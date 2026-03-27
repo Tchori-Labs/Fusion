@@ -274,13 +274,16 @@ export class TaskExecutor {
       let acquiredFromPool = false;
       const settings = await this.store.getSettings();
 
+      // Resolve the base branch — set by the scheduler when a dep is in-review
+      const baseBranch = task.baseBranch || null;
+
       if (!isResume) {
 
         // Try acquiring a warm worktree from the pool
         if (this.options.pool && settings.recycleWorktrees) {
           const pooled = this.options.pool.acquire();
           if (pooled) {
-            this.options.pool.prepareForTask(pooled, branchName);
+            this.options.pool.prepareForTask(pooled, branchName, baseBranch ?? undefined);
             worktreePath = pooled;
             acquiredFromPool = true;
             executorLog.log(`Acquired worktree from pool: ${pooled}`);
@@ -291,9 +294,14 @@ export class TaskExecutor {
 
         // Fall through to fresh worktree creation if pool had nothing
         if (!acquiredFromPool) {
-          this.createWorktree(branchName, worktreePath);
+          this.createWorktree(branchName, worktreePath, baseBranch ?? undefined);
           await this.store.updateTask(task.id, { worktree: worktreePath });
-          await this.store.logEntry(task.id, `Worktree created at ${worktreePath}`);
+
+          if (baseBranch) {
+            await this.store.logEntry(task.id, `Worktree created at ${worktreePath} (based on ${baseBranch})`);
+          } else {
+            await this.store.logEntry(task.id, `Worktree created at ${worktreePath}`);
+          }
 
           // Run worktree init command for fresh worktrees (skip for pooled — caches are warm)
           if (settings.worktreeInitCommand) {
@@ -713,13 +721,24 @@ export class TaskExecutor {
 
   // ── Worktree management ────────────────────────────────────────────
 
-  private createWorktree(branch: string, path: string): void {
+  /**
+   * Create a git worktree at `path` on a new branch.
+   *
+   * @param branch — Branch name (e.g., `kb/kb-042`)
+   * @param path — Absolute worktree directory path
+   * @param startPoint — Optional git ref to branch from (e.g., `kb/kb-041`).
+   *   When provided, the worktree starts from that ref instead of HEAD.
+   */
+  private createWorktree(branch: string, path: string, startPoint?: string): void {
     if (existsSync(path)) {
       executorLog.log(`Worktree already exists: ${path}`);
       return;
     }
     try {
-      execSync(`git worktree add -b "${branch}" "${path}"`, { cwd: this.rootDir, stdio: "pipe" });
+      const cmd = startPoint
+        ? `git worktree add -b "${branch}" "${path}" "${startPoint}"`
+        : `git worktree add -b "${branch}" "${path}"`;
+      execSync(cmd, { cwd: this.rootDir, stdio: "pipe" });
     } catch {
       try {
         execSync(`git worktree add "${path}" "${branch}"`, { cwd: this.rootDir, stdio: "pipe" });
@@ -727,7 +746,7 @@ export class TaskExecutor {
         throw new Error(`Failed to create worktree: ${e.message}`);
       }
     }
-    executorLog.log(`Worktree created: ${path}`);
+    executorLog.log(`Worktree created: ${path}${startPoint ? ` (from ${startPoint})` : ""}`);
   }
 
   /**

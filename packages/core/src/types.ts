@@ -66,6 +66,12 @@ export interface Task {
   blockedBy?: string;
   /** When true, all automated agent and scheduler interaction is suspended. */
   paused?: boolean;
+  /** Git branch name (or task ID) to use as the starting point when
+   *  creating this task's worktree. Set by the scheduler when a task's
+   *  explicit dependency or `blockedBy` task is in-review with an
+   *  unmerged branch. The executor reads this to branch from the
+   *  dependency's branch instead of HEAD. Cleared after worktree creation. */
+  baseBranch?: string;
   attachments?: TaskAttachment[];
   log: TaskLogEntry[];
   size?: "S" | "M" | "L";

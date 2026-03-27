@@ -383,6 +383,249 @@ describe("Scheduler file-scope overlap", () => {
   });
 });
 
+describe("Scheduler explicit dep relaxation (in-review as met)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  async function runSchedule(scheduler: Scheduler): Promise<void> {
+    (scheduler as any).running = true;
+    await scheduler.schedule();
+  }
+
+  it("allows task to start when explicit dep is in-review", async () => {
+    const tasks = [
+      makeTask({ id: "KB-001", column: "in-review", worktree: "/tmp/wt/kb-001" }),
+      makeTask({ id: "KB-002", column: "todo", dependencies: ["KB-001"] }),
+    ];
+    const store = createMockStore(tasks);
+    const scheduler = new Scheduler(store, { maxConcurrent: 2 });
+
+    await runSchedule(scheduler);
+
+    expect(store.moveTask).toHaveBeenCalledWith("KB-002", "in-progress");
+  });
+
+  it("blocks task when explicit dep is in-progress (not yet done or in-review)", async () => {
+    const tasks = [
+      makeTask({ id: "KB-001", column: "in-progress" }),
+      makeTask({ id: "KB-002", column: "todo", dependencies: ["KB-001"] }),
+    ];
+    const store = createMockStore(tasks);
+    const scheduler = new Scheduler(store, { maxConcurrent: 3 });
+
+    await runSchedule(scheduler);
+
+    expect(store.moveTask).not.toHaveBeenCalledWith("KB-002", "in-progress");
+    expect(store.updateTask).toHaveBeenCalledWith("KB-002", { status: "queued" });
+  });
+
+  it("allows task to start when explicit dep is done", async () => {
+    const tasks = [
+      makeTask({ id: "KB-001", column: "done" }),
+      makeTask({ id: "KB-002", column: "todo", dependencies: ["KB-001"] }),
+    ];
+    const store = createMockStore(tasks);
+    const scheduler = new Scheduler(store, { maxConcurrent: 2 });
+
+    await runSchedule(scheduler);
+
+    expect(store.moveTask).toHaveBeenCalledWith("KB-002", "in-progress");
+  });
+
+  it("blocks task when explicit dep is in todo", async () => {
+    const tasks = [
+      makeTask({ id: "KB-001", column: "todo" }),
+      makeTask({ id: "KB-002", column: "todo", dependencies: ["KB-001"] }),
+    ];
+    const store = createMockStore(tasks);
+    const scheduler = new Scheduler(store, { maxConcurrent: 3 });
+
+    await runSchedule(scheduler);
+
+    // KB-001 should be started (no deps), KB-002 blocked (dep in todo)
+    expect(store.moveTask).toHaveBeenCalledWith("KB-001", "in-progress");
+    expect(store.moveTask).not.toHaveBeenCalledWith("KB-002", "in-progress");
+  });
+});
+
+describe("Scheduler baseBranch recording", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  async function runSchedule(scheduler: Scheduler): Promise<void> {
+    (scheduler as any).running = true;
+    await scheduler.schedule();
+  }
+
+  it("sets baseBranch when explicit dep is in-review with worktree", async () => {
+    const tasks = [
+      makeTask({ id: "KB-001", column: "in-review", worktree: "/tmp/wt/kb-001" }),
+      makeTask({ id: "KB-002", column: "todo", dependencies: ["KB-001"] }),
+    ];
+    const store = createMockStore(tasks);
+    const scheduler = new Scheduler(store, { maxConcurrent: 2 });
+
+    await runSchedule(scheduler);
+
+    expect(store.updateTask).toHaveBeenCalledWith("KB-002", {
+      status: null,
+      blockedBy: null,
+      baseBranch: "kb/kb-001",
+    });
+  });
+
+  it("does not set baseBranch when dep is done (already merged to main)", async () => {
+    const tasks = [
+      makeTask({ id: "KB-001", column: "done" }),
+      makeTask({ id: "KB-002", column: "todo", dependencies: ["KB-001"] }),
+    ];
+    const store = createMockStore(tasks);
+    const scheduler = new Scheduler(store, { maxConcurrent: 2 });
+
+    await runSchedule(scheduler);
+
+    expect(store.updateTask).toHaveBeenCalledWith("KB-002", {
+      status: null,
+      blockedBy: null,
+      baseBranch: undefined,
+    });
+  });
+
+  it("sets baseBranch from blockedBy when blocker is in-review with worktree", async () => {
+    const tasks = [
+      makeTask({ id: "KB-001", column: "in-review", worktree: "/tmp/wt/kb-001" }),
+      makeTask({ id: "KB-002", column: "todo", blockedBy: "KB-001" }),
+    ];
+    const store = createMockStore(tasks);
+    const scheduler = new Scheduler(store, { maxConcurrent: 2 });
+
+    await runSchedule(scheduler);
+
+    expect(store.updateTask).toHaveBeenCalledWith("KB-002", {
+      status: null,
+      blockedBy: null,
+      baseBranch: "kb/kb-001",
+    });
+  });
+
+  it("does not set baseBranch when dep is in-review without worktree", async () => {
+    const tasks = [
+      makeTask({ id: "KB-001", column: "in-review" }), // no worktree
+      makeTask({ id: "KB-002", column: "todo", dependencies: ["KB-001"] }),
+    ];
+    const store = createMockStore(tasks);
+    const scheduler = new Scheduler(store, { maxConcurrent: 2 });
+
+    await runSchedule(scheduler);
+
+    expect(store.updateTask).toHaveBeenCalledWith("KB-002", {
+      status: null,
+      blockedBy: null,
+      baseBranch: undefined,
+    });
+  });
+
+  it("prefers explicit dep over blockedBy for baseBranch", async () => {
+    const tasks = [
+      makeTask({ id: "KB-001", column: "in-review", worktree: "/tmp/wt/kb-001" }),
+      makeTask({ id: "KB-003", column: "in-review", worktree: "/tmp/wt/kb-003" }),
+      makeTask({ id: "KB-002", column: "todo", dependencies: ["KB-001"], blockedBy: "KB-003" }),
+    ];
+    const store = createMockStore(tasks);
+    const scheduler = new Scheduler(store, { maxConcurrent: 2 });
+
+    await runSchedule(scheduler);
+
+    // Should use explicit dep KB-001, not blockedBy KB-003
+    expect(store.updateTask).toHaveBeenCalledWith("KB-002", {
+      status: null,
+      blockedBy: null,
+      baseBranch: "kb/kb-001",
+    });
+  });
+
+  it("does not set baseBranch for tasks with no deps or blockedBy", async () => {
+    const tasks = [
+      makeTask({ id: "KB-001", column: "todo" }),
+    ];
+    const store = createMockStore(tasks);
+    const scheduler = new Scheduler(store, { maxConcurrent: 2 });
+
+    await runSchedule(scheduler);
+
+    expect(store.updateTask).toHaveBeenCalledWith("KB-001", {
+      status: null,
+      blockedBy: null,
+      baseBranch: undefined,
+    });
+  });
+});
+
+describe("Scheduler in-review file scope overlap", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  async function runSchedule(scheduler: Scheduler): Promise<void> {
+    (scheduler as any).running = true;
+    await scheduler.schedule();
+  }
+
+  it("blocks todo task when in-review task with worktree has overlapping file scope", async () => {
+    const tasks = [
+      makeTask({ id: "KB-001", column: "in-review", worktree: "/tmp/wt/kb-001" }),
+      makeTask({ id: "KB-002", column: "todo" }),
+    ];
+    const store = createMockStore(tasks);
+    store.getSettings.mockResolvedValue({
+      maxConcurrent: 2,
+      maxWorktrees: 4,
+      pollIntervalMs: 15000,
+      groupOverlappingFiles: true,
+      autoMerge: false,
+    });
+    store.parseFileScopeFromPrompt.mockImplementation(async (id: string) => {
+      if (id === "KB-001") return ["packages/shared/utils.ts"];
+      if (id === "KB-002") return ["packages/shared/utils.ts"];
+      return [];
+    });
+
+    const scheduler = new Scheduler(store, { maxConcurrent: 3 });
+    await runSchedule(scheduler);
+
+    expect(store.moveTask).not.toHaveBeenCalled();
+    expect(store.updateTask).toHaveBeenCalledWith("KB-002", { status: "queued", blockedBy: "KB-001" });
+  });
+
+  it("does not block when in-review task has no worktree (already merged)", async () => {
+    const tasks = [
+      makeTask({ id: "KB-001", column: "in-review" }), // no worktree — merged
+      makeTask({ id: "KB-002", column: "todo" }),
+    ];
+    const store = createMockStore(tasks);
+    store.getSettings.mockResolvedValue({
+      maxConcurrent: 2,
+      maxWorktrees: 4,
+      pollIntervalMs: 15000,
+      groupOverlappingFiles: true,
+      autoMerge: false,
+    });
+    store.parseFileScopeFromPrompt.mockImplementation(async (id: string) => {
+      if (id === "KB-001") return ["packages/shared/utils.ts"];
+      if (id === "KB-002") return ["packages/shared/utils.ts"];
+      return [];
+    });
+
+    const scheduler = new Scheduler(store, { maxConcurrent: 3 });
+    await runSchedule(scheduler);
+
+    // KB-002 should be started (no overlap with merged in-review task)
+    expect(store.moveTask).toHaveBeenCalledWith("KB-002", "in-progress");
+  });
+});
+
 describe("Scheduler paused tasks", () => {
   beforeEach(() => {
     vi.clearAllMocks();

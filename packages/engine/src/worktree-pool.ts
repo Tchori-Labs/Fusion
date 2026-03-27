@@ -72,19 +72,21 @@ export class WorktreePool {
    * Prepare a recycled worktree for a new task.
    *
    * Resets the working tree to a clean state, then creates (or force-resets)
-   * the task's branch based on `main`. This ensures the new task starts
-   * from the latest main with a clean working directory, while preserving
-   * untracked build caches (node_modules, target/, dist/).
+   * the task's branch based on the given start point (or `main` by default).
+   * This ensures the new task starts from the correct base with a clean
+   * working directory, while preserving untracked build caches
+   * (node_modules, target/, dist/).
    *
    * Steps performed:
    * 1. `git checkout -- .` — discard tracked file modifications
    * 2. `git clean -fd` — remove untracked files (but not .gitignore'd caches)
-   * 3. `git checkout -B <branchName> main` — create/reset branch from main
+   * 3. `git checkout -B <branchName> <startPoint>` — create/reset branch from start point
    *
    * @param worktreePath — Absolute path to the recycled worktree
    * @param branchName — Branch name for the new task (e.g., `kb/kb-042`)
+   * @param startPoint — Git ref to branch from (e.g., `kb/kb-041`). Defaults to `main`.
    */
-  prepareForTask(worktreePath: string, branchName: string): void {
+  prepareForTask(worktreePath: string, branchName: string, startPoint?: string): void {
     // Clean tracked modifications
     try {
       execSync("git checkout -- .", { cwd: worktreePath, stdio: "pipe" });
@@ -95,8 +97,9 @@ export class WorktreePool {
     // Remove untracked files (but not .gitignore'd build caches)
     execSync("git clean -fd", { cwd: worktreePath, stdio: "pipe" });
 
-    // Create or force-reset the branch from main
-    execSync(`git checkout -B "${branchName}" main`, {
+    // Create or force-reset the branch from the start point (or main)
+    const base = startPoint || "main";
+    execSync(`git checkout -B "${branchName}" ${base}`, {
       cwd: worktreePath,
       stdio: "pipe",
     });

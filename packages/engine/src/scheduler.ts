@@ -122,6 +122,35 @@ export class Scheduler {
   }
 
   /**
+   * Resolve the base branch for a task being started.
+   *
+   * Checks explicit dependencies and implicit `blockedBy` for an in-review
+   * task with an unmerged branch. Returns the git branch name to start from,
+   * or `null` if the task should start from HEAD (default).
+   *
+   * Priority: explicit dep in-review (first with worktree) > blockedBy in-review.
+   */
+  private resolveBaseBranch(task: Task, allTasks: Task[]): string | null {
+    // Check explicit dependencies for in-review tasks with worktrees
+    for (const depId of task.dependencies) {
+      const dep = allTasks.find((t) => t.id === depId);
+      if (dep && dep.column === "in-review" && dep.worktree) {
+        return `kb/${dep.id.toLowerCase()}`;
+      }
+    }
+
+    // Check implicit blockedBy for in-review task with worktree
+    if (task.blockedBy) {
+      const blocker = allTasks.find((t) => t.id === task.blockedBy);
+      if (blocker && blocker.column === "in-review" && blocker.worktree) {
+        return `kb/${blocker.id.toLowerCase()}`;
+      }
+    }
+
+    return null;
+  }
+
+  /**
    * Delegates to the module-level {@link pathsOverlap} for testability.
    */
   private pathsOverlap(a: string[], b: string[]): boolean {
@@ -199,20 +228,35 @@ export class Scheduler {
       if (todo.length === 0) return;
 
       /**
-       * Pre-compute file scopes for **all** currently in-progress tasks so
-       * that todo tasks are never started when their files overlap with work
-       * already underway.  The re-entrance guard on this method ensures that
-       * this snapshot stays consistent throughout the pass — without it, a
-       * concurrent pass could read stale state and start conflicting tasks.
+       * Pre-compute file scopes for all currently active tasks (in-progress
+       * AND in-review with unmerged worktrees) so that todo tasks are never
+       * started when their files overlap with work already underway or
+       * awaiting merge.
+       *
+       * Including in-review tasks prevents a blocked task from starting on
+       * main HEAD when the blocker's changes haven't been merged yet.
+       *
+       * The re-entrance guard on this method ensures that this snapshot
+       * stays consistent throughout the pass — without it, a concurrent
+       * pass could read stale state and start conflicting tasks.
        *
        * Newly started tasks are appended to this map further below so that
        * subsequent todo tasks in the same pass also see them.
        */
-      const inProgressScopes = new Map<string, string[]>();
+      const activeScopes = new Map<string, string[]>();
       if (settings.groupOverlappingFiles) {
+        // In-progress tasks
         for (const t of inProgress) {
           const scope = await this.store.parseFileScopeFromPrompt(t.id);
-          if (scope.length > 0) inProgressScopes.set(t.id, scope);
+          if (scope.length > 0) activeScopes.set(t.id, scope);
+        }
+        // In-review tasks with unmerged worktrees
+        const inReviewWithWorktree = tasks.filter(
+          (t) => t.column === "in-review" && t.worktree,
+        );
+        for (const t of inReviewWithWorktree) {
+          const scope = await this.store.parseFileScopeFromPrompt(t.id);
+          if (scope.length > 0) activeScopes.set(t.id, scope);
         }
       }
 
@@ -223,10 +267,10 @@ export class Scheduler {
       for (const taskId of ordered) {
         const task = tasks.find((t) => t.id === taskId)!;
 
-        // Check all deps are satisfied (must be done — merged to main)
+        // Check all deps are satisfied (done or in-review with branch ready)
         const unmetDeps = task.dependencies.filter((depId) => {
           const dep = tasks.find((t) => t.id === depId);
-          return dep && dep.column !== "done";
+          return dep && dep.column !== "done" && dep.column !== "in-review";
         });
 
         if (unmetDeps.length > 0) {
@@ -240,7 +284,7 @@ export class Scheduler {
           const taskScope = await this.store.parseFileScopeFromPrompt(task.id);
           if (taskScope.length > 0) {
             let overlappingTaskId: string | null = null;
-            for (const [ipId, ipScope] of inProgressScopes) {
+            for (const [ipId, ipScope] of activeScopes) {
               if (this.pathsOverlap(taskScope, ipScope)) {
                 overlappingTaskId = ipId;
                 break;
@@ -258,9 +302,12 @@ export class Scheduler {
           continue;
         }
 
-        // Dependencies met — clear status and move to in-progress
+        // Dependencies met — resolve base branch from in-review deps
+        const baseBranch = this.resolveBaseBranch(task, tasks);
+
+        // Clear status and move to in-progress
         schedulerLog.log(`Starting ${task.id}: ${task.title || task.id} (deps satisfied)`);
-        await this.store.updateTask(task.id, { status: null, blockedBy: null });
+        await this.store.updateTask(task.id, { status: null, blockedBy: null, baseBranch: baseBranch ?? undefined });
         await this.store.moveTask(task.id, "in-progress");
         this.options.onSchedule?.(task);
         started++;
@@ -268,7 +315,7 @@ export class Scheduler {
         // Track newly started task's file scope for overlap with remaining todo tasks
         if (settings.groupOverlappingFiles) {
           const scope = await this.store.parseFileScopeFromPrompt(task.id);
-          if (scope.length > 0) inProgressScopes.set(task.id, scope);
+          if (scope.length > 0) activeScopes.set(task.id, scope);
         }
       }
     } catch (err) {

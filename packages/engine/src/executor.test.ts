@@ -428,6 +428,167 @@ describe("TaskExecutor worktree naming", () => {
   });
 });
 
+describe("TaskExecutor dependency-based worktree creation", () => {
+  const makeTask = (overrides: Partial<Task> = {}) => ({
+    id: "KB-060",
+    title: "Test",
+    description: "Test",
+    column: "in-progress" as const,
+    dependencies: [],
+    steps: [],
+    currentStep: 0,
+    log: [],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    ...overrides,
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockedExistsSync.mockReturnValue(false);
+    mockedCreateHaiAgent.mockResolvedValue({
+      session: {
+        prompt: vi.fn().mockResolvedValue(undefined),
+        dispose: vi.fn(),
+      },
+    } as any);
+  });
+
+  it("creates worktree from baseBranch when set on task", async () => {
+    const store = createMockStore();
+    const executor = new TaskExecutor(store, "/tmp/test");
+
+    await executor.execute(makeTask({
+      id: "KB-060",
+      baseBranch: "kb/kb-059",
+    }));
+
+    // The git worktree add command should include the startPoint
+    const worktreeAddCalls = mockedExecSync.mock.calls.filter(
+      (c) => typeof c[0] === "string" && (c[0] as string).includes("worktree add"),
+    );
+    expect(worktreeAddCalls.length).toBeGreaterThan(0);
+    expect(worktreeAddCalls[0][0]).toContain("kb/kb-059");
+  });
+
+  it("creates worktree from HEAD when baseBranch is not set", async () => {
+    const store = createMockStore();
+    const executor = new TaskExecutor(store, "/tmp/test");
+
+    await executor.execute(makeTask({
+      id: "KB-061",
+      // no baseBranch
+    }));
+
+    // The git worktree add command should NOT include a startPoint
+    const worktreeAddCalls = mockedExecSync.mock.calls.filter(
+      (c) => typeof c[0] === "string" && (c[0] as string).includes("worktree add -b"),
+    );
+    expect(worktreeAddCalls.length).toBeGreaterThan(0);
+    // Command format: git worktree add -b "branch" "path" (no extra ref after path)
+    const cmd = worktreeAddCalls[0][0] as string;
+    // Count quoted segments: branch + path = 2 quoted args
+    const quoted = cmd.match(/"[^"]+"/g) || [];
+    expect(quoted).toHaveLength(2);
+  });
+
+  it("logs base branch in worktree creation log entry", async () => {
+    const store = createMockStore();
+    const executor = new TaskExecutor(store, "/tmp/test");
+
+    await executor.execute(makeTask({
+      id: "KB-062",
+      baseBranch: "kb/kb-061",
+    }));
+
+    expect(store.logEntry).toHaveBeenCalledWith(
+      "KB-062",
+      expect.stringContaining("based on kb/kb-061"),
+    );
+  });
+
+  it("does not mention base branch in log when baseBranch is not set", async () => {
+    const store = createMockStore();
+    const executor = new TaskExecutor(store, "/tmp/test");
+
+    await executor.execute(makeTask({
+      id: "KB-063",
+    }));
+
+    // Check that log entry does NOT mention "based on"
+    const logCalls = store.logEntry.mock.calls.filter(
+      (call: any[]) => typeof call[1] === "string" && call[1].includes("Worktree created"),
+    );
+    expect(logCalls.length).toBeGreaterThan(0);
+    expect(logCalls[0][1]).not.toContain("based on");
+  });
+
+  it("passes baseBranch to pool prepareForTask when using pooled worktree", async () => {
+    const pool = new WorktreePool();
+    pool.release("/tmp/test/.worktrees/idle-wt");
+    mockedExistsSync.mockImplementation(
+      (p) => p === "/tmp/test/.worktrees/idle-wt",
+    );
+
+    const prepareSpy = vi.spyOn(pool, "prepareForTask");
+
+    const store = createMockStore();
+    store.getSettings.mockResolvedValue({
+      maxConcurrent: 2,
+      maxWorktrees: 4,
+      pollIntervalMs: 15000,
+      groupOverlappingFiles: false,
+      autoMerge: false,
+      recycleWorktrees: true,
+    });
+
+    const executor = new TaskExecutor(store, "/tmp/test", { pool });
+
+    await executor.execute(makeTask({
+      id: "KB-064",
+      baseBranch: "kb/kb-063",
+    }));
+
+    expect(prepareSpy).toHaveBeenCalledWith(
+      "/tmp/test/.worktrees/idle-wt",
+      "kb/kb-064",
+      "kb/kb-063",
+    );
+  });
+
+  it("passes undefined to pool prepareForTask when no baseBranch", async () => {
+    const pool = new WorktreePool();
+    pool.release("/tmp/test/.worktrees/idle-wt");
+    mockedExistsSync.mockImplementation(
+      (p) => p === "/tmp/test/.worktrees/idle-wt",
+    );
+
+    const prepareSpy = vi.spyOn(pool, "prepareForTask");
+
+    const store = createMockStore();
+    store.getSettings.mockResolvedValue({
+      maxConcurrent: 2,
+      maxWorktrees: 4,
+      pollIntervalMs: 15000,
+      groupOverlappingFiles: false,
+      autoMerge: false,
+      recycleWorktrees: true,
+    });
+
+    const executor = new TaskExecutor(store, "/tmp/test", { pool });
+
+    await executor.execute(makeTask({
+      id: "KB-065",
+    }));
+
+    expect(prepareSpy).toHaveBeenCalledWith(
+      "/tmp/test/.worktrees/idle-wt",
+      "kb/kb-065",
+      undefined,
+    );
+  });
+});
+
 describe("TaskExecutor worktree pool integration", () => {
   const makeTask = (id = "KB-020") => ({
     id,
