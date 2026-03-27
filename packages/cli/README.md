@@ -14,14 +14,11 @@ Tasks flow through five columns: **Triage → Todo → In Progress → In Review
 npm install -g @dustinbyrne/kb
 ```
 
-## Prerequisites
+## Authentication
 
-kb uses [pi](https://github.com/badlogic/pi-mono) agent sessions under the hood. You need:
+kb uses [pi](https://github.com/badlogic/pi-mono) for AI agent sessions and reuses your existing pi authentication. You can also authenticate directly through the dashboard UI.
 
-1. **Install pi:** `npm install -g @mariozechner/pi-coding-agent`
-2. **Authenticate:** Run `pi` and use `/login`, or set the `ANTHROPIC_API_KEY` environment variable
-
-kb reuses your existing pi authentication — no separate setup needed.
+If you don't have pi set up yet: `npm i -g @mariozechner/pi-coding-agent && pi` then `/login`.
 
 ## Usage
 
@@ -85,7 +82,7 @@ kb task merge KB-042
 
 - **Triage processor** — An AI agent reads your project, understands the codebase, and turns your rough idea into a detailed specification with steps, file scope, and acceptance criteria.
 - **Scheduler** — Resolves dependency graphs and moves tasks to in-progress when ready. Independent tasks run in parallel.
-- **Executor** — Creates an isolated git worktree, spawns an AI agent to implement the spec, and moves the task to in-review on completion.
+- **Executor** — Creates an isolated git worktree and spawns an AI agent to implement the spec step by step. At each step boundary, a separate reviewer agent (different model, read-only) independently checks the plan or code. Verdicts: approve (proceed), revise (fix issues), or rethink (change approach). Review depth scales with task complexity (levels 0–3, assigned during triage).
 - **You review** — Inspect the changes and merge with `kb task merge`, or toggle auto-merge in the dashboard.
 
 ## Standalone binary

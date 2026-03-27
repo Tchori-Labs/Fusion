@@ -4,19 +4,29 @@ AI-orchestrated task board. Like Trello, but your tasks get specified, executed,
 
 ## Workflow
 
-```
-  Triage       Todo        In Progress     In Review      Done
- ----------  ----------  ---------------  ------------  --------
-  raw idea    AI spec'd    AI working       ready to     merged
-              & ready      in worktree      merge
+```mermaid
+graph LR
+    H((You)) -->|rough idea| T["Triage<br/><i>AI writes spec</i>"]
+    T --> TD["Todo<br/><i>waiting for deps</i>"]
+    TD -->|agent free| IP
+    IP -->|steps + reviews pass| IR["In Review<br/><i>ready to merge</i>"]
+    IR -->|squash merge| D["Done<br/><i>shipped</i>"]
 
-     |            |             |               |            |
-     |  AI specs  |  deps met,  |  all steps +  | squash     |
-     +----------->+  agent free +  reviews pass +  merge     |
-                  +------------>+-------------->+----------->+
-                        ^                            |
-                        |        needs work          |
-                        +----------------------------+
+    subgraph IP[" In Progress "]
+        direction TB
+        E[Execute step] --> R{Cross-model\nreview}
+        R -->|approve| E
+        R -->|revise| E
+    end
+
+    style H fill:#161b22,stroke:#8b949e,color:#e6edf3
+    style T fill:#2d2006,stroke:#d29922,color:#d29922
+    style TD fill:#0d2044,stroke:#58a6ff,color:#58a6ff
+    style IP fill:#1a0d2e,stroke:#bc8cff,color:#bc8cff
+    style E fill:#1a0d2e,stroke:#bc8cff,color:#e6edf3
+    style R fill:#1a0d2e,stroke:#bc8cff,color:#e6edf3
+    style IR fill:#0d2d16,stroke:#3fb950,color:#3fb950
+    style D fill:#1a1a1a,stroke:#8b949e,color:#8b949e
 ```
 
 Tasks with dependencies are processed sequentially. Independent tasks run in parallel.
@@ -24,44 +34,38 @@ Tasks with dependencies are processed sequentially. Independent tasks run in par
 ## Quick Start
 
 ```bash
-# Install dependencies
-pnpm install
-
-# Start the board (with AI engine)
-pnpm dev dashboard
-
-# Create a task via CLI
-pnpm dev task create "Fix the login redirect bug"
-
-# List tasks
-pnpm dev task list
-
-# Move a task
-pnpm dev task move KB-001 todo
-
-# Pause a task (stops all automation)
-pnpm dev task pause KB-001
-
-# Unpause a task (resumes automation)
-pnpm dev task unpause KB-001
-
-# Attach a file to a task (images, logs, configs)
-pnpm dev task attach KB-001 ./screenshot.png
-
-# Create a task with attachments
-pnpm dev task create "Fix the login bug" -- --attach screenshot.png --attach error.log
+npm i -g @dustinbyrne/kb
 ```
 
-Then open [http://localhost:4040](http://localhost:4040).
+Then from the root of your repository:
 
-## Prerequisites
+```bash
+kb dashboard
+```
 
-The AI engine uses [pi](https://github.com/badlogic/pi-mono) agent sessions under the hood. You need:
+Open [http://localhost:4040](http://localhost:4040) — create tasks from the board or the CLI.
 
-1. **pi installed:** `npm install -g @mariozechner/pi-coding-agent`
-2. **API key configured:** Run `pi` and use `/login` or set `ANTHROPIC_API_KEY`
+### CLI commands
 
-kb reuses your existing pi authentication — no separate setup needed.
+```bash
+kb task create "Fix the login redirect bug"
+kb task create "Button misaligned" --attach screenshot.png
+kb task list
+kb task show KB-001
+kb task move KB-001 todo
+kb task merge KB-001
+```
+
+Agents can use these same commands, or see [`.agents/skills/`](.agents/skills/) for structured skill docs.
+
+### Prerequisites
+
+The AI engine uses [pi](https://github.com/badlogic/pi-mono) under the hood:
+
+1. `npm i -g @mariozechner/pi-coding-agent`
+2. Run `pi` and use `/login`, or set `ANTHROPIC_API_KEY`
+
+kb reuses your existing pi authentication.
 
 ## Packages
 
@@ -80,12 +84,12 @@ Tasks live on disk in `.kb/tasks/` in the project root:
 
 ```
 .kb/
-  config.json              -- board config + ID counter
-  tasks/
-    KB-001/
-      task.json             -- metadata (column, deps, timestamps)
-      PROMPT.md             -- task specification
-      attachments/          -- file attachments (optional)
+├── config.json              # Board config + ID counter
+└── tasks/
+    └── KB-001/
+        ├── task.json        # Metadata (column, deps, timestamps)
+        ├── PROMPT.md        # Task specification
+        └── attachments/     # File attachments — images & text files (optional)
 ```
 
 ### Board UI
