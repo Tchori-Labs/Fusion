@@ -91,8 +91,6 @@ function AppInner() {
 
   const handleDetailClose = useCallback(() => setDetailTask(null), []);
 
-  const engineStopped = globalPaused || enginePaused;
-
   return (
     <>
       <Header
@@ -114,7 +112,7 @@ function AppInner() {
         onNewTask={handleCreateOpen}
         autoMerge={autoMerge}
         onToggleAutoMerge={handleToggleAutoMerge}
-        engineStopped={engineStopped}
+        globalPaused={globalPaused}
       />
       {detailTask && (
         <TaskDetailModal

@@ -11,10 +11,10 @@ import type { Column } from "@kb/core";
 const ACTIVE_STATUSES = new Set(["planning", "researching", "executing", "finalizing", "merging", "specifying"]);
 
 /** Mirrors the cardClass computation from TaskCard.tsx */
-function computeCardClass(opts: { dragging?: boolean; queued?: boolean; status?: string; column?: Column; engineStopped?: boolean }): string {
-  const { dragging = false, queued = false, status, column = "todo", engineStopped } = opts;
+function computeCardClass(opts: { dragging?: boolean; queued?: boolean; status?: string; column?: Column; globalPaused?: boolean }): string {
+  const { dragging = false, queued = false, status, column = "todo", globalPaused } = opts;
   const isFailed = status === "failed";
-  const isAgentActive = !engineStopped && !queued && !isFailed && (column === "in-progress" || ACTIVE_STATUSES.has(status as string));
+  const isAgentActive = !globalPaused && !queued && !isFailed && (column === "in-progress" || ACTIVE_STATUSES.has(status as string));
   return `card${dragging ? " dragging" : ""}${queued ? " queued" : ""}${isAgentActive ? " agent-active" : ""}${isFailed ? " failed" : ""}`;
 }
 
@@ -97,32 +97,43 @@ describe("TaskCard agent-active class", () => {
     expect(cls).toContain("failed");
   });
 
-  // engineStopped tests
+  // globalPaused tests (hard stop suppresses glow; soft pause does not)
 
-  it("does NOT apply agent-active when engineStopped is true with active status", () => {
+  it("does NOT apply agent-active when globalPaused is true with active status", () => {
     for (const status of ["planning", "researching", "executing", "finalizing", "merging", "specifying"]) {
-      const cls = computeCardClass({ status, engineStopped: true });
+      const cls = computeCardClass({ status, globalPaused: true });
       expect(cls).not.toContain("agent-active");
     }
   });
 
-  it("does NOT apply agent-active when engineStopped is true for in-progress column", () => {
-    const cls = computeCardClass({ column: "in-progress", engineStopped: true });
+  it("does NOT apply agent-active when globalPaused is true for in-progress column", () => {
+    const cls = computeCardClass({ column: "in-progress", globalPaused: true });
     expect(cls).not.toContain("agent-active");
   });
 
-  it("does NOT apply agent-active when engineStopped is true with active status and in-progress column", () => {
-    const cls = computeCardClass({ column: "in-progress", status: "executing", engineStopped: true });
+  it("does NOT apply agent-active when globalPaused is true with active status and in-progress column", () => {
+    const cls = computeCardClass({ column: "in-progress", status: "executing", globalPaused: true });
     expect(cls).not.toContain("agent-active");
   });
 
-  it("applies agent-active when engineStopped is false with active status", () => {
-    const cls = computeCardClass({ status: "executing", engineStopped: false });
+  it("applies agent-active when globalPaused is false with active status", () => {
+    const cls = computeCardClass({ status: "executing", globalPaused: false });
     expect(cls).toContain("agent-active");
   });
 
-  it("applies agent-active when engineStopped is undefined (backward compat)", () => {
-    const cls = computeCardClass({ status: "executing", engineStopped: undefined });
+  it("applies agent-active when globalPaused is undefined (backward compat)", () => {
+    const cls = computeCardClass({ status: "executing", globalPaused: undefined });
+    expect(cls).toContain("agent-active");
+  });
+
+  it("applies agent-active when only soft-paused (globalPaused is false)", () => {
+    // Soft pause (enginePaused) should NOT suppress the glow — only globalPaused matters
+    const cls = computeCardClass({ status: "executing", globalPaused: false });
+    expect(cls).toContain("agent-active");
+  });
+
+  it("applies agent-active for in-progress column when only soft-paused", () => {
+    const cls = computeCardClass({ column: "in-progress", globalPaused: false });
     expect(cls).toContain("agent-active");
   });
 });

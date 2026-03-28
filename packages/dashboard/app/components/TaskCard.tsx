@@ -27,10 +27,10 @@ interface TaskCardProps {
   queued?: boolean;
   onOpenDetail: (task: TaskDetail) => void;
   addToast: (message: string, type?: ToastType) => void;
-  engineStopped?: boolean;
+  globalPaused?: boolean;
 }
 
-export function TaskCard({ task, queued, onOpenDetail, addToast, engineStopped }: TaskCardProps) {
+export function TaskCard({ task, queued, onOpenDetail, addToast, globalPaused }: TaskCardProps) {
   const [dragging, setDragging] = useState(false);
   const [fileDragOver, setFileDragOver] = useState(false);
 
@@ -91,7 +91,7 @@ export function TaskCard({ task, queued, onOpenDetail, addToast, engineStopped }
 
   const isFailed = task.status === "failed";
   const isPaused = task.paused === true;
-  const isAgentActive = !engineStopped && !queued && !isFailed && !isPaused && (task.column === "in-progress" || ACTIVE_STATUSES.has(task.status as string));
+  const isAgentActive = !globalPaused && !queued && !isFailed && !isPaused && (task.column === "in-progress" || ACTIVE_STATUSES.has(task.status as string));
   const isDraggable = !queued && !isPaused;
   const cardClass = `card${dragging ? " dragging" : ""}${queued ? " queued" : ""}${isAgentActive ? " agent-active" : ""}${isFailed ? " failed" : ""}${isPaused ? " paused" : ""}${fileDragOver ? " file-drop-target" : ""}`;
 
