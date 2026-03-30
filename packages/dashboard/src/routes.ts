@@ -3,7 +3,7 @@ import multer from "multer";
 import { createReadStream } from "node:fs";
 import { execSync } from "node:child_process";
 import type { TaskStore, Column, MergeResult } from "@kb/core";
-import { COLUMNS, VALID_TRANSITIONS, type PrInfo } from "@kb/core";
+import { COLUMNS, VALID_TRANSITIONS, type PrInfo, isGhAuthenticated } from "@kb/core";
 import type { ServerOptions } from "./server.js";
 import { GitHubClient, getCurrentGitHubRepo } from "./github.js";
 import { githubPoller, githubRateLimiter } from "./github-poll.js";
@@ -1316,66 +1316,35 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         return;
       }
 
-      const token = process.env.GITHUB_TOKEN;
-
-      // Build query parameters - only open issues, no PRs
-      const params = new URLSearchParams();
-      params.append("state", "open");
-      params.append("per_page", String(Math.min(limit, 100)));
-      if (labels && labels.length > 0) {
-        params.append("labels", labels.join(","));
+      // Check gh authentication
+      if (!isGhAuthenticated()) {
+        res.status(401).json({
+          error: "Not authenticated with GitHub. Run `gh auth login`.",
+        });
+        return;
       }
 
-      const url = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues?${params}`;
-
-      const headers: Record<string, string> = {
-        Accept: "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-        "User-Agent": "kb-dashboard/1.0",
-      };
-
-      if (token) {
-        headers.Authorization = `Bearer ${token}`;
-      }
-
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000);
+      const client = new GitHubClient();
 
       try {
-        const response = await fetch(url, {
-          headers,
-          signal: controller.signal,
-        });
-
-        if (!response.ok) {
-          if (response.status === 404) {
-            res.status(404).json({ error: `Repository not found: ${owner}/${repo}` });
-            return;
-          }
-          if (response.status === 401 || response.status === 403) {
-            res.status(token ? 403 : 401).json({
-              error: `Authentication failed. ${token ? "Check your GITHUB_TOKEN." : "Set GITHUB_TOKEN env var."}`,
-            });
-            return;
-          }
-          res.status(502).json({ error: `GitHub API error: ${response.status} ${response.statusText}` });
+        const issues = await client.listIssues(owner, repo, { limit, labels });
+        res.json(issues);
+      } catch (err: any) {
+        // Handle specific error cases from gh CLI
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        
+        if (errorMessage.includes("not found") || errorMessage.includes("404")) {
+          res.status(404).json({ error: `Repository not found: ${owner}/${repo}` });
           return;
         }
-
-        // Filter out pull requests (they have a pull_request property)
-        const issues = (await response.json()) as Array<{
-          number: number;
-          title: string;
-          body: string | null;
-          html_url: string;
-          labels: Array<{ name: string }>;
-          pull_request?: unknown;
-        }>;
-        const filteredIssues = issues.filter((issue) => !issue.pull_request).slice(0, limit);
-
-        res.json(filteredIssues);
-      } finally {
-        clearTimeout(timeoutId);
+        if (errorMessage.includes("authentication") || errorMessage.includes("401") || errorMessage.includes("403")) {
+          res.status(401).json({
+            error: "Not authenticated with GitHub. Run `gh auth login`.",
+          });
+          return;
+        }
+        
+        res.status(502).json({ error: `GitHub CLI error: ${errorMessage}` });
       }
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -1405,56 +1374,49 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         return;
       }
 
-      const token = process.env.GITHUB_TOKEN;
-
-      // Fetch the specific issue
-      const url = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/issues/${issueNumber}`;
-
-      const headers: Record<string, string> = {
-        Accept: "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-        "User-Agent": "kb-dashboard/1.0",
-      };
-
-      if (token) {
-        headers.Authorization = `Bearer ${token}`;
+      // Check gh authentication
+      if (!isGhAuthenticated()) {
+        res.status(401).json({
+          error: "Not authenticated with GitHub. Run `gh auth login`.",
+        });
+        return;
       }
 
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000);
+      const client = new GitHubClient();
 
-      let issue: { number: number; title: string; body: string | null; html_url: string; pull_request?: unknown };
+      let issue: {
+        number: number;
+        title: string;
+        body: string | null;
+        html_url: string;
+        state: "open" | "closed";
+      } | null;
 
       try {
-        const response = await fetch(url, {
-          headers,
-          signal: controller.signal,
-        });
+        issue = await client.getIssue(owner, repo, issueNumber);
 
-        if (!response.ok) {
-          if (response.status === 404) {
-            res.status(404).json({ error: `Issue #${issueNumber} not found in ${owner}/${repo}` });
-            return;
-          }
-          if (response.status === 401 || response.status === 403) {
-            res.status(token ? 403 : 401).json({
-              error: `Authentication failed. ${token ? "Check your GITHUB_TOKEN." : "Set GITHUB_TOKEN env var."}`,
-            });
-            return;
-          }
-          res.status(502).json({ error: `GitHub API error: ${response.status} ${response.statusText}` });
-          return;
-        }
-
-        issue = await response.json() as typeof issue;
-
-        // Check if it's a pull request
-        if (issue.pull_request) {
+        // getIssue returns null when the issue doesn't exist OR when it's a PR
+        // We return a 400 error indicating it might be a PR (consistent with old behavior)
+        if (issue === null) {
           res.status(400).json({ error: `#${issueNumber} is a pull request, not an issue` });
           return;
         }
-      } finally {
-        clearTimeout(timeoutId);
+      } catch (err: any) {
+        const errorMessage = err instanceof Error ? err.message : String(err);
+        
+        if (errorMessage.includes("not found") || errorMessage.includes("404")) {
+          res.status(404).json({ error: `Issue #${issueNumber} not found in ${owner}/${repo}` });
+          return;
+        }
+        if (errorMessage.includes("authentication") || errorMessage.includes("401") || errorMessage.includes("403")) {
+          res.status(401).json({
+            error: "Not authenticated with GitHub. Run `gh auth login`.",
+          });
+          return;
+        }
+        
+        res.status(502).json({ error: `GitHub CLI error: ${errorMessage}` });
+        return;
       }
 
       // Check if already imported

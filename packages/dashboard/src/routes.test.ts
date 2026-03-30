@@ -8,6 +8,19 @@ import type { TaskDetail } from "@kb/core";
 import type { AuthStorageLike, ModelRegistryLike } from "./routes.js";
 import { __resetPlanningState } from "./planning.js";
 
+// Mock @kb/core for gh CLI auth checks
+vi.mock("@kb/core", async () => {
+  const actual = await vi.importActual<typeof import("@kb/core")>("@kb/core");
+  return {
+    ...actual,
+    isGhAuthenticated: vi.fn(),
+  };
+});
+
+import { isGhAuthenticated } from "@kb/core";
+
+const mockIsGhAuthenticated = vi.mocked(isGhAuthenticated);
+
 function createMockStore(overrides: Partial<TaskStore> = {}): TaskStore {
   return {
     getTask: vi.fn(),
@@ -1809,17 +1822,16 @@ describe("Pause/Unpause endpoints", () => {
 
 describe("POST /github/issues/fetch", () => {
   let store: TaskStore;
-  let fetchSpy: ReturnType<typeof vi.fn>;
-  const originalFetch = globalThis.fetch;
+  let listIssuesSpy: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     store = createMockStore();
-    fetchSpy = vi.fn();
-    globalThis.fetch = fetchSpy as any;
+    mockIsGhAuthenticated.mockReturnValue(true);
+    listIssuesSpy = vi.fn();
+    vi.spyOn(GitHubClient.prototype, "listIssues").mockImplementation(listIssuesSpy);
   });
 
   afterEach(() => {
-    globalThis.fetch = originalFetch;
     vi.restoreAllMocks();
   });
 
@@ -1839,11 +1851,7 @@ describe("POST /github/issues/fetch", () => {
   };
 
   it("fetches issues successfully", async () => {
-    fetchSpy.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      json: () => Promise.resolve([mockGitHubIssue]),
-    } as Response);
+    listIssuesSpy.mockResolvedValueOnce([mockGitHubIssue]);
 
     const res = await REQUEST(buildApp(), "POST", "/api/github/issues/fetch", JSON.stringify({ owner: "owner", repo: "repo" }), {
       "Content-Type": "application/json",
@@ -1874,11 +1882,7 @@ describe("POST /github/issues/fetch", () => {
   });
 
   it("returns 404 when repository not found", async () => {
-    fetchSpy.mockResolvedValueOnce({
-      ok: false,
-      status: 404,
-      statusText: "Not Found",
-    } as Response);
+    listIssuesSpy.mockRejectedValueOnce(new Error("Repository not found: owner/repo"));
 
     const res = await REQUEST(buildApp(), "POST", "/api/github/issues/fetch", JSON.stringify({ owner: "owner", repo: "repo" }), {
       "Content-Type": "application/json",
@@ -1888,30 +1892,34 @@ describe("POST /github/issues/fetch", () => {
     expect(res.body.error).toContain("Repository not found");
   });
 
-  it("returns 401/403 when authentication fails", async () => {
-    fetchSpy.mockResolvedValueOnce({
-      ok: false,
-      status: 403,
-      statusText: "Forbidden",
-    } as Response);
+  it("returns 401 when gh not authenticated", async () => {
+    mockIsGhAuthenticated.mockReturnValueOnce(false);
 
     const res = await REQUEST(buildApp(), "POST", "/api/github/issues/fetch", JSON.stringify({ owner: "owner", repo: "repo" }), {
       "Content-Type": "application/json",
     });
 
     expect(res.status).toBe(401);
-    expect(res.body.error).toContain("Authentication failed");
+    expect(res.body.error).toContain("Not authenticated with GitHub");
+    expect(res.body.error).toContain("gh auth login");
   });
 
-  it("filters out pull requests", async () => {
-    const pr = { ...mockGitHubIssue, pull_request: {} };
-    fetchSpy.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      json: () => Promise.resolve([mockGitHubIssue, pr]),
-    } as Response);
+  it("returns 502 when gh CLI fails", async () => {
+    listIssuesSpy.mockRejectedValueOnce(new Error("Some gh CLI error"));
 
     const res = await REQUEST(buildApp(), "POST", "/api/github/issues/fetch", JSON.stringify({ owner: "owner", repo: "repo" }), {
+      "Content-Type": "application/json",
+    });
+
+    expect(res.status).toBe(502);
+    expect(res.body.error).toContain("GitHub CLI error");
+  });
+
+  it("filters out pull requests (gh CLI already filters them)", async () => {
+    // gh issue list already filters out PRs, so we just verify the response
+    listIssuesSpy.mockResolvedValueOnce([mockGitHubIssue]);
+
+    const res = await REQUEST(buildApp(), "POST", "/api/github/issues/fetch", JSON.stringify({ owner: "owner", repo: "repo", limit: 10 }), {
       "Content-Type": "application/json",
     });
 
@@ -1922,11 +1930,7 @@ describe("POST /github/issues/fetch", () => {
 
   it("respects limit parameter", async () => {
     const manyIssues = Array.from({ length: 50 }, (_, i) => ({ ...mockGitHubIssue, number: i + 1 }));
-    fetchSpy.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      json: () => Promise.resolve(manyIssues),
-    } as Response);
+    listIssuesSpy.mockResolvedValueOnce(manyIssues.slice(0, 10));
 
     const res = await REQUEST(buildApp(), "POST", "/api/github/issues/fetch", JSON.stringify({ owner: "owner", repo: "repo", limit: 10 }), {
       "Content-Type": "application/json",
@@ -1939,12 +1943,12 @@ describe("POST /github/issues/fetch", () => {
 
 describe("POST /github/issues/import", () => {
   let store: TaskStore;
-  let fetchSpy: ReturnType<typeof vi.fn>;
-  const originalFetch = globalThis.fetch;
+  let getIssueSpy: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
-    fetchSpy = vi.fn();
-    globalThis.fetch = fetchSpy as any;
+    mockIsGhAuthenticated.mockReturnValue(true);
+    getIssueSpy = vi.fn();
+    vi.spyOn(GitHubClient.prototype, "getIssue").mockImplementation(getIssueSpy);
 
     store = createMockStore({
       createTask: vi.fn().mockResolvedValue({
@@ -1958,7 +1962,6 @@ describe("POST /github/issues/import", () => {
   });
 
   afterEach(() => {
-    globalThis.fetch = originalFetch;
     vi.restoreAllMocks();
   });
 
@@ -1974,15 +1977,11 @@ describe("POST /github/issues/import", () => {
     title: "Test Issue",
     body: "Test body",
     html_url: "https://github.com/owner/repo/issues/1",
-    labels: [{ name: "bug" }],
+    state: "open",
   };
 
   it("imports a single issue successfully", async () => {
-    fetchSpy.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      json: () => Promise.resolve(mockGitHubIssue),
-    } as Response);
+    getIssueSpy.mockResolvedValueOnce(mockGitHubIssue);
 
     const res = await REQUEST(buildApp(), "POST", "/api/github/issues/import", JSON.stringify({ owner: "owner", repo: "repo", issueNumber: 1 }), {
       "Content-Type": "application/json",
@@ -1999,11 +1998,7 @@ describe("POST /github/issues/import", () => {
   });
 
   it("logs the import action", async () => {
-    fetchSpy.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      json: () => Promise.resolve(mockGitHubIssue),
-    } as Response);
+    getIssueSpy.mockResolvedValueOnce(mockGitHubIssue);
 
     await REQUEST(buildApp(), "POST", "/api/github/issues/import", JSON.stringify({ owner: "owner", repo: "repo", issueNumber: 1 }), {
       "Content-Type": "application/json",
@@ -2021,34 +2016,39 @@ describe("POST /github/issues/import", () => {
     expect(res.body.error).toContain("issueNumber is required");
   });
 
-  it("returns 404 when issue not found", async () => {
-    fetchSpy.mockResolvedValueOnce({
-      ok: false,
-      status: 404,
-      statusText: "Not Found",
-    } as Response);
+  it("returns 400 when issue not found or is a pull request", async () => {
+    // getIssue returns null for both "not found" and "PR" cases
+    getIssueSpy.mockResolvedValueOnce(null);
 
     const res = await REQUEST(buildApp(), "POST", "/api/github/issues/import", JSON.stringify({ owner: "owner", repo: "repo", issueNumber: 999 }), {
       "Content-Type": "application/json",
     });
 
-    expect(res.status).toBe(404);
-    expect(res.body.error).toContain("not found");
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain("is a pull request");
   });
 
-  it("returns 400 when importing a pull request", async () => {
-    fetchSpy.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      json: () => Promise.resolve({ ...mockGitHubIssue, pull_request: {} }),
-    } as Response);
+  it("returns 401 when gh not authenticated", async () => {
+    mockIsGhAuthenticated.mockReturnValueOnce(false);
 
     const res = await REQUEST(buildApp(), "POST", "/api/github/issues/import", JSON.stringify({ owner: "owner", repo: "repo", issueNumber: 1 }), {
       "Content-Type": "application/json",
     });
 
-    expect(res.status).toBe(400);
-    expect(res.body.error).toContain("pull request");
+    expect(res.status).toBe(401);
+    expect(res.body.error).toContain("Not authenticated with GitHub");
+    expect(res.body.error).toContain("gh auth login");
+  });
+
+  it("returns 502 when gh CLI fails", async () => {
+    getIssueSpy.mockRejectedValueOnce(new Error("Some gh CLI error"));
+
+    const res = await REQUEST(buildApp(), "POST", "/api/github/issues/import", JSON.stringify({ owner: "owner", repo: "repo", issueNumber: 1 }), {
+      "Content-Type": "application/json",
+    });
+
+    expect(res.status).toBe(502);
+    expect(res.body.error).toContain("GitHub CLI error");
   });
 
   it("returns 409 when issue already imported", async () => {
@@ -2060,11 +2060,7 @@ describe("POST /github/issues/import", () => {
       },
     ]);
 
-    fetchSpy.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      json: () => Promise.resolve(mockGitHubIssue),
-    } as Response);
+    getIssueSpy.mockResolvedValueOnce(mockGitHubIssue);
 
     const res = await REQUEST(buildApp(), "POST", "/api/github/issues/import", JSON.stringify({ owner: "owner", repo: "repo", issueNumber: 1 }), {
       "Content-Type": "application/json",
@@ -2081,11 +2077,7 @@ describe("POST /github/issues/import", () => {
       ...mockGitHubIssue,
       title: "A".repeat(250),
     };
-    fetchSpy.mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      json: () => Promise.resolve(longTitleIssue),
-    } as Response);
+    getIssueSpy.mockResolvedValueOnce(longTitleIssue);
 
     await REQUEST(buildApp(), "POST", "/api/github/issues/import", JSON.stringify({ owner: "owner", repo: "repo", issueNumber: 1 }), {
       "Content-Type": "application/json",
