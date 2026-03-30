@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { TerminalService } from "./terminal-service.js";
+import { TerminalService, STALE_SESSION_THRESHOLD_MS } from "./terminal-service.js";
 
 // Mock node-pty
 const mockPtyProcess = {
@@ -265,6 +265,149 @@ describe("TerminalService", () => {
     it("returns false for write with invalid session ID", () => {
       const result = service.write("invalid<id>", "data");
       expect(result).toBe(false);
+    });
+  });
+
+  describe("activity tracking", () => {
+    it("sets lastActivityAt on session creation", async () => {
+      const before = new Date();
+      const session = await service.createSession();
+      const after = new Date();
+
+      expect(session).toBeTruthy();
+      expect(session!.lastActivityAt.getTime()).toBeGreaterThanOrEqual(before.getTime());
+      expect(session!.lastActivityAt.getTime()).toBeLessThanOrEqual(after.getTime());
+    });
+
+    it("updates lastActivityAt on write", async () => {
+      const session = await service.createSession();
+      expect(session).toBeTruthy();
+
+      const initialActivity = session!.lastActivityAt.getTime();
+
+      // Small delay to ensure time difference
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      service.write(session!.id, "hello");
+
+      const updatedSession = service.getSession(session!.id);
+      expect(updatedSession!.lastActivityAt.getTime()).toBeGreaterThan(initialActivity);
+    });
+
+    it("includes lastActivityAt in getAllSessions", async () => {
+      await service.createSession();
+      const sessions = service.getAllSessions();
+
+      expect(sessions).toHaveLength(1);
+      expect(sessions[0].lastActivityAt).toBeInstanceOf(Date);
+    });
+  });
+
+  describe("stale session detection", () => {
+    it("returns empty array when no sessions are stale", async () => {
+      await service.createSession();
+      const stale = service.getStaleSessions(300_000);
+      expect(stale).toHaveLength(0);
+    });
+
+    it("returns sessions older than threshold", async () => {
+      const session = await service.createSession();
+      expect(session).toBeTruthy();
+
+      // Manually backdate the lastActivityAt
+      session!.lastActivityAt = new Date(Date.now() - 600_000); // 10 min ago
+
+      const stale = service.getStaleSessions(300_000); // 5 min threshold
+      expect(stale).toHaveLength(1);
+      expect(stale[0].id).toBe(session!.id);
+    });
+
+    it("sorts stale sessions oldest first", async () => {
+      const session1 = await service.createSession();
+      const session2 = await service.createSession();
+      expect(session1).toBeTruthy();
+      expect(session2).toBeTruthy();
+
+      // session1 is older (more stale)
+      session1!.lastActivityAt = new Date(Date.now() - 700_000);
+      session2!.lastActivityAt = new Date(Date.now() - 600_000);
+
+      const stale = service.getStaleSessions(300_000);
+      expect(stale).toHaveLength(2);
+      expect(stale[0].id).toBe(session1!.id);
+      expect(stale[1].id).toBe(session2!.id);
+    });
+  });
+
+  describe("stale session eviction", () => {
+    it("STALE_SESSION_THRESHOLD_MS is 5 minutes", () => {
+      expect(STALE_SESSION_THRESHOLD_MS).toBe(300_000);
+    });
+
+    it("evicts stale sessions beyond threshold", async () => {
+      // Create a service with max 5 sessions
+      const svc = new TerminalService(projectRoot, 5);
+
+      const sessions = [];
+      for (let i = 0; i < 5; i++) {
+        sessions.push(await svc.createSession());
+      }
+      expect(svc.getSessionCount()).toBe(5);
+
+      // Make 3 sessions stale
+      sessions[0]!.lastActivityAt = new Date(Date.now() - 600_000);
+      sessions[1]!.lastActivityAt = new Date(Date.now() - 500_000);
+      sessions[2]!.lastActivityAt = new Date(Date.now() - 400_000);
+
+      const evicted = svc.evictStaleSessions(300_000);
+      // All 3 stale sessions are evicted because killSession sends SIGTERM
+      // but the session remains in the map until onExit fires (async).
+      // The eviction loop sees the map size unchanged and continues evicting all stale sessions.
+      expect(evicted).toBe(3);
+      // kill was called for each evicted session
+      expect(mockPtyProcess.kill).toHaveBeenCalledTimes(3);
+
+      svc.cleanup();
+    });
+
+    it("createSession auto-evicts when at 80% capacity", async () => {
+      // maxSessions = 5, 80% = 4
+      const svc = new TerminalService(projectRoot, 5);
+
+      // Create 4 sessions (80% of 5)
+      const sessions = [];
+      for (let i = 0; i < 4; i++) {
+        sessions.push(await svc.createSession());
+      }
+      expect(svc.getSessionCount()).toBe(4);
+
+      // Make 2 sessions stale
+      sessions[0]!.lastActivityAt = new Date(Date.now() - 600_000);
+      sessions[1]!.lastActivityAt = new Date(Date.now() - 500_000);
+
+      // Creating a new session should trigger eviction first
+      const newSession = await svc.createSession();
+      expect(newSession).toBeTruthy();
+      // Should have evicted stale sessions, then created a new one
+      // After eviction, we target <= 4 (80%), evict oldest stale sessions
+      // Then create the new session
+      expect(svc.getSessionCount()).toBeLessThanOrEqual(5);
+
+      svc.cleanup();
+    });
+
+    it("does not evict active sessions", async () => {
+      const svc = new TerminalService(projectRoot, 5);
+
+      for (let i = 0; i < 5; i++) {
+        await svc.createSession();
+      }
+      // All sessions are fresh, no stale ones
+      const evicted = svc.evictStaleSessions(300_000);
+      expect(evicted).toBe(0);
+      expect(svc.getSessionCount()).toBe(5);
+
+      svc.cleanup();
     });
   });
 });

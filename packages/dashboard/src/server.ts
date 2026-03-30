@@ -317,6 +317,12 @@ export function setupTerminalWebSocket(
       clearInterval(pingInterval);
       if (dataUnsub) dataUnsub();
       if (exitUnsub) exitUnsub();
+      // Kill the PTY session to prevent session leaks
+      try {
+        terminalService.killSession(sessionId);
+      } catch {
+        // Ignore errors during cleanup — session may already be dead
+      }
     });
 
     ws.on("error", () => {
@@ -324,6 +330,12 @@ export function setupTerminalWebSocket(
       clearInterval(pingInterval);
       if (dataUnsub) dataUnsub();
       if (exitUnsub) exitUnsub();
+      // Kill the PTY session to prevent session leaks
+      try {
+        terminalService.killSession(sessionId);
+      } catch {
+        // Ignore errors during cleanup — session may already be dead
+      }
     });
   });
 

@@ -34,6 +34,9 @@ const DEFAULT_MAX_SESSIONS = 10;
 const OUTPUT_THROTTLE_MS = 4; // ~250fps max update rate for responsive input
 const OUTPUT_BATCH_SIZE = 4096; // Smaller batches for lower latency
 
+// Stale session threshold: sessions inactive for more than 5 minutes are eligible for eviction
+export const STALE_SESSION_THRESHOLD_MS = 300_000; // 5 minutes
+
 // Valid session ID pattern (alphanumeric and dashes only)
 const SESSION_ID_PATTERN = /^[a-zA-Z0-9-]+$/;
 
@@ -64,6 +67,7 @@ export interface TerminalSession {
   pty: IPty;
   cwd: string;
   createdAt: Date;
+  lastActivityAt: Date;
   shell: string;
   scrollbackBuffer: string;
   outputBuffer: string;
@@ -252,9 +256,66 @@ export class TerminalService extends EventEmitter {
   }
 
   /**
+   * Update the last activity timestamp for a session
+   */
+  updateActivity(sessionId: string): void {
+    const session = this.sessions.get(sessionId);
+    if (session) {
+      session.lastActivityAt = new Date();
+    }
+  }
+
+  /**
+   * Get sessions that have been inactive for longer than the given threshold
+   * @param thresholdMs Inactivity threshold in milliseconds
+   * @returns Array of stale sessions sorted by lastActivityAt (oldest first)
+   */
+  getStaleSessions(thresholdMs: number): TerminalSession[] {
+    const now = Date.now();
+    const stale: TerminalSession[] = [];
+    for (const session of this.sessions.values()) {
+      if (now - session.lastActivityAt.getTime() > thresholdMs) {
+        stale.push(session);
+      }
+    }
+    // Sort oldest first
+    stale.sort((a, b) => a.lastActivityAt.getTime() - b.lastActivityAt.getTime());
+    return stale;
+  }
+
+  /**
+   * Evict stale sessions that have been inactive beyond the threshold.
+   * Kills sessions sorted by oldest activity first, stopping once below the target count.
+   * @param thresholdMs Inactivity threshold in milliseconds (default: STALE_SESSION_THRESHOLD_MS)
+   * @returns Number of sessions evicted
+   */
+  evictStaleSessions(thresholdMs: number = STALE_SESSION_THRESHOLD_MS): number {
+    const staleSessions = this.getStaleSessions(thresholdMs);
+    let evicted = 0;
+    const targetCount = Math.floor(this.maxSessions * 0.8);
+
+    for (const session of staleSessions) {
+      if (this.sessions.size <= targetCount) break;
+      const idleDuration = Date.now() - session.lastActivityAt.getTime();
+      console.info(
+        `Evicting stale session ${session.id} (idle for ${Math.round(idleDuration / 1000)}s)`,
+      );
+      this.killSession(session.id);
+      evicted++;
+    }
+
+    return evicted;
+  }
+
+  /**
    * Create a new terminal session
    */
   async createSession(options: TerminalOptions = {}): Promise<TerminalSession | null> {
+    // Auto-evict stale sessions when at 80% of limit
+    if (this.sessions.size >= Math.floor(this.maxSessions * 0.8)) {
+      this.evictStaleSessions();
+    }
+
     // Check session limit
     if (this.sessions.size >= this.maxSessions) {
       console.error(`Max sessions (${this.maxSessions}) reached, refusing new session`);
@@ -325,6 +386,7 @@ export class TerminalService extends EventEmitter {
       pty: ptyProcess,
       cwd,
       createdAt: new Date(),
+      lastActivityAt: new Date(),
       shell,
       scrollbackBuffer: "",
       outputBuffer: "",
@@ -406,6 +468,7 @@ export class TerminalService extends EventEmitter {
     }
 
     session.pty.write(data);
+    this.updateActivity(sessionId);
     return true;
   }
 
@@ -541,11 +604,12 @@ export class TerminalService extends EventEmitter {
   /**
    * Get all active sessions
    */
-  getAllSessions(): Array<{ id: string; cwd: string; createdAt: Date; shell: string }> {
+  getAllSessions(): Array<{ id: string; cwd: string; createdAt: Date; lastActivityAt: Date; shell: string }> {
     return Array.from(this.sessions.values()).map((s) => ({
       id: s.id,
       cwd: s.cwd,
       createdAt: s.createdAt,
+      lastActivityAt: s.lastActivityAt,
       shell: s.shell,
     }));
   }

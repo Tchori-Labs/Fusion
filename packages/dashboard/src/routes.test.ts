@@ -7,6 +7,7 @@ import type { TaskStore, TaskAttachment } from "@kb/core";
 import type { TaskDetail } from "@kb/core";
 import type { AuthStorageLike, ModelRegistryLike } from "./routes.js";
 import { __resetPlanningState } from "./planning.js";
+import * as terminalServiceModule from "./terminal-service.js";
 
 // Mock @kb/core for gh CLI auth checks
 vi.mock("@kb/core", async () => {
@@ -3619,5 +3620,200 @@ describe("Git Management endpoints", () => {
         expect(res.body.error).toContain("sessionId is required");
       });
     });
+  });
+});
+
+describe("Terminal session routes", () => {
+  let store: TaskStore;
+
+  beforeEach(() => {
+    store = createMockStore({
+      getRootDir: vi.fn().mockReturnValue("/test/project"),
+    } as any);
+  });
+
+  function buildApp() {
+    const app = express();
+    app.use(express.json());
+    app.use("/api", createApiRoutes(store));
+    return app;
+  }
+
+  describe("GET /api/terminal/sessions", () => {
+    it("returns lastActivityAt in session listing", async () => {
+      const now = new Date();
+      const mockSessions = [
+        { id: "term-123", cwd: "/test", createdAt: now, lastActivityAt: now, shell: "/bin/zsh" },
+      ];
+      const mockService = {
+        getAllSessions: vi.fn().mockReturnValue(mockSessions),
+      };
+      vi.spyOn(terminalServiceModule, "getTerminalService").mockReturnValue(mockService as any);
+
+      const res = await GET(buildApp(), "/api/terminal/sessions");
+
+      expect(res.status).toBe(200);
+      expect(res.body).toHaveLength(1);
+      expect(res.body[0].id).toBe("term-123");
+      expect(res.body[0].lastActivityAt).toBe(now.toISOString());
+      expect(res.body[0].createdAt).toBe(now.toISOString());
+      // Ensure no sensitive data is exposed
+      expect(res.body[0].scrollbackBuffer).toBeUndefined();
+      expect(res.body[0].env).toBeUndefined();
+
+      vi.restoreAllMocks();
+    });
+  });
+
+  describe("POST /api/terminal/sessions", () => {
+    it("returns 503 when max sessions reached (session is null)", async () => {
+      const mockService = {
+        createSession: vi.fn().mockResolvedValue(null),
+      };
+      vi.spyOn(terminalServiceModule, "getTerminalService").mockReturnValue(mockService as any);
+
+      const res = await REQUEST(
+        buildApp(),
+        "POST",
+        "/api/terminal/sessions",
+        JSON.stringify({}),
+        { "Content-Type": "application/json" },
+      );
+
+      expect(res.status).toBe(503);
+      expect(res.body.error).toContain("Max sessions");
+
+      vi.restoreAllMocks();
+    });
+  });
+});
+
+describe("Terminal WebSocket close handler", () => {
+  it("kills PTY session when WebSocket closes", async () => {
+    // This tests the server.ts close handler logic by verifying that
+    // setupTerminalWebSocket's close handler calls killSession.
+    // We import server.ts and mock the terminal service.
+    const killSessionMock = vi.fn().mockReturnValue(true);
+    const getSessionMock = vi.fn().mockReturnValue({
+      id: "term-ws-test",
+      shell: "/bin/zsh",
+      cwd: "/test/project",
+      scrollbackBuffer: "hello",
+    });
+    const getScrollbackAndClearPendingMock = vi.fn().mockReturnValue("scrollback data");
+    const onDataMock = vi.fn().mockReturnValue(() => {});
+    const onExitMock = vi.fn().mockReturnValue(() => {});
+
+    const mockService = {
+      getSession: getSessionMock,
+      getScrollbackAndClearPending: getScrollbackAndClearPendingMock,
+      killSession: killSessionMock,
+      write: vi.fn(),
+      resize: vi.fn(),
+      onData: onDataMock,
+      onExit: onExitMock,
+    };
+
+    vi.spyOn(terminalServiceModule, "getTerminalService").mockReturnValue(mockService as any);
+
+    // Dynamically import to get fresh module with the mock
+    const { setupTerminalWebSocket } = await import("./server.js");
+
+    const app = express();
+    const server = http.createServer(app);
+
+    setupTerminalWebSocket(app, server);
+
+    await new Promise<void>((resolve, reject) => {
+      server.listen(0, () => {
+        const addr = server.address() as { port: number };
+        const { WebSocket: WsClient } = require("ws");
+        const ws = new WsClient(`ws://127.0.0.1:${addr.port}/api/terminal/ws?sessionId=term-ws-test`);
+
+        ws.on("open", () => {
+          // Close the WebSocket - this should trigger killSession
+          ws.close();
+        });
+
+        ws.on("close", () => {
+          // Give the close handler time to execute
+          setTimeout(() => {
+            try {
+              expect(killSessionMock).toHaveBeenCalledWith("term-ws-test");
+              server.close();
+              resolve();
+            } catch (err) {
+              server.close();
+              reject(err);
+            }
+          }, 50);
+        });
+
+        ws.on("error", (err: Error) => {
+          server.close();
+          reject(err);
+        });
+      });
+    });
+
+    vi.restoreAllMocks();
+  });
+
+  it("kills PTY session when WebSocket encounters an error", async () => {
+    const killSessionMock = vi.fn().mockReturnValue(true);
+    const getSessionMock = vi.fn().mockReturnValue({
+      id: "term-ws-err",
+      shell: "/bin/zsh",
+      cwd: "/test/project",
+    });
+    const getScrollbackAndClearPendingMock = vi.fn().mockReturnValue(null);
+    const onDataMock = vi.fn().mockReturnValue(() => {});
+    const onExitMock = vi.fn().mockReturnValue(() => {});
+
+    const mockService = {
+      getSession: getSessionMock,
+      getScrollbackAndClearPending: getScrollbackAndClearPendingMock,
+      killSession: killSessionMock,
+      write: vi.fn(),
+      resize: vi.fn(),
+      onData: onDataMock,
+      onExit: onExitMock,
+    };
+
+    vi.spyOn(terminalServiceModule, "getTerminalService").mockReturnValue(mockService as any);
+
+    const { setupTerminalWebSocket } = await import("./server.js");
+
+    const app = express();
+    const server = http.createServer(app);
+
+    setupTerminalWebSocket(app, server);
+
+    await new Promise<void>((resolve, reject) => {
+      server.listen(0, () => {
+        const addr = server.address() as { port: number };
+        const { WebSocket: WsClient } = require("ws");
+        const ws = new WsClient(`ws://127.0.0.1:${addr.port}/api/terminal/ws?sessionId=term-ws-err`);
+
+        ws.on("open", () => {
+          // Force-terminate the connection to trigger error/close
+          ws.terminate();
+        });
+
+        // After termination, give the handler time to run
+        setTimeout(() => {
+          try {
+            expect(killSessionMock).toHaveBeenCalledWith("term-ws-err");
+            server.close();
+            resolve();
+          } catch (err) {
+            server.close();
+            reject(err);
+          }
+        }, 200);
+      });
+    });
+
+    vi.restoreAllMocks();
   });
 });

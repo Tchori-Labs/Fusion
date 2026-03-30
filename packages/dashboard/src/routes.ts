@@ -2168,6 +2168,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
           cwd: s.cwd,
           shell: s.shell,
           createdAt: s.createdAt.toISOString(),
+          lastActivityAt: s.lastActivityAt.toISOString(),
         }))
       );
     } catch (err: any) {
