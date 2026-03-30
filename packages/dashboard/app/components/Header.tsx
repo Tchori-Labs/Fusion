@@ -1,4 +1,4 @@
-import { Settings, Pause, Play, Square, Download, LayoutGrid, List, Terminal, Lightbulb } from "lucide-react";
+import { Settings, Pause, Play, Square, Download, LayoutGrid, List, Terminal, Lightbulb, Search, X } from "lucide-react";
 
 interface HeaderProps {
   onOpenSettings?: () => void;
@@ -11,6 +11,8 @@ interface HeaderProps {
   onToggleEnginePause?: () => void;
   view?: "board" | "list";
   onChangeView?: (view: "board" | "list") => void;
+  searchQuery?: string;
+  onSearchChange?: (query: string) => void;
 }
 
 export function Header({
@@ -24,6 +26,8 @@ export function Header({
   onToggleEnginePause,
   view = "board",
   onChangeView,
+  searchQuery = "",
+  onSearchChange,
 }: HeaderProps) {
   return (
     <header className="header">
@@ -54,6 +58,28 @@ export function Header({
             >
               <List size={16} />
             </button>
+          </div>
+        )}
+        {/* Search - only show in board view */}
+        {onSearchChange && view === "board" && (
+          <div className="header-search">
+            <Search size={14} className="header-search-icon" />
+            <input
+              type="text"
+              placeholder="Search tasks..."
+              value={searchQuery}
+              onChange={(e) => onSearchChange(e.target.value)}
+              className="header-search-input"
+            />
+            {searchQuery && (
+              <button
+                className="header-search-clear"
+                onClick={() => onSearchChange("")}
+                aria-label="Clear search"
+              >
+                <X size={14} />
+              </button>
+            )}
           </div>
         )}
         {/* Import from GitHub */}

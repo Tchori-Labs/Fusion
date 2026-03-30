@@ -2,7 +2,7 @@ import type { Task, TaskDetail, TaskCreateInput, Column as ColumnType } from "@k
 import { COLUMNS } from "@kb/core";
 import { Column } from "./Column";
 import type { ToastType } from "../hooks/useToast";
-import { useState } from "react";
+import { useState, useMemo } from "react";
 
 interface BoardProps {
   tasks: Task[];
@@ -21,10 +21,23 @@ interface BoardProps {
   ) => Promise<Task>;
   onArchiveTask?: (id: string) => Promise<Task>;
   onUnarchiveTask?: (id: string) => Promise<Task>;
+  searchQuery?: string;
 }
 
-export function Board({ tasks, maxConcurrent, onMoveTask, onOpenDetail, addToast, onQuickCreate, onNewTask, autoMerge, onToggleAutoMerge, globalPaused, onUpdateTask, onArchiveTask, onUnarchiveTask }: BoardProps) {
+export function Board({ tasks, maxConcurrent, onMoveTask, onOpenDetail, addToast, onQuickCreate, onNewTask, autoMerge, onToggleAutoMerge, globalPaused, onUpdateTask, onArchiveTask, onUnarchiveTask, searchQuery = "" }: BoardProps) {
   const [archivedCollapsed, setArchivedCollapsed] = useState(true);
+
+  // Filter tasks based on search query (matches id, title, or description)
+  const filteredTasks = useMemo(() => {
+    if (!searchQuery.trim()) return tasks;
+    const query = searchQuery.toLowerCase();
+    return tasks.filter(
+      (t) =>
+        t.id.toLowerCase().includes(query) ||
+        (t.title && t.title.toLowerCase().includes(query)) ||
+        t.description.toLowerCase().includes(query)
+    );
+  }, [tasks, searchQuery]);
 
   return (
     <main className="board" id="board">
@@ -32,7 +45,7 @@ export function Board({ tasks, maxConcurrent, onMoveTask, onOpenDetail, addToast
         <Column
           key={col}
           column={col}
-          tasks={tasks
+          tasks={filteredTasks
             .filter((t) => t.column === col)
             .sort((a, b) => {
               // Tasks with columnMovedAt sort descending (most recent first)

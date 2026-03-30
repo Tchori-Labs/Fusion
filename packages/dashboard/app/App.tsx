@@ -41,6 +41,7 @@ function AppInner() {
     }
     return "board";
   });
+  const [searchQuery, setSearchQuery] = useState("");
   const [githubTokenConfigured, setGithubTokenConfigured] = useState(false);
   const { tasks, createTask, moveTask, deleteTask, mergeTask, retryTask, updateTask, duplicateTask, archiveTask, unarchiveTask } = useTasks();
 
@@ -179,6 +180,8 @@ function AppInner() {
         onToggleEnginePause={handleToggleEnginePause}
         view={view}
         onChangeView={handleChangeView}
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
       />
       {view === "board" ? (
         <Board
@@ -195,6 +198,7 @@ function AppInner() {
           onUpdateTask={updateTask}
           onArchiveTask={archiveTask}
           onUnarchiveTask={unarchiveTask}
+          searchQuery={searchQuery}
         />
       ) : (
         <ListView
