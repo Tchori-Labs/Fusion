@@ -3487,6 +3487,152 @@ body {
   opacity: 0.9;
 }
 
+/* === PTY Terminal Styles === */
+
+.terminal-container {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  background: #1e1e1e;
+  overflow: hidden;
+}
+
+.terminal-xterm {
+  width: 100%;
+  height: 100%;
+  padding: 4px;
+}
+
+.terminal-xterm .xterm {
+  height: 100%;
+}
+
+.terminal-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: 16px;
+  color: var(--text-muted);
+}
+
+.terminal-loading .terminal-spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid var(--border);
+  border-top-color: var(--in-progress);
+  border-radius: 50%;
+  animation: terminal-spin 1s linear infinite;
+}
+
+@keyframes terminal-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.terminal-shell-name {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-family: "SF Mono", Monaco, Consolas, monospace;
+  margin-left: 8px;
+}
+
+.terminal-status {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-left: 8px;
+}
+
+.terminal-status.connected {
+  background: var(--done);
+}
+
+.terminal-status.connecting,
+.terminal-status.reconnecting {
+  background: var(--in-progress);
+  animation: terminal-pulse 1.5s ease-in-out infinite;
+}
+
+.terminal-status.disconnected {
+  background: var(--error);
+}
+
+@keyframes terminal-pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.terminal-status-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.terminal-connection-status {
+  font-weight: 500;
+}
+
+.terminal-connection-status.connected {
+  color: var(--done);
+}
+
+.terminal-connection-status.connecting,
+.terminal-connection-status.reconnecting {
+  color: var(--in-progress);
+}
+
+.terminal-connection-status.disconnected {
+  color: var(--error);
+}
+
+.terminal-exit-code {
+  color: var(--error);
+  font-weight: 500;
+}
+
+.terminal-reconnect-btn,
+.terminal-restart-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.terminal-reconnect-btn:hover,
+.terminal-restart-btn:hover {
+  background: var(--card-hover);
+  border-color: var(--text-muted);
+}
+
+.terminal-error {
+  padding: 12px 16px;
+  background: rgba(179, 38, 38, 0.1);
+  border-bottom: 1px solid var(--border);
+  color: var(--error);
+  font-size: 13px;
+}
+
 /* === Terminal Modal Mobile Responsive === */
 @media (max-width: 768px) {
   .terminal-modal {
