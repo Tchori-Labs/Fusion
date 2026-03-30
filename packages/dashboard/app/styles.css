@@ -2431,7 +2431,10 @@ body {
   /* Mobile task-entry font sizing: prevent Safari zoom-on-focus by ensuring
      task entry inputs are at least 16px on mobile viewports */
   .quick-entry-input,
-  #new-task-description {
+  #new-task-description,
+  .inline-create-input,
+  .card-edit-title-input,
+  .card-edit-desc-textarea {
     font-size: 16px;
   }
 
