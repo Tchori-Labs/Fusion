@@ -7,7 +7,7 @@ When making changes that affect published packages, create a changeset file:
 ```bash
 cat > .changeset/<short-description>.md << 'EOF'
 ---
-"@dustinbyrne/kb": patch
+"@gsxdsm/fusion": patch
 ---
 
 Short description of the change.
@@ -22,16 +22,16 @@ Bump types:
 
 Include the changeset file in the same commit as the code change. The filename should be a short kebab-case description (e.g. `fix-merge-conflict.md`, `add-retry-button.md`).
 
-Only create changesets for changes that affect the published `@dustinbyrne/kb` package — user-facing features, bug fixes, CLI changes, tool changes. Do NOT create changesets for internal docs (AGENTS.md, README), CI config, or refactors that don't change behavior.
+Only create changesets for changes that affect the published `@gsxdsm/fusion` package — user-facing features, bug fixes, CLI changes, tool changes. Do NOT create changesets for internal docs (AGENTS.md, README), CI config, or refactors that don't change behavior.
 
 ## Package Structure
 
-- `@kb/core` — domain model, task store (private, not published)
-- `@kb/dashboard` — web UI + API server (private, not published)
-- `@kb/engine` — AI agents: triage, executor, reviewer, merger, scheduler (private, not published)
-- `@dustinbyrne/kb` — CLI + pi extension (published to npm)
+- `@fusion/core` — domain model, task store (private, not published)
+- `@fusion/dashboard` — web UI + API server (private, not published)
+- `@fusion/engine` — AI agents: triage, executor, reviewer, merger, scheduler (private, not published)
+- `@gsxdsm/fusion` — CLI + pi extension (published to npm)
 
-Only `@dustinbyrne/kb` is published. The others are internal workspace packages.
+Only `@gsxdsm/fusion` is published. The others are internal workspace packages.
 
 ## SQLite Storage Architecture
 
@@ -96,7 +96,7 @@ Tests are required. Typechecks and manual verification are not substitutes for r
 
 ## Pi Extension (`packages/cli/src/extension.ts`)
 
-The pi extension provides tools and a `/kb` command for interacting with kb from within a pi session. It ships as part of `@dustinbyrne/kb` — one `pi install` gives you both the CLI and the extension.
+The pi extension provides tools and a `/kb` command for interacting with kb from within a pi session. It ships as part of `@gsxdsm/fusion` — one `pi install` gives you both the CLI and the extension.
 
 Update it when:
 

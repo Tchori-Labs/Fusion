@@ -5,7 +5,7 @@ Fusion works as a standalone CLI without pi. This is useful for CI environments,
 ## Installation
 
 ```bash
-npm install -g @dustinbyrne/kb
+npm install -g @gsxdsm/fusion
 ```
 
 ## Authentication
