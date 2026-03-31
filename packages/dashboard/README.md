@@ -138,10 +138,10 @@ Browse and edit task worktree files directly from the task detail modal:
 
 - **Files Tab**: Available when a task has a worktree assigned
 - **File Tree**: Navigate directories with breadcrumb-style path display
-- **Code Editor**: Edit files with syntax highlighting powered by CodeMirror 6
-  - Supports TypeScript, JavaScript, JSON, CSS, Markdown, and more
+- **Text Editor**: Edit files with a clean textarea-based editor
+  - Supports all text files with automatic syntax detection
+  - **Markdown Preview**: Toggle between edit and preview modes for `.md`, `.markdown`, and `.mdx` files
   - One-dark theme matching the dashboard
-  - Auto-detects language from file extension
 - **Safety Features**:
   - Path traversal prevention (blocks `..` patterns)
   - Binary file detection (prevents editing images, executables, etc.)

@@ -1,3 +1,8 @@
+import { useState, useCallback } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import { FileEdit, Eye } from "lucide-react";
+
 interface FileEditorProps {
   content: string;
   onChange: (content: string) => void;
@@ -5,15 +10,72 @@ interface FileEditorProps {
   filePath?: string;
 }
 
+function isMarkdownFile(filePath?: string): boolean {
+  if (!filePath) return false;
+  const lowerPath = filePath.toLowerCase();
+  return lowerPath.endsWith(".md") || lowerPath.endsWith(".markdown") || lowerPath.endsWith(".mdx");
+}
+
 export function FileEditor({ content, onChange, readOnly, filePath }: FileEditorProps) {
+  const [showPreview, setShowPreview] = useState(false);
+  const isMarkdown = isMarkdownFile(filePath);
+
+  // For markdown files in readOnly mode, default to preview
+  const effectiveShowPreview = isMarkdown && (readOnly ? true : showPreview);
+
+  const handleEditClick = useCallback(() => {
+    setShowPreview(false);
+  }, []);
+
+  const handlePreviewClick = useCallback(() => {
+    setShowPreview(true);
+  }, []);
+
   return (
-    <textarea
-      className="file-editor-container file-editor-textarea"
-      value={content}
-      onChange={(e) => onChange(e.target.value)}
-      readOnly={readOnly}
-      spellCheck={false}
-      aria-label={filePath ? `Editor for ${filePath}` : "File editor"}
-    />
+    <div className="file-editor-container">
+      {isMarkdown && (
+        <div className="file-editor-toolbar">
+          <div className="file-editor-mode-toggle">
+            {!readOnly && (
+              <button
+                className={`btn btn-sm ${!effectiveShowPreview ? "btn-primary" : ""}`}
+                onClick={handleEditClick}
+                disabled={!effectiveShowPreview}
+                aria-label="Edit mode"
+              >
+                <FileEdit size={14} />
+                Edit
+              </button>
+            )}
+            <button
+              className={`btn btn-sm ${effectiveShowPreview ? "btn-primary" : ""}`}
+              onClick={handlePreviewClick}
+              disabled={effectiveShowPreview}
+              aria-label="Preview mode"
+            >
+              <Eye size={14} />
+              Preview
+            </button>
+          </div>
+        </div>
+      )}
+
+      {effectiveShowPreview ? (
+        <div className="file-editor-preview markdown-body">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+            {content}
+          </ReactMarkdown>
+        </div>
+      ) : (
+        <textarea
+          className="file-editor-textarea"
+          value={content}
+          onChange={(e) => onChange(e.target.value)}
+          readOnly={readOnly}
+          spellCheck={false}
+          aria-label={filePath ? `Editor for ${filePath}` : "File editor"}
+        />
+      )}
+    </div>
   );
 }
