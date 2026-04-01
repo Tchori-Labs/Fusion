@@ -51,6 +51,7 @@ const HELP = `
 fn — AI-orchestrated task board
 
 Usage:
+  fn init                          Initialize a new kb project in current directory
   fn dashboard                        Start the board web UI
   fn dashboard --paused               Start with automation paused
   fn dashboard --dev                  Start web UI only (no AI engine)
@@ -160,8 +161,92 @@ async function main() {
 
   const command = args[0];
 
+  // Migration check for first-run experience
+  // Skip for init command and help flags
+  if (command !== "init" && command !== "--help" && command !== "-h") {
+    try {
+      const { FirstRunDetector, MigrationCoordinator } = await import("@fusion/core");
+      const { CentralCore } = await import("@fusion/core");
+      
+      const detector = new FirstRunDetector();
+      const state = await detector.detectFirstRunState();
+      
+      if (state === "needs-migration") {
+        const cwd = process.cwd();
+        const central = new CentralCore();
+        await central.init();
+        
+        try {
+          const coordinator = new MigrationCoordinator(central);
+          const result = await coordinator.registerSingleProject(cwd);
+          
+          if (result.success && result.projectsRegistered.length > 0) {
+            const project = await central.getProject(result.projectsRegistered[0]);
+            if (project) {
+              console.log(`✓ Auto-registered project: ${project.name}`);
+            }
+          } else if (result.errors.length > 0) {
+            console.warn(`Migration warning: ${result.errors[0]}`);
+          }
+        } finally {
+          await central.close();
+        }
+      }
+    } catch {
+      // Silently ignore migration errors - user can manually run fn init
+    }
+  }
+
   try {
     switch (command) {
+      case "init": {
+        // Initialize a new kb project
+        const { existsSync, mkdirSync } = await import("node:fs");
+        const { join } = await import("node:path");
+        const { CentralCore } = await import("@fusion/core");
+        const { Database } = await import("@fusion/core");
+        
+        const cwd = process.cwd();
+        const kbDir = join(cwd, ".kb");
+        
+        // Check if already initialized
+        if (existsSync(kbDir)) {
+          // Check if already registered in central
+          const central = new CentralCore();
+          await central.init();
+          const existing = await central.getProjectByPath(cwd);
+          
+          if (existing) {
+            console.log(`Project "${existing.name}" already initialized at ${cwd}`);
+            await central.close();
+            break;
+          }
+          
+          // Directory exists but not registered - just register it
+          const project = await central.autoRegisterProject(cwd);
+          console.log(`✓ Registered project "${project.name}" at ${cwd}`);
+          await central.close();
+          break;
+        }
+        
+        // Create .kb directory
+        mkdirSync(kbDir, { recursive: true });
+        
+        // Initialize SQLite database
+        const db = new Database(kbDir);
+        db.init();
+        db.close();
+        
+        // Register in central
+        const central = new CentralCore();
+        await central.init();
+        
+        const project = await central.autoRegisterProject(cwd);
+        console.log(`✓ Initialized kb project "${project.name}" at ${cwd}`);
+        await central.close();
+        break;
+      }
+
       case "dashboard": {
         // Initialize native module resolution for Bun binary before starting dashboard
         // This sets up the paths so node-pty can find its native assets

@@ -31,7 +31,7 @@ import { EventEmitter } from "node:events";
 import { randomUUID } from "node:crypto";
 import { existsSync, statSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
-import { isAbsolute, join } from "node:path";
+import { isAbsolute, join, basename } from "node:path";
 import type {
   RegisteredProject,
   ProjectHealth,
@@ -944,5 +944,135 @@ export class CentralCore extends EventEmitter<CentralCoreEvents> {
       details: row.details,
       metadata: fromJson<Record<string, unknown>>(row.metadata),
     };
+  }
+
+  // ── Migration Helpers ────────────────────────────────────────────────
+
+  /**
+   * Auto-register a project at the given path.
+   *
+   * This is used during migration from single-project to multi-project mode.
+   * Generates the project name from git remote or directory name.
+   *
+   * @param projectPath — Absolute path to project directory
+   * @returns Registered project
+   * @throws Error if path doesn't exist, isn't absolute, or registration fails
+   */
+  async autoRegisterProject(projectPath: string): Promise<RegisteredProject> {
+    this.ensureInitialized();
+
+    // Check if already registered
+    const existing = await this.getProjectByPath(projectPath);
+    if (existing) {
+      return existing;
+    }
+
+    // Generate name from git remote or directory
+    const name = await this.generateProjectName(projectPath);
+
+    // Ensure unique name
+    const uniqueName = await this.ensureUniqueName(name);
+
+    // Register with in-process isolation
+    return this.registerProject({
+      name: uniqueName,
+      path: projectPath,
+      isolationMode: "in-process",
+    });
+  }
+
+  /**
+   * Get the current first-run state for this central instance.
+   *
+   * @returns First-run state
+   */
+  async getFirstRunState(): Promise<import("./migration.js").FirstRunState> {
+    const { FirstRunDetector } = await import("./migration.js");
+    const detector = new FirstRunDetector(this.globalDir);
+    return detector.detectFirstRunState(this);
+  }
+
+  /**
+   * Check if a project path is already registered.
+   *
+   * @param projectPath — Absolute project path
+   * @returns true if already registered
+   */
+  async isProjectRegistered(projectPath: string): Promise<boolean> {
+    const existing = await this.getProjectByPath(projectPath);
+    return !!existing;
+  }
+
+  /**
+   * Generate a project name from git remote or directory name.
+   */
+  private async generateProjectName(projectPath: string): Promise<string> {
+    // Try git remote first
+    try {
+      const { execFile } = await import("node:child_process");
+      const { promisify } = await import("node:util");
+      const execFileAsync = promisify(execFile);
+
+      const { stdout } = await execFileAsync(
+        "git",
+        ["remote", "get-url", "origin"],
+        { cwd: projectPath, timeout: 5000 }
+      );
+
+      const remoteUrl = stdout.trim();
+      if (remoteUrl) {
+        const name = this.extractRepoName(remoteUrl);
+        if (name) return name;
+      }
+    } catch {
+      // Git not available or no remote - fall through to directory name
+    }
+
+    // Fallback to directory name
+    return basename(projectPath);
+  }
+
+  /**
+   * Extract repository name from git remote URL.
+   */
+  private extractRepoName(remoteUrl: string): string | null {
+    // Remove .git suffix
+    const withoutGit = remoteUrl.replace(/\.git$/, "");
+
+    // Handle SSH format: git@host:owner/repo
+    const sshMatch = withoutGit.match(/:([^/:]+\/([^/]+))$/);
+    if (sshMatch) {
+      return sshMatch[2];
+    }
+
+    // Handle HTTPS format: https://host/owner/repo
+    const httpsMatch = withoutGit.match(/\/([^/]+)$/);
+    if (httpsMatch) {
+      return httpsMatch[1];
+    }
+
+    return null;
+  }
+
+  /**
+   * Ensure a project name is unique by appending -N suffix if needed.
+   */
+  private async ensureUniqueName(baseName: string): Promise<string> {
+    const existing = await this.listProjects();
+    const existingNames = new Set(existing.map((p) => p.name.toLowerCase()));
+
+    if (!existingNames.has(baseName.toLowerCase())) {
+      return baseName;
+    }
+
+    // Find unique suffix
+    let counter = 1;
+    let candidate = `${baseName}-${counter}`;
+    while (existingNames.has(candidate.toLowerCase())) {
+      counter++;
+      candidate = `${baseName}-${counter}`;
+    }
+
+    return candidate;
   }
 }

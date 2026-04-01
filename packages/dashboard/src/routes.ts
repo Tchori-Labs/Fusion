@@ -1066,6 +1066,68 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   // Get GitHub token from options or env
   const githubToken = options?.githubToken ?? process.env.GITHUB_TOKEN;
 
+  // ── Setup and Migration Routes ───────────────────────────────────────────
+
+  /**
+   * GET /api/setup-state
+   * Returns the first-run state and detected projects for migration/setup wizard.
+   * Response: { state: FirstRunState, detectedProjects: DetectedProject[], hasCentralDb: boolean }
+   */
+  router.get("/setup-state", async (_req, res) => {
+    try {
+      const { FirstRunDetector } = await import("@fusion/core");
+      const { CentralCore } = await import("@fusion/core");
+      
+      const detector = new FirstRunDetector();
+      const state = await detector.detectFirstRunState();
+      const detectedProjects = await detector.detectExistingProjects(process.cwd());
+      
+      res.json({
+        state,
+        detectedProjects,
+        hasCentralDb: detector.hasCentralDb(),
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  /**
+   * POST /api/complete-setup
+   * Complete setup by registering selected projects.
+   * Body: { projects: Array<{ path: string, name: string, isolationMode?: string }> }
+   * Response: { success: boolean, registered: string[], errors: string[] }
+   */
+  router.post("/complete-setup", async (req, res) => {
+    try {
+      const { projects } = req.body;
+      if (!Array.isArray(projects)) {
+        res.status(400).json({ error: "projects array is required" });
+        return;
+      }
+
+      const { CentralCore, MigrationCoordinator } = await import("@fusion/core");
+      
+      const central = new CentralCore();
+      await central.init();
+      
+      try {
+        const coordinator = new MigrationCoordinator(central);
+        const result = await coordinator.completeSetup(projects);
+        
+        res.json({
+          success: result.success,
+          registered: result.projectsRegistered,
+          errors: result.errors,
+        });
+      } finally {
+        await central.close();
+      }
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // Scheduler config (includes persisted settings)
   router.get("/config", async (_req, res) => {
     try {

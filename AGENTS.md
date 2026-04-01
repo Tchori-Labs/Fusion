@@ -1156,3 +1156,107 @@ When you add a template:
 1. The template data is copied to a new workflow step (templates themselves are immutable)
 2. The new step is enabled by default
 3. You can edit the step after creation to customize the prompt
+
+## Multi-Project Migration
+
+kb supports migrating from single-project mode to multi-project mode seamlessly. When you upgrade to a multi-project capable version, the system automatically detects existing projects and registers them in the central project registry.
+
+### Auto-Migration Behavior
+
+On first run after upgrade, kb will:
+1. **Detect** existing `.kb/kb.db` files in the current directory tree
+2. **Register** the discovered project in the central database at `~/.pi/kb/kb-central.db`
+3. **Preserve** all existing data — nothing is moved or deleted
+4. **Report** the auto-registration via console output
+
+This process is:
+- **Idempotent** — Re-running migration is a no-op for already-registered projects
+- **Safe** — Original `.kb/` directories are never modified
+- **Reversible** — Deleting `~/.pi/kb/kb-central.db` reverts to single-project mode
+
+### Backward Compatibility
+
+Single-project workflows continue working without changes:
+- No `--project` flag required when only one project is registered
+- Existing CLI commands work exactly as before
+- Dashboard opens directly to the project overview
+
+When multiple projects are registered, explicit project selection is required:
+```bash
+fn task list --project my-frontend
+fn dashboard --project my-backend
+```
+
+### Manual Project Registration
+
+To initialize a new project or register an existing project manually:
+
+```bash
+# Initialize new project (creates .kb/ and registers in central)
+fn init
+
+# Initialize with custom name
+fn init --name "My Custom Project"
+
+# Register existing project at specific directory
+fn project add /path/to/project --name "Existing Project"
+```
+
+### Rollback Procedure
+
+If the central database causes issues:
+
+1. **Delete the central database**:
+   ```bash
+   rm ~/.pi/kb/kb-central.db
+   ```
+   This only removes the project registry. All per-project data in `.kb/kb.db` remains intact.
+
+2. **kb falls back to single-project legacy mode** automatically
+
+3. **Re-register projects** if needed:
+   ```bash
+   fn init
+   # or
+   fn project add /path/to/project
+   ```
+
+4. **Emergency bypass** (disable auto-migration):
+   ```bash
+   KB_SKIP_MIGRATION=1 fn task list
+   ```
+
+### Dashboard First-Run Experience
+
+The dashboard provides setup endpoints for the first-run wizard:
+
+- `GET /api/setup-state` — Returns migration state (`fresh-install`, `needs-migration`, `setup-wizard`, `normal-operation`) and detected projects
+- `POST /api/complete-setup` — Registers selected projects from the wizard
+
+When the dashboard detects `needs-migration` or `setup-wizard` states, it shows appropriate prompts to guide users through initial setup.
+
+### Migration API
+
+Core migration functions are available in `@fusion/core`:
+
+```typescript
+import { 
+  FirstRunDetector, 
+  MigrationCoordinator, 
+  BackwardCompat,
+  needsCentralMigration,
+  autoMigrateToCentral 
+} from "@fusion/core";
+
+// Detect first-run state
+const detector = new FirstRunDetector();
+const state = await detector.detectFirstRunState(); // "fresh-install" | "needs-migration" | "setup-wizard" | "normal-operation"
+
+// Coordinate migration
+const coordinator = new MigrationCoordinator(central);
+const result = await coordinator.registerSingleProject("/path/to/project");
+
+// Backward compatibility resolution
+const compat = new BackwardCompat(central);
+const context = await compat.resolveProjectContext("/cwd"); // Auto-resolves single project
+```

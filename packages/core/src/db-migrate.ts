@@ -532,3 +532,60 @@ async function createBackups(kbDir: string): Promise<void> {
     }
   }
 }
+
+// ── Central Migration ────────────────────────────────────────────────
+
+/**
+ * Check if migration to central database is needed.
+ *
+ * Returns true if:
+ * - Central DB doesn't exist AND
+ * - cwd has `.kb/kb.db` (existing single-project)
+ *
+ * @param cwd — Current working directory to check
+ * @param globalDir — Directory for central database. Defaults to `~/.pi/kb/`.
+ */
+export function needsCentralMigration(cwd: string, globalDir?: string): boolean {
+  const { FirstRunDetector } = require("./migration.js");
+  const detector = new FirstRunDetector(globalDir);
+
+  // Check if central DB exists
+  if (detector.hasCentralDb()) {
+    return false;
+  }
+
+  // Check if cwd has a kb project
+  return detector["hasKbProject"](cwd);
+}
+
+/**
+ * Detect existing projects by walking up from cwd.
+ *
+ * @param cwd — Starting directory (default: process.cwd())
+ * @param globalDir — Directory for central database. Defaults to `~/.pi/kb/`.
+ * @returns Array of detected projects
+ */
+export async function detectExistingProjects(
+  cwd?: string,
+  globalDir?: string
+): Promise<Array<{ path: string; name: string; hasDb: boolean }>> {
+  const { FirstRunDetector } = require("./migration.js");
+  const detector = new FirstRunDetector(globalDir);
+  return detector.detectExistingProjects(cwd);
+}
+
+/**
+ * Auto-migrate an existing single project to central database.
+ *
+ * @param existingProjectPath — Absolute path to existing project
+ * @param central — Initialized CentralCore instance
+ * @returns Migration result
+ */
+export async function autoMigrateToCentral(
+  existingProjectPath: string,
+  central: import("./central-core.js").CentralCore
+): Promise<import("./migration.js").MigrationResult> {
+  const { MigrationCoordinator } = require("./migration.js");
+  const coordinator = new MigrationCoordinator(central);
+  return coordinator.registerSingleProject(existingProjectPath);
+}

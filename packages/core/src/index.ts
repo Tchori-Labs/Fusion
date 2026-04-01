@@ -123,3 +123,24 @@ export type {
   CentralActivityLogEntry, 
   GlobalConcurrencyState 
 } from "./types.js";
+
+// ── Migration and First-Run Experience ────────────────────────────────
+
+export {
+  FirstRunDetector,
+  MigrationCoordinator,
+  BackwardCompat,
+  ProjectRequiredError,
+} from "./migration.js";
+export type {
+  FirstRunState,
+  DetectedProject,
+  MigrationResult,
+  ProjectSetupInput,
+  ResolvedContext,
+} from "./migration.js";
+export {
+  needsCentralMigration,
+  detectExistingProjects,
+  autoMigrateToCentral,
+} from "./db-migrate.js";

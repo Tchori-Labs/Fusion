@@ -1,6 +1,6 @@
 ---
-"@gsxdsm/fusion": minor
 "@fusion/core": minor
+"@gsxdsm/fusion": minor
 ---
 
 Add migration and first-run experience for multi-project support
@@ -12,3 +12,7 @@ Add migration and first-run experience for multi-project support
 - `--project` flag support for CLI multi-project targeting
 - `KB_SKIP_MIGRATION` environment variable for recovery
 - Graceful fallback when central database unavailable
+- New `fn init` command to initialize kb projects
+- Interactive first-run setup wizard API in dashboard
+- Idempotent migration — safe to re-run
+- Rollback procedure documented in AGENTS.md
