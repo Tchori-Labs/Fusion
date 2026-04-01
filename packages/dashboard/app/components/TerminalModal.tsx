@@ -33,6 +33,7 @@ export function TerminalModal({ isOpen, onClose, initialCommand }: TerminalModal
   const [isCreating, setIsCreating] = useState(false);
   const [shellName, setShellName] = useState<string>("");
   const [exitCode, setExitCode] = useState<number | null>(null);
+  const [xtermReady, setXtermReady] = useState(false);
   
   const terminalRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<XTerm | null>(null);
@@ -42,8 +43,10 @@ export function TerminalModal({ isOpen, onClose, initialCommand }: TerminalModal
   const { connectionStatus, sendInput, resize, onData, onConnect, onExit, onScrollback, reconnect } = useTerminal(sessionId);
 
   // Initialize xterm.js
+  // Depends on `isCreating` so the effect re-runs once session creation
+  // completes and the terminal container div is visible in the DOM.
   useEffect(() => {
-    if (!isOpen || !terminalRef.current || xtermRef.current) return;
+    if (!isOpen || isCreating || !terminalRef.current || xtermRef.current) return;
 
     let mounted = true;
 
@@ -111,6 +114,9 @@ export function TerminalModal({ isOpen, onClose, initialCommand }: TerminalModal
       xtermRef.current = terminal;
       fitAddonRef.current = fitAddon;
 
+      // Signal that xterm is ready so the subscription effect re-runs
+      setXtermReady(true);
+
       // Handle data from terminal (user input)
       const dataHandler = terminal.onData((data) => {
         sendInput(data);
@@ -148,12 +154,15 @@ export function TerminalModal({ isOpen, onClose, initialCommand }: TerminalModal
         xtermRef.current = null;
       }
       fitAddonRef.current = null;
+      setXtermReady(false);
     };
-  }, [isOpen, sendInput, resize]);
+  }, [isOpen, isCreating, sendInput, resize]);
 
-  // Subscribe to terminal data
+  // Subscribe to terminal data.
+  // Depends on `xtermReady` so subscriptions are established after the
+  // async xterm initialization completes and xtermRef.current is set.
   useEffect(() => {
-    if (!xtermRef.current) return;
+    if (!xtermReady || !xtermRef.current) return;
 
     const unsubData = onData((data) => {
       xtermRef.current?.write(data);
@@ -178,7 +187,7 @@ export function TerminalModal({ isOpen, onClose, initialCommand }: TerminalModal
       unsubConnect();
       unsubExit();
     };
-  }, [onData, onScrollback, onConnect, onExit]);
+  }, [xtermReady, onData, onScrollback, onConnect, onExit]);
 
   // Create session when modal opens
   useEffect(() => {
@@ -418,18 +427,21 @@ export function TerminalModal({ isOpen, onClose, initialCommand }: TerminalModal
 
         {/* Terminal container */}
         <div className="terminal-container" data-testid="terminal-container">
-          {isCreating ? (
+          {isCreating && (
             <div className="terminal-loading" data-testid="terminal-loading">
               <div className="terminal-spinner" />
               <span>Starting terminal...</span>
             </div>
-          ) : (
-            <div
-              ref={terminalRef}
-              className="terminal-xterm"
-              data-testid="terminal-xterm"
-            />
           )}
+          {/* Always render the xterm container so the ref is available for
+              initialization as soon as the session is ready. Hiding it with
+              display:none while loading prevents a flash of empty terminal. */}
+          <div
+            ref={terminalRef}
+            className="terminal-xterm"
+            data-testid="terminal-xterm"
+            style={isCreating ? { display: "none" } : undefined}
+          />
         </div>
 
         {/* Connection status bar */}

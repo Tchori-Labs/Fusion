@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { TerminalModal } from "../TerminalModal";
 import * as useTerminalModule from "../../hooks/useTerminal";
 import * as apiModule from "../../api";
@@ -13,6 +13,44 @@ vi.mock("../../api", () => ({
   createTerminalSession: vi.fn(),
   killPtyTerminalSession: vi.fn(),
 }));
+
+// Mock xterm modules to prevent DOM errors in jsdom
+const mockTerminalInstance = {
+  loadAddon: vi.fn(),
+  open: vi.fn(),
+  onData: vi.fn(() => ({ dispose: vi.fn() })),
+  dispose: vi.fn(),
+  write: vi.fn(),
+  clear: vi.fn(),
+  focus: vi.fn(),
+  options: { fontSize: 14 },
+  cols: 80,
+  rows: 24,
+};
+
+vi.mock("@xterm/xterm", () => ({
+  Terminal: vi.fn(() => mockTerminalInstance),
+}));
+
+vi.mock("@xterm/addon-fit", () => ({
+  FitAddon: vi.fn(() => ({
+    fit: vi.fn(),
+    dispose: vi.fn(),
+  })),
+}));
+
+vi.mock("@xterm/addon-web-links", () => ({
+  WebLinksAddon: vi.fn(() => ({
+    dispose: vi.fn(),
+  })),
+}));
+
+vi.mock("@xterm/addon-webgl", () => {
+  throw new Error("WebGL not available");
+});
+
+// Suppress xterm CSS import
+vi.mock("@xterm/xterm/css/xterm.css", () => ({}));
 
 const mockUseTerminal = vi.mocked(useTerminalModule.useTerminal);
 const mockCreateTerminalSession = vi.mocked(apiModule.createTerminalSession);
@@ -77,7 +115,9 @@ describe("TerminalModal", () => {
     
     render(<TerminalModal isOpen={true} onClose={mockOnClose} />);
 
-    expect(screen.getByTestId("terminal-loading")).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.getByTestId("terminal-loading")).toBeTruthy();
+    });
   });
 
   it("shows error when session creation fails", async () => {
@@ -104,7 +144,9 @@ describe("TerminalModal", () => {
   it("closes modal on escape key", async () => {
     render(<TerminalModal isOpen={true} onClose={mockOnClose} />);
 
-    fireEvent.keyDown(document, { key: "Escape" });
+    await act(async () => {
+      fireEvent.keyDown(document, { key: "Escape" });
+    });
 
     expect(mockOnClose).toHaveBeenCalled();
   });
@@ -127,7 +169,9 @@ describe("TerminalModal", () => {
       expect(mockCreateTerminalSession).toHaveBeenCalled();
     });
 
-    rerender(<TerminalModal isOpen={false} onClose={mockOnClose} />);
+    await act(async () => {
+      rerender(<TerminalModal isOpen={false} onClose={mockOnClose} />);
+    });
 
     await waitFor(() => {
       expect(mockKillPtyTerminalSession).toHaveBeenCalledWith("test-session-123");
@@ -170,6 +214,70 @@ describe("TerminalModal", () => {
 
     await waitFor(() => {
       expect(mockUseTerminal).toHaveBeenCalledWith("test-session-123");
+    });
+  });
+
+  it("initializes xterm after session is created", async () => {
+    render(<TerminalModal isOpen={true} onClose={mockOnClose} />);
+
+    // Wait for session creation to complete and xterm to initialize
+    await waitFor(() => {
+      expect(mockTerminalInstance.open).toHaveBeenCalled();
+    });
+
+    // Verify xterm was opened with the terminal container div
+    const terminalDiv = screen.getByTestId("terminal-xterm");
+    expect(mockTerminalInstance.open).toHaveBeenCalledWith(terminalDiv);
+  });
+
+  it("xterm container is always in the DOM", async () => {
+    mockCreateTerminalSession.mockImplementation(() => new Promise(() => {}));
+    
+    render(<TerminalModal isOpen={true} onClose={mockOnClose} />);
+
+    // Even while loading, the xterm container should exist (hidden)
+    const xtermDiv = screen.getByTestId("terminal-xterm");
+    expect(xtermDiv).toBeTruthy();
+    expect(xtermDiv.style.display).toBe("none");
+  });
+
+  it("xterm container becomes visible after session creation", async () => {
+    render(<TerminalModal isOpen={true} onClose={mockOnClose} />);
+
+    await waitFor(() => {
+      const xtermDiv = screen.getByTestId("terminal-xterm");
+      expect(xtermDiv.style.display).not.toBe("none");
+    });
+  });
+
+  it("subscribes to terminal data after xterm is ready", async () => {
+    const mockOnData = vi.fn(() => vi.fn());
+    const mockOnConnect = vi.fn(() => vi.fn());
+    const mockOnExit = vi.fn(() => vi.fn());
+    const mockOnScrollback = vi.fn(() => vi.fn());
+
+    mockUseTerminal.mockReturnValue(
+      createMockTerminalState({
+        onData: mockOnData,
+        onConnect: mockOnConnect,
+        onExit: mockOnExit,
+        onScrollback: mockOnScrollback,
+      })
+    );
+
+    render(<TerminalModal isOpen={true} onClose={mockOnClose} />);
+
+    // Wait for xterm initialization to complete
+    await waitFor(() => {
+      expect(mockTerminalInstance.open).toHaveBeenCalled();
+    });
+
+    // After xterm is ready, data subscriptions should be established
+    await waitFor(() => {
+      expect(mockOnData).toHaveBeenCalled();
+      expect(mockOnConnect).toHaveBeenCalled();
+      expect(mockOnExit).toHaveBeenCalled();
+      expect(mockOnScrollback).toHaveBeenCalled();
     });
   });
 });
