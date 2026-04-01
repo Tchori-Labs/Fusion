@@ -8,6 +8,7 @@ import { CustomModelDropdown } from "./CustomModelDropdown";
 import { ModelSelectionModal } from "./ModelSelectionModal";
 
 const STORAGE_KEY = "kb-quick-entry-text";
+const DISCLOSURE_STORAGE_KEY = "kb-quick-entry-expanded";
 
 interface QuickEntryBoxProps {
   onCreate?: (input: TaskCreateInput) => Promise<void>;
@@ -57,7 +58,17 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
     return "";
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // isExpanded controls textarea height styling (auto-resize)
   const [isExpanded, setIsExpanded] = useState(false);
+  // isDisclosureExpanded controls visibility of the controls panel (Deps, Models, etc.)
+  const [isDisclosureExpanded, setIsDisclosureExpanded] = useState(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem(DISCLOSURE_STORAGE_KEY);
+      // Default to true (expanded) for backward compatibility - only collapse if explicitly set to "false"
+      return saved !== "false";
+    }
+    return true;
+  });
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const justResetRef = useRef(false);
 
@@ -139,6 +150,13 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
     }
   }, [description]);
 
+  // Persist disclosure state to localStorage whenever it changes
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      localStorage.setItem(DISCLOSURE_STORAGE_KEY, isDisclosureExpanded.toString());
+    }
+  }, [isDisclosureExpanded]);
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -206,7 +224,8 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
     setIsModelModalOpen(false);
     setIsRefineMenuOpen(false);
     setIsRefining(false);
-    setIsExpanded(false); // Collapse on reset
+    setIsExpanded(false); // Collapse textarea height on reset
+    // Note: isDisclosureExpanded is NOT reset - user preference persists
     justResetRef.current = true;
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
@@ -292,8 +311,9 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
             localStorage.removeItem(STORAGE_KEY);
           }
         }
-        // Collapse on escape
+        // Collapse textarea and disclosure on escape
         setIsExpanded(false);
+        setIsDisclosureExpanded(false);
         textareaRef.current?.blur();
       }
     },
@@ -304,6 +324,7 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
       showDeps,
       isModelModalOpen,
       isRefineMenuOpen,
+      setIsDisclosureExpanded,
     ],
   );
 
@@ -427,15 +448,16 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
     }
   }, [availableModels]);
 
-  // Show expanded controls only when manually expanded (isExpanded)
-  const showExpandedControls = isExpanded;
+  // Show expanded controls based on disclosure state (user preference), not textarea focus
+  const showExpandedControls = isDisclosureExpanded;
 
   const toggleExpanded = useCallback(() => {
+    setIsDisclosureExpanded((prev) => !prev);
     setIsExpanded((prev) => !prev);
   }, []);
 
   return (
-    <div className={`quick-entry-box ${isExpanded ? "quick-entry-box--expanded" : "quick-entry-box--collapsed"}`} data-testid="quick-entry-box">
+    <div className={`quick-entry-box ${isDisclosureExpanded ? "quick-entry-box--expanded" : "quick-entry-box--collapsed"}`} data-testid="quick-entry-box">
       <div className="quick-entry-main-row">
         <textarea
           ref={textareaRef}
@@ -455,12 +477,12 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
           type="button"
           className="btn btn-sm quick-entry-toggle"
           onClick={toggleExpanded}
-          aria-expanded={isExpanded}
+          aria-expanded={isDisclosureExpanded}
           aria-controls="quick-entry-controls"
           data-testid="quick-entry-toggle"
-          title={isExpanded ? "Collapse" : "Expand"}
+          title={isDisclosureExpanded ? "Collapse" : "Expand"}
         >
-          {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+          {isDisclosureExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
         </button>
       </div>
       {showExpandedControls && (
