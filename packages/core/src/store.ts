@@ -1694,6 +1694,18 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   }
 
   /**
+   * Gracefully shut down: stop watching and close the database connection.
+   * Ensures WAL is checkpointed so no pending writes are lost.
+   */
+  close(): void {
+    this.stopWatching();
+    if (this._db) {
+      this._db.close();
+      this._db = null;
+    }
+  }
+
+  /**
    * Mark a file path as recently written by an in-process mutation
    * so the watcher will skip it.
    */

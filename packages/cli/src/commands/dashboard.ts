@@ -650,18 +650,31 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
       cronRunner.stop();
       notifier.stop();
       if (mergeRetryTimer) clearTimeout(mergeRetryTimer);
-      store.stopWatching();
+      store.close();
+      process.exit(0);
+    });
+
+    process.on("SIGTERM", () => {
+      stuckTaskDetector.stop();
+      triage.stop();
+      scheduler.stop();
+      cronRunner.stop();
+      notifier.stop();
+      if (mergeRetryTimer) clearTimeout(mergeRetryTimer);
+      store.close();
       process.exit(0);
     });
   }
 
-  // Dev mode: simplified SIGINT handler (no engine components)
+  // Dev mode: simplified shutdown handlers (no engine components)
   if (opts.dev) {
-    process.on("SIGINT", () => {
+    const devShutdown = () => {
       notifier.stop();
-      store.stopWatching();
+      store.close();
       process.exit(0);
-    });
+    };
+    process.on("SIGINT", devShutdown);
+    process.on("SIGTERM", devShutdown);
   }
 
   const server = app.listen(selectedPort);
