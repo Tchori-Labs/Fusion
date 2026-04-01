@@ -833,14 +833,14 @@ describe("SettingsModal", () => {
     expect(layout!.querySelector(".settings-content")).toBeTruthy();
   });
 
-  it("has .settings-sidebar with 10 .settings-nav-item buttons for all sections", async () => {
+  it("has .settings-sidebar with 11 .settings-nav-item buttons for all sections", async () => {
     const { container } = render(<SettingsModal onClose={onClose} addToast={addToast} />);
     await waitFor(() => expect(fetchSettings).toHaveBeenCalled());
 
     const sidebar = container.querySelector(".settings-sidebar");
     expect(sidebar).toBeTruthy();
     const navItems = sidebar!.querySelectorAll(".settings-nav-item");
-    expect(navItems.length).toBe(10);
+    expect(navItems.length).toBe(11);
 
     // Labels include scope emoji indicators (🌐 for global, 📁 for project)
     const labels = Array.from(navItems).map((el) => el.textContent);
@@ -853,6 +853,7 @@ describe("SettingsModal", () => {
       "📁Worktrees",
       "📁Commands",
       "📁Merge",
+      "📁Backups",
       "🌐Notifications",
       "Authentication",
     ]);
@@ -1327,11 +1328,11 @@ describe("SettingsModal", () => {
     await waitFor(() => expect(fetchSettings).toHaveBeenCalled());
 
     fireEvent.click(screen.getByText("Scheduling"));
-    const input = screen.getByLabelText("Stuck Task Timeout (ms)");
+    const input = screen.getByLabelText("Stuck Task Timeout (minutes)");
     expect(input).toBeTruthy();
     expect(input.getAttribute("type")).toBe("number");
-    expect(input.getAttribute("min")).toBe("0");
-    expect(input.getAttribute("step")).toBe("60000");
+    expect(input.getAttribute("min")).toBe("1");
+    expect(input.getAttribute("step")).toBe("1");
   });
 
   it("Stuck Task Timeout field saves correctly when set to a value", async () => {
@@ -1339,9 +1340,9 @@ describe("SettingsModal", () => {
     await waitFor(() => expect(fetchSettings).toHaveBeenCalled());
 
     fireEvent.click(screen.getByText("Scheduling"));
-    const input = screen.getByLabelText("Stuck Task Timeout (ms)") as HTMLInputElement;
-    fireEvent.change(input, { target: { value: "600000" } });
-    expect(input.value).toBe("600000");
+    const input = screen.getByLabelText("Stuck Task Timeout (minutes)") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "10" } });
+    expect(input.value).toBe("10");
 
     fireEvent.click(screen.getByText("Save"));
     await waitFor(() => expect(updateSettings).toHaveBeenCalledTimes(1));
@@ -1350,7 +1351,7 @@ describe("SettingsModal", () => {
     expect(payload.taskStuckTimeoutMs).toBe(600000);
   });
 
-  it("Stuck Task Timeout field submits undefined when set to 0 or empty (disabled)", async () => {
+  it("Stuck Task Timeout field submits undefined when set to empty (disabled)", async () => {
     (fetchSettings as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       ...defaultSettings,
       taskStuckTimeoutMs: 600000,
@@ -1360,7 +1361,7 @@ describe("SettingsModal", () => {
     await waitFor(() => expect(fetchSettings).toHaveBeenCalled());
 
     fireEvent.click(screen.getByText("Scheduling"));
-    const input = screen.getByLabelText("Stuck Task Timeout (ms)") as HTMLInputElement;
+    const input = screen.getByLabelText("Stuck Task Timeout (minutes)") as HTMLInputElement;
     fireEvent.change(input, { target: { value: "" } });
 
     fireEvent.click(screen.getByText("Save"));
@@ -1375,7 +1376,21 @@ describe("SettingsModal", () => {
     await waitFor(() => expect(fetchSettings).toHaveBeenCalled());
 
     fireEvent.click(screen.getByText("Scheduling"));
-    expect(screen.getByText(/Timeout in milliseconds for detecting stuck tasks/)).toBeTruthy();
+    expect(screen.getByText(/Timeout in minutes for detecting stuck tasks/)).toBeTruthy();
+  });
+
+  it("Stuck Task Timeout field displays correct minute value from milliseconds setting", async () => {
+    (fetchSettings as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ...defaultSettings,
+      taskStuckTimeoutMs: 600000,
+    });
+
+    render(<SettingsModal onClose={onClose} addToast={addToast} />);
+    await waitFor(() => expect(fetchSettings).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByText("Scheduling"));
+    const input = screen.getByLabelText("Stuck Task Timeout (minutes)") as HTMLInputElement;
+    expect(input.value).toBe("10");
   });
 
   it("scope banners render for global and project sections", async () => {

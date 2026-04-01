@@ -793,20 +793,20 @@ export function SettingsModal({
               />
             </div>
             <div className="form-group">
-              <label htmlFor="taskStuckTimeoutMs">Stuck Task Timeout (ms)</label>
+              <label htmlFor="taskStuckTimeoutMs">Stuck Task Timeout (minutes)</label>
               <input
                 id="taskStuckTimeoutMs"
                 type="number"
-                min={0}
-                step={60000}
-                value={form.taskStuckTimeoutMs || ""}
+                min={1}
+                step={1}
+                value={form.taskStuckTimeoutMs ? Math.round(form.taskStuckTimeoutMs / 60000) : ""}
                 onChange={(e) => {
                   const val = e.target.value;
                   const num = Number(val);
-                  setForm((f) => ({ ...f, taskStuckTimeoutMs: val && num > 0 ? num : undefined }));
+                  setForm((f) => ({ ...f, taskStuckTimeoutMs: val && num > 0 ? num * 60000 : undefined }));
                 }}
               />
-              <small>Timeout in milliseconds for detecting stuck tasks. When a task&apos;s agent session shows no activity for longer than this duration, the task is terminated and retried. Set to 0 to disable. Suggested: 600000 (10 minutes).</small>
+              <small>Timeout in minutes for detecting stuck tasks. When a task&apos;s agent session shows no activity for longer than this duration, the task is terminated and retried. Leave empty to disable. Suggested: 10.</small>
             </div>
             <div className="form-group">
               <label htmlFor="groupOverlappingFiles" className="checkbox-label">
