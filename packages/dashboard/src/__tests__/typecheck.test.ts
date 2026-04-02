@@ -101,5 +101,5 @@ describe("clean-checkout typecheck", () => {
     // Verify that typecheck ran and succeeded - just check no error was thrown
     // The fact that we got here without error means it passed
     expect(error).toBeNull();
-  });
+  }, 180_000);
 });

@@ -5,4 +5,4 @@
 "@fusion/engine": minor
 ---
 
-Rename data directory from .kb to .fusion
+Rename project storage to `.fusion/fusion.db` and global storage to `~/.pi/fusion`.

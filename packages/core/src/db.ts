@@ -315,7 +315,7 @@ export class Database {
   private transactionDepth = 0;
 
   constructor(private kbDir: string) {
-    this.dbPath = join(kbDir, "kb.db");
+    this.dbPath = join(kbDir, "fusion.db");
 
     // Ensure .fusion directory exists
     if (!existsSync(kbDir)) {

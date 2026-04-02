@@ -1,11 +1,10 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { once } from "node:events";
-import * as http from "node:http";
 import { createServer } from "../server.js";
 import * as childProcess from "node:child_process";
 import * as fs from "node:fs";
 import type { Task } from "@fusion/core";
 import { EventEmitter } from "node:events";
+import { get } from "../test-request.js";
 
 vi.mock("node:child_process", async () => {
   const actual = await vi.importActual<typeof import("node:child_process")>("node:child_process");
@@ -101,24 +100,9 @@ function createTask(overrides: Partial<Task> = {}): Task {
   };
 }
 
-async function requestSessionFiles(port: number, taskId = "FN-675"): Promise<{ status: number; body: any }> {
-  return await new Promise((resolve, reject) => {
-    const req = http.request(
-      {
-        hostname: "127.0.0.1",
-        port,
-        path: `/api/tasks/${taskId}/session-files`,
-        method: "GET",
-      },
-      (res) => {
-        let data = "";
-        res.on("data", (chunk) => (data += chunk));
-        res.on("end", () => resolve({ status: res.statusCode!, body: JSON.parse(data) }));
-      },
-    );
-    req.on("error", reject);
-    req.end();
-  });
+async function requestSessionFiles(app: Parameters<typeof get>[0], taskId = "FN-675"): Promise<{ status: number; body: any }> {
+  const response = await get(app, `/api/tasks/${taskId}/session-files`);
+  return { status: response.status, body: response.body };
 }
 
 describe("GET /api/tasks/:id/session-files", () => {
@@ -139,16 +123,10 @@ describe("GET /api/tasks/:id/session-files", () => {
     store.addTask(createTask({ worktree: undefined }));
 
     const app = createServer(store as any);
-    const server = app.listen(0);
-    await once(server, "listening");
-    const port = (server.address() as { port: number }).port;
-
-    const response = await requestSessionFiles(port);
+    const response = await requestSessionFiles(app);
 
     expect(response.status).toBe(200);
     expect(response.body).toEqual([]);
 
-    server.close();
-    await once(server, "close");
   });
 });

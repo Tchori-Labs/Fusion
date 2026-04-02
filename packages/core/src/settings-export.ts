@@ -2,7 +2,7 @@
  * Settings export and import functionality.
  *
  * This module provides utilities for exporting and importing kb settings,
- * supporting both global (~/.pi/kb/settings.json) and project-level (.kb/config.json)
+ * supporting both global (~/.pi/fusion/settings.json) and project-level (.fusion/config.json)
  * settings for backup, migration, and sharing.
  */
 
@@ -24,9 +24,9 @@ export interface SettingsExportData {
   exportedAt: string;
   /** Source identifier (e.g., hostname, project path) */
   source?: string;
-  /** Global settings (user-level, ~/.pi/kb/settings.json) */
+  /** Global settings (user-level, ~/.pi/fusion/settings.json) */
   global?: GlobalSettings;
-  /** Project settings (project-level, .kb/config.json) */
+  /** Project settings (project-level, .fusion/config.json) */
   project?: Partial<ProjectSettings>;
 }
 

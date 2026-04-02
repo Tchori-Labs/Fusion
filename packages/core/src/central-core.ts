@@ -4,7 +4,7 @@
  * Provides project registry, health tracking, unified activity feed,
  * and global concurrency management across all registered projects.
  *
- * The central database is located at `~/.pi/kb/kb-central.db`.
+ * The central database is located at `~/.pi/fusion/fusion-central.db`.
  *
  * @example
  * ```typescript
@@ -43,7 +43,7 @@ import type {
   ProjectSettings,
 } from "./types.js";
 import { CentralDatabase, toJson, toJsonNullable, fromJson } from "./central-db.js";
-import { defaultGlobalDir } from "./global-settings.js";
+import { resolveGlobalDir } from "./global-settings.js";
 
 // ── Event Types ───────────────────────────────────────────────────────────
 
@@ -71,13 +71,13 @@ export class CentralCore extends EventEmitter<CentralCoreEvents> {
 
   /**
    * Create a CentralCore instance.
-   * @param globalDir — Directory for central database. Defaults to `~/.pi/kb/`.
+   * @param globalDir — Directory for central database. Defaults to `~/.pi/fusion/`.
    *                  Accepts a custom path for testing.
    */
   constructor(globalDir?: string) {
     super();
     this.setMaxListeners(100);
-    this.globalDir = globalDir ?? defaultGlobalDir();
+    this.globalDir = resolveGlobalDir(globalDir);
   }
 
   /**
@@ -818,10 +818,10 @@ export class CentralCore extends EventEmitter<CentralCoreEvents> {
   /**
    * Get the path to the central database file.
    *
-   * @returns Absolute path to kb-central.db
+   * @returns Absolute path to fusion-central.db
    */
   getDatabasePath(): string {
-    return this.db?.getPath() ?? join(this.globalDir, "kb-central.db");
+    return this.db?.getPath() ?? join(this.globalDir, "fusion-central.db");
   }
 
   /**

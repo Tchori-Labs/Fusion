@@ -10,7 +10,7 @@ function createMockGlobalSettingsStore() {
   return {
     getSettings: vi.fn().mockResolvedValue({}),
     updateSettings: vi.fn().mockResolvedValue({}),
-    getSettingsPath: vi.fn().mockReturnValue("/fake/home/.pi/kb/settings.json"),
+    getSettingsPath: vi.fn().mockReturnValue("/fake/home/.pi/fusion/settings.json"),
     init: vi.fn().mockResolvedValue(false),
   };
 }

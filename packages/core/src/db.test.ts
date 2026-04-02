@@ -33,7 +33,7 @@ describe("Database", () => {
 
   describe("initialization", () => {
     it("creates the database file", () => {
-      expect(existsSync(join(kbDir, "kb.db"))).toBe(true);
+      expect(existsSync(join(kbDir, "fusion.db"))).toBe(true);
     });
 
     it("creates the .fusion directory if missing", () => {
@@ -1024,7 +1024,7 @@ describe("createDatabase factory", () => {
     const db = createDatabase(kbDir);
 
     // DB file exists (created on open) but schema not initialized
-    expect(existsSync(join(kbDir, "kb.db"))).toBe(true);
+    expect(existsSync(join(kbDir, "fusion.db"))).toBe(true);
     // Schema is NOT yet created — querying __meta would fail
     expect(() => db.getSchemaVersion()).toThrow();
 
@@ -1048,7 +1048,7 @@ describe("createDatabase factory", () => {
     const kbDir = join(tmpDir, ".fusion");
     const db = createDatabase(kbDir);
 
-    expect(db.getPath()).toBe(join(kbDir, "kb.db"));
+    expect(db.getPath()).toBe(join(kbDir, "fusion.db"));
 
     db.close();
   });

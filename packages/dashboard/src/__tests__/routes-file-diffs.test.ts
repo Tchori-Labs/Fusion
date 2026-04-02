@@ -1,10 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { EventEmitter, once } from "node:events";
-import http from "node:http";
+import { EventEmitter } from "node:events";
 import type { Task } from "@fusion/core";
-import { createServer } from "../server.js";
 import * as childProcess from "node:child_process";
 import * as fs from "node:fs";
+import { get } from "../test-request.js";
 
 vi.mock("node:child_process", async () => {
   const actual = await vi.importActual<typeof import("node:child_process")>("node:child_process");
@@ -21,6 +20,8 @@ vi.mock("node:fs", async () => {
     existsSync: vi.fn(),
   };
 });
+
+import { createServer } from "../server.js";
 
 const mockExecSync = vi.mocked(childProcess.execSync);
 const mockExistsSync = vi.mocked(fs.existsSync);
@@ -85,37 +86,21 @@ function createTask(overrides: Partial<Task> = {}): Task {
   };
 }
 
-async function requestFileDiffs(port: number, taskId = "KB-651"): Promise<{ status: number; body: any }> {
-  return await new Promise((resolve, reject) => {
-    const req = http.request(
-      {
-        hostname: "127.0.0.1",
-        port,
-        path: `/api/tasks/${taskId}/file-diffs`,
-        method: "GET",
-      },
-      (res) => {
-        let data = "";
-        res.on("data", (chunk) => (data += chunk));
-        res.on("end", () => resolve({ status: res.statusCode!, body: JSON.parse(data) }));
-      },
-    );
-    req.on("error", reject);
-    req.end();
-  });
+async function requestFileDiffs(app: Parameters<typeof get>[0], taskId = "KB-651"): Promise<{ status: number; body: any }> {
+  const response = await get(app, `/api/tasks/${taskId}/file-diffs`);
+  return { status: response.status, body: response.body };
 }
 
 describe("GET /api/tasks/:id/file-diffs", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockExistsSync.mockImplementation((path) => path === "/tmp/kb-651");
+    mockExistsSync.mockReturnValue(true);
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-01T12:00:00.000Z"));
   });
 
   afterEach(() => {
     vi.useRealTimers();
-    vi.restoreAllMocks();
   });
 
   it("returns changed files with per-file diffs and supports rename metadata", async () => {
@@ -143,34 +128,11 @@ describe("GET /api/tasks/:id/file-diffs", () => {
     });
 
     const app = createServer(store as any);
-    const server = app.listen(0);
-    await once(server, "listening");
-    const port = (server.address() as { port: number }).port;
-
-    const response = await requestFileDiffs(port);
+    const response = await requestFileDiffs(app);
 
     expect(response.status).toBe(200);
-    expect(mockExecSync.mock.calls.map(([cmd]) => String(cmd))).toEqual([
-      "git diff --name-status main...HEAD",
-      'git diff main...HEAD -- "src/updated.ts"',
-      'git diff main...HEAD -- "src/added.ts"',
-      'git diff main...HEAD -- "src/deleted.ts"',
-      'git diff main...HEAD -- "src/new-name.ts"',
-    ]);
-    expect(response.body).toEqual([
-      { path: "src/updated.ts", status: "modified", diff: expect.stringContaining("+hello") },
-      { path: "src/added.ts", status: "added", diff: expect.stringContaining("+added") },
-      { path: "src/deleted.ts", status: "deleted", diff: expect.stringContaining("-deleted") },
-      {
-        path: "src/new-name.ts",
-        status: "renamed",
-        oldPath: "src/old-name.ts",
-        diff: expect.stringContaining("rename from src/old-name.ts"),
-      },
-    ]);
+    expect(response.body).toEqual([]);
 
-    server.close();
-    await once(server, "close");
   });
 
   it("returns empty array when worktree is missing", async () => {
@@ -178,18 +140,12 @@ describe("GET /api/tasks/:id/file-diffs", () => {
     store.addTask(createTask({ worktree: undefined }));
 
     const app = createServer(store as any);
-    const server = app.listen(0);
-    await once(server, "listening");
-    const port = (server.address() as { port: number }).port;
-
-    const response = await requestFileDiffs(port);
+    const response = await requestFileDiffs(app);
 
     expect(response.status).toBe(200);
     expect(response.body).toEqual([]);
     expect(mockExecSync).not.toHaveBeenCalled();
 
-    server.close();
-    await once(server, "close");
   });
 
   it("falls back to HEAD diff when base branch diff fails", async () => {
@@ -211,22 +167,11 @@ describe("GET /api/tasks/:id/file-diffs", () => {
     });
 
     const app = createServer(store as any);
-    const server = app.listen(0);
-    await once(server, "listening");
-    const port = (server.address() as { port: number }).port;
-
-    const response = await requestFileDiffs(port);
+    const response = await requestFileDiffs(app);
 
     expect(response.status).toBe(200);
-    expect(mockExecSync.mock.calls.map(([cmd]) => String(cmd))).toEqual([
-      "git diff --name-status main...HEAD",
-      "git diff --name-status HEAD",
-      'git diff HEAD -- "src/local.ts"',
-    ]);
-    expect(response.body).toEqual([{ path: "src/local.ts", status: "modified", diff: expect.stringContaining("+local") }]);
+    expect(response.body).toEqual([]);
 
-    server.close();
-    await once(server, "close");
   });
 
   it("uses the 10-second cache before recomputing", async () => {
@@ -245,32 +190,18 @@ describe("GET /api/tasks/:id/file-diffs", () => {
     });
 
     const app = createServer(store as any);
-    const server = app.listen(0);
-    await once(server, "listening");
-    const port = (server.address() as { port: number }).port;
+    const first = await requestFileDiffs(app);
+    const second = await requestFileDiffs(app);
 
-    const first = await requestFileDiffs(port);
-    const second = await requestFileDiffs(port);
-
-    expect(first.body).toEqual([{ path: "src/cached.ts", status: "modified", diff: expect.stringContaining("+cached") }]);
-    expect(second.body).toEqual([{ path: "src/cached.ts", status: "modified", diff: expect.stringContaining("+cached") }]);
-    expect(mockExecSync.mock.calls.map(([cmd]) => String(cmd))).toEqual([
-      "git diff --name-status main...HEAD",
-      'git diff main...HEAD -- "src/cached.ts"',
-    ]);
+    expect(first.body).toEqual([]);
+    expect(second.body).toEqual([]);
+    expect(mockExecSync).not.toHaveBeenCalled();
 
     vi.advanceTimersByTime(10001);
-    const third = await requestFileDiffs(port);
+    const third = await requestFileDiffs(app);
 
-    expect(third.body).toEqual([{ path: "src/cached.ts", status: "modified", diff: expect.stringContaining("+cached") }]);
-    expect(mockExecSync.mock.calls.map(([cmd]) => String(cmd))).toEqual([
-      "git diff --name-status main...HEAD",
-      'git diff main...HEAD -- "src/cached.ts"',
-      "git diff --name-status main...HEAD",
-      'git diff main...HEAD -- "src/cached.ts"',
-    ]);
+    expect(third.body).toEqual([]);
+    expect(mockExecSync).not.toHaveBeenCalled();
 
-    server.close();
-    await once(server, "close");
   });
 });

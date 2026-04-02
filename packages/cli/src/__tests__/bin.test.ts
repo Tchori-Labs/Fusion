@@ -14,6 +14,7 @@ const runProjectList = vi.fn();
 const runProjectAdd = vi.fn();
 const runProjectRemove = vi.fn();
 const runProjectShow = vi.fn();
+const runProjectInfo = vi.fn();
 const runProjectSetDefault = vi.fn();
 const runProjectDetect = vi.fn();
 
@@ -75,6 +76,7 @@ vi.mock("../commands/project.js", () => ({
   runProjectAdd,
   runProjectRemove,
   runProjectShow,
+  runProjectInfo,
   runProjectSetDefault,
   runProjectDetect,
 }));
@@ -82,7 +84,7 @@ vi.mock("../commands/project.js", () => ({
 describe("bin", () => {
   let logSpy: ReturnType<typeof vi.spyOn>;
   let errorSpy: ReturnType<typeof vi.spyOn>;
-  let exitSpy: ReturnType<typeof vi.spyOn>;
+  let exitSpy: ReturnType<typeof vi.spyOn> | undefined;
   let originalArgv: string[];
 
   beforeEach(() => {
@@ -91,21 +93,22 @@ describe("bin", () => {
     originalArgv = process.argv;
     logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    exitSpy = vi.spyOn(process, "exit").mockImplementation((code?: string | number | null) => {
+    vi.spyOn(process, "exit").mockImplementation(((code?: number | string | null) => {
       throw new Error(`process.exit:${code ?? 0}`);
-    });
+    }) as never);
   });
 
   afterEach(() => {
     process.argv = originalArgv;
     logSpy.mockRestore();
     errorSpy.mockRestore();
-    exitSpy.mockRestore();
+    vi.restoreAllMocks();
   });
 
   async function runBin(args: string[]) {
     process.argv = ["node", "bin", ...args];
-    return import("../bin.ts?" + Math.random());
+    vi.resetModules();
+    return import("../bin.ts");
   }
 
   it("routes task list with --project before subcommand", async () => {
@@ -163,11 +166,11 @@ describe("bin", () => {
     expect(runProjectList).toHaveBeenCalledTimes(2);
 
     await runBin(["project", "add", "my-app", "/tmp/my-app", "--isolation", "child-process", "--force"]);
-    expect(runProjectAdd).toHaveBeenCalledWith("my-app", "/tmp/my-app", { isolation: "child-process", force: true });
+    expect(runProjectAdd).toHaveBeenCalledWith("my-app", "/tmp/my-app", { isolation: "child-process", force: true, interactive: false });
 
     await runBin(["project", "remove", "my-app", "--force"]);
     await runBin(["project", "rm", "my-app", "--force"]);
-    expect(runProjectRemove).toHaveBeenCalledWith("my-app", true);
+    expect(runProjectRemove).toHaveBeenCalledWith("my-app", { force: true });
 
     await runBin(["project", "show", "my-app"]);
     expect(runProjectShow).toHaveBeenCalledWith("my-app");
@@ -187,14 +190,12 @@ describe("bin", () => {
 
   it("rejects duplicate --project flags", async () => {
     await expect(runBin(["task", "list", "--project", "one", "-P", "two"]))
-      .rejects.toThrow("process.exit:1");
-    expect(errorSpy).toHaveBeenCalledWith("Error: Duplicate --project flag. Specify a project only once.");
+      .rejects.toThrow("Duplicate --project flag. Specify a project only once.");
   });
 
   it("rejects missing --project value", async () => {
     await expect(runBin(["task", "list", "--project"]))
-      .rejects.toThrow("process.exit:1");
-    expect(errorSpy).toHaveBeenCalledWith("Error: Usage: --project <name>");
+      .rejects.toThrow("Usage: --project <name>");
   });
 
   it("shows help when --project is combined with global help", async () => {

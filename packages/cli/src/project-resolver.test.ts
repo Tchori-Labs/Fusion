@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { existsSync, statSync } from "node:fs";
+import { TaskStore } from "@fusion/core";
 
 // Mock fs module
 vi.mock("node:fs", () => ({
@@ -64,7 +65,7 @@ describe("Project Resolver", () => {
   });
 
   describe("findKbDir", () => {
-    it("should find .kb directory in current path", () => {
+    it("should find .fusion directory in current path", () => {
       vi.mocked(existsSync)
         .mockReturnValueOnce(true)
         .mockReturnValue(false);
@@ -74,7 +75,7 @@ describe("Project Resolver", () => {
       expect(result).toBe("/project");
     });
 
-    it("should walk up parent directories to find .kb", () => {
+    it("should walk up parent directories to find .fusion", () => {
       vi.mocked(existsSync)
         .mockReturnValueOnce(false)
         .mockReturnValueOnce(true)
@@ -85,13 +86,13 @@ describe("Project Resolver", () => {
       expect(result).toBe("/a/b");
     });
 
-    it("should return null if no .kb found", () => {
+    it("should return null if no .fusion found", () => {
       vi.mocked(existsSync).mockReturnValue(false);
       const result = findKbDir("/some/path");
       expect(result).toBeNull();
     });
 
-    it("should return null if .kb is not a directory", () => {
+    it("should return null if .fusion is not a directory", () => {
       vi.mocked(existsSync).mockReturnValue(true);
       vi.mocked(statSync).mockReturnValue({ isDirectory: () => false } as any);
       const result = findKbDir("/project");
@@ -100,13 +101,13 @@ describe("Project Resolver", () => {
   });
 
   describe("isKbProject", () => {
-    it("should return true if .kb directory exists", () => {
+    it("should return true if .fusion directory exists", () => {
       vi.mocked(existsSync).mockReturnValue(true);
       vi.mocked(statSync).mockReturnValue({ isDirectory: () => true } as any);
       expect(isKbProject("/project")).toBe(true);
     });
 
-    it("should return false if .kb directory does not exist", () => {
+    it("should return false if .fusion directory does not exist", () => {
       vi.mocked(existsSync).mockReturnValue(false);
       expect(isKbProject("/project")).toBe(false);
     });
@@ -159,6 +160,10 @@ describe("Project Resolver", () => {
       };
 
       vi.mocked(existsSync).mockImplementation((path) => path === "/workspace/alpha");
+      vi.mocked(TaskStore).mockImplementation(() => ({
+        init: vi.fn().mockResolvedValue(undefined),
+        listTasks: vi.fn().mockResolvedValue([]),
+      }) as any);
 
       const core = await getCentralCore();
       core.listProjects.mockResolvedValue([mockProject]);
@@ -167,6 +172,7 @@ describe("Project Resolver", () => {
       expect(resolved.projectId).toBe("proj_123");
       expect(resolved.name).toBe("alpha");
       expect(resolved.directory).toBe("/workspace/alpha");
+      expect(resolved.store.init).toHaveBeenCalledOnce();
     });
 
     it("should throw NOT_FOUND if --project project not found", async () => {
@@ -178,7 +184,7 @@ describe("Project Resolver", () => {
       );
     });
 
-    it("should throw NOT_REGISTERED if .kb exists but project not registered", async () => {
+    it("should throw NOT_REGISTERED if .fusion exists but project not registered", async () => {
       vi.mocked(existsSync).mockReturnValueOnce(true).mockReturnValue(true);
       vi.mocked(statSync).mockReturnValue({ isDirectory: () => true } as any);
 
@@ -191,7 +197,7 @@ describe("Project Resolver", () => {
       );
     });
 
-    it("should throw NO_PROJECTS when no projects registered and no .kb found", async () => {
+    it("should throw NO_PROJECTS when no projects registered and no .fusion found", async () => {
       vi.mocked(existsSync).mockReturnValue(false);
 
       const core = await getCentralCore();

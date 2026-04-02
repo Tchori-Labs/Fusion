@@ -3,7 +3,7 @@
  *
  * Handles the transition from single-project to multi-project mode:
  * - Detects first-run state (fresh install, needs migration, setup wizard, normal)
- * - Auto-discovers existing .kb/ directories for migration
+ * - Auto-discovers existing .fusion/ directories for migration
  * - Coordinates migration to central database
  * - Provides backward compatibility for single-project workflows
  *
@@ -16,13 +16,14 @@ import { isAbsolute, join, resolve, basename, dirname } from "node:path";
 import type { CentralCore } from "./central-core.js";
 import { CentralCore as CentralCoreClass } from "./central-core.js";
 import type { CentralCoreStub } from "./migration-stubs.js";
+import { resolveGlobalDir } from "./global-settings.js";
 
 // ── Types ────────────────────────────────────────────────────────────
 
 /** First-run state detection results */
 export type FirstRunState =
-  | "fresh-install"      // No central DB, no .kb/ anywhere
-  | "needs-migration"    // No central DB, but .kb/kb.db exists in cwd
+  | "fresh-install"      // No central DB, no .fusion/ anywhere
+  | "needs-migration"    // No central DB, but .fusion/fusion.db exists in cwd
   | "setup-wizard"       // Central DB exists but has zero projects
   | "normal-operation";  // Central DB exists with projects
 
@@ -32,7 +33,7 @@ export interface DetectedProject {
   path: string;
   /** Auto-generated or derived project name */
   name: string;
-  /** Whether the project has a valid kb.db */
+  /** Whether the project has a valid fusion.db */
   hasDb: boolean;
 }
 
@@ -93,7 +94,7 @@ export class FirstRunDetector {
 
   /**
    * Create a FirstRunDetector.
-   * @param globalDir — Directory for central database. Defaults to `~/.pi/kb/`.
+   * @param globalDir — Directory for central database. Defaults to `~/.pi/fusion/`.
    */
   constructor(globalDir?: string) {
     this.globalDir = globalDir ?? this.getDefaultGlobalDir();
@@ -104,7 +105,7 @@ export class FirstRunDetector {
    *
    * Returns one of four states:
    * - `"fresh-install"` — No central DB and no kb project found from cwd upward
-   * - `"needs-migration"` — No central DB, but a `.kb/kb.db` project exists in cwd ancestry
+   * - `"needs-migration"` — No central DB, but a `.fusion/fusion.db` project exists in cwd ancestry
    * - `"setup-wizard"` — Central DB exists and can be read, but has zero projects
    * - `"normal-operation"` — Central DB exists with one or more projects
    * 
@@ -159,7 +160,7 @@ export class FirstRunDetector {
    * Check if the central database exists.
    */
   hasCentralDb(): boolean {
-    const centralDbPath = join(this.globalDir, "kb-central.db");
+    const centralDbPath = join(this.globalDir, "fusion-central.db");
     return existsSync(centralDbPath);
   }
 
@@ -167,13 +168,13 @@ export class FirstRunDetector {
    * Get the path to the central database.
    */
   getCentralDbPath(): string {
-    return join(this.globalDir, "kb-central.db");
+    return join(this.globalDir, "fusion-central.db");
   }
 
   /**
    * Detect existing projects by walking up the directory tree.
    *
-   * Starting from `cwd`, walks up looking for `.kb/kb.db` files.
+   * Starting from `cwd`, walks up looking for `.fusion/fusion.db` files.
    * Stops at home directory or root.
    *
    * @param cwd — Starting directory (default: process.cwd())
@@ -283,8 +284,8 @@ export class FirstRunDetector {
    * Check if a directory contains a valid kb project.
    */
   private hasKbProject(dir: string): boolean {
-    const kbDir = join(dir, ".kb");
-    const dbPath = join(kbDir, "kb.db");
+    const kbDir = join(dir, ".fusion");
+    const dbPath = join(kbDir, "fusion.db");
 
     if (!existsSync(kbDir)) return false;
     if (!existsSync(dbPath)) return false;
@@ -298,7 +299,7 @@ export class FirstRunDetector {
   }
 
   private getDefaultGlobalDir(): string {
-    return join(homedir(), ".pi", "kb");
+    return resolveGlobalDir();
   }
 }
 
@@ -504,8 +505,8 @@ export class MigrationCoordinator {
   }
 
   private hasKbProject(dir: string): boolean {
-    const kbDir = join(dir, ".kb");
-    const dbPath = join(kbDir, "kb.db");
+    const kbDir = join(dir, ".fusion");
+    const dbPath = join(kbDir, "fusion.db");
 
     if (!existsSync(kbDir)) return false;
     if (!existsSync(dbPath)) return false;

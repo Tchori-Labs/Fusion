@@ -70,7 +70,7 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
   /**
    * Creates a new MissionStore instance.
    *
-   * @param kbDir - Path to the .kb directory (e.g., /path/to/project/.kb)
+   * @param kbDir - Path to the .fusion directory (e.g., /path/to/project/.fusion)
    * @param db - Shared Database instance (same instance used by TaskStore)
    */
   constructor(

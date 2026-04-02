@@ -205,10 +205,10 @@ Fusion reuses your existing pi authentication.
 
 ### Task Storage
 
-Tasks live on disk in `.kb/tasks/` in the project root:
+Tasks live on disk in `.fusion/tasks/` in the project root:
 
 ```
-.kb/
+.fusion/
 ├── config.json              # Board config + ID counter
 └── tasks/
     └── FN-001/
@@ -277,7 +277,7 @@ Set overrides in the dashboard via **task detail → Model tab**, or choose **Cu
 - `themeMode`, `colorTheme` — UI preferences
 - `ntfyEnabled`, `ntfyTopic` — Push notifications
 
-**Project settings** (`.kb/config.json`):
+**Project settings** (`.fusion/config.json`):
 - `modelPresets` — Custom preset definitions
 - `autoSelectPresetBySize` — Size-to-preset mappings
 - All workflow and automation settings
@@ -412,7 +412,7 @@ fn task unarchive FN-001      # Restore an archived task to done
 - Archive/unarchive buttons on task cards (visible on hover)
 - Archived tasks cannot be dragged or modified
 
-Archive cleanup removes task directories while preserving metadata in `.kb/archive.jsonl`. Restored tasks keep all metadata but lose attachments and agent logs.
+Archive cleanup removes task directories while preserving metadata in `.fusion/archive.jsonl`. Restored tasks keep all metadata but lose attachments and agent logs.
 
 ## Building a standalone executable
 
@@ -611,7 +611,7 @@ Workflow step agents use **readonly tools** (no modifications). If a workflow st
 
 ## Scheduled Tasks
 
-Automate recurring workflows with multi-step scheduled tasks. Schedules are stored in `.kb/automations/`.
+Automate recurring workflows with multi-step scheduled tasks. Schedules are stored in `.fusion/automations/`.
 
 ### Schedule Types
 
@@ -674,7 +674,7 @@ Schedules respect the global pause state (`fn dashboard --paused`).
 
 Fusion uses a two-tier settings hierarchy:
 - **Global settings** (`~/.pi/fusion/settings.json`) — User preferences across all projects
-- **Project settings** (`.kb/config.json`) — Project-specific workflow settings
+- **Project settings** (`.fusion/config.json`) — Project-specific workflow settings
 
 Project settings override global settings. Configure in the dashboard under **Settings**.
 

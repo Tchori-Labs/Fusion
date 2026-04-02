@@ -16,6 +16,19 @@ vi.mock("../github-webhooks.js", async () => {
 
 const mockGetGitHubAppConfig = vi.mocked(getGitHubAppConfig);
 
+async function detectLoopbackBinding(): Promise<boolean> {
+  return await new Promise((resolve) => {
+    const server = http.createServer();
+    server.once("error", () => resolve(false));
+    server.listen(0, "127.0.0.1", () => {
+      server.close(() => resolve(true));
+    });
+  });
+}
+
+const loopbackBindingAvailable = await detectLoopbackBinding();
+const webhookIntegrationTest = loopbackBindingAvailable ? it : it.skip;
+
 class MockStore extends EventEmitter {
   private tasks = new Map<string, Task>();
   private rootDir: string;
@@ -165,7 +178,33 @@ describe("POST /api/github/webhooks", () => {
     vi.restoreAllMocks();
   });
 
-  it("returns 503 when GitHub App is not configured", async () => {
+  async function postWebhook(
+    port: number,
+    payload: string,
+    headers: Record<string, string> = {},
+  ): Promise<{ status: number; body: any }> {
+    return await new Promise((resolve, reject) => {
+      const req = http.request({
+        hostname: "127.0.0.1",
+        port,
+        path: "/api/github/webhooks",
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...headers,
+        },
+      }, (res) => {
+        let data = "";
+        res.on("data", (chunk) => (data += chunk));
+        res.on("end", () => resolve({ status: res.statusCode!, body: JSON.parse(data) }));
+      });
+      req.on("error", reject);
+      req.write(payload);
+      req.end();
+    });
+  }
+
+  webhookIntegrationTest("returns 503 when GitHub App is not configured", async () => {
     mockGetGitHubAppConfig.mockReturnValue(null);
 
     const store = new MockStore();
@@ -173,20 +212,7 @@ describe("POST /api/github/webhooks", () => {
     const server = app.listen(0);
     await once(server, "listening");
     const port = (server.address() as { port: number }).port;
-
-    const response = await new Promise<{ status: number; body: any }>((resolve, reject) => {
-      const req = http.request(
-        { hostname: "127.0.0.1", port, path: "/api/github/webhooks", method: "POST", headers: { "Content-Type": "application/json" } },
-        (res) => {
-          let data = "";
-          res.on("data", (chunk) => (data += chunk));
-          res.on("end", () => resolve({ status: res.statusCode!, body: JSON.parse(data) }));
-        }
-      );
-      req.on("error", reject);
-      req.write(JSON.stringify({ action: "opened" }));
-      req.end();
-    });
+    const response = await postWebhook(port, JSON.stringify({ action: "opened" }));
 
     expect(response.status).toBe(503);
     expect(response.body.error).toContain("not configured");
@@ -195,7 +221,7 @@ describe("POST /api/github/webhooks", () => {
     await once(server, "close");
   });
 
-  it("returns 403 for invalid signature", async () => {
+  webhookIntegrationTest("returns 403 for invalid signature", async () => {
     const store = new MockStore();
     const app = createServer(store as any);
     const server = app.listen(0);
@@ -204,28 +230,8 @@ describe("POST /api/github/webhooks", () => {
 
     const payload = JSON.stringify({ action: "opened", number: 42 });
     const invalidSignature = "sha256=invalid";
-
-    const response = await new Promise<{ status: number; body: any }>((resolve, reject) => {
-      const req = http.request(
-        { 
-          hostname: "127.0.0.1", 
-          port, 
-          path: "/api/github/webhooks", 
-          method: "POST", 
-          headers: { 
-            "Content-Type": "application/json",
-            "X-Hub-Signature-256": invalidSignature,
-          } 
-        },
-        (res) => {
-          let data = "";
-          res.on("data", (chunk) => (data += chunk));
-          res.on("end", () => resolve({ status: res.statusCode!, body: JSON.parse(data) }));
-        }
-      );
-      req.on("error", reject);
-      req.write(payload);
-      req.end();
+    const response = await postWebhook(port, payload, {
+      "X-Hub-Signature-256": invalidSignature,
     });
 
     expect(response.status).toBe(403);
@@ -235,7 +241,7 @@ describe("POST /api/github/webhooks", () => {
     await once(server, "close");
   });
 
-  it("returns 200 for valid ping event", async () => {
+  webhookIntegrationTest("returns 200 for valid ping event", async () => {
     const store = new MockStore();
     const app = createServer(store as any);
     const server = app.listen(0);
@@ -244,29 +250,9 @@ describe("POST /api/github/webhooks", () => {
 
     const payload = JSON.stringify({ zen: "Keep it logically awesome" });
     const signature = createHmacSignature(payload, mockConfig.webhookSecret);
-
-    const response = await new Promise<{ status: number; body: any }>((resolve, reject) => {
-      const req = http.request(
-        { 
-          hostname: "127.0.0.1", 
-          port, 
-          path: "/api/github/webhooks", 
-          method: "POST", 
-          headers: { 
-            "Content-Type": "application/json",
-            "X-Hub-Signature-256": signature,
-            "X-GitHub-Event": "ping",
-          } 
-        },
-        (res) => {
-          let data = "";
-          res.on("data", (chunk) => (data += chunk));
-          res.on("end", () => resolve({ status: res.statusCode!, body: JSON.parse(data) }));
-        }
-      );
-      req.on("error", reject);
-      req.write(payload);
-      req.end();
+    const response = await postWebhook(port, payload, {
+      "X-Hub-Signature-256": signature,
+      "X-GitHub-Event": "ping",
     });
 
     expect(response.status).toBe(200);
@@ -276,7 +262,7 @@ describe("POST /api/github/webhooks", () => {
     await once(server, "close");
   });
 
-  it("returns 202 for unsupported event types", async () => {
+  webhookIntegrationTest("returns 202 for unsupported event types", async () => {
     const store = new MockStore();
     const app = createServer(store as any);
     const server = app.listen(0);
@@ -285,29 +271,9 @@ describe("POST /api/github/webhooks", () => {
 
     const payload = JSON.stringify({ action: "pushed" });
     const signature = createHmacSignature(payload, mockConfig.webhookSecret);
-
-    const response = await new Promise<{ status: number; body: any }>((resolve, reject) => {
-      const req = http.request(
-        { 
-          hostname: "127.0.0.1", 
-          port, 
-          path: "/api/github/webhooks", 
-          method: "POST", 
-          headers: { 
-            "Content-Type": "application/json",
-            "X-Hub-Signature-256": signature,
-            "X-GitHub-Event": "push",
-          } 
-        },
-        (res) => {
-          let data = "";
-          res.on("data", (chunk) => (data += chunk));
-          res.on("end", () => resolve({ status: res.statusCode!, body: JSON.parse(data) }));
-        }
-      );
-      req.on("error", reject);
-      req.write(payload);
-      req.end();
+    const response = await postWebhook(port, payload, {
+      "X-Hub-Signature-256": signature,
+      "X-GitHub-Event": "push",
     });
 
     expect(response.status).toBe(202);
@@ -317,13 +283,12 @@ describe("POST /api/github/webhooks", () => {
     await once(server, "close");
   });
 
-  it("returns 202 for issue_comment on regular issues (not PRs)", async () => {
+  webhookIntegrationTest("returns 202 for issue_comment on regular issues (not PRs)", async () => {
     const store = new MockStore();
     const app = createServer(store as any);
     const server = app.listen(0);
     await once(server, "listening");
     const port = (server.address() as { port: number }).port;
-
     // Issue comment without pull_request field
     const payload = JSON.stringify({
       action: "created",
@@ -333,29 +298,9 @@ describe("POST /api/github/webhooks", () => {
       comment: { id: 456, body: "Issue comment" },
     });
     const signature = createHmacSignature(payload, mockConfig.webhookSecret);
-
-    const response = await new Promise<{ status: number; body: any }>((resolve, reject) => {
-      const req = http.request(
-        { 
-          hostname: "127.0.0.1", 
-          port, 
-          path: "/api/github/webhooks", 
-          method: "POST", 
-          headers: { 
-            "Content-Type": "application/json",
-            "X-Hub-Signature-256": signature,
-            "X-GitHub-Event": "issue_comment",
-          } 
-        },
-        (res) => {
-          let data = "";
-          res.on("data", (chunk) => (data += chunk));
-          res.on("end", () => resolve({ status: res.statusCode!, body: JSON.parse(data) }));
-        }
-      );
-      req.on("error", reject);
-      req.write(payload);
-      req.end();
+    const response = await postWebhook(port, payload, {
+      "X-Hub-Signature-256": signature,
+      "X-GitHub-Event": "issue_comment",
     });
 
     expect(response.status).toBe(202);
@@ -365,13 +310,12 @@ describe("POST /api/github/webhooks", () => {
     await once(server, "close");
   });
 
-  it("returns 500 when installation token cannot be fetched", async () => {
+  webhookIntegrationTest("returns 500 when installation token cannot be fetched", async () => {
     const store = new MockStore();
     const app = createServer(store as any);
     const server = app.listen(0);
     await once(server, "listening");
     const port = (server.address() as { port: number }).port;
-
     // Valid PR event with missing installation data
     const payload = JSON.stringify({
       action: "opened",
@@ -380,29 +324,9 @@ describe("POST /api/github/webhooks", () => {
       // No installation field - will cause token fetch to fail
     });
     const signature = createHmacSignature(payload, mockConfig.webhookSecret);
-
-    const response = await new Promise<{ status: number; body: any }>((resolve, reject) => {
-      const req = http.request(
-        { 
-          hostname: "127.0.0.1", 
-          port, 
-          path: "/api/github/webhooks", 
-          method: "POST", 
-          headers: { 
-            "Content-Type": "application/json",
-            "X-Hub-Signature-256": signature,
-            "X-GitHub-Event": "pull_request",
-          } 
-        },
-        (res) => {
-          let data = "";
-          res.on("data", (chunk) => (data += chunk));
-          res.on("end", () => resolve({ status: res.statusCode!, body: JSON.parse(data) }));
-        }
-      );
-      req.on("error", reject);
-      req.write(payload);
-      req.end();
+    const response = await postWebhook(port, payload, {
+      "X-Hub-Signature-256": signature,
+      "X-GitHub-Event": "pull_request",
     });
 
     // Should return 400 for missing installation data

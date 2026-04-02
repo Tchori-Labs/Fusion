@@ -488,12 +488,12 @@ export interface TaskCreateInput {
 //
 // Settings are split into two scopes:
 //
-// 1. **GlobalSettings** — User preferences stored in `~/.pi/kb/settings.json`.
+// 1. **GlobalSettings** — User preferences stored in `~/.pi/fusion/settings.json`.
 //    These persist across all kb projects for the current user (theme, default
 //    AI models, notification preferences).
 //
 // 2. **ProjectSettings** — Project-specific workflow and resource settings stored
-//    in `.kb/config.json`. These control how the engine operates for this
+//    in `.fusion/config.json`. These control how the engine operates for this
 //    particular project (concurrency, merge strategy, worktree management, etc.).
 //
 // The merged view (`Settings`) combines both scopes: project values override
@@ -507,7 +507,7 @@ export interface TaskCreateInput {
 export type SettingsScope = "global" | "project";
 
 /**
- * Global (user-level) settings stored in `~/.pi/kb/settings.json`.
+ * Global (user-level) settings stored in `~/.pi/fusion/settings.json`.
  *
  * These are user preferences that persist across all kb projects.
  * The dashboard UI shows these under a "Global" section.
@@ -556,7 +556,7 @@ export interface GlobalSettings {
 }
 
 /**
- * Project-level settings stored in `.kb/config.json`.
+ * Project-level settings stored in `.fusion/config.json`.
  *
  * These control how the engine operates for this particular project:
  * concurrency, merge strategy, worktree management, build/test commands, etc.
@@ -672,7 +672,7 @@ export interface ProjectSettings {
   autoBackupSchedule?: string;
   /** Number of backup files to retain (oldest deleted when exceeded). Default: 7. */
   autoBackupRetention?: number;
-  /** Directory for backup files, relative to project root. Default: ".kb/backups". */
+  /** Directory for backup files, relative to project root. Default: ".fusion/backups". */
   autoBackupDir?: string;
   /** When true, tasks created without titles but with descriptions longer than 140
    *  characters will automatically receive an AI-generated title (max 60 chars).
@@ -754,7 +754,7 @@ export const DEFAULT_PROJECT_SETTINGS: ProjectSettings = {
   autoBackupEnabled: false,
   autoBackupSchedule: "0 2 * * *",
   autoBackupRetention: 7,
-  autoBackupDir: ".kb/backups",
+  autoBackupDir: ".fusion/backups",
   autoSummarizeTitles: false,
   titleSummarizerProvider: undefined,
   titleSummarizerModelId: undefined,
@@ -1137,7 +1137,7 @@ export interface DetectedProject {
   path: string;
   /** Auto-generated or derived project name */
   name: string;
-  /** Whether the project has a valid kb.db */
+  /** Whether the project has a valid fusion.db */
   hasDb: boolean;
 }
 

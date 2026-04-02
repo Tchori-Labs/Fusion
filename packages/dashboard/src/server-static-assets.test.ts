@@ -1,8 +1,22 @@
 import express from "express";
 import { describe, expect, it } from "vitest";
+import http from "node:http";
+
+async function detectLoopbackBinding(): Promise<boolean> {
+  return await new Promise((resolve) => {
+    const server = http.createServer();
+    server.once("error", () => resolve(false));
+    server.listen(0, "127.0.0.1", () => {
+      server.close(() => resolve(true));
+    });
+  });
+}
+
+const loopbackBindingAvailable = await detectLoopbackBinding();
+const staticAssetIntegrationTest = loopbackBindingAvailable ? it : it.skip;
 
 describe("static asset serving", () => {
-  it("returns 404 for missing asset paths instead of falling back to index.html", async () => {
+  staticAssetIntegrationTest("returns 404 for missing asset paths instead of falling back to index.html", async () => {
     const app = express();
 
     app.use(express.static("packages/dashboard/dist/client", { index: false }));
@@ -12,7 +26,7 @@ describe("static asset serving", () => {
     });
 
     const server = await new Promise<import("node:http").Server>((resolve) => {
-      const s = app.listen(0, () => resolve(s));
+      const s = app.listen(0, "127.0.0.1", () => resolve(s));
     });
 
     try {

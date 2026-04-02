@@ -1,8 +1,8 @@
 /**
  * AgentStore - Filesystem-based persistence for agent lifecycle management
  * 
- * Agents are stored at `.kb/agents/{agentId}.json` with their metadata.
- * Heartbeat events are appended to `.kb/agents/{agentId}-heartbeats.jsonl`.
+ * Agents are stored at `.fusion/agents/{agentId}.json` with their metadata.
+ * Heartbeat events are appended to `.fusion/agents/{agentId}-heartbeats.jsonl`.
  * 
  * File Structure:
  * - agents/{agentId}.json: Agent metadata (id, name, role, state, taskId, timestamps, metadata)
@@ -51,7 +51,7 @@ type TypedEventEmitter<Events extends Record<string, unknown[]>> = {
 
 /** Options for AgentStore constructor */
 export interface AgentStoreOptions {
-  /** Root directory for kb data (default: .kb) */
+  /** Root directory for kb data (default: .fusion) */
   rootDir?: string;
 }
 

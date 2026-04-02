@@ -16,6 +16,7 @@ import type { Database } from "./db.js";
 import { toJson, toJsonNullable, normalizeTaskComments } from "./db.js";
 import type { Task, BoardConfig, ActivityLogEntry, ArchivedTaskEntry } from "./types.js";
 import type { ScheduledTask } from "./automation.js";
+import { resolveGlobalDir } from "./global-settings.js";
 
 // ── Detection ────────────────────────────────────────────────────────
 
@@ -24,7 +25,7 @@ import type { ScheduledTask } from "./automation.js";
  * Returns true if migration is needed.
  */
 export function detectLegacyData(kbDir: string): boolean {
-  const hasDb = existsSync(join(kbDir, "kb.db"));
+  const hasDb = existsSync(join(kbDir, "fusion.db"));
   if (hasDb) return false;
 
   return (
@@ -45,7 +46,7 @@ export function getMigrationStatus(kbDir: string): {
   hasDatabase: boolean;
   needsMigration: boolean;
 } {
-  const hasDatabase = existsSync(join(kbDir, "kb.db"));
+  const hasDatabase = existsSync(join(kbDir, "fusion.db"));
   const hasLegacy =
     existsSync(join(kbDir, "tasks")) ||
     existsSync(join(kbDir, "config.json")) ||
@@ -539,13 +540,13 @@ async function createBackups(kbDir: string): Promise<void> {
  *
  * Returns true if:
  * - Central DB doesn't exist AND
- * - cwd has `.kb/kb.db` (existing single-project)
+ * - cwd has `.fusion/fusion.db` or `.fusion/fusion.db` (existing single-project)
  *
  * @param cwd — Current working directory to check
- * @param globalDir — Directory for central database. Defaults to `~/.pi/kb/`.
+ * @param globalDir — Directory for central database. Defaults to `~/.pi/fusion/`.
  */
 export function needsCentralMigration(cwd: string, globalDir?: string): boolean {
-  const centralDbPath = join(globalDir ?? join(homedir(), ".pi", "kb"), "kb-central.db");
+  const centralDbPath = join(resolveGlobalDir(globalDir), "fusion-central.db");
   if (existsSync(centralDbPath)) {
     return false;
   }
@@ -555,7 +556,14 @@ export function needsCentralMigration(cwd: string, globalDir?: string): boolean 
   const root = dirname(current) === current ? current : "/";
 
   while (true) {
-    const dbPath = join(current, ".kb", "kb.db");
+    const fusionDbPath = join(current, ".fusion", "fusion.db");
+    if (existsSync(fusionDbPath)) {
+      try {
+        const stat = statSync(fusionDbPath);
+        if (stat.isFile() && stat.size > 0) return true;
+      } catch { /* fall through */ }
+    }
+    const dbPath = join(current, ".fusion", "fusion.db");
     if (existsSync(dbPath)) {
       try {
         const stat = statSync(dbPath);
@@ -581,7 +589,7 @@ export function needsCentralMigration(cwd: string, globalDir?: string): boolean 
  * Detect existing projects by walking up from cwd.
  *
  * @param cwd — Starting directory (default: process.cwd())
- * @param globalDir — Directory for central database. Defaults to `~/.pi/kb/`.
+ * @param globalDir — Directory for central database. Defaults to `~/.pi/fusion/`.
  * @returns Array of detected projects
  */
 export async function detectExistingProjects(

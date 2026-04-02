@@ -20,7 +20,6 @@ describe("GitHubRateLimiter", () => {
 
   afterEach(() => {
     vi.useRealTimers();
-    vi.restoreAllMocks();
   });
 
   it("allows requests within the rate limit", () => {
@@ -447,6 +446,7 @@ describe("GitHubPollingService", () => {
 
     it("handles missing tasks (ENOENT unwatches)", async () => {
       mockGetTask.mockRejectedValue({ code: "ENOENT" });
+      mockGetBadgeStatusesBatch.mockResolvedValue({});
 
       service.watchTask("FN-001", "pr", "owner", "repo", 1);
       

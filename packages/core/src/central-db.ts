@@ -5,7 +5,7 @@
  * synchronous transaction handling. The database runs in WAL mode
  * for concurrent reader/writer access.
  *
- * This database is stored at `~/.pi/kb/kb-central.db` and serves as the
+ * This database is stored at `~/.pi/fusion/fusion-central.db` and serves as the
  * coordination hub for all projects, storing the project registry,
  * unified activity feed, global concurrency limits, and project health.
  */
@@ -13,8 +13,8 @@
 import { DatabaseSync } from "node:sqlite";
 import { join } from "node:path";
 import { mkdirSync, existsSync } from "node:fs";
-import { homedir } from "node:os";
 import type { Statement } from "./db.js";
+import { resolveGlobalDir } from "./global-settings.js";
 
 // ── JSON Helpers (reused from db.ts) ─────────────────────────────────────
 
@@ -95,13 +95,6 @@ CREATE TABLE IF NOT EXISTS __meta (
 
 // ── Central Database Class ────────────────────────────────────────────────
 
-/**
- * Default directory for central kb data: `~/.pi/kb/`
- */
-function defaultGlobalDir(): string {
-  return join(homedir(), ".pi", "kb");
-}
-
 export class CentralDatabase {
   private db: DatabaseSync;
   private readonly dbPath: string;
@@ -110,8 +103,8 @@ export class CentralDatabase {
   private transactionDepth = 0;
 
   constructor(globalDir?: string) {
-    this.globalDir = globalDir ?? defaultGlobalDir();
-    this.dbPath = join(this.globalDir, "kb-central.db");
+    this.globalDir = resolveGlobalDir(globalDir);
+    this.dbPath = join(this.globalDir, "fusion-central.db");
 
     // Ensure directory exists
     if (!existsSync(this.globalDir)) {
@@ -256,7 +249,7 @@ export class CentralDatabase {
 /**
  * Create a new CentralDatabase instance (does NOT initialize schema).
  * Callers must call `db.init()` separately.
- * @param globalDir - Path to the global kb directory (e.g., `~/.pi/kb/`)
+ * @param globalDir - Path to the global fusion directory (e.g., `~/.pi/fusion/`)
  * @returns CentralDatabase instance (not yet initialized)
  */
 export function createCentralDatabase(globalDir?: string): CentralDatabase {

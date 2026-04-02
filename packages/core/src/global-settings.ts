@@ -1,5 +1,5 @@
 /**
- * Global settings store — manages user-level settings in `~/.pi/kb/settings.json`.
+ * Global settings store — manages user-level settings in `~/.pi/fusion/settings.json`.
  *
  * Global settings persist across all kb projects for the current user.
  * They include UI theme preferences, default AI model selection, and
@@ -9,15 +9,45 @@
  */
 
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { mkdir, readFile, writeFile, rename } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, renameSync } from "node:fs";
 import type { GlobalSettings } from "./types.js";
 import { DEFAULT_GLOBAL_SETTINGS } from "./types.js";
 
-/** Default directory for global kb settings: `~/.pi/kb/` */
-export function defaultGlobalDir(): string {
+/** Legacy directory for global settings before the rename to fusion. */
+export function legacyGlobalDir(): string {
   return join(homedir(), ".pi", "kb");
+}
+
+/** Default directory for global fusion settings: `~/.pi/fusion/` */
+export function defaultGlobalDir(): string {
+  return join(homedir(), ".pi", "fusion");
+}
+
+/**
+ * Resolve the active global directory.
+ *
+ * If the new `~/.pi/fusion` directory does not exist but the legacy
+ * `~/.pi/kb` directory does, move the legacy directory into place so
+ * existing settings and central metadata continue to work after upgrade.
+ */
+export function resolveGlobalDir(dir?: string): string {
+  if (dir) return dir;
+
+  const preferredDir = defaultGlobalDir();
+  const legacyDir = legacyGlobalDir();
+
+  if (!existsSync(preferredDir) && existsSync(legacyDir)) {
+    try {
+      mkdirSync(dirname(preferredDir), { recursive: true });
+      renameSync(legacyDir, preferredDir);
+    } catch {
+      return legacyDir;
+    }
+  }
+
+  return preferredDir;
 }
 
 export class GlobalSettingsStore {
@@ -29,11 +59,11 @@ export class GlobalSettingsStore {
 
   /**
    * Create a GlobalSettingsStore.
-   * @param dir — Directory to store settings.json. Defaults to `~/.pi/kb/`.
+   * @param dir — Directory to store settings.json. Defaults to `~/.pi/fusion/`.
    *              Accepts a custom path for testing.
    */
   constructor(dir?: string) {
-    this.dir = dir ?? defaultGlobalDir();
+    this.dir = resolveGlobalDir(dir);
     this.settingsPath = join(this.dir, "settings.json");
   }
 

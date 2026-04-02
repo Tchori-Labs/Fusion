@@ -234,7 +234,7 @@ export function updateSettings(settings: Partial<Settings>): Promise<Settings> {
   });
 }
 
-/** Fetch global (user-level) settings from ~/.pi/kb/settings.json */
+/** Fetch global (user-level) settings from ~/.pi/fusion/settings.json */
 export function fetchGlobalSettings(): Promise<GlobalSettings> {
   return api<GlobalSettings>("/settings/global");
 }
@@ -2199,7 +2199,6 @@ export function unlinkFeatureFromTask(featureId: string): Promise<MissionFeature
     method: "POST",
   });
 }
-
 
 
 

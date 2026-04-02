@@ -28,7 +28,7 @@ describe("BackupManager", () => {
     kbDir = join(tempDir, ".fusion");
     await mkdir(kbDir, { recursive: true });
     // Create a dummy database file
-    writeFileSync(join(kbDir, "kb.db"), "dummy database content");
+    writeFileSync(join(kbDir, "fusion.db"), "dummy database content");
     backupManager = new BackupManager(kbDir);
   });
 
@@ -48,7 +48,7 @@ describe("BackupManager", () => {
     it("should copy database content correctly", async () => {
       const backup = await backupManager.createBackup();
 
-      const originalContent = readFileSync(join(kbDir, "kb.db"), "utf-8");
+      const originalContent = readFileSync(join(kbDir, "fusion.db"), "utf-8");
       const backupContent = readFileSync(backup.path, "utf-8");
 
       expect(backupContent).toBe(originalContent);
@@ -186,13 +186,13 @@ describe("BackupManager", () => {
       const backup = await backupManager.createBackup();
 
       // Modify the original database
-      await writeFile(join(kbDir, "kb.db"), "modified content");
+      await writeFile(join(kbDir, "fusion.db"), "modified content");
 
       // Restore the backup
       await backupManager.restoreBackup(backup.filename, { createPreRestoreBackup: false });
 
       // Verify the restore
-      const restoredContent = readFileSync(join(kbDir, "kb.db"), "utf-8");
+      const restoredContent = readFileSync(join(kbDir, "fusion.db"), "utf-8");
       expect(restoredContent).toBe("dummy database content");
     });
 
@@ -313,7 +313,7 @@ describe("createBackupManager", () => {
     const tempDir = mkdtempSync(join(tmpdir(), "kb-backup-test-"));
     const kbDir = join(tempDir, ".fusion");
     await mkdir(kbDir, { recursive: true });
-    writeFileSync(join(kbDir, "kb.db"), "test");
+    writeFileSync(join(kbDir, "fusion.db"), "test");
 
     const settings: Partial<ProjectSettings> = {
       autoBackupDir: "custom/backups",
@@ -349,7 +349,7 @@ describe("runBackupCommand", () => {
     tempDir = mkdtempSync(join(tmpdir(), "kb-backup-test-"));
     kbDir = join(tempDir, ".fusion");
     await mkdir(kbDir, { recursive: true });
-    writeFileSync(join(kbDir, "kb.db"), "dummy database content");
+    writeFileSync(join(kbDir, "fusion.db"), "dummy database content");
   });
 
   afterEach(async () => {
@@ -437,7 +437,7 @@ describe("runBackupCommand", () => {
 
   it("should return failure when database file is missing", async () => {
     // Remove the database
-    await rm(join(kbDir, "kb.db"));
+    await rm(join(kbDir, "fusion.db"));
 
     const settings: ProjectSettings = {
       maxConcurrent: 2,

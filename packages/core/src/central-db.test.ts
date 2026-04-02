@@ -22,7 +22,7 @@ describe("CentralDatabase", () => {
     it("should create database at the specified path", () => {
       db.init();
       const dbPath = db.getPath();
-      expect(dbPath).toBe(join(tempDir, "kb-central.db"));
+      expect(dbPath).toBe(join(tempDir, "fusion-central.db"));
       // Verify file exists
       const stats = statSync(dbPath);
       expect(stats.isFile()).toBe(true);

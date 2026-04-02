@@ -23,10 +23,10 @@ function tempDir(prefix: string): string {
 
 // Helper to create a fake kb project
 function createFakeKbProject(dir: string): void {
-  const kbDir = join(dir, ".kb");
+  const kbDir = join(dir, ".fusion");
   mkdirSync(kbDir, { recursive: true });
-  // Create empty kb.db file (SQLite needs actual format, but for detection an empty file works)
-  writeFileSync(join(kbDir, "kb.db"), "SQLite format 3\x00");
+  // Create empty fusion.db file (SQLite needs actual format, but for detection an empty file works)
+  writeFileSync(join(kbDir, "fusion.db"), "SQLite format 3\x00");
 }
 
 // Helper to create a fake git remote
@@ -64,7 +64,7 @@ describe("FirstRunDetector", () => {
   });
 
   describe("detectFirstRunState", () => {
-    it("should detect fresh-install when no central DB and no local .kb/", async () => {
+    it("should detect fresh-install when no central DB and no local .fusion/", async () => {
       const tempProjectDir = tempDir("kb-fresh-");
       process.chdir(tempProjectDir);
 
@@ -76,7 +76,7 @@ describe("FirstRunDetector", () => {
       rmSync(tempProjectDir, { recursive: true, force: true });
     });
 
-    it("should detect needs-migration when local .kb/ exists but no central DB", async () => {
+    it("should detect needs-migration when local .fusion/ exists but no central DB", async () => {
       const tempProjectDir = tempDir("kb-needs-migration-");
       createFakeKbProject(tempProjectDir);
       process.chdir(tempProjectDir);
@@ -159,7 +159,7 @@ describe("FirstRunDetector", () => {
       process.chdir(tempProjectDir);
 
       mkdirSync(tempGlobalDir, { recursive: true });
-      writeFileSync(join(tempGlobalDir, "kb-central.db"), "not a sqlite database");
+      writeFileSync(join(tempGlobalDir, "fusion-central.db"), "not a sqlite database");
 
       const detector = new FirstRunDetector(tempGlobalDir);
       const state = await detector.detectFirstRunState();
@@ -174,7 +174,7 @@ describe("FirstRunDetector", () => {
       process.chdir(tempProjectDir);
 
       mkdirSync(tempGlobalDir, { recursive: true });
-      writeFileSync(join(tempGlobalDir, "kb-central.db"), "not a sqlite database");
+      writeFileSync(join(tempGlobalDir, "fusion-central.db"), "not a sqlite database");
 
       const detector = new FirstRunDetector(tempGlobalDir);
       const state = await detector.detectFirstRunState();
@@ -216,7 +216,7 @@ describe("FirstRunDetector", () => {
       rmSync(tempProjectDir, { recursive: true, force: true });
     });
 
-    it("should walk up directory tree to find .kb/", async () => {
+    it("should walk up directory tree to find .fusion/", async () => {
       const tempProjectDir = tempDir("kb-parent-");
       createFakeKbProject(tempProjectDir);
       const nestedDir = join(tempProjectDir, "src", "components");
@@ -304,7 +304,7 @@ describe("FirstRunDetector", () => {
   describe("getCentralDbPath", () => {
     it("should return correct path", () => {
       const detector = new FirstRunDetector(tempGlobalDir);
-      expect(detector.getCentralDbPath()).toBe(join(tempGlobalDir, "kb-central.db"));
+      expect(detector.getCentralDbPath()).toBe(join(tempGlobalDir, "fusion-central.db"));
     });
   });
 });
@@ -638,15 +638,15 @@ describe("MigrationCoordinator", () => {
     it("should return success for fresh-install state", async () => {
       // Close and remove central to simulate fresh state
       await central.close();
-      rmSync(join(tempGlobalDir, "kb-central.db"), { force: true });
+      rmSync(join(tempGlobalDir, "fusion-central.db"), { force: true });
 
-      // Create fresh temp dir with no .kb/
+      // Create fresh temp dir with no .fusion/
       const tempFreshDir = tempDir("kb-fresh-coord-");
 
       central = new CentralCore(tempGlobalDir);
       await central.init();
 
-      // Change to fresh dir (no .kb/)
+      // Change to fresh dir (no .fusion/)
       const originalCwd = process.cwd();
       process.chdir(tempFreshDir);
 
@@ -820,7 +820,7 @@ describe("BackwardCompat", () => {
     it("should return true when no central DB", async () => {
       // Close and remove central DB
       await central.close();
-      rmSync(join(tempGlobalDir, "kb-central.db"), { force: true });
+      rmSync(join(tempGlobalDir, "fusion-central.db"), { force: true });
 
       // Need to re-init CentralCore for it to work
       central = new CentralCore(tempGlobalDir);

@@ -96,10 +96,12 @@ export class NtfyNotifier {
    * Stop listening to store events and abort in-flight requests.
    */
   stop(): void {
-    this.store.off("task:moved", this.handleTaskMoved);
-    this.store.off("task:updated", this.handleTaskUpdated);
-    this.store.off("task:merged", this.handleTaskMerged);
-    this.store.off("settings:updated", this.handleSettingsUpdated);
+    if (typeof this.store.off === "function") {
+      this.store.off("task:moved", this.handleTaskMoved);
+      this.store.off("task:updated", this.handleTaskUpdated);
+      this.store.off("task:merged", this.handleTaskMerged);
+      this.store.off("settings:updated", this.handleSettingsUpdated);
+    }
 
     // Abort any in-flight requests
     if (this.abortController) {

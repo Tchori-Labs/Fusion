@@ -18,9 +18,9 @@ function tempDir(prefix: string): string {
 
 // Helper to create a fake kb project
 function createFakeKbProject(dir: string): void {
-  const kbDir = join(dir, ".kb");
+  const kbDir = join(dir, ".fusion");
   mkdirSync(kbDir, { recursive: true });
-  writeFileSync(join(kbDir, "kb.db"), "SQLite format 3\x00");
+  writeFileSync(join(kbDir, "fusion.db"), "SQLite format 3\x00");
 }
 
 describe("Backward Compatibility Layer", () => {
@@ -216,7 +216,7 @@ describe("Backward Compatibility Layer", () => {
     it("should return legacy mode when no central DB", async () => {
       // Close and remove central DB
       await central.close();
-      rmSync(join(tempGlobalDir, "kb-central.db"), { force: true });
+      rmSync(join(tempGlobalDir, "fusion-central.db"), { force: true });
 
       // Re-create central but don't init
       central = new CentralCore(tempGlobalDir);
@@ -232,7 +232,7 @@ describe("Backward Compatibility Layer", () => {
     it("should report legacy mode correctly", async () => {
       // Close and remove central DB
       await central.close();
-      rmSync(join(tempGlobalDir, "kb-central.db"), { force: true });
+      rmSync(join(tempGlobalDir, "fusion-central.db"), { force: true });
 
       central = new CentralCore(tempGlobalDir);
 

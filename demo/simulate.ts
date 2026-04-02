@@ -142,7 +142,7 @@ async function main() {
       const task = pick(inReview);
       await store.logEntry(task.id, "Auto-merged into main");
       // Can't use mergeTask (no real branch), so just move directly
-      const dir = `${root}/.kb/tasks/${task.id}`;
+      const dir = `${root}/.fusion/tasks/${task.id}`;
       // Read, update, write manually to move to done
       const detail = await store.getTask(task.id);
       await store.updateTask(task.id, { status: undefined, worktree: undefined });

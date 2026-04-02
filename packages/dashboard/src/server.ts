@@ -42,6 +42,39 @@ type DashboardExpressApp = ReturnType<typeof express> & {
   __kbWebSocketsAttached?: boolean;
 };
 
+function shouldForceLocalhostForTests(): boolean {
+  return process.env.NODE_ENV === "test";
+}
+
+function normalizeListenArgsForTests(args: unknown[]): unknown[] {
+  if (!shouldForceLocalhostForTests()) {
+    return args;
+  }
+
+  if (args.length === 0) {
+    return ["127.0.0.1"];
+  }
+
+  const [first, second] = args;
+  const secondIsHost = typeof second === "string";
+  const firstIsOptionsObject =
+    typeof first === "object" && first !== null && !Array.isArray(first);
+
+  if (firstIsOptionsObject || secondIsHost) {
+    return args;
+  }
+
+  if (typeof first === "number") {
+    return [first, "127.0.0.1", ...args.slice(1)];
+  }
+
+  if (typeof first === "string" && first.startsWith("/")) {
+    return args;
+  }
+
+  return args;
+}
+
 export function createServer(store: TaskStore, options?: ServerOptions): ReturnType<typeof express> {
   const app = express();
 
@@ -214,7 +247,8 @@ export function createServer(store: TaskStore, options?: ServerOptions): ReturnT
 
   const originalListen = dashboardApp.listen.bind(dashboardApp);
   dashboardApp.listen = ((...args: Parameters<typeof dashboardApp.listen>) => {
-    const server = originalListen(...args);
+    const normalizedArgs = normalizeListenArgsForTests(args) as Parameters<typeof originalListen>;
+    const server = originalListen(...normalizedArgs);
 
     if (!dashboardApp.__kbWebSocketsAttached) {
       dashboardApp.__kbWebSocketsAttached = true;

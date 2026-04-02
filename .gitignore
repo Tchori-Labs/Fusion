@@ -9,7 +9,7 @@ dist/
 coverage/
 
 # hai runtime (local board state — don't commit)
-.kb/
+.fusion/
 .hai/
 .worktrees/
 .fusion/

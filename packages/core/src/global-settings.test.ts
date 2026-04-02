@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { GlobalSettingsStore } from "./global-settings.js";
+import { GlobalSettingsStore, defaultGlobalDir } from "./global-settings.js";
 import { DEFAULT_GLOBAL_SETTINGS } from "./types.js";
 import { readFile, rm, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
@@ -13,6 +13,7 @@ function makeTmpDir(): string {
 describe("GlobalSettingsStore", () => {
   let dir: string;
   let store: GlobalSettingsStore;
+  const originalHome = process.env.HOME;
 
   beforeEach(() => {
     dir = makeTmpDir();
@@ -21,6 +22,11 @@ describe("GlobalSettingsStore", () => {
 
   afterEach(async () => {
     await rm(dir, { recursive: true, force: true });
+    if (originalHome === undefined) {
+      delete process.env.HOME;
+    } else {
+      process.env.HOME = originalHome;
+    }
   });
 
   describe("init()", () => {
@@ -59,6 +65,30 @@ describe("GlobalSettingsStore", () => {
 
       const settings = await store.getSettings();
       expect(settings.themeMode).toBe("light");
+    });
+
+    it("adopts the legacy ~/.pi/kb directory when ~/.pi/fusion does not exist", async () => {
+      const homeDir = makeTmpDir();
+      process.env.HOME = homeDir;
+
+      const legacyDir = join(homeDir, ".pi", "kb");
+      await mkdir(legacyDir, { recursive: true });
+      await writeFile(
+        join(legacyDir, "settings.json"),
+        JSON.stringify({ themeMode: "light" }),
+      );
+
+      const defaultStore = new GlobalSettingsStore();
+      await defaultStore.init();
+
+      expect(defaultStore.getSettingsPath()).toBe(join(defaultGlobalDir(), "settings.json"));
+      expect(existsSync(join(homeDir, ".pi", "fusion", "settings.json"))).toBe(true);
+      expect(existsSync(join(homeDir, ".pi", "kb"))).toBe(false);
+
+      const settings = await defaultStore.getSettings();
+      expect(settings.themeMode).toBe("light");
+
+      await rm(homeDir, { recursive: true, force: true });
     });
   });
 

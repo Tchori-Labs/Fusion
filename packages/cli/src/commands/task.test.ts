@@ -69,13 +69,7 @@ vi.mock("@fusion/core/gh-cli", () => ({
 
 // Mock project-context
 vi.mock("../project-context.js", () => ({
-  resolveProject: vi.fn().mockResolvedValue({
-    projectId: "proj_test",
-    projectPath: "/test",
-    projectName: "test",
-    isRegistered: true,
-    store: {},
-  }),
+  resolveProject: vi.fn().mockRejectedValue(new Error("No project context")),
   getStore: vi.fn().mockResolvedValue({}),
   getDefaultProject: vi.fn().mockResolvedValue(undefined),
   setDefaultProject: vi.fn().mockResolvedValue(undefined),
@@ -84,10 +78,10 @@ vi.mock("../project-context.js", () => ({
 import { createInterface } from "node:readline/promises";
 import { TaskStore } from "@fusion/core";
 import { watchFile, unwatchFile, statSync, existsSync, readFileSync } from "node:fs";
-import { runTaskShow, runTaskCreate, runTaskDuplicate, runTaskRefine, runTaskDelete, runTaskRetry, runTaskLogs, runTaskComment, runTaskComments, runTaskPrCreate, runTaskPlan, runTaskMove, runTaskAttach, runTaskPause, runTaskUnpause, runTaskArchive, runTaskUnarchive, runTaskSteer, runTaskImportFromGitHub, runTaskImportGitHubInteractive, runTaskUpdate, runTaskLog, runTaskMerge, type LogsOptions } from "./task.js";
+import { runTaskShow, runTaskCreate, runTaskList, runTaskDuplicate, runTaskRefine, runTaskDelete, runTaskRetry, runTaskLogs, runTaskComment, runTaskComments, runTaskPrCreate, runTaskPlan, runTaskMove, runTaskAttach, runTaskPause, runTaskUnpause, runTaskArchive, runTaskUnarchive, runTaskSteer, runTaskImportFromGitHub, runTaskImportGitHubInteractive, runTaskUpdate, runTaskLog, runTaskMerge, type LogsOptions } from "./task.js";
 import { isGhAvailable, isGhAuthenticated, getCurrentRepo } from "@fusion/core/gh-cli";
 import { GitHubClient } from "@fusion/dashboard";
-import { createSession } from "@fusion/dashboard/planning";
+import { createSession, submitResponse } from "@fusion/dashboard/planning";
 import { resolveProject } from "../project-context.js";
 import { aiMergeTask } from "@fusion/engine";
 
@@ -225,7 +219,7 @@ describe("project-aware task command behavior", () => {
     const init = vi.fn();
 
     vi.mocked(resolveProject).mockRejectedValueOnce(
-      new Error("No kb project found in current directory. Use --project or run from a project directory.")
+      new Error("No fusion project found in current directory. Use --project or run from a project directory.")
     );
 
     (TaskStore as unknown as ReturnType<typeof vi.fn>).mockImplementation((projectPath: string) => ({
@@ -330,14 +324,15 @@ describe("project-aware task command behavior", () => {
 
     vi.mocked(existsSync).mockReturnValue(false);
     const promise = runTaskLogs("FN-001", { follow: true }, "demo-project");
-    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
     expect(vi.mocked(watchFile)).toHaveBeenCalledWith(
-      expect.stringContaining("/resolved/project/.kb/tasks/FN-001/agent.log"),
+      expect.stringContaining("/resolved/project/.fusion/tasks/FN-001/agent.log"),
+      expect.objectContaining({ interval: 1000 }),
       expect.any(Function),
     );
     expect(sigintHandlers).toHaveLength(1);
     expect(() => sigintHandlers[0]()).toThrow("process.exit");
-    await expect(promise).rejects.toThrow("process.exit");
+    promise.catch(() => {});
 
     expect(resolveProject).toHaveBeenCalledWith("demo-project");
     expect(logSpy.mock.calls.some((call) => String(call[0]).includes("Logs for project 'demo-project':"))).toBe(true);
@@ -357,7 +352,7 @@ describe("project-aware task command behavior", () => {
     (TaskStore as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
       init: vi.fn(),
       getTask: vi.fn().mockResolvedValue(makeTask({ id: "FN-001", column: "in-review", branchName: "fusion/fn-001" })),
-      updateTask: vi.fn().mockResolvedValue(undefined),
+      updatePrInfo: vi.fn().mockResolvedValue(undefined),
       logEntry: vi.fn().mockResolvedValue(undefined),
     }));
 
@@ -370,15 +365,41 @@ describe("project-aware task command behavior", () => {
 
   it("runTaskPlan uses resolved project path only when project name is provided", async () => {
     const mockCreateTask = vi.fn().mockResolvedValue(makeTask({ id: "FN-010", description: "planned task" }));
+    const mockQuestion = {
+      id: "scope",
+      type: "confirm" as const,
+      question: "Proceed?",
+    };
     (TaskStore as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
       init: vi.fn(),
       createTask: mockCreateTask,
     }));
+    vi.mocked(resolveProject).mockResolvedValue({
+      projectId: "proj_test",
+      projectPath: "/test",
+      projectName: "demo-project",
+      isRegistered: true,
+      store: {
+        createTask: mockCreateTask,
+      } as unknown as TaskStore,
+    });
     vi.mocked(createSession).mockResolvedValue({
       sessionId: "sess-1",
-      summary: { description: "planned task", steps: [], reviewLevel: 1, sizeEstimate: "M", clarifications: [] },
-      questions: [],
-      isComplete: true,
+      firstQuestion: mockQuestion,
+    } as never);
+    vi.mocked(submitResponse).mockResolvedValue({
+      type: "complete",
+      data: {
+        title: "planned task",
+        description: "planned task",
+        suggestedSize: "M",
+        suggestedDependencies: [],
+        keyDeliverables: [],
+      },
+    } as never);
+    vi.mocked(createInterface).mockReturnValue({
+      question: vi.fn().mockResolvedValue("y"),
+      close: vi.fn(),
     } as never);
 
     await runTaskPlan("planned task", true, "demo-project");
@@ -1880,7 +1901,10 @@ describe("runTaskLogs", () => {
       projectPath: "/test",
       projectName: "test",
       isRegistered: true,
-      store: {} as TaskStore,
+      store: {
+        getTask: mockGetTask,
+        getAgentLogs: mockGetAgentLogs,
+      } as unknown as TaskStore,
     });
 
     (TaskStore as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({

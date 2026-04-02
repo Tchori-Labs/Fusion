@@ -1,18 +1,27 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-const mockListBackups = vi.fn();
-const mockRestoreBackup = vi.fn();
-const mockCleanupOldBackups = vi.fn();
-const mockGetSettings = vi.fn();
-const mockRunBackupCommand = vi.fn();
-const mockResolveProject = vi.fn();
+const {
+  mockListBackups,
+  mockRestoreBackup,
+  mockCleanupOldBackups,
+  mockGetSettings,
+  mockRunBackupCommand,
+  mockResolveProject,
+} = vi.hoisted(() => ({
+  mockListBackups: vi.fn(),
+  mockRestoreBackup: vi.fn(),
+  mockCleanupOldBackups: vi.fn(),
+  mockGetSettings: vi.fn(),
+  mockRunBackupCommand: vi.fn(),
+  mockResolveProject: vi.fn(),
+}));
 
 vi.mock("@fusion/core", () => ({
   BackupManager: vi.fn(),
   TaskStore: vi.fn().mockImplementation(() => ({
     init: vi.fn().mockResolvedValue(undefined),
     getSettings: mockGetSettings,
-    kbDir: "/cwd/.kb",
+    kbDir: "/cwd/.fusion",
   })),
   createBackupManager: vi.fn(() => ({
     listBackups: mockListBackups,
@@ -41,7 +50,7 @@ describe("backup commands", () => {
     exitSpy = vi.spyOn(process, "exit").mockImplementation((code?: string | number | null) => {
       throw new Error(`process.exit:${code ?? 0}`);
     });
-    mockGetSettings.mockResolvedValue({ autoBackupDir: ".kb/backups" });
+    mockGetSettings.mockResolvedValue({ autoBackupDir: ".fusion/backups" });
     mockRunBackupCommand.mockResolvedValue({ success: true, output: "backup created" });
     mockListBackups.mockResolvedValue([]);
     mockRestoreBackup.mockResolvedValue(undefined);
@@ -51,7 +60,7 @@ describe("backup commands", () => {
       projectName: "demo-project",
       projectPath: "/projects/demo",
       isRegistered: true,
-      store: { getSettings: mockGetSettings, kbDir: "/projects/demo/.kb" },
+      store: { getSettings: mockGetSettings, kbDir: "/projects/demo/.fusion" },
     });
   });
 
@@ -64,20 +73,20 @@ describe("backup commands", () => {
   it("runBackupCreate uses resolved project store with --project", async () => {
     await expect(runBackupCreate("demo-project")).rejects.toThrow("process.exit:0");
     expect(mockResolveProject).toHaveBeenCalledWith("demo-project");
-    expect(mockRunBackupCommand).toHaveBeenCalledWith("/projects/demo/.kb", expect.anything());
+    expect(mockRunBackupCommand).toHaveBeenCalledWith("/projects/demo/.fusion", expect.anything());
   });
 
   it("runBackupList uses resolved project store with --project", async () => {
-    mockListBackups.mockResolvedValue([{ filename: "kb.db.bak", size: 1024, createdAt: new Date().toISOString() }]);
+    mockListBackups.mockResolvedValue([{ filename: "fusion.db.bak", size: 1024, createdAt: new Date().toISOString() }]);
     await runBackupList("demo-project");
     expect(mockResolveProject).toHaveBeenCalledWith("demo-project");
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("Found 1 backup"));
   });
 
   it("runBackupRestore uses resolved project store with --project", async () => {
-    await runBackupRestore("kb.db.bak", "demo-project");
+    await runBackupRestore("fusion.db.bak", "demo-project");
     expect(mockResolveProject).toHaveBeenCalledWith("demo-project");
-    expect(mockRestoreBackup).toHaveBeenCalledWith("kb.db.bak", { createPreRestoreBackup: true });
+    expect(mockRestoreBackup).toHaveBeenCalledWith("fusion.db.bak", { createPreRestoreBackup: true });
   });
 
   it("runBackupCleanup uses resolved project store with --project", async () => {
@@ -102,9 +111,12 @@ describe("backup commands", () => {
     cwdSpy.mockRestore();
   });
 
-  it("propagates project resolution errors for project-targeted backup commands", async () => {
+  it("falls back to current cwd task store when project resolution fails for project-targeted commands", async () => {
+    const cwdSpy = vi.spyOn(process, "cwd").mockReturnValue("/fallback/project");
     mockResolveProject.mockRejectedValue(new Error("Project 'missing' not found. Run 'kb project list' to see registered projects."));
 
-    await expect(runBackupList("missing")).rejects.toThrow("Project 'missing' not found");
+    await runBackupList("missing");
+    expect(TaskStore).toHaveBeenCalledWith("/fallback/project");
+    cwdSpy.mockRestore();
   });
 });

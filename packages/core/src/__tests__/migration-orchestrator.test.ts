@@ -12,9 +12,9 @@ function createTempDir(): string {
 
 // Helper to create a fake kb project structure
 function createFakeKbProject(dir: string): void {
-  mkdirSync(join(dir, ".kb"), { recursive: true });
+  mkdirSync(join(dir, ".fusion"), { recursive: true });
   // Create an empty file as the database (enough for detection)
-  writeFileSync(join(dir, ".kb", "kb.db"), "");
+  writeFileSync(join(dir, ".fusion", "fusion.db"), "");
 }
 
 describe("MigrationOrchestrator", () => {
@@ -164,7 +164,7 @@ describe("MigrationOrchestrator", () => {
       const projectDir = join(tempDir, "incomplete-project");
       mkdirSync(projectDir, { recursive: true });
       mkdirSync(join(projectDir, ".fusion"), { recursive: true });
-      // Create directory but no kb.db file
+      // Create directory but no fusion.db file
 
       const detected = await orchestrator.detectExistingProjects(projectDir);
 

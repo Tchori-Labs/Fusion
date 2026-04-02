@@ -182,7 +182,7 @@ function copyClientAssets() {
     // Ignore cleanup errors - directory might not exist or be accessible
   }
   console.log("Copying dashboard client assets...");
-  mkdirSync(dashboardClientDest, { recursive: true });
+  mkdirSync(outDir, { recursive: true });
   cpSync(dashboardClientSrc, dashboardClientDest, { recursive: true });
   console.log(`  → ${dashboardClientDest}`);
 }

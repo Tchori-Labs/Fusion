@@ -45,6 +45,7 @@ const { runSettingsExport } = await import("./commands/settings-export.js");
 const { runSettingsImport } = await import("./commands/settings-import.js");
 const { runGitStatus, runGitFetch, runGitPull, runGitPush } = await import("./commands/git.js");
 const { runBackupCreate, runBackupList, runBackupRestore, runBackupCleanup } = await import("./commands/backup.js");
+const { runMissionCreate, runMissionList, runMissionShow, runMissionDelete, runMissionActivateSlice } = await import("./commands/mission.js");
 const { runProjectList, runProjectAdd, runProjectRemove, runProjectShow, runProjectInfo, runProjectSetDefault, runProjectDetect } = await import("./commands/project.js");
 
 const HELP = `
@@ -80,6 +81,11 @@ Usage:
   fn task pr-create <id> [--title <title>] [--base <branch>] [--body <body>]
                          Create a GitHub PR for an in-review task
   fn task import <owner/repo> [opts]  Import GitHub issues as tasks
+  fn mission create [title] [desc]    Create a new mission
+  fn mission list | ls                List missions
+  fn mission show | info <id>         Show mission details
+  fn mission delete <id> [--force]    Delete a mission
+  fn mission activate-slice <id>      Mark a slice active
   fn project list | ls [--json]       List all registered projects
   fn project add [name] [path] [opts]  Register a new project
   fn project remove | rm <name> [--force]
@@ -512,6 +518,44 @@ async function main() {
         break;
       }
 
+      case "mission": {
+        const subcommand = args[1];
+        switch (subcommand) {
+          case "create": {
+            const title = args[2];
+            const description = args.length > 3 ? args.slice(3).join(" ") : undefined;
+            await runMissionCreate(title, description, projectName);
+            break;
+          }
+          case "list":
+          case "ls":
+            await runMissionList(projectName);
+            break;
+          case "show":
+          case "info": {
+            const id = args[2];
+            await runMissionShow(id, projectName);
+            break;
+          }
+          case "delete": {
+            const id = args[2];
+            const force = args.includes("--force");
+            await runMissionDelete(id, force, projectName);
+            break;
+          }
+          case "activate-slice": {
+            const id = args[2];
+            await runMissionActivateSlice(id, projectName);
+            break;
+          }
+          default:
+            console.error(`Unknown subcommand: mission ${subcommand || ""}`);
+            console.log("Try: fn mission create | list | show | delete | activate-slice");
+            process.exit(1);
+        }
+        break;
+      }
+
       case "settings": {
         const subcommand = args[1];
         if (!subcommand || subcommand === "show") {
@@ -631,4 +675,4 @@ async function main() {
   }
 }
 
-main();
+await main();

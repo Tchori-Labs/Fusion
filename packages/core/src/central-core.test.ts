@@ -33,7 +33,7 @@ describe("CentralCore", () => {
     it("should initialize and create database", async () => {
       await central.init();
       expect(central.isInitialized()).toBe(true);
-      expect(central.getDatabasePath()).toBe(join(tempDir, "kb-central.db"));
+      expect(central.getDatabasePath()).toBe(join(tempDir, "fusion-central.db"));
     });
 
     it("should be idempotent on multiple init calls", async () => {
@@ -919,7 +919,7 @@ describe("CentralCore", () => {
 
     it("should get database path", async () => {
       const path = central.getDatabasePath();
-      expect(path).toBe(join(tempDir, "kb-central.db"));
+      expect(path).toBe(join(tempDir, "fusion-central.db"));
     });
 
     it("should get global directory", async () => {

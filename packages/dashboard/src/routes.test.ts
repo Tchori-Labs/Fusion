@@ -36,7 +36,7 @@ function createMockGlobalSettingsStore() {
   return {
     getSettings: vi.fn().mockResolvedValue({}),
     updateSettings: vi.fn().mockResolvedValue({}),
-    getSettingsPath: vi.fn().mockReturnValue("/fake/home/.pi/kb/settings.json"),
+    getSettingsPath: vi.fn().mockReturnValue("/fake/home/.pi/fusion/settings.json"),
     init: vi.fn().mockResolvedValue(false),
   };
 }
@@ -2987,22 +2987,19 @@ describe("POST /github/issues/batch-import", () => {
   });
 
   it("imports multiple issues successfully", async () => {
-    fetchSpy
+    const throttledSpy = vi.spyOn(GitHubClient.prototype, "fetchThrottled")
       .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve(mockGitHubIssue(1, "First Issue")),
-      } as Response)
+        success: true,
+        data: mockGitHubIssue(1, "First Issue"),
+      } as Awaited<ReturnType<GitHubClient["fetchThrottled"]>>)
       .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve(mockGitHubIssue(2, "Second Issue")),
-      } as Response)
+        success: true,
+        data: mockGitHubIssue(2, "Second Issue"),
+      } as Awaited<ReturnType<GitHubClient["fetchThrottled"]>>)
       .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve(mockGitHubIssue(3, "Third Issue")),
-      } as Response);
+        success: true,
+        data: mockGitHubIssue(3, "Third Issue"),
+      } as Awaited<ReturnType<GitHubClient["fetchThrottled"]>>);
 
     const res = await REQUEST(
       buildApp(),
@@ -3015,7 +3012,7 @@ describe("POST /github/issues/batch-import", () => {
     expect(res.status).toBe(200);
     expect(res.body.results).toHaveLength(3);
     expect(res.body.results.every((r: { success: boolean }) => r.success)).toBe(true);
-    expect(fetchSpy).toHaveBeenCalledTimes(3);
+    expect(throttledSpy).toHaveBeenCalledTimes(3);
     expect(store.createTask).toHaveBeenCalledTimes(3);
   });
 
@@ -3110,23 +3107,19 @@ describe("POST /github/issues/batch-import", () => {
   });
 
   it("handles partial failures (some succeed, some fail)", async () => {
-    fetchSpy
+    const throttledSpy = vi.spyOn(GitHubClient.prototype, "fetchThrottled")
       .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve(mockGitHubIssue(1)),
-      } as Response)
+        success: true,
+        data: mockGitHubIssue(1),
+      } as Awaited<ReturnType<GitHubClient["fetchThrottled"]>>)
       .mockResolvedValueOnce({
-        ok: false,
-        status: 404,
-        statusText: "Not Found",
-        json: () => Promise.resolve({ message: "Not Found" }),
-      } as Response)
+        success: false,
+        error: "GitHub API error (404): Not Found",
+      } as Awaited<ReturnType<GitHubClient["fetchThrottled"]>>)
       .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve(mockGitHubIssue(3)),
-      } as Response);
+        success: true,
+        data: mockGitHubIssue(3),
+      } as Awaited<ReturnType<GitHubClient["fetchThrottled"]>>);
 
     const res = await REQUEST(
       buildApp(),
@@ -3142,6 +3135,7 @@ describe("POST /github/issues/batch-import", () => {
     expect(res.body.results[1].success).toBe(false);
     expect(res.body.results[1].error).toContain("404");
     expect(res.body.results[2].success).toBe(true);
+    expect(throttledSpy).toHaveBeenCalledTimes(3);
   });
 
   it("rejects pull requests with appropriate error", async () => {

@@ -1161,7 +1161,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
 
   /**
    * GET /api/settings/global
-   * Returns the global (user-level) settings from ~/.pi/kb/settings.json.
+   * Returns the global (user-level) settings from ~/.pi/fusion/settings.json.
    * Does NOT include computed/server-only fields like githubTokenConfigured.
    */
   router.get("/settings/global", async (_req, res) => {
@@ -1176,7 +1176,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
 
   /**
    * PUT /api/settings/global
-   * Update global (user-level) settings in ~/.pi/kb/settings.json.
+   * Update global (user-level) settings in ~/.pi/fusion/settings.json.
    * These settings persist across all kb projects for the current user.
    */
   router.put("/settings/global", async (req, res) => {
@@ -5927,7 +5927,7 @@ Output ONLY the prompt text (no markdown, no explanations).`;
       
       const existingPaths = new Set(existingProjects.map((p: { path: string }) => p.path));
       
-      // Scan for .kb/kb.db or .fusion/kb.db files (indicating kb projects)
+      // Scan for .fusion/fusion.db or .fusion/fusion.db files (indicating kb projects)
       const detected: Array<{ path: string; suggestedName: string; existing: boolean }> = [];
       
       try {
@@ -5937,7 +5937,7 @@ Output ONLY the prompt text (no markdown, no explanations).`;
           if (!entry.isDirectory()) continue;
           
           const dirPath = join(searchPath, entry.name);
-          const hasKbDb = existsSync(join(dirPath, ".kb", "kb.db"));
+          const hasKbDb = existsSync(join(dirPath, ".fusion", "fusion.db"));
           const hasFusionDir = existsSync(join(dirPath, ".fusion"));
           
           if (hasKbDb || hasFusionDir) {

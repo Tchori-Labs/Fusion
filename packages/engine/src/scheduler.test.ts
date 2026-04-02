@@ -265,7 +265,7 @@ describe("Scheduler", () => {
   });
 
   describe("filesystem validation", () => {
-    it("validates tasks using the .kb task directory layout", async () => {
+    it("validates tasks using the .fusion task directory layout", async () => {
       const todoTask = createMockTask({ id: "FN-010", column: "todo" });
       const moveTask = vi.fn().mockResolvedValue(undefined);
       const updateTask = vi.fn().mockResolvedValue(undefined);

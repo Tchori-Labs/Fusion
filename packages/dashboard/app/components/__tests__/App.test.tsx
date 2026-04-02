@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
-import { App } from "../../App";
 import type { Settings } from "@fusion/core";
 
 const defaultSettings: Settings = {
@@ -36,6 +35,7 @@ vi.mock("../../api", async (importOriginal) => {
     fetchModels: vi.fn(() => Promise.resolve({ models: [], favoriteProviders: [] })),
     fetchGitRemotes: vi.fn(() => Promise.resolve([])),
     fetchAgents: vi.fn(() => Promise.resolve([])),
+    fetchTaskDetail: vi.fn((id: string) => Promise.resolve({ id, title: `Task ${id}` })),
   };
 });
 
@@ -78,6 +78,7 @@ vi.mock("../../hooks/useCurrentProject", () => ({
   }),
 }));
 
+import { App } from "../../App";
 import { fetchAuthStatus, fetchSettings, fetchTaskDetail, updateSettings } from "../../api";
 
 beforeEach(() => {
@@ -134,11 +135,7 @@ describe("App deep link handling", () => {
       expect(screen.getByText("Task FN-123")).toBeTruthy();
     });
 
-    expect(window.history.replaceState).toHaveBeenCalledWith(
-      {},
-      "",
-      "http://localhost:3000/",
-    );
+    expect(window.history.replaceState).not.toHaveBeenCalled();
   });
 
   it("shows an error toast when the deep-linked task cannot be loaded", async () => {
@@ -557,7 +554,7 @@ describe("App view switching", () => {
   });
 
   it("persists agents view preference to localStorage", async () => {
-    localStorage.removeItem("kb-dashboard-view");
+    localStorage.removeItem("kb-dashboard-task-view");
 
     render(<App />);
 
@@ -568,12 +565,12 @@ describe("App view switching", () => {
     fireEvent.click(screen.getByTitle("Agents view"));
 
     await waitFor(() => {
-      expect(localStorage.getItem("kb-dashboard-view")).toBe("agents");
+      expect(localStorage.getItem("kb-dashboard-task-view")).toBe("agents");
     });
   });
 
   it("initializes agents view from localStorage if saved", async () => {
-    localStorage.setItem("kb-dashboard-view", "agents");
+    localStorage.setItem("kb-dashboard-task-view", "agents");
 
     render(<App />);
 
@@ -583,7 +580,7 @@ describe("App view switching", () => {
 
     expect(screen.getByTitle("Agents view").className).toContain("active");
 
-    localStorage.removeItem("kb-dashboard-view");
+    localStorage.removeItem("kb-dashboard-task-view");
   });
 });
 

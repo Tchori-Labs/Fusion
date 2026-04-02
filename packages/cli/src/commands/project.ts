@@ -278,8 +278,8 @@ export async function runProjectAdd(
         process.exit(1);
       }
 
-      // Check for .kb directory
-      const kbDbPath = resolve(absolutePath, ".kb", "kb.db");
+      // Check for .fusion directory
+      const kbDbPath = resolve(absolutePath, ".fusion", "fusion.db");
       if (!existsSync(kbDbPath) && !options.force) {
         console.log(`\n  No kb project found at ${formatDisplayPath(absolutePath)}`);
         const init = await rl.question("  Initialize kb here first? [Y/n] ");
@@ -331,8 +331,8 @@ export async function runProjectAdd(
       process.exit(1);
     }
 
-    // Check for .kb directory
-    const kbDbPath = resolve(absolutePath, ".kb", "kb.db");
+    // Check for .fusion directory
+    const kbDbPath = resolve(absolutePath, ".fusion", "fusion.db");
     if (!existsSync(kbDbPath) && !options.force) {
       console.error(`\n  ✗ No kb project found at ${formatDisplayPath(absolutePath)}`);
       console.error("  Run `kb init` first to initialize the project.\n");
@@ -441,7 +441,7 @@ export async function runProjectShow(name?: string): Promise<void> {
           project = await central.getProject(detected.id);
         }
         if (!project) {
-          // Unregistered project with .kb
+          // Unregistered project with .fusion
           console.log();
           console.log(`  Project: ${detected.name}`);
           console.log(`  Location: ${formatDisplayPath(detected.path)}`);

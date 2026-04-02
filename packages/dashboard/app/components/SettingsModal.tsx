@@ -13,7 +13,7 @@ import { applyPresetToSelection, generatePresetId, validatePresetId } from "../u
  *
  * Each section groups related settings fields under a sidebar nav item.
  * Sections have a `scope` to indicate where their settings are stored:
- *   - "global": User-level settings stored in ~/.pi/kb/settings.json (shared across projects)
+ *   - "global": User-level settings stored in ~/.pi/fusion/settings.json (shared across projects)
  *   - "project": Project-specific settings stored in .fusion/config.json
  *   - undefined: Section operates independently of settings storage (e.g. authentication)
  *

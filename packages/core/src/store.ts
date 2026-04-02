@@ -55,7 +55,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
 
   /**
    * Hybrid storage note: task metadata lives in SQLite, while blob files remain on disk.
-   * Any write to `.kb/tasks/{id}` must recreate the directory on demand, and any read from
+   * Any write to `.fusion/tasks/{id}` must recreate the directory on demand, and any read from
    * optional blob files must tolerate missing files/directories because cleanup, migration,
    * or manual filesystem changes can remove them independently of the database row.
    */
@@ -81,7 +81,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   private taskLocks: Map<string, Promise<void>> = new Map();
   /** Promise chain for serializing config.json read-modify-write cycles */
   private configLock: Promise<void> = Promise.resolve();
-  /** Global settings store (`~/.pi/kb/settings.json`) */
+  /** Global settings store (`~/.pi/fusion/settings.json`) */
   private globalSettingsStore: GlobalSettingsStore;
   /** Polling interval for change detection */
   private pollInterval: ReturnType<typeof setInterval> | null = null;
@@ -461,7 +461,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
    * Get merged settings: global defaults ← global user prefs ← project overrides.
    *
    * Returns the combined view that most consumers should use. Project-level
-   * values in `.kb/config.json` override global values from `~/.pi/kb/settings.json`.
+   * values in `.fusion/config.json` override global values from `~/.pi/fusion/settings.json`.
    */
   async getSettings(): Promise<Settings> {
     const [globalSettings, config] = await Promise.all([
@@ -501,7 +501,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   }
 
   /**
-   * Update project-level settings in `.kb/config.json`.
+   * Update project-level settings in `.fusion/config.json`.
    *
    * Accepts `Partial<Settings>` for backward compatibility. Any global-only
    * fields in the patch are silently filtered out — they will not be persisted
@@ -530,7 +530,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   }
 
   /**
-   * Update global (user-level) settings in `~/.pi/kb/settings.json`.
+   * Update global (user-level) settings in `~/.pi/fusion/settings.json`.
    *
    * These settings persist across all kb projects for the current user.
    * Only fields defined in `GlobalSettings` are accepted.
@@ -1975,7 +1975,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
 
   /**
    * Append an agent log entry to the task's agent log file (JSONL format).
-   * Each entry is a single JSON line appended to `.kb/tasks/{ID}/agent.log`.
+   * Each entry is a single JSON line appended to `.fusion/tasks/{ID}/agent.log`.
    * Also emits an `agent:log` event for live streaming.
    *
    * @param taskId - The task ID (e.g. "KB-001")

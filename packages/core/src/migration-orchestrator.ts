@@ -94,7 +94,7 @@ export class MigrationOrchestrator {
    * Detect existing kb projects by walking the filesystem.
    *
    * Scans from the starting path up to maxDepth levels deep, looking for
-   * directories containing `.kb/kb.db`.
+   * directories containing `.fusion/fusion.db` (or legacy `.fusion/fusion.db`)
    *
    * Security notes:
    * - Only scans from the specified startPath
@@ -154,7 +154,7 @@ export class MigrationOrchestrator {
       return;
     }
 
-    // Check if this directory is a kb project (has .kb/kb.db)
+    // Check if this directory is a kb project (has .fusion/fusion.db or .fusion/fusion.db)
     const hasKbDb = this.isKbProject(dir);
     if (hasKbDb) {
       const name = this.generateProjectName(dir);
@@ -201,15 +201,28 @@ export class MigrationOrchestrator {
 
   /**
    * Check if a directory contains a valid kb project.
-   * Validates that .kb/kb.db exists and is a file.
+   * Validates that .fusion/fusion.db (or legacy .fusion/fusion.db) exists and is a file.
    */
   private isKbProject(dir: string): boolean {
-    const kbPath = join(dir, ".kb");
+    // Check current layout: .fusion/fusion.db
+    const fusionPath = join(dir, ".fusion");
+    if (existsSync(fusionPath)) {
+      const fusionDb = join(fusionPath, "fusion.db");
+      if (existsSync(fusionDb)) {
+        try {
+          const stats = statSync(fusionDb);
+          if (stats.isFile()) return true;
+        } catch { /* fall through */ }
+      }
+    }
+
+    // Fall back to legacy layout: .fusion/fusion.db
+    const kbPath = join(dir, ".fusion");
     if (!existsSync(kbPath)) {
       return false;
     }
 
-    const dbPath = join(kbPath, "kb.db");
+    const dbPath = join(kbPath, "fusion.db");
     if (!existsSync(dbPath)) {
       return false;
     }
@@ -233,7 +246,7 @@ export class MigrationOrchestrator {
   /**
    * Auto-register detected projects in the central registry.
    *
-   * - Filters to projects with valid kb.db
+   * - Filters to projects with valid fusion.db
    * - Skips already-registered projects
    * - Generates unique names (appends number if conflict: name, name-2, name-3)
    * - Sets isolationMode to 'in-process' for migrated projects

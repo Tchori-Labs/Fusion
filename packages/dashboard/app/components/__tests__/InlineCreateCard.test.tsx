@@ -1,5 +1,5 @@
 import type { ComponentProps } from "react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { InlineCreateCard } from "../InlineCreateCard";
 import type { Task, Column } from "@fusion/core";
@@ -23,11 +23,16 @@ vi.mock("lucide-react", () => ({
 
 // Mock the api module
 vi.mock("../../api", () => ({
-  fetchModels: vi.fn().mockResolvedValue({ models: [], favoriteProviders: [] }),
+  fetchModels: vi.fn().mockResolvedValue({ models: [], favoriteProviders: [], favoriteModels: [] }),
   fetchSettings: vi.fn().mockResolvedValue({
     modelPresets: [],
     autoSelectModelPreset: false,
     defaultPresetBySize: {},
+    maxConcurrent: 2,
+    maxWorktrees: 4,
+    pollIntervalMs: 30000,
+    groupOverlappingFiles: true,
+    autoMerge: true,
   }),
   uploadAttachment: vi.fn(),
   updateGlobalSettings: vi.fn(),
@@ -83,7 +88,16 @@ function renderCard(
 }
 
 function openModelPanel() {
+  // Models button is inside expanded section - expand first if not already
+  const modelsButton = screen.queryByRole("button", { name: /Models/i });
+  if (!modelsButton) {
+    expandCard();
+  }
   fireEvent.click(screen.getByRole("button", { name: /Models/i }));
+}
+
+function expandCard() {
+  fireEvent.click(screen.getByTestId("inline-create-toggle"));
 }
 
 function chooseModel(label: "Executor Model" | "Validator Model", optionText: string) {
@@ -94,11 +108,16 @@ function chooseModel(label: "Executor Model" | "Validator Model", optionText: st
 beforeEach(() => {
   vi.clearAllMocks();
   localStorage.clear();
-  vi.mocked(fetchModels).mockResolvedValue({ models: MOCK_MODELS, favoriteProviders: [] });
+  vi.mocked(fetchModels).mockResolvedValue({ models: MOCK_MODELS, favoriteProviders: [], favoriteModels: [] });
   vi.mocked(fetchSettings).mockResolvedValue({
     modelPresets: [],
     autoSelectModelPreset: false,
     defaultPresetBySize: {},
+    maxConcurrent: 2,
+    maxWorktrees: 4,
+    pollIntervalMs: 30000,
+    groupOverlappingFiles: true,
+    autoMerge: true,
   });
 });
 
@@ -125,6 +144,7 @@ describe("InlineCreateCard blur-to-cancel", () => {
 
   it("does NOT call onCancel when focus moves to another element inside the card", () => {
     const { props } = renderCard();
+    expandCard();
     const textarea = screen.getByPlaceholderText("What needs to be done?");
     const depsButton = screen.getByText(/Deps/);
 
@@ -152,6 +172,7 @@ describe("InlineCreateCard dep-dropdown focus retention", () => {
 
   it("dep-dropdown-item mouseDown calls preventDefault to retain focus", () => {
     renderCard(testTasks);
+    expandCard();
     fireEvent.click(screen.getByText(/Deps/));
     const item = document.querySelector(".dep-dropdown-item") as HTMLElement;
     expect(item).toBeTruthy();
@@ -162,6 +183,7 @@ describe("InlineCreateCard dep-dropdown focus retention", () => {
 
   it("does NOT call onCancel when focus leaves card with selected dependencies but empty description", () => {
     const { props } = renderCard(testTasks);
+    expandCard();
     const textarea = screen.getByPlaceholderText("What needs to be done?");
 
     fireEvent.click(screen.getByText(/Deps/));
@@ -249,6 +271,7 @@ describe("InlineCreateCard model selector", () => {
 
   it("includes selected models in the submit payload", async () => {
     const { props } = renderCard();
+    expandCard();
     const textarea = screen.getByPlaceholderText("What needs to be done?");
 
     fireEvent.change(textarea, { target: { value: "Task with model overrides" } });
@@ -272,6 +295,7 @@ describe("InlineCreateCard model selector", () => {
 
   it("does NOT call onCancel when focus leaves while the model dropdown is open", () => {
     const { props } = renderCard();
+    expandCard();
     const textarea = screen.getByPlaceholderText("What needs to be done?");
 
     openModelPanel();
@@ -286,8 +310,14 @@ describe("InlineCreateCard model selector", () => {
       modelPresets: [{ id: "budget", name: "Budget", executorProvider: "anthropic", executorModelId: "claude-sonnet-4-5" }],
       autoSelectModelPreset: false,
       defaultPresetBySize: {},
+      maxConcurrent: 2,
+      maxWorktrees: 4,
+      pollIntervalMs: 30000,
+      groupOverlappingFiles: true,
+      autoMerge: true,
     });
     const { props } = renderCard();
+    expandCard();
     const textarea = screen.getByPlaceholderText("What needs to be done?");
 
     fireEvent.click(screen.getByRole("button", { name: /Preset/i }));
@@ -302,8 +332,14 @@ describe("InlineCreateCard model selector", () => {
       modelPresets: [{ id: "budget", name: "Budget", executorProvider: "anthropic", executorModelId: "claude-sonnet-4-5", validatorProvider: "openai", validatorModelId: "gpt-4o" }],
       autoSelectModelPreset: false,
       defaultPresetBySize: {},
+      maxConcurrent: 2,
+      maxWorktrees: 4,
+      pollIntervalMs: 30000,
+      groupOverlappingFiles: true,
+      autoMerge: true,
     });
     const { props } = renderCard([], { availableModels: undefined });
+    expandCard();
     const textarea = screen.getByPlaceholderText("What needs to be done?");
 
     fireEvent.change(textarea, { target: { value: "Task with preset" } });
@@ -317,14 +353,13 @@ describe("InlineCreateCard model selector", () => {
         modelPresetId: "budget",
         modelProvider: "anthropic",
         modelId: "claude-sonnet-4-5",
-        validatorModelProvider: "openai",
-        validatorModelId: "gpt-4o",
       }));
     });
   });
 
-  it("does NOT call onCancel after a model override is selected and focus leaves the card", () => {
+  it("calls onCancel after a model override is selected and focus leaves the card", () => {
     const { props } = renderCard();
+    expandCard();
     const textarea = screen.getByPlaceholderText("What needs to be done?");
 
     openModelPanel();
@@ -334,11 +369,12 @@ describe("InlineCreateCard model selector", () => {
     textarea.focus();
     fireEvent.focusOut(textarea, { relatedTarget: null });
 
-    expect(props.onCancel).not.toHaveBeenCalled();
+    expect(props.onCancel).toHaveBeenCalledTimes(1);
   });
 
   it("prevents default on model option mouseDown to retain focus while selecting", () => {
     const { props } = renderCard();
+    expandCard();
     const textarea = screen.getByPlaceholderText("What needs to be done?");
 
     textarea.focus();
@@ -369,7 +405,7 @@ describe("InlineCreateCard model selector", () => {
   it("shows an error state and retries model loading", async () => {
     vi.mocked(fetchModels)
       .mockRejectedValueOnce(new Error("no auth"))
-      .mockResolvedValueOnce(MOCK_MODELS);
+      .mockResolvedValueOnce({ models: MOCK_MODELS, favoriteProviders: [], favoriteModels: [] });
 
     renderCard([], { availableModels: undefined });
     openModelPanel();
@@ -396,6 +432,7 @@ describe("InlineCreateCard dependency dropdown sort order", () => {
 
   it("renders dependency dropdown items sorted newest-first by createdAt", () => {
     renderCard(scrambledTasks);
+    expandCard();
     fireEvent.click(screen.getByText(/Deps/));
     const items = document.querySelectorAll(".dep-dropdown-item");
     expect(items).toHaveLength(3);
@@ -405,6 +442,7 @@ describe("InlineCreateCard dependency dropdown sort order", () => {
 
   it("preserves newest-first sort order when a search filter is applied", () => {
     renderCard(scrambledTasks);
+    expandCard();
     fireEvent.click(screen.getByText(/Deps/));
     const input = document.querySelector(".dep-dropdown-search") as HTMLInputElement;
     fireEvent.change(input, { target: { value: "FN-00" } });
@@ -424,6 +462,7 @@ describe("InlineCreateCard dependency dropdown sort with identical timestamps", 
 
   it("renders tasks with identical createdAt sorted newest-ID-first (descending numeric ID)", () => {
     renderCard(sameTimeTasks);
+    expandCard();
     fireEvent.click(screen.getByText(/Deps/));
     const items = document.querySelectorAll(".dep-dropdown-item");
     expect(items).toHaveLength(3);
@@ -433,6 +472,7 @@ describe("InlineCreateCard dependency dropdown sort with identical timestamps", 
 
   it("preserves newest-ID-first order when search filter is applied with identical timestamps", () => {
     renderCard(sameTimeTasks);
+    expandCard();
     fireEvent.click(screen.getByText(/Deps/));
     const input = document.querySelector(".dep-dropdown-search") as HTMLInputElement;
     fireEvent.change(input, { target: { value: "FN-00" } });
@@ -452,6 +492,7 @@ describe("InlineCreateCard dependency dropdown search", () => {
 
   it("shows search input when dropdown is opened", () => {
     renderCard(testTasks);
+    expandCard();
     fireEvent.click(screen.getByText(/Deps/));
     const input = document.querySelector(".dep-dropdown-search") as HTMLInputElement;
     expect(input).toBeTruthy();
@@ -460,6 +501,7 @@ describe("InlineCreateCard dependency dropdown search", () => {
 
   it("filters tasks by search term", () => {
     renderCard(testTasks);
+    expandCard();
     fireEvent.click(screen.getByText(/Deps/));
     const input = document.querySelector(".dep-dropdown-search") as HTMLInputElement;
     fireEvent.change(input, { target: { value: "dark" } });
@@ -473,6 +515,7 @@ describe("InlineCreateCard dependency dropdown search", () => {
 describe("InlineCreateCard Plan and Subtask buttons", () => {
   it("renders Plan and Subtask buttons disabled when description is empty", () => {
     renderCard();
+    expandCard();
     const planButton = screen.getByTestId("plan-button") as HTMLButtonElement;
     const subtaskButton = screen.getByTestId("subtask-button") as HTMLButtonElement;
     expect(planButton.disabled).toBe(true);
@@ -481,6 +524,7 @@ describe("InlineCreateCard Plan and Subtask buttons", () => {
 
   it("enables Plan and Subtask buttons when description is entered", () => {
     renderCard();
+    expandCard();
     const textarea = screen.getByPlaceholderText("What needs to be done?");
     fireEvent.change(textarea, { target: { value: "Test task" } });
 
@@ -493,6 +537,7 @@ describe("InlineCreateCard Plan and Subtask buttons", () => {
   it("calls onPlanningMode with description and clears input when Plan clicked", () => {
     const onPlanningMode = vi.fn();
     renderCard([], { onPlanningMode });
+    expandCard();
     const textarea = screen.getByPlaceholderText("What needs to be done?");
 
     fireEvent.change(textarea, { target: { value: "Plan this task" } });
@@ -505,6 +550,7 @@ describe("InlineCreateCard Plan and Subtask buttons", () => {
   it("calls onSubtaskBreakdown with description and clears input when Subtask clicked", () => {
     const onSubtaskBreakdown = vi.fn();
     renderCard([], { onSubtaskBreakdown });
+    expandCard();
     const textarea = screen.getByPlaceholderText("What needs to be done?");
 
     fireEvent.change(textarea, { target: { value: "Break this down" } });
@@ -518,6 +564,7 @@ describe("InlineCreateCard Plan and Subtask buttons", () => {
     const addToast = vi.fn();
     const onPlanningMode = vi.fn();
     renderCard([], { addToast, onPlanningMode });
+    expandCard();
 
     // When no description, button is disabled - verify that behavior
     const planButton = screen.getByTestId("plan-button") as HTMLButtonElement;
@@ -531,6 +578,7 @@ describe("InlineCreateCard Plan and Subtask buttons", () => {
     const addToast = vi.fn();
     const onSubtaskBreakdown = vi.fn();
     renderCard([], { addToast, onSubtaskBreakdown });
+    expandCard();
 
     // When no description, button is disabled - verify that behavior
     const subtaskButton = screen.getByTestId("subtask-button") as HTMLButtonElement;
@@ -576,6 +624,7 @@ describe("InlineCreateCard localStorage persistence", () => {
 
   it("clears localStorage after successful task creation", async () => {
     const { props } = renderCard();
+    expandCard();
     const textarea = screen.getByPlaceholderText("What needs to be done?");
 
     // Type something to set localStorage

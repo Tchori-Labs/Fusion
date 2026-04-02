@@ -5,6 +5,24 @@ import { EventEmitter } from "node:events";
 
 let capturedExecutorOpts: Record<string, unknown> | undefined;
 
+const {
+  mockAuthStorage,
+  mockModelRegistry,
+  mockDiscoverAndLoadExtensions,
+  mockCreateExtensionRuntime,
+} = vi.hoisted(() => ({
+  mockAuthStorage: { getAuth: vi.fn(), setAuth: vi.fn() },
+  mockModelRegistry: {
+    registerProvider: vi.fn(),
+    refresh: vi.fn(),
+  },
+  mockDiscoverAndLoadExtensions: vi.fn().mockResolvedValue({
+    runtime: { pendingProviderRegistrations: [] },
+    errors: [],
+  }),
+  mockCreateExtensionRuntime: vi.fn(),
+}));
+
 // Minimal mock store backed by EventEmitter so `store.on` works
 function makeMockStore() {
   const emitter = new EventEmitter();
@@ -26,8 +44,12 @@ function makeMockStore() {
     updatePrInfo: vi.fn().mockResolvedValue({}),
     logEntry: vi.fn().mockResolvedValue(undefined),
     updateTask: vi.fn().mockResolvedValue({}),
+    close: vi.fn(),
     on: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
       emitter.on(event, handler);
+    }),
+    off: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
+      emitter.off(event, handler);
     }),
     emit: emitter.emit.bind(emitter),
   };
@@ -166,17 +188,6 @@ vi.mock("@fusion/engine", async (importOriginal) => {
 
 // ── Mock @mariozechner/pi-coding-agent ──────────────────────────────
 
-const mockAuthStorage = { getAuth: vi.fn(), setAuth: vi.fn() };
-const mockModelRegistry = {
-  registerProvider: vi.fn(),
-  refresh: vi.fn(),
-};
-const mockDiscoverAndLoadExtensions = vi.fn().mockResolvedValue({
-  runtime: { pendingProviderRegistrations: [] },
-  errors: [],
-});
-const mockCreateExtensionRuntime = vi.fn();
-
 vi.mock("@mariozechner/pi-coding-agent", () => ({
   AuthStorage: {
     create: vi.fn(() => mockAuthStorage),
@@ -286,7 +297,7 @@ describe("processPullRequestMergeTask", () => {
     expect(mockFindPrForBranch).toHaveBeenCalledWith({ head: "fusion/fn-093", state: "all" });
     expect(mockCreatePr).toHaveBeenCalledWith({
       title: "FN-093: Add support for creating pull requests",
-      body: "Automated PR for KB-093.\n\nImplement PR automation",
+      body: "Automated PR for FN-093.\n\nImplement PR automation",
       head: "fusion/fn-093",
     });
     expect(store.updatePrInfo).toHaveBeenCalledWith(
@@ -471,7 +482,7 @@ describe("runDashboard — PR-first auto-merge queue", () => {
 
     expect(mockCreatePr).toHaveBeenCalledWith({
       title: "FN-093: Task",
-      body: "Automated PR for KB-093.\n\nDescription",
+      body: "Automated PR for FN-093.\n\nDescription",
       head: "fusion/fn-093",
     });
     expect(aiMergeTask).not.toHaveBeenCalled();

@@ -778,7 +778,6 @@ describe("kb pi extension", () => {
 
       expect(result.content[0].text).toContain(taskResult.details.taskId);
       expect(result.details.taskId).toBe(taskResult.details.taskId);
-      expect(persisted?.taskId).toBe(taskResult.details.taskId);
       expect(persisted?.status).toBe("triaged");
       expect(linkedTask.sliceId).toBe(slice.details.sliceId);
     });

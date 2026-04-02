@@ -264,7 +264,7 @@ export class Scheduler {
     for (const depId of task.dependencies) {
       const dep = allTasks.find((t) => t.id === depId);
       if (dep && dep.column === "in-review" && dep.worktree) {
-        return `kb/${dep.id.toLowerCase()}`;
+        return `fusion/${dep.id.toLowerCase()}`;
       }
     }
 

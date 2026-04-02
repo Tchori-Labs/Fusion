@@ -44,11 +44,11 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   constructor(private rootDir: string, globalSettingsDir?: string) {
     super();
     this.setMaxListeners(100);
-    this.kbDir = join(rootDir, ".kb");
-    this.tasksDir = join(this.kbDir, "tasks");
-    this.configPath = join(this.kbDir, "config.json");
-    this.archiveLogPath = join(this.kbDir, "archive.jsonl");
-    this.activityLogPath = join(this.kbDir, "activity-log.jsonl");
+    this.fusionDir = join(rootDir, ".fusion");
+    this.tasksDir = join(this.fusionDir, "tasks");
+    this.configPath = join(this.fusionDir, "config.json");
+    this.archiveLogPath = join(this.fusionDir, "archive.jsonl");
+    this.activityLogPath = join(this.fusionDir, "activity-log.jsonl");
     this.globalSettingsStore = new GlobalSettingsStore(globalSettingsDir);
   }
 
@@ -240,7 +240,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
    * Get merged settings: global defaults ← global user prefs ← project overrides.
    *
    * Returns the combined view that most consumers should use. Project-level
-   * values in `.kb/config.json` override global values from `~/.pi/kb/settings.json`.
+   * values in `.fusion/config.json` override global values from `~/.pi/kb/settings.json`.
    */
   async getSettings(): Promise<Settings> {
     const [globalSettings, config] = await Promise.all([
@@ -280,7 +280,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   }
 
   /**
-   * Update project-level settings in `.kb/config.json`.
+   * Update project-level settings in `.fusion/config.json`.
    *
    * Accepts `Partial<Settings>` for backward compatibility. Any global-only
    * fields in the patch are silently filtered out — they will not be persisted
@@ -1525,7 +1525,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
 
   /**
    * Append an agent log entry to the task's agent log file (JSONL format).
-   * Each entry is a single JSON line appended to `.kb/tasks/{ID}/agent.log`.
+   * Each entry is a single JSON line appended to `.fusion/tasks/{ID}/agent.log`.
    * Also emits an `agent:log` event for live streaming.
    *
    * @param taskId - The task ID (e.g. "KB-001")
@@ -2155,7 +2155,7 @@ ${notificationsSection}`;
 
   /**
    * Record an activity log entry to the global activity log.
-   * Appends to .kb/activity-log.jsonl (JSON Lines format).
+   * Appends to .fusion/activity-log.jsonl (JSON Lines format).
    * Auto-generates ID and timestamp.
    */
   async recordActivity(entry: Omit<ActivityLogEntry, "id" | "timestamp">): Promise<ActivityLogEntry> {

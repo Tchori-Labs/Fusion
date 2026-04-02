@@ -3,7 +3,7 @@
  *
  * Handles determination of which project to use for CLI commands based on:
  * - Explicit `--project <name>` flag
- * - Current working directory auto-detection (walking up to find `.kb/`)
+ * - Current working directory auto-detection (walking up to find `.fusion/`)
  * - Default project when only one is registered
  * - Interactive prompts when ambiguous
  */
@@ -96,17 +96,17 @@ export async function getProjectManager(): Promise<ProjectManager> {
 }
 
 /**
- * Walk up from the given path to find a `.kb/` directory.
+ * Walk up from the given path to find a `.fusion/` directory.
  *
  * @param startPath - Directory to start searching from
- * @returns Absolute path to the directory containing `.kb/`, or null if not found
+ * @returns Absolute path to the directory containing `.fusion/`, or null if not found
  */
 export function findKbDir(startPath: string): string | null {
   let current = resolve(startPath);
 
   // Safety limit to prevent infinite loops
   for (let i = 0; i < 100; i++) {
-    const kbPath = resolve(current, ".kb");
+    const kbPath = resolve(current, ".fusion");
     if (existsSync(kbPath) && statSync(kbPath).isDirectory()) {
       return current;
     }
@@ -168,10 +168,10 @@ async function promptConfirm(message: string, defaultYes = false): Promise<boole
  *
  * Resolution order:
  * 1. If --project <name> flag given, look up by name in registry
- * 2. Walk up from cwd to find .kb/ directory
+ * 2. Walk up from cwd to find .fusion/ directory
  * 3. If found, match path against registered projects
- * 4. If not registered but has .kb/, prompt to register or error
- * 5. If no .kb/ found and exactly one project registered, use it
+ * 4. If not registered but has .fusion/, prompt to register or error
+ * 5. If no .fusion/ found and exactly one project registered, use it
  * 6. If multiple projects and no match, error with list
  *
  * @param options - Resolution options
@@ -218,7 +218,7 @@ export async function resolveProject(options: ResolveOptions = {}): Promise<Reso
     return createResolvedProject(match);
   }
 
-  // 2. Walk up from cwd to find .kb/
+  // 2. Walk up from cwd to find .fusion/
   const cwd = options.cwd ? resolve(options.cwd) : process.cwd();
   const kbDir = findKbDir(cwd);
 
@@ -243,7 +243,7 @@ export async function resolveProject(options: ResolveOptions = {}): Promise<Reso
       return createResolvedProject(match);
     }
 
-    // 4. Has .kb/ but not registered
+    // 4. Has .fusion/ but not registered
     if (interactive) {
       console.log(`\n  Found kb project at ${kbDir} but it's not registered.`);
       const shouldRegister = await promptConfirm("Register this project now?", true);
@@ -289,7 +289,7 @@ export async function resolveProject(options: ResolveOptions = {}): Promise<Reso
     }
   }
 
-  // 5. No .kb/ found - check registered projects
+  // 5. No .fusion/ found - check registered projects
   const allProjects = await central.listProjects();
 
   if (allProjects.length === 0) {
@@ -447,10 +447,10 @@ export async function isProjectNameTaken(
 }
 
 /**
- * Validate that a path contains an initialized kb project (.kb/ directory exists).
+ * Validate that a path contains an initialized kb project (.fusion/ directory exists).
  */
 export function isKbProject(path: string): boolean {
-  const kbPath = resolve(path, ".kb");
+  const kbPath = resolve(path, ".fusion");
   return existsSync(kbPath) && statSync(kbPath).isDirectory();
 }
 
@@ -550,28 +550,28 @@ export async function registerProjectInteractive(
   // Validate directory
   const absPath = resolveAbsolutePath(dir);
 
-  // Check for .kb/ directory
+  // Check for .fusion/ directory
   if (!isKbProject(absPath)) {
     if (interactive) {
-      console.log(`\n  No .kb/ directory found in ${absPath}`);
+      console.log(`\n  No .fusion/ directory found in ${absPath}`);
       const shouldInit = await promptConfirm("Initialize kb here first?", true);
 
       if (shouldInit) {
-        // Initialize the project (create .kb/)
+        // Initialize the project (create .fusion/)
         const { TaskStore } = await import("@fusion/core");
         const store = new TaskStore(absPath);
         await store.init();
         console.log(`  ✓ Initialized kb at ${absPath}`);
       } else {
         throw new ProjectResolutionError(
-          "Cannot register project without .kb/ directory. Run `fn init` first.",
+          "Cannot register project without .fusion/ directory. Run `fn init` first.",
           "NOT_INITIALIZED",
           { directory: absPath }
         );
       }
     } else {
       throw new ProjectResolutionError(
-        `No .kb/ directory found in ${absPath}. Run \`fn init\` first.`,
+        `No .fusion/ directory found in ${absPath}. Run \`fn init\` first.`,
         "NOT_INITIALIZED",
         { directory: absPath }
       );

@@ -400,7 +400,7 @@ When `FUSION_BADGE_PUBSUB_REDIS_URL` is not set, the dashboard uses an in-memory
 - `GET /api/config` - Server configuration
 - `GET /api/settings` - Merged settings (project overrides global)
 - `PUT /api/settings` - Update project-level settings (rejects global-only fields)
-- `GET /api/settings/global` - Global user settings (~/.pi/kb/settings.json)
+- `GET /api/settings/global` - Global user settings (~/.pi/fusion/settings.json)
 - `PUT /api/settings/global` - Update global user settings
 - `GET /api/settings/scopes` - Settings separated by scope: { global, project }
 - `GET /api/models` - Available AI models

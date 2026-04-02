@@ -1,7 +1,7 @@
 /**
  * projectDetection.ts - Client-side project detection utilities
  * 
- * Provides utilities for scanning and detecting kb projects.
+ * Provides utilities for scanning and detecting fusion projects.
  * These functions prepare data for API calls rather than accessing
  * the filesystem directly (which is not possible from browser).
  */
@@ -134,11 +134,11 @@ function getDefaultScanPath(): string {
 
 /**
  * Sorts detected projects by likelihood of being a kb project.
- * Projects with .kb/kb.db are ranked higher.
+ * Projects with .fusion/fusion.db are ranked higher.
  */
 export function sortDetectedProjects(projects: DetectedProject[]): DetectedProject[] {
   return [...projects].sort((a, b) => {
-    // Existing projects (with kb.db) come first
+    // Existing projects (with fusion.db) come first
     if (a.existing && !b.existing) return -1;
     if (!a.existing && b.existing) return 1;
     return 0;

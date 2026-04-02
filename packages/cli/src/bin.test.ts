@@ -45,7 +45,10 @@ const commandMocks = vi.hoisted(() => ({
   runProjectList: vi.fn(),
   runProjectAdd: vi.fn(),
   runProjectRemove: vi.fn(),
+  runProjectShow: vi.fn(),
   runProjectInfo: vi.fn(),
+  runProjectSetDefault: vi.fn(),
+  runProjectDetect: vi.fn(),
 }));
 
 vi.mock("./commands/dashboard.js", () => ({ runDashboard: commandMocks.runDashboard }));
@@ -103,7 +106,10 @@ vi.mock("./commands/project.js", () => ({
   runProjectList: commandMocks.runProjectList,
   runProjectAdd: commandMocks.runProjectAdd,
   runProjectRemove: commandMocks.runProjectRemove,
+  runProjectShow: commandMocks.runProjectShow,
   runProjectInfo: commandMocks.runProjectInfo,
+  runProjectSetDefault: commandMocks.runProjectSetDefault,
+  runProjectDetect: commandMocks.runProjectDetect,
 }));
 
 const originalArgv = process.argv;

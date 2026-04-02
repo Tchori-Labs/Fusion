@@ -39,7 +39,7 @@ export class BackupManager {
 
   /**
    * Creates a new BackupManager instance.
-   * @param kbDir - Absolute path to the .kb directory
+   * @param kbDir - Absolute path to the .fusion directory
    * @param options - Backup configuration options
    */
   constructor(kbDir: string, options?: BackupOptions) {
@@ -61,7 +61,7 @@ export class BackupManager {
    * @returns BackupInfo for the newly created backup
    */
   async createBackup(): Promise<BackupInfo> {
-    const sourcePath = join(this.kbDir, "kb.db");
+    const sourcePath = join(this.kbDir, "fusion.db");
     const backupDirPath = this.getBackupDirPath();
     
     // Ensure backup directory exists
@@ -188,7 +188,7 @@ export class BackupManager {
   ): Promise<void> {
     const backupDirPath = this.getBackupDirPath();
     const sourcePath = join(backupDirPath, filename);
-    const targetPath = join(this.kbDir, "kb.db");
+    const targetPath = join(this.kbDir, "fusion.db");
 
     // Verify source exists
     try {
@@ -281,7 +281,7 @@ export function validateBackupDir(dir: string): boolean {
 
 /**
  * Factory function to create a BackupManager with project settings.
- * @param kbDir - Absolute path to the .kb directory
+ * @param kbDir - Absolute path to the .fusion directory
  * @param settings - Project settings containing backup configuration
  * @returns Configured BackupManager instance
  */
@@ -303,7 +303,7 @@ export function createBackupManager(
  * at the automation/scheduler level. This allows manual backups via CLI even when
  * auto-backup is disabled.
  * 
- * @param kbDir - Absolute path to the .kb directory
+ * @param kbDir - Absolute path to the .fusion directory
  * @param settings - Project settings
  * @returns Result of the backup operation
  */

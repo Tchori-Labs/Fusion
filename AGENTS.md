@@ -39,8 +39,8 @@ kb uses a hybrid storage architecture: structured metadata lives in SQLite while
 
 ### Database Location
 
-- **Project database:** `.kb/kb.db` — SQLite database with WAL mode enabled
-- **Blob files:** `.kb/tasks/{ID}/PROMPT.md`, `agent.log`, `attachments/` — remain on filesystem
+- **Project database:** `.fusion/fusion.db` — SQLite database with WAL mode enabled
+- **Blob files:** `.fusion/tasks/{ID}/PROMPT.md`, `agent.log`, `attachments/` — remain on filesystem
 - **Global settings:** `~/.pi/fusion/settings.json` — remains file-based (not in SQLite)
 
 ### Tables
@@ -62,7 +62,7 @@ The database runs in WAL (Write-Ahead Logging) mode for concurrent reader/writer
 
 ### Auto-Migration from Legacy Storage
 
-On first run, if legacy file-based data exists (`.kb/tasks/`, `.kb/config.json`, etc.) but no `.kb/kb.db`, the system automatically migrates all data to SQLite:
+On first run, if legacy file-based data exists (`.fusion/tasks/`, `.fusion/config.json`, etc.) but no `.fusion/fusion.db`, the system automatically migrates all data to SQLite:
 
 1. Config, tasks, activity log, archive, automations, and agents are migrated
 2. Original files are backed up (`.bak` suffix)
@@ -74,7 +74,7 @@ On first run, if legacy file-based data exists (`.kb/tasks/`, `.kb/config.json`,
 
 If something goes wrong after migration:
 - Backup files (`.bak`) contain the original data
-- Delete `.kb/kb.db` and rename `.bak` files back to restore legacy storage
+- Delete `.fusion/fusion.db` and rename `.bak` files back to restore legacy storage
 - The system will re-migrate on next startup
 
 ### JSON Columns
@@ -197,7 +197,7 @@ Projects have one of these statuses:
 
 kb has two activity log systems:
 
-1. **Per-project activity log** (`.kb/kb.db` → `activityLog` table)
+1. **Per-project activity log** (`.fusion/fusion.db` → `activityLog` table)
    - Contains events for a single project
    - Used by the dashboard for project-specific views
    
@@ -477,7 +477,7 @@ When you run a kb command without `--project`, the CLI resolves the project in t
 
 1. **Explicit `--project` flag** — Uses the specified project
 2. **Default project** — Uses the project set via `kb project set-default`
-3. **CWD auto-detection** — Walks up the directory tree looking for `.fusion/kb.db`
+3. **CWD auto-detection** — Walks up the directory tree looking for `.fusion/fusion.db`
 
 If no project is found, the CLI exits with an error:
 ```
@@ -608,7 +608,7 @@ Use `useBadgeWebSocket()` when a UI surface needs live badge snapshots for speci
 kb uses a two-tier settings hierarchy:
 
 - **Global settings** — User preferences stored in `~/.pi/fusion/settings.json`. These persist across all kb projects for the current user.
-- **Project settings** — Project-specific workflow and resource settings stored in `.kb/config.json`. These control how the engine operates for a particular project.
+- **Project settings** — Project-specific workflow and resource settings stored in `.fusion/config.json`. These control how the engine operates for a particular project.
 
 When reading settings, project values override global values. The merged view is what the engine and dashboard use.
 
@@ -623,7 +623,7 @@ When reading settings, project values override global values. The merged view is
 - `ntfyEnabled` — Enable push notifications
 - `ntfyTopic` — ntfy.sh topic for notifications
 
-**Project settings** (`~/.kb/config.json`):
+**Project settings** (`~/.fusion/config.json`):
 - All other settings listed below (concurrency, merge, worktrees, commands, etc.)
 
 The dashboard Settings modal shows scope indicators (🌐 global, 📁 project) in the sidebar to help users understand where each setting is stored. Saving only updates the scope matching the active section.
@@ -783,7 +783,7 @@ When true, enables automatic database backups for the kb SQLite database.
 
 **How it works:**
 - When enabled, the system creates scheduled automation to run backups on the configured schedule
-- Backups are timestamped copies of `.kb/kb.db` stored in the backup directory
+- Backups are timestamped copies of `.fusion/fusion.db` stored in the backup directory
 - Old backups are automatically cleaned up based on the retention setting
 - Manual backups can still be created via CLI or dashboard even when auto-backup is disabled
 
@@ -794,7 +794,7 @@ When true, enables automatic database backups for the kb SQLite database.
     "autoBackupEnabled": true,
     "autoBackupSchedule": "0 2 * * *",
     "autoBackupRetention": 7,
-    "autoBackupDir": ".kb/backups"
+    "autoBackupDir": ".fusion/backups"
   }
 }
 ```
@@ -817,7 +817,7 @@ Number of backup files to retain. When the count exceeds this limit, the oldest 
 
 **Valid range:** 1–100
 
-### `autoBackupDir` (default: `".kb/backups"`)
+### `autoBackupDir` (default: `".fusion/backups"`)
 
 Directory for backup files, relative to the project root. The directory is created automatically if it doesn't exist.
 
@@ -988,7 +988,7 @@ Archived tasks can be cleaned up from the filesystem to reduce storage overhead 
 ### Storage Pattern
 
 When a task is archived and cleaned up:
-1. A compact entry is written to `.kb/archive.jsonl` (JSON Lines format)
+1. A compact entry is written to `.fusion/archive.jsonl` (JSON Lines format)
 2. The task directory (`task.json`, `PROMPT.md`, `agent.log`, attachments) is removed
 3. The archive entry contains all metadata needed to restore the task
 
@@ -1050,7 +1050,7 @@ Workflow steps are reusable quality gates that run after task implementation but
 
 ### Storage
 
-Workflow step definitions are stored in `.kb/config.json`:
+Workflow step definitions are stored in `.fusion/config.json`:
 ```json
 {
   "workflowSteps": [

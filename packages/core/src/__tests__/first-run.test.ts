@@ -13,8 +13,8 @@ function createTempDir(): string {
 
 // Helper to create a fake kb project structure
 function createFakeKbProject(dir: string): void {
-  mkdirSync(join(dir, ".kb"), { recursive: true });
-  writeFileSync(join(dir, ".kb", "kb.db"), "");
+  mkdirSync(join(dir, ".fusion"), { recursive: true });
+  writeFileSync(join(dir, ".fusion", "fusion.db"), "");
 }
 
 describe("FirstRunExperience", () => {

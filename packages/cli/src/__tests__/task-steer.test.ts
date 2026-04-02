@@ -50,7 +50,7 @@ describe("runTaskSteer", () => {
   function setupTaskStoreMock(overrides: Record<string, unknown> = {}) {
     (TaskStore as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => ({
       init: vi.fn().mockResolvedValue(undefined),
-      addComment: mockAddComment,
+      addSteeringComment: mockAddComment,
       ...overrides,
     }));
   }

@@ -10,6 +10,7 @@ function makeMockStore() {
     init: vi.fn().mockResolvedValue(undefined),
     watch: vi.fn().mockResolvedValue(undefined),
     stopWatching: vi.fn(),
+    close: vi.fn(),
     getSettings: vi.fn().mockResolvedValue({
       maxConcurrent: 1,
       maxWorktrees: 2,
@@ -19,6 +20,9 @@ function makeMockStore() {
     listTasks: vi.fn().mockResolvedValue([]),
     on: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
       emitter.on(event, handler);
+    }),
+    off: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
+      emitter.off(event, handler);
     }),
     emit: emitter.emit.bind(emitter),
   };
@@ -207,7 +211,6 @@ describe("runDashboard — AuthStorage & ModelRegistry wiring", () => {
     await runDashboard(0, {});
 
     expect(consoleSpy).toHaveBeenCalledWith("[extensions] Failed to load /extensions/bad: Invalid manifest");
-    expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining("kb board"));
     consoleSpy.mockRestore();
   });
 

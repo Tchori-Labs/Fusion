@@ -17,4 +17,4 @@ All task and settings commands now support `--project <name>` flag:
 - `kb task list --project myapp`
 - `kb settings --project myapp`
 
-Projects are auto-detected from cwd by walking up to find `.kb/`.
+Projects are auto-detected from cwd by walking up to find `.fusion/`.

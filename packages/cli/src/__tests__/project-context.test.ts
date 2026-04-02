@@ -19,13 +19,15 @@ import { CentralCore, GlobalSettingsStore, type RegisteredProject } from "@fusio
 
 describe("project-context", () => {
   let tempDir: string;
-  let globalDir: string;
+  let homeDir: string;
   let central: CentralCore;
+  const originalHome = process.env.HOME;
 
   beforeEach(async () => {
     tempDir = mkdtempSync(join(tmpdir(), "kb-test-"));
-    globalDir = mkdtempSync(join(tmpdir(), "kb-global-"));
-    central = new CentralCore(globalDir);
+    homeDir = mkdtempSync(join(tmpdir(), "kb-home-"));
+    process.env.HOME = homeDir;
+    central = new CentralCore();
     await central.init();
   });
 
@@ -34,21 +36,26 @@ describe("project-context", () => {
     clearStoreCache();
     try {
       rmSync(tempDir, { recursive: true, force: true });
-      rmSync(globalDir, { recursive: true, force: true });
+      rmSync(homeDir, { recursive: true, force: true });
     } catch {
       // Ignore cleanup errors
+    }
+    if (originalHome === undefined) {
+      delete process.env.HOME;
+    } else {
+      process.env.HOME = originalHome;
     }
   });
 
   function createMockProject(name: string, parentDir: string = tempDir): string {
     const projectPath = join(parentDir, name);
-    mkdirSync(join(projectPath, ".kb"), { recursive: true });
-    writeFileSync(join(projectPath, ".kb", "kb.db"), "");
+    mkdirSync(join(projectPath, ".fusion"), { recursive: true });
+    writeFileSync(join(projectPath, ".fusion", "fusion.db"), "");
     return projectPath;
   }
 
   describe("detectProjectFromCwd", () => {
-    it("should find project from CWD when .kb/kb.db exists", async () => {
+    it("should find project from CWD when .fusion/fusion.db exists", async () => {
       const projectPath = createMockProject("my-project");
       const project = await central.registerProject({
         name: "my-project",
@@ -159,7 +166,7 @@ describe("project-context", () => {
       mkdirSync(randomDir, { recursive: true });
 
       await expect(resolveProject(undefined, randomDir)).rejects.toThrow(
-        "No kb project found"
+        "No fusion project found"
       );
     });
   });

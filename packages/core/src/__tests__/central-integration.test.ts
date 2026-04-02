@@ -193,7 +193,7 @@ describe("CentralCore Integration", () => {
 
   it("should verify database path and stats", async () => {
     const dbPath = central.getDatabasePath();
-    expect(dbPath).toContain("kb-central.db");
+    expect(dbPath).toContain("fusion-central.db");
 
     const globalDir = central.getGlobalDir();
     expect(globalDir).toBe(tempDir);

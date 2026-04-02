@@ -1,10 +1,24 @@
 import { EventEmitter, once } from "node:events";
+import http from "node:http";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
 import type { Task } from "@fusion/core";
 import { createServer } from "../server.js";
 import { WebSocketManager } from "../websocket.js";
 import { InMemoryBadgePubSub, type BadgePubSub } from "../badge-pubsub.js";
+
+async function detectLoopbackBinding(): Promise<boolean> {
+  return await new Promise((resolve) => {
+    const server = http.createServer();
+    server.once("error", () => resolve(false));
+    server.listen(0, "127.0.0.1", () => {
+      server.close(() => resolve(true));
+    });
+  });
+}
+
+const loopbackBindingAvailable = await detectLoopbackBinding();
+const websocketIntegrationTest = loopbackBindingAvailable ? it : it.skip;
 
 class MockSocket extends EventEmitter {
   readyState: number = WebSocket.OPEN;
@@ -221,7 +235,7 @@ describe("WebSocketManager", () => {
 });
 
 describe("/api/ws integration", () => {
-  it("delivers badge updates to subscribed websocket clients via task:updated events", async () => {
+  websocketIntegrationTest("delivers badge updates to subscribed websocket clients via task:updated events", async () => {
     const initialTask = createTask();
     const store = new MockStore(initialTask);
     const app = createServer(store as any, { githubToken: "test-token" });
@@ -276,7 +290,7 @@ describe("/api/ws integration", () => {
  * dashboard instances using a shared pub/sub adapter.
  */
 describe("multi-instance /api/ws integration", () => {
-  it("delivers badge updates from instance A to subscribed client on instance B", async () => {
+  websocketIntegrationTest("delivers badge updates from instance A to subscribed client on instance B", async () => {
     // Create a shared pub/sub adapter that both instances will use
     const sharedPubSub: BadgePubSub = new InMemoryBadgePubSub();
     await sharedPubSub.start();
@@ -372,7 +386,7 @@ describe("multi-instance /api/ws integration", () => {
     });
   }, 5000);
 
-  it("does not double-send badge updates to origin subscribers", async () => {
+  websocketIntegrationTest("does not double-send badge updates to origin subscribers", async () => {
     // Create a shared pub/sub adapter
     const sharedPubSub: BadgePubSub = new InMemoryBadgePubSub();
     await sharedPubSub.start();
@@ -445,7 +459,7 @@ describe("multi-instance /api/ws integration", () => {
     expect(badgeMessages[0].prInfo.number).toBe(99);
   }, 5000);
 
-  it("sends cached badge snapshot to late subscribers after remote update", async () => {
+  websocketIntegrationTest("sends cached badge snapshot to late subscribers after remote update", async () => {
     // Create a shared pub/sub adapter
     const sharedPubSub: BadgePubSub = new InMemoryBadgePubSub();
     await sharedPubSub.start();

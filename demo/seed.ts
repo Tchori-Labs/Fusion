@@ -1,5 +1,5 @@
 /**
- * Seeds a .kb board with realistic tasks across all columns.
+ * Seeds a .fusion board with realistic tasks across all columns.
  * Run from a git repo: `npx tsx demo/seed.ts [dir]`
  *
  * Creates a board that looks like an active project mid-flight:
@@ -334,7 +334,7 @@ ${stepsSection}
 - [ ] No regressions
 `;
 
-  const dir = join(store.getRootDir(), ".kb", "tasks", id);
+  const dir = join(store.getRootDir(), ".fusion", "tasks", id);
   await writeFile(join(dir, "PROMPT.md"), prompt);
 }
 

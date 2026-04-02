@@ -32,7 +32,7 @@ const storeCache = new Map<string, TaskStore>();
  * Resolution order:
  * 1. If `projectNameFlag` provided: look up by name (case-insensitive) or ID (exact)
  * 2. Else if default project set in global settings: use that project
- * 3. Else: auto-detect from CWD by finding nearest `.kb/kb.db`
+ * 3. Else: auto-detect from CWD by finding nearest `.fusion/fusion.db`
  *
  * @param projectNameFlag - Optional explicit project name/ID from --project flag
  * @param cwd - Current working directory for CWD detection (default: process.cwd())
@@ -54,7 +54,7 @@ export async function resolveProject(
       project = await findProjectByNameOrId(central, projectNameFlag);
       if (!project) {
         throw new Error(
-          `Project '${projectNameFlag}' not found. Run 'kb project list' to see registered projects.`
+          `Project '${projectNameFlag}' not found. Run 'fusion project list' to see registered projects.`
         );
       }
     }
@@ -76,7 +76,7 @@ export async function resolveProject(
       const detected = await detectProjectFromCwd(cwd, central);
       if (!detected) {
         throw new Error(
-          `No kb project found in current directory. Use --project or run from a project directory.`
+          `No fusion project found in current directory. Use --project or run from a project directory.`
         );
       }
 
@@ -170,7 +170,7 @@ export async function clearDefaultProject(): Promise<void> {
 
 /**
  * Detect a project from the current working directory by walking up
- * the directory tree looking for `.kb/kb.db`.
+ * the directory tree looking for `.fusion/fusion.db`.
  *
  * @param cwd - Starting directory (typically process.cwd())
  * @param central - Initialized CentralCore instance
@@ -185,14 +185,14 @@ export async function detectProjectFromCwd(
   // Walk up the directory tree
   while (true) {
     // Check for kb database
-    const kbPath = resolve(currentDir, ".kb", "kb.db");
+    const kbPath = resolve(currentDir, ".fusion", "fusion.db");
     if (existsSync(kbPath)) {
       // Found a kb project - check if it's registered
       const project = await central.getProjectByPath(currentDir);
       if (project) {
         return project;
       }
-      // Not registered, but has .kb/kb.db - still use it as a valid project
+      // Not registered, but has .fusion/fusion.db - still use it as a valid project
       // This preserves legacy single-project CLI behavior.
       // Use empty string for id to indicate unregistered status.
       return {
@@ -303,3 +303,4 @@ export async function getStore(
   const context = await resolveProject(projectName, cwd);
   return context.store;
 }
+

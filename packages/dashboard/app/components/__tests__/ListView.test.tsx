@@ -219,7 +219,7 @@ describe("ListView", () => {
 
   it("sorts tasks by column when Column header is clicked", () => {
     const tasks = [
-      createMockTask({ id: "FN-001", column: "done" }),
+      createMockTask({ id: "FN-001", column: "todo" }),
       createMockTask({ id: "FN-002", column: "triage" }),
       createMockTask({ id: "FN-003", column: "in-progress" }),
     ];
@@ -229,11 +229,11 @@ describe("ListView", () => {
     const columnHeader = screen.getByText("Column");
     fireEvent.click(columnHeader);
 
-    // Get data rows - sorted by column alphabetically: done, in-progress, triage
+    // Rows are rendered in fixed column-section order.
     const rows = screen.getAllByRole("row").filter(r => r.getAttribute("data-id"));
-    expect(rows[0].textContent).toContain("FN-002"); // triage (sorted first alphabetically)
-    expect(rows[1].textContent).toContain("FN-003"); // in-progress
-    expect(rows[2].textContent).toContain("FN-001"); // done
+    expect(rows[0].textContent).toContain("FN-002"); // triage section first
+    expect(rows[1].textContent).toContain("FN-001"); // todo section second
+    expect(rows[2].textContent).toContain("FN-003"); // in-progress section third
   });
 
   it("sorts tasks by status when Status header is clicked", () => {

@@ -14,31 +14,44 @@ import {
 } from "../file-service.js";
 import type { TaskStore } from "@fusion/core";
 
-// Mock node:fs/promises
-const mockReaddir = vi.fn();
-const mockReadFile = vi.fn();
-const mockWriteFile = vi.fn();
-const mockStat = vi.fn();
+// Mock node:fs/promises - use vi.hoisted for proper hoisting with ES modules
+const { mockReaddir, mockReadFile, mockWriteFile, mockStat } = vi.hoisted(() => ({
+  mockReaddir: vi.fn(),
+  mockReadFile: vi.fn(),
+  mockWriteFile: vi.fn(),
+  mockStat: vi.fn(),
+}));
+
+// Mock node:fs
+const { mockExistsSync } = vi.hoisted(() => ({
+  mockExistsSync: vi.fn(),
+}));
 
 vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs/promises")>();
   return {
-    ...actual,
-    readdir: (...args: any[]) => mockReaddir(...args),
-    readFile: (...args: any[]) => mockReadFile(...args),
-    writeFile: (...args: any[]) => mockWriteFile(...args),
-    stat: (...args: any[]) => mockStat(...args),
+    default: {
+      ...actual,
+      readdir: mockReaddir,
+      readFile: mockReadFile,
+      writeFile: mockWriteFile,
+      stat: mockStat,
+    },
+    readdir: mockReaddir,
+    readFile: mockReadFile,
+    writeFile: mockWriteFile,
+    stat: mockStat,
   };
 });
-
-// Mock node:fs
-const mockExistsSync = vi.fn();
 
 vi.mock("node:fs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:fs")>();
   return {
-    ...actual,
-    existsSync: (...args: any[]) => mockExistsSync(...args),
+    default: {
+      ...actual,
+      existsSync: mockExistsSync,
+    },
+    existsSync: mockExistsSync,
   };
 });
 
@@ -378,7 +391,7 @@ describe("writeProjectFile", () => {
         isFile: () => true,
       }); // Parent is a file
 
-    await expect(writeProjectFile(mockStore, "file.txt/sub.txt", "content")).rejects.toThrow("Parent is not a directory");
+    await expect(writeProjectFile(mockStore, "file.txt/sub.txt", "content")).rejects.toThrow("Parent directory does not exist");
   });
 
   it("requires file path", async () => {
@@ -543,21 +556,25 @@ describe("workspace operations", () => {
     it("task ID workspace resolves to task path", async () => {
       mockGetTask.mockResolvedValue({ id: "FN-456", worktree: undefined });
       mockGetRootDir.mockReturnValue("/project");
-      mockStat.mockResolvedValue({
-        isDirectory: () => true,
-        isFile: () => false,
-      });
+      // First call: stat on the directory
+      // Second call: stat on PROMPT.md entry
+      mockStat
+        .mockResolvedValueOnce({
+          isDirectory: () => true,
+          isFile: () => false,
+          size: 0,
+          mtime: new Date(),
+        })
+        .mockResolvedValueOnce({
+          isDirectory: () => false,
+          isFile: () => true,
+          size: 100,
+          mtime: new Date(),
+        });
 
       mockReaddir.mockResolvedValue([
         { name: "PROMPT.md", isDirectory: () => false, isFile: () => true },
       ]);
-
-      mockStat.mockResolvedValue({
-        isDirectory: () => false,
-        isFile: () => true,
-        size: 100,
-        mtime: new Date(),
-      });
 
       const result = await listWorkspaceFiles(mockStore, "FN-456");
 
@@ -599,7 +616,7 @@ describe("workspace operations", () => {
 
       expect(result.content).toBe("Task description");
       expect(mockReadFile).toHaveBeenCalledWith(
-        "/project/.fusion/tasks/KB-123/PROMPT.md",
+        "/project/.fusion/tasks/FN-123/PROMPT.md",
         "utf-8",
       );
     });
@@ -643,7 +660,7 @@ describe("workspace operations", () => {
 
       expect(result.success).toBe(true);
       expect(mockWriteFile).toHaveBeenCalledWith(
-        "/project/.fusion/tasks/KB-123/output.txt",
+        "/project/.fusion/tasks/FN-123/output.txt",
         "Task output",
         "utf-8",
       );
