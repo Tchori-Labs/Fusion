@@ -544,6 +544,94 @@ describe("Header", () => {
       expect(onSearchChange).toHaveBeenCalledWith("test");
     });
 
+    it("does not render project selector trigger on mobile", () => {
+      const projects = [
+        { id: "proj_1", name: "Project One", path: "/path/1", status: "active" as const, isolationMode: "in-process" as const, createdAt: "", updatedAt: "" },
+        { id: "proj_2", name: "Project Two", path: "/path/2", status: "active" as const, isolationMode: "in-process" as const, createdAt: "", updatedAt: "" },
+      ];
+      render(
+        <Header
+          projects={projects}
+          currentProject={projects[0]}
+          onSelectProject={vi.fn()}
+          onViewAllProjects={vi.fn()}
+        />
+      );
+      expect(screen.queryByTestId("project-selector-trigger")).toBeNull();
+    });
+
+    it("does not render back-to-projects button on mobile", () => {
+      const projects = [
+        { id: "proj_1", name: "Project One", path: "/path/1", status: "active" as const, isolationMode: "in-process" as const, createdAt: "", updatedAt: "" },
+        { id: "proj_2", name: "Project Two", path: "/path/2", status: "active" as const, isolationMode: "in-process" as const, createdAt: "", updatedAt: "" },
+      ];
+      render(
+        <Header
+          projects={projects}
+          currentProject={projects[0]}
+          onViewAllProjects={vi.fn()}
+        />
+      );
+      expect(screen.queryByTestId("back-to-projects-btn")).toBeNull();
+    });
+
+    it("shows switch project item in overflow menu on mobile when multiple projects", () => {
+      const projects = [
+        { id: "proj_1", name: "Project One", path: "/path/1", status: "active" as const, isolationMode: "in-process" as const, createdAt: "", updatedAt: "" },
+        { id: "proj_2", name: "Project Two", path: "/path/2", status: "active" as const, isolationMode: "in-process" as const, createdAt: "", updatedAt: "" },
+      ];
+      render(
+        <Header
+          projects={projects}
+          currentProject={projects[0]}
+          onSelectProject={vi.fn()}
+          onViewAllProjects={vi.fn()}
+          onOpenSettings={vi.fn()}
+        />
+      );
+      fireEvent.click(screen.getByTitle("More header actions"));
+      const btn = screen.getByTestId("overflow-project-selector-btn");
+      expect(btn).toBeDefined();
+      // Should show the current project name
+      expect(btn.textContent).toContain("Project One");
+    });
+
+    it("overflow project selector calls onViewAllProjects when clicked", () => {
+      const projects = [
+        { id: "proj_1", name: "Project One", path: "/path/1", status: "active" as const, isolationMode: "in-process" as const, createdAt: "", updatedAt: "" },
+        { id: "proj_2", name: "Project Two", path: "/path/2", status: "active" as const, isolationMode: "in-process" as const, createdAt: "", updatedAt: "" },
+      ];
+      const onViewAllProjects = vi.fn();
+      render(
+        <Header
+          projects={projects}
+          currentProject={projects[0]}
+          onSelectProject={vi.fn()}
+          onViewAllProjects={onViewAllProjects}
+          onOpenSettings={vi.fn()}
+        />
+      );
+      fireEvent.click(screen.getByTitle("More header actions"));
+      fireEvent.click(screen.getByTestId("overflow-project-selector-btn"));
+      expect(onViewAllProjects).toHaveBeenCalledOnce();
+    });
+
+    it("does not show switch project in overflow menu with single project", () => {
+      const projects = [
+        { id: "proj_1", name: "Project One", path: "/path/1", status: "active" as const, isolationMode: "in-process" as const, createdAt: "", updatedAt: "" },
+      ];
+      render(
+        <Header
+          projects={projects}
+          currentProject={projects[0]}
+          onViewAllProjects={vi.fn()}
+          onOpenSettings={vi.fn()}
+        />
+      );
+      fireEvent.click(screen.getByTitle("More header actions"));
+      expect(screen.queryByTestId("overflow-project-selector-btn")).toBeNull();
+    });
+
     it("shows agents button in overflow menu on mobile when onOpenAgents provided", () => {
       render(<Header onOpenSettings={vi.fn()} onOpenAgents={vi.fn()} />);
       fireEvent.click(screen.getByTitle("More header actions"));

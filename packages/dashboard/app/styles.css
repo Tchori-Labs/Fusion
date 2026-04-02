@@ -4439,6 +4439,12 @@ body {
     padding: 12px 12px;
   }
 
+  /* Hide project selector and back button on mobile (belt-and-suspenders with conditional rendering) */
+  .header-project-selector,
+  .header-back-button {
+    display: none;
+  }
+
   /* Mobile header: collapsible search and overflow menu */
   .mobile-search-trigger {
     display: flex;

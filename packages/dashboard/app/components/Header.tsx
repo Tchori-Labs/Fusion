@@ -171,8 +171,8 @@ export function Header({
         <img src="/logo.svg" alt="Fusion logo" className="header-logo" width={24} height={24} />
         <h1 className="logo">Fusion</h1>
 
-        {/* Project Selector - shown when 2+ projects, placed next to logo/title */}
-        {projects.length > 1 && (
+        {/* Project Selector - shown when 2+ projects on desktop only */}
+        {!isMobile && projects.length > 1 && (
           <div className="header-project-selector">
             <ProjectSelector
               projects={projects}
@@ -185,8 +185,8 @@ export function Header({
           </div>
         )}
         
-        {/* Back to All Projects button when viewing a specific project */}
-        {currentProject && onViewAllProjects && (
+        {/* Back to All Projects button when viewing a specific project (desktop only) */}
+        {!isMobile && currentProject && onViewAllProjects && (
           <button
             className="header-back-button"
             onClick={onViewAllProjects}
@@ -468,6 +468,18 @@ export function Header({
             role="menu"
             aria-label="Additional header actions"
           >
+            {/* Switch Project - in overflow on mobile */}
+            {projects.length > 1 && onViewAllProjects && (
+              <button
+                className="mobile-overflow-item"
+                onClick={() => handleOverflowAction(onViewAllProjects)}
+                role="menuitem"
+                data-testid="overflow-project-selector-btn"
+              >
+                <Folder size={16} />
+                <span>{currentProject ? currentProject.name : "Switch Project"}</span>
+              </button>
+            )}
             {/* Files - in overflow on mobile */}
             {onOpenFiles && (
               <button
