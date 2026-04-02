@@ -424,12 +424,23 @@ export class TaskExecutor {
         if (this.options.pool && settings.recycleWorktrees) {
           const pooled = this.options.pool.acquire();
           if (pooled) {
-            this.options.pool.prepareForTask(pooled, branchName, baseBranch ?? undefined);
-            worktreePath = pooled;
-            acquiredFromPool = true;
-            executorLog.log(`Acquired worktree from pool: ${pooled}`);
-            await this.store.updateTask(task.id, { worktree: worktreePath });
-            await this.store.logEntry(task.id, `Acquired worktree from pool: ${worktreePath}`);
+            try {
+              this.options.pool.prepareForTask(pooled, branchName, baseBranch ?? undefined);
+              worktreePath = pooled;
+              acquiredFromPool = true;
+              executorLog.log(`Acquired worktree from pool: ${pooled}`);
+              await this.store.updateTask(task.id, { worktree: worktreePath });
+              await this.store.logEntry(task.id, `Acquired worktree from pool: ${worktreePath}`);
+            } catch (poolErr: any) {
+              // Pool preparation failed — release the worktree back and fall through
+              // to fresh worktree creation
+              this.options.pool.release(pooled);
+              executorLog.log(`Pool prepareForTask failed, falling through to fresh worktree: ${poolErr.message}`);
+              await this.store.logEntry(
+                task.id,
+                `Pool worktree preparation failed (${poolErr.message}), creating fresh worktree`,
+              );
+            }
           }
         }
 

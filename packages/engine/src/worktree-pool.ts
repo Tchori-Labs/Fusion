@@ -127,10 +127,31 @@ export class WorktreePool {
 
     // Create or force-reset the branch from the start point (or main)
     const base = startPoint || "main";
-    execSync(`git checkout -B "${branchName}" ${base}`, {
-      cwd: worktreePath,
-      stdio: "pipe",
-    });
+    const checkoutCmd = `git checkout -B "${branchName}" ${base}`;
+    try {
+      execSync(checkoutCmd, {
+        cwd: worktreePath,
+        stdio: "pipe",
+      });
+    } catch (err: any) {
+      const stderr = err?.stderr?.toString() ?? err?.message ?? "";
+      const match = stderr.match(/already used by worktree at '([^']+)'/);
+      if (!match) {
+        throw err;
+      }
+
+      // The branch is checked out in a different worktree — detach it there,
+      // delete the stale branch, then retry.
+      const conflictingPath = match[1];
+      try {
+        execSync("git checkout --detach", { cwd: conflictingPath, stdio: "pipe" });
+      } catch {
+        // Conflicting worktree may no longer exist on disk — try pruning instead
+        execSync("git worktree prune", { cwd: worktreePath, stdio: "pipe" });
+      }
+      execSync(`git branch -D "${branchName}"`, { cwd: worktreePath, stdio: "pipe" });
+      execSync(checkoutCmd, { cwd: worktreePath, stdio: "pipe" });
+    }
   }
 }
 

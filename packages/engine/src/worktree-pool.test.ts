@@ -173,6 +173,106 @@ describe("WorktreePool", () => {
       expect(calls).toContain("git clean -fd");
       expect(calls).toContain('git checkout -B "fusion/fn-001" main');
     });
+
+    it("recovers from 'already used by worktree' by detaching conflicting worktree", () => {
+      let callCount = 0;
+      mockedExecSync.mockImplementation((cmd: any, opts: any) => {
+        const cmdStr = String(cmd);
+        if (cmdStr.includes("checkout -B")) {
+          callCount++;
+          if (callCount === 1) {
+            const err: any = new Error("branch conflict");
+            err.stderr = Buffer.from(
+              "fatal: 'fusion/fn-042' is already used by worktree at '/other/wt'"
+            );
+            throw err;
+          }
+          // Second call succeeds (retry)
+          return Buffer.from("");
+        }
+        if (cmdStr === "git checkout --detach") {
+          expect(opts.cwd).toBe("/other/wt"); // Must target the conflicting worktree
+          return Buffer.from("");
+        }
+        if (cmdStr.includes("branch -D")) {
+          expect(cmdStr).toContain("fusion/fn-042");
+          return Buffer.from("");
+        }
+        return Buffer.from("");
+      });
+
+      expect(() => pool.prepareForTask("/tmp/wt", "fusion/fn-042")).not.toThrow();
+
+      const calls = mockedExecSync.mock.calls.map((c) => [c[0], (c[1] as any)?.cwd]);
+      // Verify detach targeted the conflicting worktree, not the current one
+      const detachCall = calls.find(([cmd]) => cmd === "git checkout --detach");
+      expect(detachCall).toBeDefined();
+      expect(detachCall![1]).toBe("/other/wt");
+    });
+
+    it("falls back to git worktree prune when detach in conflicting path fails", () => {
+      let checkoutBCount = 0;
+      mockedExecSync.mockImplementation((cmd: any, opts: any) => {
+        const cmdStr = String(cmd);
+        if (cmdStr.includes("checkout -B")) {
+          checkoutBCount++;
+          if (checkoutBCount === 1) {
+            const err: any = new Error("branch conflict");
+            err.stderr = Buffer.from(
+              "fatal: 'fusion/fn-042' is already used by worktree at '/gone/wt'"
+            );
+            throw err;
+          }
+          return Buffer.from("");
+        }
+        if (cmdStr === "git checkout --detach") {
+          throw new Error("not a git repository"); // Conflicting path no longer exists
+        }
+        return Buffer.from("");
+      });
+
+      expect(() => pool.prepareForTask("/tmp/wt", "fusion/fn-042")).not.toThrow();
+
+      const cmds = mockedExecSync.mock.calls.map((c) => c[0]);
+      expect(cmds).toContain("git worktree prune");
+    });
+
+    it("re-throws non-conflict errors from checkout -B unchanged", () => {
+      mockedExecSync.mockImplementation((cmd: any) => {
+        if (String(cmd).includes("checkout -B")) {
+          const err: any = new Error("some other git error");
+          err.stderr = Buffer.from("fatal: some other git error");
+          throw err;
+        }
+        return Buffer.from("");
+      });
+
+      expect(() => pool.prepareForTask("/tmp/wt", "fusion/fn-042")).toThrow(
+        "some other git error"
+      );
+    });
+
+    it("re-throws when recovery itself fails", () => {
+      let checkoutBCount = 0;
+      mockedExecSync.mockImplementation((cmd: any) => {
+        const cmdStr = String(cmd);
+        if (cmdStr.includes("checkout -B")) {
+          checkoutBCount++;
+          if (checkoutBCount === 1) {
+            const err: any = new Error("branch conflict");
+            err.stderr = Buffer.from(
+              "fatal: 'fusion/fn-042' is already used by worktree at '/other/wt'"
+            );
+            throw err;
+          }
+          // Retry also fails
+          throw new Error("still broken");
+        }
+        return Buffer.from("");
+      });
+
+      expect(() => pool.prepareForTask("/tmp/wt", "fusion/fn-042")).toThrow("still broken");
+    });
   });
 
   describe("rehydrate", () => {

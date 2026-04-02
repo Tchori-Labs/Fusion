@@ -1348,6 +1348,44 @@ describe("TaskExecutor worktree pool integration", () => {
     // Pool should still have the entry (not acquired)
     expect(pool.size).toBe(1);
   });
+
+  it("falls through to fresh worktree when pool prepareForTask throws", async () => {
+    const pool = new WorktreePool();
+    pool.release("/tmp/test/.worktrees/bad-wt");
+    // Make prepareForTask throw
+    vi.spyOn(pool, "prepareForTask").mockImplementation(() => {
+      throw new Error("branch conflict unrecoverable");
+    });
+    const releaseSpy = vi.spyOn(pool, "release");
+
+    const store = createMockStore();
+    store.getSettings.mockResolvedValue({
+      maxConcurrent: 2,
+      maxWorktrees: 4,
+      pollIntervalMs: 15000,
+      groupOverlappingFiles: false,
+      autoMerge: false,
+      recycleWorktrees: true,
+    });
+
+    const executor = new TaskExecutor(store, "/tmp/test", { pool });
+    await executor.execute(makeTask());
+
+    // Should have released the bad worktree back to pool
+    expect(releaseSpy).toHaveBeenCalledWith("/tmp/test/.worktrees/bad-wt");
+
+    // Should have fallen through to fresh worktree creation
+    const worktreeAddCalls = mockedExecSync.mock.calls.filter(
+      (c) => typeof c[0] === "string" && (c[0] as string).includes("worktree add"),
+    );
+    expect(worktreeAddCalls.length).toBeGreaterThan(0);
+
+    // Should log the pool failure
+    expect(store.logEntry).toHaveBeenCalledWith(
+      "FN-020",
+      expect.stringContaining("Pool worktree preparation failed"),
+    );
+  });
 });
 
 describe("WorktreePool capacity", () => {
