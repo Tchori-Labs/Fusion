@@ -16,6 +16,10 @@ export interface CustomModelDropdownProps {
   favoriteProviders?: string[];
   /** Called when user toggles a provider's favorite status */
   onToggleFavorite?: (provider: string) => void;
+  /** List of favorited model identifiers in format "{provider}/{modelId}" */
+  favoriteModels?: string[];
+  /** Called when user toggles a model's favorite status */
+  onToggleModelFavorite?: (modelId: string) => void;
 }
 
 interface DropdownPosition {
@@ -47,6 +51,8 @@ export function CustomModelDropdown({
   label,
   favoriteProviders = [],
   onToggleFavorite,
+  favoriteModels = [],
+  onToggleModelFavorite,
 }: CustomModelDropdownProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [localFilter, setLocalFilter] = useState("");
@@ -71,7 +77,28 @@ export function CustomModelDropdown({
     }, {});
   }, [filteredModels]);
 
+  // Build favorited model entries - models that are in the favoriteModels list and in filteredModels
+  const favoritedModelEntries = useMemo(() => {
+    const result: Array<{ model: ModelInfo; fullId: string }> = [];
+    for (const fullId of favoriteModels) {
+      const slashIdx = fullId.indexOf("/");
+      if (slashIdx === -1) continue;
+      const provider = fullId.slice(0, slashIdx);
+      const modelId = fullId.slice(slashIdx + 1);
+      const model = filteredModels.find((m) => m.provider === provider && m.id === modelId);
+      if (model) {
+        result.push({ model, fullId });
+      }
+    }
+    return result;
+  }, [favoriteModels, filteredModels]);
+
   // Sort providers: favorites first (in order), then alphabetically
+  // Exclude providers that are already favorited as models (they appear at top as pinned rows)
+  const favoritedProviderSet = new Set(favoriteModels.map((fullId) => {
+    const idx = fullId.indexOf("/");
+    return idx !== -1 ? fullId.slice(0, idx) : fullId;
+  }));
   const sortedProviderEntries = useMemo(() => {
     const entries = Object.entries(modelsByProvider);
     const favoritesSet = new Set(favoriteProviders);
@@ -103,10 +130,21 @@ export function CustomModelDropdown({
   }, [value]);
 
   // Build list of all selectable options (for keyboard navigation)
+  // Includes favorited models first (as pinned rows), then provider groups
   const optionsList = useMemo(() => {
-    const options: Array<{ type: "default" | "provider" | "model"; value: string; label: string; provider?: string }> = [
+    const options: Array<{ type: "default" | "provider" | "model" | "favorite"; value: string; label: string; provider?: string }> = [
       { type: "default", value: "", label: "Use default" },
     ];
+
+    // Add favorited models as pinned rows first
+    for (const { model, fullId } of favoritedModelEntries) {
+      options.push({
+        type: "favorite",
+        value: fullId,
+        label: model.name,
+        provider: model.provider,
+      });
+    }
 
     sortedProviderEntries.forEach(([provider, providerModels]) => {
       options.push({ type: "provider", value: `__group_${provider}`, label: provider, provider });
@@ -121,7 +159,7 @@ export function CustomModelDropdown({
     });
 
     return options;
-  }, [sortedProviderEntries]);
+  }, [favoritedModelEntries, sortedProviderEntries]);
 
   // Get current selection display text
   const selectedDisplayText = useMemo(() => {
@@ -249,7 +287,7 @@ export function CustomModelDropdown({
           e.preventDefault();
           if (isOpen) {
             const option = optionsList[highlightedIndex];
-            if (option && option.type !== "provider") {
+            if (option && option.type !== "provider" && option.type !== "favorite") {
               onChange(option.value);
               setIsOpen(false);
               setLocalFilter("");
@@ -358,6 +396,48 @@ export function CustomModelDropdown({
           <span className="model-combobox-option-text model-combobox-option-text--default">Use default</span>
         </div>
 
+        {/* Favorited models as pinned rows */}
+        {favoritedModelEntries.length > 0 && (
+          <>
+            <div className="model-combobox-divider" />
+            {favoritedModelEntries.map(({ model, fullId }, idx) => {
+              const optionIndex = idx + 1; // +1 for "Use default" at index 0
+              const isHighlighted = highlightedIndex === optionIndex;
+              const isSelected = value === fullId;
+              return (
+                <div
+                  key={fullId}
+                  data-index={optionIndex}
+                  className={`model-combobox-option model-combobox-option--favorite ${isHighlighted ? "model-combobox-option--highlighted" : ""} ${isSelected ? "model-combobox-option--selected" : ""}`}
+                  onClick={() => handleSelect(fullId)}
+                  onMouseEnter={() => setHighlightedIndex(optionIndex)}
+                  role="option"
+                  aria-selected={isSelected}
+                >
+                  <ProviderIcon provider={model.provider} size="sm" />
+                  <span className="model-combobox-option-text">{model.name}</span>
+                  <span className="model-combobox-option-id">{model.id}</span>
+                  {onToggleModelFavorite && (
+                    <button
+                      type="button"
+                      className="model-combobox-option-favorite model-combobox-option-favorite--active"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onToggleModelFavorite(fullId);
+                      }}
+                      title="Remove from favorites"
+                      aria-label={`Remove ${model.name} from favorites`}
+                    >
+                      ★
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+            <div className="model-combobox-divider" />
+          </>
+        )}
+
         {sortedProviderEntries.map(([provider, providerModels]) => {
           const groupStartIndex = optionsList.findIndex((opt) => opt.value === `__group_${provider}`);
           const isFavorite = favoriteProviders.includes(provider);
@@ -387,6 +467,7 @@ export function CustomModelDropdown({
                 const optionIndex = optionsList.findIndex((opt) => opt.value === optionValue);
                 const isHighlighted = highlightedIndex === optionIndex;
                 const isSelected = value === optionValue;
+                const isFavorited = favoriteModels.includes(optionValue);
 
                 return (
                   <div
@@ -400,6 +481,20 @@ export function CustomModelDropdown({
                   >
                     <span className="model-combobox-option-text">{m.name}</span>
                     <span className="model-combobox-option-id">{m.id}</span>
+                    {onToggleModelFavorite && (
+                      <button
+                        type="button"
+                        className={`model-combobox-option-favorite ${isFavorited ? "model-combobox-option-favorite--active" : ""}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onToggleModelFavorite(optionValue);
+                        }}
+                        title={isFavorited ? "Remove from favorites" : "Add to favorites"}
+                        aria-label={isFavorited ? `Remove ${m.name} from favorites` : `Add ${m.name} to favorites`}
+                      >
+                        {isFavorited ? "★" : "☆"}
+                      </button>
+                    )}
                   </div>
                 );
               })}
