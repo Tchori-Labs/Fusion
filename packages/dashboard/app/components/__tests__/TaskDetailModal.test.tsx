@@ -574,8 +574,8 @@ describe("TaskDetailModal", () => {
       />,
     );
 
-    // Click on Activity tab to show activity list
-    fireEvent.click(screen.getByText("Activity"));
+    // Click Logs tab — Activity is the default subview
+    fireEvent.click(screen.getByText("Logs"));
 
     const activityList = container.querySelector(".detail-activity-list");
     expect(activityList).toBeTruthy();
@@ -657,17 +657,27 @@ describe("TaskDetailModal", () => {
       );
 
       expect(screen.getByText("Definition")).toBeTruthy();
-      expect(screen.getByText("Activity")).toBeTruthy();
-      expect(screen.getByText("Agent Log")).toBeTruthy();
+      expect(screen.getByText("Logs")).toBeTruthy();
+      // Activity and Agent Log are subviews inside the Logs tab, not top-level tabs
+      // They should NOT be visible on the Definition tab
+      expect(screen.queryByText("Activity")).toBeNull();
+      expect(screen.queryByText("Agent Log")).toBeNull();
       // Definition content should be visible
       expect(container.querySelector(".markdown-body")).toBeTruthy();
       // Activity section should NOT be visible initially
       expect(container.querySelector(".detail-activity")).toBeNull();
       // Agent log viewer should not be visible
       expect(container.querySelector("[data-testid='agent-log-viewer']")).toBeNull();
+
+      // After clicking Logs tab, the subview toggle buttons should appear
+      fireEvent.click(screen.getByText("Logs"));
+      const logSubviewToggle = container.querySelector(".log-subview-toggle");
+      expect(logSubviewToggle).toBeTruthy();
+      expect(logSubviewToggle!.textContent).toContain("Activity");
+      expect(logSubviewToggle!.textContent).toContain("Agent Log");
     });
 
-    it("switches to Activity tab and shows activity feed", () => {
+    it("switches to Activity subview via Logs tab and shows activity feed", () => {
       const { container } = render(
         <TaskDetailModal
           task={makeTask({
@@ -685,8 +695,8 @@ describe("TaskDetailModal", () => {
         />,
       );
 
-      // Click Activity tab
-      fireEvent.click(screen.getByText("Activity"));
+      // Click Logs tab — Activity is the default subview
+      fireEvent.click(screen.getByText("Logs"));
 
       // Activity section should be visible
       expect(container.querySelector(".detail-activity")).toBeTruthy();
@@ -696,7 +706,7 @@ describe("TaskDetailModal", () => {
       expect(container.querySelector(".markdown-body")).toBeNull();
     });
 
-    it("activity tab renders log entries correctly", () => {
+    it("Activity subview renders log entries correctly", () => {
       const { container } = render(
         <TaskDetailModal
           task={makeTask({
@@ -715,8 +725,8 @@ describe("TaskDetailModal", () => {
         />,
       );
 
-      // Click Activity tab
-      fireEvent.click(screen.getByText("Activity"));
+      // Click Logs tab — Activity is the default subview
+      fireEvent.click(screen.getByText("Logs"));
 
       const activityList = container.querySelector(".detail-activity-list");
       expect(activityList).toBeTruthy();
@@ -732,7 +742,7 @@ describe("TaskDetailModal", () => {
       expect(logEntries[2].textContent).toContain("Created task");
     });
 
-    it("activity tab shows empty state when no logs", () => {
+    it("Activity subview shows empty state when no logs", () => {
       const { container } = render(
         <TaskDetailModal
           task={makeTask({ log: [] })}
@@ -745,8 +755,8 @@ describe("TaskDetailModal", () => {
         />,
       );
 
-      // Click Activity tab
-      fireEvent.click(screen.getByText("Activity"));
+      // Click Logs tab — Activity is the default subview
+      fireEvent.click(screen.getByText("Logs"));
 
       // Activity section should be visible
       expect(container.querySelector(".detail-activity")).toBeTruthy();
@@ -757,7 +767,7 @@ describe("TaskDetailModal", () => {
       expect(container.querySelector(".detail-activity-list")).toBeNull();
     });
 
-    it("can switch between all tabs", () => {
+    it("can switch between all tabs and Logs subviews", () => {
       const { container } = render(
         <TaskDetailModal
           task={makeTask({
@@ -777,20 +787,25 @@ describe("TaskDetailModal", () => {
       expect(container.querySelector(".markdown-body")).toBeTruthy();
       expect(container.querySelector(".detail-activity")).toBeNull();
 
-      // Switch to Activity tab
-      fireEvent.click(screen.getByText("Activity"));
+      // Switch to Logs tab (Activity subview is default)
+      fireEvent.click(screen.getByText("Logs"));
       expect(container.querySelector(".detail-activity")).toBeTruthy();
       expect(container.querySelector(".markdown-body")).toBeNull();
 
-      // Switch to Agent Log tab
+      // Switch to Agent Log subview within Logs tab
       fireEvent.click(screen.getByText("Agent Log"));
       expect(container.querySelector("[data-testid='agent-log-viewer']")).toBeTruthy();
       expect(container.querySelector(".detail-activity")).toBeNull();
 
+      // Switch back to Activity subview within Logs tab
+      fireEvent.click(screen.getByText("Activity"));
+      expect(container.querySelector(".detail-activity")).toBeTruthy();
+      expect(container.querySelector("[data-testid='agent-log-viewer']")).toBeNull();
+
       // Switch to Comments tab
       fireEvent.click(screen.getByText("Comments"));
       expect(screen.getByPlaceholderText(/Add a comment/)).toBeTruthy();
-      expect(container.querySelector("[data-testid='agent-log-viewer']")).toBeNull();
+      expect(container.querySelector(".detail-activity")).toBeNull();
 
       // Switch back to Definition tab
       fireEvent.click(screen.getByText("Definition"));
@@ -799,7 +814,7 @@ describe("TaskDetailModal", () => {
 
     });
 
-    it("switches to Agent Log tab and back", async () => {
+    it("switches to Agent Log subview via Logs tab and back", async () => {
       const { useAgentLogs } = await import("../../hooks/useAgentLogs");
       const mockUseAgentLogs = vi.mocked(useAgentLogs);
 
@@ -815,7 +830,8 @@ describe("TaskDetailModal", () => {
         />,
       );
 
-      // Click Agent Log tab
+      // Click Logs tab, then Agent Log subview
+      fireEvent.click(screen.getByText("Logs"));
       fireEvent.click(screen.getByText("Agent Log"));
 
       // Agent log viewer should appear
@@ -831,7 +847,7 @@ describe("TaskDetailModal", () => {
       expect(container.querySelector("[data-testid='agent-log-viewer']")).toBeNull();
     });
 
-    it("passes enabled=true to useAgentLogs only when Agent Log tab is active", async () => {
+    it("passes enabled=true to useAgentLogs only when Logs → Agent Log subview is active", async () => {
       const { useAgentLogs } = await import("../../hooks/useAgentLogs");
       const mockUseAgentLogs = vi.mocked(useAgentLogs);
       mockUseAgentLogs.mockClear();
@@ -852,11 +868,15 @@ describe("TaskDetailModal", () => {
       const initialCall = mockUseAgentLogs.mock.calls[mockUseAgentLogs.mock.calls.length - 1];
       expect(initialCall[1]).toBe(false);
 
-      // Switch to Agent Log tab
-      fireEvent.click(screen.getByText("Agent Log"));
+      // Switch to Logs tab (Activity subview is default) — enabled should still be false
+      fireEvent.click(screen.getByText("Logs"));
+      const afterLogsClick = mockUseAgentLogs.mock.calls[mockUseAgentLogs.mock.calls.length - 1];
+      expect(afterLogsClick[1]).toBe(false);
 
-      const afterSwitch = mockUseAgentLogs.mock.calls[mockUseAgentLogs.mock.calls.length - 1];
-      expect(afterSwitch[1]).toBe(true);
+      // Switch to Agent Log subview — enabled should become true
+      fireEvent.click(screen.getByText("Agent Log"));
+      const afterAgentLog = mockUseAgentLogs.mock.calls[mockUseAgentLogs.mock.calls.length - 1];
+      expect(afterAgentLog[1]).toBe(true);
     });
 
     it("switches to Comments tab", async () => {
@@ -883,7 +903,7 @@ describe("TaskDetailModal", () => {
       expect(container.querySelector(".markdown-body")).toBeNull();
     });
 
-    it("shows Comments tab in tab list", async () => {
+    it("shows correct top-level tabs including Logs", async () => {
       render(
         <TaskDetailModal
           task={makeTask()}
@@ -896,17 +916,23 @@ describe("TaskDetailModal", () => {
         />,
       );
 
+      // For an in-progress task, the top-level tabs are:
+      // Definition, Logs, Changes, Comments, Model (no Activity/Agent Log as top-level)
+      const tabTexts = ["Definition", "Logs", "Changes", "Comments", "Model"];
       const tabs = screen.getAllByRole("button").filter((b) =>
-        ["Definition", "Activity", "Agent Log", "Comments"].includes(b.textContent || "")
+        tabTexts.includes(b.textContent || "")
       );
-      expect(tabs.length).toBe(4);
-      expect(tabs[1].textContent).toBe("Activity");
+      expect(tabs.length).toBe(5);
+      expect(tabs[0].textContent).toBe("Definition");
+      expect(tabs[1].textContent).toBe("Logs");
+      expect(tabs[2].textContent).toBe("Changes");
       expect(tabs[3].textContent).toBe("Comments");
+      expect(tabs[4].textContent).toBe("Model");
     });
   });
 
   describe("Agent Log full-height layout", () => {
-    it("applies detail-body--agent-log class when Agent Log tab is active", () => {
+    it("applies detail-body--agent-log class when Logs → Agent Log subview is active", () => {
       const { container } = render(
         <TaskDetailModal
           task={makeTask({ prompt: "# Hello\n\nContent" })}
@@ -922,7 +948,10 @@ describe("TaskDetailModal", () => {
       // Initially, detail-body should NOT have the agent-log modifier
       expect(container.querySelector(".detail-body--agent-log")).toBeNull();
 
-      // Switch to Agent Log tab
+      // Switch to Logs tab, then Agent Log subview
+      fireEvent.click(screen.getByText("Logs"));
+      expect(container.querySelector(".detail-body--agent-log")).toBeNull(); // Activity subview default
+
       fireEvent.click(screen.getByText("Agent Log"));
 
       // detail-body should now have the agent-log modifier class
@@ -948,7 +977,8 @@ describe("TaskDetailModal", () => {
         />,
       );
 
-      // Switch to Agent Log tab
+      // Switch to Logs tab, then Agent Log subview
+      fireEvent.click(screen.getByText("Logs"));
       fireEvent.click(screen.getByText("Agent Log"));
 
       // The section wrapping AgentLogViewer should have the full-height class
@@ -970,7 +1000,8 @@ describe("TaskDetailModal", () => {
         />,
       );
 
-      // Switch to Agent Log tab first
+      // Switch to Logs tab, then Agent Log subview first
+      fireEvent.click(screen.getByText("Logs"));
       fireEvent.click(screen.getByText("Agent Log"));
       expect(container.querySelector(".detail-body--agent-log")).toBeTruthy();
 
@@ -1054,6 +1085,7 @@ describe("TaskDetailModal", () => {
         defaultModelId: "claude-sonnet-4-5",
       });
 
+      fireEvent.click(screen.getByText("Logs"));
       fireEvent.click(screen.getByText("Agent Log"));
 
       await waitFor(() => {
@@ -1075,6 +1107,7 @@ describe("TaskDetailModal", () => {
         validatorModelId: "gpt-4o",
       });
 
+      fireEvent.click(screen.getByText("Logs"));
       fireEvent.click(screen.getByText("Agent Log"));
 
       await waitFor(() => {
@@ -1097,6 +1130,7 @@ describe("TaskDetailModal", () => {
         // No validatorProvider or validatorModelId
       });
 
+      fireEvent.click(screen.getByText("Logs"));
       fireEvent.click(screen.getByText("Agent Log"));
 
       await waitFor(() => {
@@ -1106,10 +1140,10 @@ describe("TaskDetailModal", () => {
         expect(header!.textContent).toContain("anthropic/claude-sonnet-4-5");
       });
 
-      // Count occurrences - should appear twice (once for executor, once for validator)
+      // Count occurrences - should appear three times (once for executor, once for validator, once for planning)
       const header = container.querySelector("[data-testid='agent-log-model-header']")!;
       const matches = header.textContent!.match(/anthropic\/claude-sonnet-4-5/g);
-      expect(matches).toHaveLength(2);
+      expect(matches).toHaveLength(3);
     });
 
     it("shows task executor override even when settings provide a default", async () => {
@@ -1118,6 +1152,7 @@ describe("TaskDetailModal", () => {
         { defaultProvider: "anthropic", defaultModelId: "claude-sonnet-4-5" },
       );
 
+      fireEvent.click(screen.getByText("Logs"));
       fireEvent.click(screen.getByText("Agent Log"));
 
       await waitFor(() => {
@@ -1140,6 +1175,7 @@ describe("TaskDetailModal", () => {
         { defaultProvider: "anthropic", defaultModelId: "claude-sonnet-4-5", validatorProvider: "openai", validatorModelId: "gpt-4o" },
       );
 
+      fireEvent.click(screen.getByText("Logs"));
       fireEvent.click(screen.getByText("Agent Log"));
 
       await waitFor(() => {
@@ -1161,6 +1197,7 @@ describe("TaskDetailModal", () => {
         // No defaultProvider/defaultModelId
       });
 
+      fireEvent.click(screen.getByText("Logs"));
       fireEvent.click(screen.getByText("Agent Log"));
 
       await waitFor(() => {
@@ -1170,9 +1207,9 @@ describe("TaskDetailModal", () => {
 
       const header = container.querySelector("[data-testid='agent-log-model-header']")!;
       expect(header.textContent).toContain("Using default");
-      // Should show "Using default" for both executor and validator
+      // Should show "Using default" for executor, validator, and planning
       const defaultBadges = header.querySelectorAll(".model-badge-default");
-      expect(defaultBadges).toHaveLength(2);
+      expect(defaultBadges).toHaveLength(3);
     });
 
     it("shows 'Using default' for both when settings fetch fails", async () => {
@@ -1198,6 +1235,7 @@ describe("TaskDetailModal", () => {
         />,
       );
 
+      fireEvent.click(screen.getByText("Logs"));
       fireEvent.click(screen.getByText("Agent Log"));
 
       // Wait for the failed fetch to settle
@@ -1209,7 +1247,7 @@ describe("TaskDetailModal", () => {
       const header = container.querySelector("[data-testid='agent-log-model-header']")!;
       expect(header.textContent).toContain("Using default");
       const defaultBadges = header.querySelectorAll(".model-badge-default");
-      expect(defaultBadges).toHaveLength(2);
+      expect(defaultBadges).toHaveLength(3);
     });
 
     it("shows partial override: task executor with settings-based validator", async () => {
@@ -1227,6 +1265,7 @@ describe("TaskDetailModal", () => {
         },
       );
 
+      fireEvent.click(screen.getByText("Logs"));
       fireEvent.click(screen.getByText("Agent Log"));
 
       await waitFor(() => {
@@ -1626,7 +1665,8 @@ describe("TaskDetailModal", () => {
       // Should be visible in Definition tab
       expect(container.querySelector(".detail-step-progress")).toBeTruthy();
 
-      // Switch to Agent Log tab
+      // Switch to Logs tab, then Agent Log subview
+      fireEvent.click(screen.getByText("Logs"));
       fireEvent.click(screen.getByText("Agent Log"));
 
       // Should not be visible in Agent Log tab
@@ -1729,7 +1769,7 @@ describe("TaskDetailModal", () => {
       );
 
       const tabs = container.querySelectorAll(".detail-tab");
-      expect(tabs.length).toBe(6); // Definition, Activity, Agent Log, Changes, Comments, Model
+      expect(tabs.length).toBe(5); // Definition, Logs, Changes, Comments, Model
       // Tabs should use class-based styling, not inline styles
       expect(tabs[0].classList.contains("detail-tab")).toBe(true);
       expect(tabs[0].classList.contains("detail-tab-active")).toBe(true); // Definition is default active
@@ -1737,7 +1777,6 @@ describe("TaskDetailModal", () => {
       expect(tabs[2].classList.contains("detail-tab-active")).toBe(false);
       expect(tabs[3].classList.contains("detail-tab-active")).toBe(false);
       expect(tabs[4].classList.contains("detail-tab-active")).toBe(false);
-      expect(tabs[5].classList.contains("detail-tab-active")).toBe(false);
       // Verify no inline padding/fontSize (responsive CSS controls this)
       expect((tabs[0] as HTMLElement).style.padding).toBe("");
       expect((tabs[0] as HTMLElement).style.fontSize).toBe("");
@@ -2229,13 +2268,12 @@ describe("TaskDetailModal", () => {
       );
 
       const tabs = container.querySelectorAll(".detail-tab");
-      expect(tabs.length).toBe(6); // Definition, Activity, Agent Log, Changes, Comments, Model (in-progress shows Changes)
+      expect(tabs.length).toBe(5); // Definition, Logs, Changes, Comments, Model ( for in-progress tasks
       expect(tabs[0].textContent).toBe("Definition");
-      expect(tabs[1].textContent).toBe("Activity");
-      expect(tabs[2].textContent).toBe("Agent Log");
-      expect(tabs[3].textContent).toBe("Changes");
-      expect(tabs[4].textContent).toBe("Comments");
-      expect(tabs[5].textContent).toBe("Model");
+      expect(tabs[1].textContent).toBe("Logs");
+      expect(tabs[2].textContent).toBe("Changes");
+      expect(tabs[3].textContent).toBe("Comments");
+      expect(tabs[4].textContent).toBe("Model");
     });
 
     it("shows empty state and Edit button when no prompt", () => {
