@@ -149,7 +149,8 @@ export function TaskDetailModal({
   addToast,
   githubTokenConfigured,
 }: TaskDetailModalProps) {
-  const [activeTab, setActiveTab] = useState<"definition" | "activity" | "agent-log" | "changes" | "commits" | "comments" | "model">("definition");
+  const [activeTab, setActiveTab] = useState<"definition" | "logs" | "changes" | "commits" | "comments" | "model">("definition");
+  const [logSubview, setLogSubview] = useState<"activity" | "agent-log">("activity");
   const [attachments, setAttachments] = useState<TaskAttachment[]>(task.attachments || []);
   const [uploading, setUploading] = useState(false);
   const [dependencies, setDependencies] = useState<string[]>(task.dependencies || []);
@@ -314,7 +315,7 @@ export function TaskDetailModal({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { entries: agentLogEntries, loading: agentLogLoading } = useAgentLogs(
     task.id,
-    activeTab === "agent-log",
+    activeTab === "logs" && logSubview === "agent-log",
     projectId,
   );
   useEffect(() => {
@@ -677,7 +678,7 @@ export function TaskDetailModal({
             </button>
           </div>
         </div>
-        <div className={`detail-body${activeTab === "agent-log" && !isEditing ? " detail-body--agent-log" : ""}`}>
+        <div className={`detail-body${activeTab === "logs" && logSubview === "agent-log" && !isEditing ? " detail-body--agent-log" : ""}`}>
           {isEditing ? (
             <div className="modal-edit-form">
               <TaskForm
@@ -735,16 +736,10 @@ export function TaskDetailModal({
               Definition
             </button>
             <button
-              className={`detail-tab${activeTab === "activity" ? " detail-tab-active" : ""}`}
-              onClick={() => setActiveTab("activity")}
+              className={`detail-tab${activeTab === "logs" ? " detail-tab-active" : ""}`}
+              onClick={() => setActiveTab("logs")}
             >
-              Activity
-            </button>
-            <button
-              className={`detail-tab${activeTab === "agent-log" ? " detail-tab-active" : ""}`}
-              onClick={() => setActiveTab("agent-log")}
-            >
-              Agent Log
+              Logs
             </button>
             {(task.column === "in-progress" || task.column === "in-review" || task.column === "done") && (
               <button
@@ -779,14 +774,53 @@ export function TaskDetailModal({
             <div className="detail-section">
               <ModelSelectorTab task={task} addToast={addToast} />
             </div>
-          ) : activeTab === "agent-log" ? (
-            <div className="detail-section detail-section--agent-log">
-              <AgentLogViewer
-                entries={agentLogEntries}
-                loading={agentLogLoading}
-                executorModel={resolveEffectiveExecutor(task, settings)}
-                validatorModel={resolveEffectiveValidator(task, settings)}
-              />
+          ) : activeTab === "logs" ? (
+            <div className={`detail-section${logSubview === "agent-log" ? " detail-section--agent-log" : ""}`}>
+              <div className="log-subview-toggle">
+                <button
+                  className={`log-subview-btn${logSubview === "activity" ? " log-subview-btn-active" : ""}`}
+                  onClick={() => setLogSubview("activity")}
+                >
+                  Activity
+                </button>
+                <button
+                  className={`log-subview-btn${logSubview === "agent-log" ? " log-subview-btn-active" : ""}`}
+                  onClick={() => setLogSubview("agent-log")}
+                >
+                  Agent Log
+                </button>
+              </div>
+              {logSubview === "agent-log" ? (
+                <AgentLogViewer
+                  entries={agentLogEntries}
+                  loading={agentLogLoading}
+                  executorModel={resolveEffectiveExecutor(task, settings)}
+                  validatorModel={resolveEffectiveValidator(task, settings)}
+                />
+              ) : (
+                <div className="detail-activity">
+                  <h4>Activity</h4>
+                  {task.log && task.log.length > 0 ? (
+                    <div className="detail-activity-list">
+                      {[...task.log].reverse().map((entry, i) => (
+                        <div key={i} className="detail-log-entry">
+                          <div className="detail-log-header">
+                            <span className="detail-log-timestamp">
+                              {formatTimestamp(entry.timestamp)}
+                            </span>
+                            <span className="detail-log-action">{entry.action}</span>
+                          </div>
+                          {entry.outcome && (
+                            <div className="detail-log-outcome">{entry.outcome}</div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="detail-log-empty">(no activity)</div>
+                  )}
+                </div>
+              )}
             </div>
           ) : activeTab === "changes" ? (
             <TaskChangesTab taskId={task.id} worktree={task.worktree} projectId={projectId} column={task.column} mergeDetails={task.mergeDetails} />
@@ -794,29 +828,6 @@ export function TaskDetailModal({
             <CommitDiffTab commitSha={task.mergeDetails?.commitSha ?? ""} mergeDetails={task.mergeDetails} />
           ) : activeTab === "comments" ? (
             <TaskComments task={task} addToast={addToast} projectId={projectId} />
-          ) : activeTab === "activity" ? (
-            <div className="detail-section detail-activity">
-              <h4>Activity</h4>
-              {task.log && task.log.length > 0 ? (
-                <div className="detail-activity-list">
-                  {[...task.log].reverse().map((entry, i) => (
-                    <div key={i} className="detail-log-entry">
-                      <div className="detail-log-header">
-                        <span className="detail-log-timestamp">
-                          {formatTimestamp(entry.timestamp)}
-                        </span>
-                        <span className="detail-log-action">{entry.action}</span>
-                      </div>
-                      {entry.outcome && (
-                        <div className="detail-log-outcome">{entry.outcome}</div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="detail-log-empty">(no activity)</div>
-              )}
-            </div>
           ) : (
           <>
           {/* Summary section - only for done tasks with summary */}
