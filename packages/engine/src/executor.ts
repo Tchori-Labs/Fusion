@@ -483,10 +483,13 @@ export class TaskExecutor {
 
         // Fall through to fresh worktree creation if pool had nothing
         if (!acquiredFromPool) {
-          worktreePath = await this.createWorktree(branchName, worktreePath, task.id, baseBranch ?? undefined);
-          await this.store.updateTask(task.id, { worktree: worktreePath, branch: branchName });
-
-          if (baseBranch) {
+          const created = await this.createWorktree(branchName, worktreePath, task.id, baseBranch ?? undefined);
+          worktreePath = created.path;
+          await this.store.updateTask(task.id, { worktree: created.path, branch: created.branch });
+          if (created.branch !== branchName) {
+            executorLog.log(`Branch conflict resolved: using ${created.branch} instead of ${branchName}`);
+            await this.store.logEntry(task.id, `Worktree created at ${worktreePath} (branch conflict: using ${created.branch})`);
+          } else if (baseBranch) {
             await this.store.logEntry(task.id, `Worktree created at ${worktreePath} (based on ${baseBranch})`);
           } else {
             await this.store.logEntry(task.id, `Worktree created at ${worktreePath}`);
@@ -532,7 +535,9 @@ export class TaskExecutor {
         executorLog.log(`Reusing existing worktree: ${worktreePath}`);
       } else {
         // Directory exists at generated path but task has no worktree — create via normal flow
-        worktreePath = await this.createWorktree(branchName, worktreePath, task.id);
+        const created = await this.createWorktree(branchName, worktreePath, task.id);
+        worktreePath = created.path;
+        await this.store.updateTask(task.id, { worktree: created.path, branch: created.branch });
       }
 
       // Capture the base commit SHA for diff computation whenever a task
@@ -898,9 +903,18 @@ export class TaskExecutor {
         // Task finished successfully (just already moved), so call onComplete
         this.options.onComplete?.(task);
       } else if (this.pausedAborted.has(task.id)) {
-        // Task was paused mid-execution — move to todo, don't mark as failed
+        // Task was paused mid-execution — clean up worktree and move to todo
         executorLog.log(`${task.id} paused — moving to todo`);
         this.pausedAborted.delete(task.id);
+        if (worktreePath && existsSync(worktreePath)) {
+          try {
+            execSync(`git worktree remove "${worktreePath}" --force`, { cwd: this.rootDir, stdio: "pipe" });
+            executorLog.log(`Removed old worktree for paused task: ${worktreePath}`);
+          } catch (cleanupErr: any) {
+            executorLog.warn(`Failed to remove old worktree ${worktreePath}: ${cleanupErr.message}`);
+          }
+        }
+        await this.store.updateTask(task.id, { worktree: undefined, branch: undefined });
         await this.store.logEntry(task.id, "Execution paused — agent terminated, moved to todo");
         await this.store.moveTask(task.id, "todo");
       } else if (this.stuckAborted.has(task.id)) {
@@ -972,9 +986,20 @@ export class TaskExecutor {
               executorLog.warn(`⚡ ${task.id} transient error — retry ${attempt}/${MAX_RECOVERY_RETRIES} in ${delay}: ${err.message}`);
               await this.store.logEntry(task.id, `Transient error (retry ${attempt}/${MAX_RECOVERY_RETRIES} in ${delay}): ${err.message}`);
             }
+            // Clean up the old worktree so the retry gets a fresh one
+            if (worktreePath && existsSync(worktreePath)) {
+              try {
+                execSync(`git worktree remove "${worktreePath}" --force`, { cwd: this.rootDir, stdio: "pipe" });
+                executorLog.log(`Removed old worktree for transient retry: ${worktreePath}`);
+              } catch (cleanupErr: any) {
+                executorLog.warn(`Failed to remove old worktree ${worktreePath}: ${cleanupErr.message}`);
+              }
+            }
             await this.store.updateTask(task.id, {
               recoveryRetryCount: decision.nextState.recoveryRetryCount,
               nextRecoveryAt: decision.nextState.nextRecoveryAt,
+              worktree: undefined,
+              branch: undefined,
             });
             await this.store.moveTask(task.id, "todo");
             return;
@@ -1011,7 +1036,16 @@ export class TaskExecutor {
       // task in "in-progress" with no active session or worktree.
       if (stuckRequeue === true) {
         try {
-          await this.store.updateTask(task.id, { status: "stuck-killed" });
+          // Clean up the old worktree so the retry gets a fresh one
+          if (worktreePath && existsSync(worktreePath)) {
+            try {
+              execSync(`git worktree remove "${worktreePath}" --force`, { cwd: this.rootDir, stdio: "pipe" });
+              executorLog.log(`Removed old worktree for stuck-killed retry: ${worktreePath}`);
+            } catch (cleanupErr: any) {
+              executorLog.warn(`Failed to remove old worktree ${worktreePath}: ${cleanupErr.message}`);
+            }
+          }
+          await this.store.updateTask(task.id, { status: "stuck-killed", worktree: undefined, branch: undefined });
           await this.store.moveTask(task.id, "todo");
           executorLog.log(`${task.id} moved to todo for retry after stuck kill`);
         } catch (err: any) {
@@ -1807,7 +1841,7 @@ If issues are found that need attention, describe them clearly.`;
     path: string,
     taskId: string,
     startPoint?: string,
-  ): Promise<string> {
+  ): Promise<{ path: string; branch: string }> {
     // Track the worktree path we're attempting to use (may change during recovery)
     let currentPath = path;
 
@@ -1848,7 +1882,7 @@ If issues are found that need attention, describe them clearly.`;
     taskId: string,
     startPoint?: string,
     attemptNumber = 0,
-  ): Promise<string> {
+  ): Promise<{ path: string; branch: string }> {
     // If directory exists but is not a registered worktree, remove it first
     if (existsSync(path)) {
       const isRegistered = this.isRegisteredWorktree(path);
@@ -1864,14 +1898,14 @@ If issues are found that need attention, describe them clearly.`;
         }
       } else {
         executorLog.log(`Worktree already exists: ${path}`);
-        return path;
+        return { path, branch };
       }
     }
 
-    const createWithBranch = () => {
+    const createWithBranch = (branchToCreate: string) => {
       const cmd = startPoint
-        ? `git worktree add -b "${branch}" "${path}" "${startPoint}"`
-        : `git worktree add -b "${branch}" "${path}"`;
+        ? `git worktree add -b "${branchToCreate}" "${path}" "${startPoint}"`
+        : `git worktree add -b "${branchToCreate}" "${path}"`;
       execSync(cmd, { cwd: this.rootDir, stdio: "pipe" });
     };
 
@@ -1880,12 +1914,12 @@ If issues are found that need attention, describe them clearly.`;
     };
 
     try {
-      createWithBranch();
+      createWithBranch(branch);
       executorLog.log(`Worktree created: ${path}${startPoint ? ` (from ${startPoint})` : ""}`);
       if (attemptNumber > 0) {
         await this.store.logEntry(taskId, `Worktree created on attempt ${attemptNumber + 1}`, path);
       }
-      return path;
+      return { path, branch };
     } catch (initialError: any) {
       const conflictInfo = this.extractWorktreeConflictInfo(initialError);
 
@@ -1931,7 +1965,7 @@ If issues are found that need attention, describe them clearly.`;
       try {
         createFromExistingBranch();
         executorLog.log(`Worktree created from existing branch: ${path}`);
-        return path;
+        return { path, branch };
       } catch (fallbackError: any) {
         // Check if the fallback also hit an "already used" conflict
         const fallbackConflictInfo = this.extractWorktreeConflictInfo(fallbackError);
@@ -1980,21 +2014,38 @@ If issues are found that need attention, describe them clearly.`;
     taskId: string,
     startPoint?: string,
     attemptNumber?: number,
-  ): Promise<string | null> {
+  ): Promise<{ path: string; branch: string } | null> {
     const shouldGenerateNewName = await this.shouldGenerateNewWorktreeName(
       conflictPath,
       taskId,
     );
 
     if (shouldGenerateNewName) {
-      // Conflicting worktree belongs to an active task - generate new name
+      // Conflicting worktree belongs to an active task — generate new path AND
+      // use a suffixed branch name so git doesn't conflict with the branch
+      // already checked out in the existing worktree.
       const newPath = join(this.rootDir, ".worktrees", generateWorktreeName(this.rootDir));
-      await this.store.logEntry(
-        taskId,
-        `Conflicting worktree in use by active task, trying new path`,
-        newPath,
+      for (let suffix = 2; suffix <= 6; suffix++) {
+        const suffixedBranch = `${branch}-${suffix}`;
+        try {
+          await this.store.logEntry(
+            taskId,
+            `Conflicting worktree in use by active task, trying new path with branch ${suffixedBranch}`,
+            newPath,
+          );
+          return await this.tryCreateWorktree(suffixedBranch, newPath, taskId, startPoint, attemptNumber);
+        } catch (suffixErr: any) {
+          const info = this.extractWorktreeConflictInfo(suffixErr);
+          if (info.type === "already-used") {
+            // This suffixed branch is also in use — try next suffix
+            continue;
+          }
+          throw suffixErr;
+        }
+      }
+      throw new Error(
+        `Cannot create branch for task: "${branch}" and suffixes -2 through -6 are all in use by other worktrees`,
       );
-      return this.tryCreateWorktree(branch, newPath, taskId, startPoint, attemptNumber);
     }
 
     // Safe to clean up - conflicting worktree is not in use

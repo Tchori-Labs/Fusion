@@ -700,7 +700,12 @@ describe("POST /tasks/:id/retry", () => {
     });
 
     expect(res.status).toBe(200);
-    expect(store.updateTask).toHaveBeenCalledWith("KB-001", { status: undefined, error: undefined });
+    expect(store.updateTask).toHaveBeenCalledWith("KB-001", {
+      status: undefined,
+      error: undefined,
+      worktree: undefined,
+      branch: undefined,
+    });
     expect(store.moveTask).toHaveBeenCalledWith("KB-001", "todo");
   });
 
@@ -728,7 +733,12 @@ describe("POST /tasks/:id/retry", () => {
     });
 
     expect(res.status).toBe(200);
-    expect(store.updateTask).toHaveBeenCalledWith("KB-001", { status: undefined, error: undefined });
+    expect(store.updateTask).toHaveBeenCalledWith("KB-001", {
+      status: undefined,
+      error: undefined,
+      worktree: undefined,
+      branch: undefined,
+    });
     expect(store.moveTask).toHaveBeenCalledWith("KB-001", "todo");
   });
 
@@ -744,7 +754,12 @@ describe("POST /tasks/:id/retry", () => {
     });
 
     expect(res.status).toBe(200);
-    expect(store.updateTask).toHaveBeenCalledWith("KB-001", { status: undefined, error: undefined });
+    expect(store.updateTask).toHaveBeenCalledWith("KB-001", {
+      status: undefined,
+      error: undefined,
+      worktree: undefined,
+      branch: undefined,
+    });
     expect(store.moveTask).toHaveBeenCalledWith("KB-001", "todo");
     expect(store.logEntry).toHaveBeenCalledWith("KB-001", "Retry requested from dashboard");
   });
@@ -5275,6 +5290,7 @@ describe("Terminal WebSocket close handler", () => {
       shell: "/bin/zsh",
       cwd: "/test/project",
       scrollbackBuffer: "hello",
+      lastActivityAt: new Date(),
     });
     const getScrollbackAndClearPendingMock = vi.fn().mockReturnValue("scrollback data");
     const onDataMock = vi.fn().mockReturnValue(() => {});
@@ -5327,6 +5343,7 @@ describe("Terminal WebSocket close handler", () => {
       id: "term-ws-err",
       shell: "/bin/zsh",
       cwd: "/test/project",
+      lastActivityAt: new Date(),
     });
     const getScrollbackAndClearPendingMock = vi.fn().mockReturnValue(null);
     const onDataMock = vi.fn().mockReturnValue(() => {});
@@ -5383,6 +5400,7 @@ describe("Terminal WebSocket close handler", () => {
       id: "term-ws-unsub",
       shell: "/bin/zsh",
       cwd: "/test/project",
+      lastActivityAt: new Date(),
     });
     const getScrollbackAndClearPendingMock = vi.fn().mockReturnValue(null);
     const onDataMock = vi.fn().mockReturnValue(dataUnsub);

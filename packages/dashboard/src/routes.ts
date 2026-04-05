@@ -1793,7 +1793,12 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         res.status(400).json({ error: `Task is not in a retryable state (current status: ${task.status || 'none'})` });
         return;
       }
-      await scopedStore.updateTask(req.params.id, { status: undefined, error: undefined });
+      await scopedStore.updateTask(req.params.id, {
+        status: undefined,
+        error: undefined,
+        worktree: undefined,
+        branch: undefined,
+      });
       await scopedStore.logEntry(req.params.id, "Retry requested from dashboard");
       const updated = await scopedStore.moveTask(req.params.id, "todo");
       res.json(updated);

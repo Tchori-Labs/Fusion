@@ -57,6 +57,11 @@ function getInitialViewportHeight(): number {
   return _initialViewportHeight;
 }
 
+/** Reset the cached initial viewport height. Exported for tests only. */
+export function _resetInitialViewportHeight(): void {
+  _initialViewportHeight = null;
+}
+
 interface TerminalModalProps {
   isOpen: boolean;
   onClose: () => void;

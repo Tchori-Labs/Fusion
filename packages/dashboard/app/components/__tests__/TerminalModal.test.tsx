@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
-import { TerminalModal } from "../TerminalModal";
+import { TerminalModal, _resetInitialViewportHeight } from "../TerminalModal";
 import * as useTerminalModule from "../../hooks/useTerminal";
 import * as useTerminalSessionsModule from "../../hooks/useTerminalSessions";
 import * as apiModule from "../../api";
@@ -1445,6 +1445,7 @@ describe("TerminalModal — virtual keyboard overlap handling", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    _resetInitialViewportHeight();
     mockUseTerminal.mockReturnValue(createMockTerminalState());
     mockUseTerminalSessions.mockReturnValue(defaultSessionState);
 
@@ -1993,6 +1994,7 @@ describe("TerminalModal — FN-872 real-device keyboard overlap refinement", () 
 
   beforeEach(() => {
     vi.clearAllMocks();
+    _resetInitialViewportHeight();
     mockUseTerminal.mockReturnValue(createMockTerminalState());
     mockUseTerminalSessions.mockReturnValue(defaultSessionState);
 
