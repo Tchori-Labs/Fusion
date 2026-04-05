@@ -538,6 +538,13 @@ export function TerminalModal({ isOpen, onClose, initialCommand }: TerminalModal
       className="modal-overlay open"
       onClick={handleOverlayClick}
       data-testid="terminal-modal-overlay"
+      style={
+        keyboardOverlap > 0
+          ? {
+              "--overlay-padding-top": "0px",
+            } as React.CSSProperties
+          : undefined
+      }
     >
       <div
         ref={modalRef}

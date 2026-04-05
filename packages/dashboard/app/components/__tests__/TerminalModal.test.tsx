@@ -1769,6 +1769,44 @@ describe("TerminalModal — virtual keyboard overlap handling", () => {
 
     expect(scrollIntoViewSpy).not.toHaveBeenCalled();
   });
+
+  it("sets --overlay-padding-top on overlay when keyboard overlap is detected", async () => {
+    simulateMobileDevice(250);
+
+    render(<TerminalModal isOpen={true} onClose={mockOnClose} />);
+
+    await waitFor(() => {
+      const overlay = screen.getByTestId("terminal-modal-overlay");
+      expect(overlay.style.getPropertyValue("--overlay-padding-top")).toBe("0px");
+    });
+  });
+
+  it("clears --overlay-padding-top from overlay when keyboard closes", async () => {
+    const { listeners, mockVV } = simulateMobileDevice(250);
+
+    render(<TerminalModal isOpen={true} onClose={mockOnClose} />);
+
+    await waitFor(() => {
+      const overlay = screen.getByTestId("terminal-modal-overlay");
+      expect(overlay.style.getPropertyValue("--overlay-padding-top")).toBe("0px");
+    });
+
+    // Keyboard closes → visualViewport.height returns to full height (550 = innerHeight)
+    Object.defineProperty(mockVV, "height", {
+      value: 550,
+      writable: true,
+      configurable: true,
+    });
+
+    act(() => {
+      for (const cb of listeners.resize) cb();
+    });
+
+    await waitFor(() => {
+      const overlay = screen.getByTestId("terminal-modal-overlay");
+      expect(overlay.style.getPropertyValue("--overlay-padding-top")).toBe("");
+    });
+  });
 });
 
 // --- Close/reopen regression tests ---
