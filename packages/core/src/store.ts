@@ -1803,9 +1803,26 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         );
       }
 
+      // NOTE: No getTaskMergeBlocker check here — intentionally.
+      // The merge blocker validates in-review → done transitions (ensuring code
+      // has been properly reviewed before merging). An unarchived task was already
+      // merged in its previous lifecycle; this is just a restoration. The transient
+      // field clearing above ensures no stale blocker state leaks through.
       task.column = "done";
       task.columnMovedAt = new Date().toISOString();
       task.updatedAt = task.columnMovedAt;
+
+      // Clear transient fields that should not persist into "done" column.
+      // Matches the clearing done by moveTask() for consistency — archived
+      // tasks may have been archived with stale worktree/status/error/recovery
+      // state that should not reappear after unarchiving.
+      task.status = undefined;
+      task.error = undefined;
+      task.worktree = undefined;
+      task.blockedBy = undefined;
+      task.recoveryRetryCount = undefined;
+      task.nextRecoveryAt = undefined;
+
       task.log.push({
         timestamp: task.columnMovedAt,
         action: "Task unarchived",
@@ -1830,7 +1847,10 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     task.column = "done";
     task.worktree = undefined;
     task.status = undefined;
+    task.error = undefined;
     task.blockedBy = undefined;
+    task.recoveryRetryCount = undefined;
+    task.nextRecoveryAt = undefined;
     task.columnMovedAt = new Date().toISOString();
     task.updatedAt = task.columnMovedAt;
 

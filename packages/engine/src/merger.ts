@@ -1610,6 +1610,7 @@ async function completeTask(
   taskId: string,
   result: MergeResult,
 ): Promise<void> {
+  mergerLog.log(`${taskId}: completeTask — clearing status, moving to done`);
   // Clear transient status before moving to done
   await store.updateTask(taskId, { status: null });
   // Use moveTask for proper event emission

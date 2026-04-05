@@ -2688,6 +2688,24 @@ Task with acceptance criteria
       expect(moved.blockedBy).toBeUndefined();
     });
 
+    it("clears recovery fields when moving to done (FN-985 regression)", async () => {
+      const task = await store.createTask({ description: "test recovery fields" });
+      await store.moveTask(task.id, "todo");
+      await store.moveTask(task.id, "in-progress");
+
+      // Set recovery metadata via updateTask
+      await store.updateTask(task.id, {
+        recoveryRetryCount: 3,
+        nextRecoveryAt: new Date(Date.now() + 86400000).toISOString(),
+      });
+
+      await store.moveTask(task.id, "in-review");
+      const moved = await store.moveTask(task.id, "done");
+      expect(moved.column).toBe("done");
+      expect(moved.recoveryRetryCount).toBeUndefined();
+      expect(moved.nextRecoveryAt).toBeUndefined();
+    });
+
     it("blocks moving failed in-review tasks to done", async () => {
       const task = await store.createTask({ description: "test block failed review task" });
       await store.moveTask(task.id, "todo");
@@ -3516,6 +3534,41 @@ Task with acceptance criteria
       // Task starts in triage, not archived
 
       await expect(store.unarchiveTask(task.id)).rejects.toThrow("must be in 'archived'");
+    });
+
+    it("clears transient fields when unarchiving (FN-985 regression)", async () => {
+      // Simulate a task that completed normally and was archived,
+      // but somehow accumulated stale transient state.
+      const task = await store.createTask({ description: "Test task" });
+      await store.moveTask(task.id, "todo");
+      await store.moveTask(task.id, "in-progress");
+      await store.moveTask(task.id, "in-review");
+      await store.moveTask(task.id, "done");
+
+      // After reaching done, inject stale transient fields via updateTask
+      // (simulating state that could leak through if transient clearing was incomplete)
+      await store.updateTask(task.id, {
+        status: "failed",
+        error: "Something went wrong",
+        worktree: "/tmp/old-worktree",
+        blockedBy: "FN-999",
+        recoveryRetryCount: 3,
+        nextRecoveryAt: new Date(Date.now() + 86400000).toISOString(),
+      });
+
+      // Archive the task with stale state
+      await store.archiveTask(task.id);
+
+      // Unarchive — should clear all transient fields
+      const unarchived = await store.unarchiveTask(task.id);
+
+      expect(unarchived.column).toBe("done");
+      expect(unarchived.status).toBeUndefined();
+      expect(unarchived.error).toBeUndefined();
+      expect(unarchived.worktree).toBeUndefined();
+      expect(unarchived.blockedBy).toBeUndefined();
+      expect(unarchived.recoveryRetryCount).toBeUndefined();
+      expect(unarchived.nextRecoveryAt).toBeUndefined();
     });
   });
 
