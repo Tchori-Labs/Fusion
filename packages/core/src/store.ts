@@ -4,7 +4,7 @@ import { appendFile, mkdir, readFile, writeFile, rename, unlink } from "node:fs/
 import { join } from "node:path";
 import { existsSync, watch, type FSWatcher } from "node:fs";
 import type { Task, TaskDetail, TaskCreateInput, TaskAttachment, AgentLogEntry, BoardConfig, Column, MergeResult, Settings, GlobalSettings, ProjectSettings, ActivityLogEntry, ActivityEventType } from "./types.js";
-import { VALID_TRANSITIONS, DEFAULT_SETTINGS, GLOBAL_SETTINGS_KEYS } from "./types.js";
+import { VALID_TRANSITIONS, DEFAULT_SETTINGS, GLOBAL_SETTINGS_KEYS, WORKFLOW_STEP_TEMPLATES } from "./types.js";
 import { GlobalSettingsStore } from "./global-settings.js";
 import { Database, toJson, toJsonNullable, fromJson } from "./db.js";
 import { detectLegacyData, migrateFromLegacy } from "./db-migrate.js";
@@ -657,6 +657,83 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     return join(this.tasksDir, id);
   }
 
+  private getBuiltInWorkflowTemplate(templateId: string): import("./types.js").WorkflowStepTemplate | undefined {
+    return WORKFLOW_STEP_TEMPLATES.find((template) => template.id === templateId);
+  }
+
+  private toBuiltInWorkflowStep(template: import("./types.js").WorkflowStepTemplate): import("./types.js").WorkflowStep {
+    const now = new Date().toISOString();
+    return {
+      id: template.id,
+      templateId: template.id,
+      name: template.name,
+      description: template.description,
+      mode: "prompt",
+      phase: "pre-merge",
+      prompt: template.prompt,
+      toolMode: template.toolMode || "readonly",
+      enabled: true,
+      createdAt: now,
+      updatedAt: now,
+    };
+  }
+
+  private async ensureWorkflowStepForTemplate(templateId: string): Promise<import("./types.js").WorkflowStep> {
+    return this.withConfigLock(async () => {
+      const template = this.getBuiltInWorkflowTemplate(templateId);
+      if (!template) {
+        throw new Error(`Workflow step template '${templateId}' not found`);
+      }
+
+      const config = await this.readConfig();
+      const existing = (config.workflowSteps || []).find((ws) =>
+        ws.id === templateId
+        || ws.templateId === templateId
+        || ws.name.toLowerCase() === template.name.toLowerCase(),
+      );
+      if (existing) {
+        return existing;
+      }
+
+      const nextWsId = config.nextWorkflowStepId || 1;
+      const step = this.toBuiltInWorkflowStep(template);
+      step.id = `WS-${String(nextWsId).padStart(3, "0")}`;
+
+      if (!config.workflowSteps) {
+        config.workflowSteps = [];
+      }
+      config.workflowSteps.push(step);
+      config.nextWorkflowStepId = nextWsId + 1;
+      await this.writeConfig(config);
+
+      return step;
+    });
+  }
+
+  private async resolveEnabledWorkflowSteps(stepIds?: string[]): Promise<string[] | undefined> {
+    if (!stepIds?.length) return undefined;
+
+    const resolved: string[] = [];
+    const seen = new Set<string>();
+
+    for (const rawId of stepIds) {
+      const stepId = rawId.trim();
+      if (!stepId) continue;
+
+      const template = this.getBuiltInWorkflowTemplate(stepId);
+      const resolvedId = template
+        ? (await this.ensureWorkflowStepForTemplate(stepId)).id
+        : stepId;
+
+      if (!seen.has(resolvedId)) {
+        seen.add(resolvedId);
+        resolved.push(resolvedId);
+      }
+    }
+
+    return resolved.length > 0 ? resolved : undefined;
+  }
+
   async createTask(
     input: TaskCreateInput,
     options?: {
@@ -695,7 +772,9 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     }
 
     // Determine enabledWorkflowSteps: explicit input takes precedence, otherwise auto-apply default-on steps
-    let resolvedWorkflowSteps: string[] | undefined = input.enabledWorkflowSteps?.length ? input.enabledWorkflowSteps : undefined;
+    let resolvedWorkflowSteps: string[] | undefined = input.enabledWorkflowSteps?.length
+      ? await this.resolveEnabledWorkflowSteps(input.enabledWorkflowSteps)
+      : undefined;
 
     // When enabledWorkflowSteps is not provided at all (undefined), auto-apply default-on workflow steps
     if (input.enabledWorkflowSteps === undefined) {
@@ -1016,7 +1095,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
 
   async updateTask(
     id: string,
-    updates: { title?: string; description?: string; prompt?: string; worktree?: string | null; status?: string | null; dependencies?: string[]; blockedBy?: string | null; paused?: boolean; baseBranch?: string | null; branch?: string | null; baseCommitSha?: string | null; size?: "S" | "M" | "L"; reviewLevel?: number; mergeRetries?: number; stuckKillCount?: number | null; recoveryRetryCount?: number | null; nextRecoveryAt?: string | null; modelProvider?: string | null; modelId?: string | null; validatorModelProvider?: string | null; validatorModelId?: string | null; error?: string | null; summary?: string | null; sessionFile?: string | null; workflowStepResults?: import("./types.js").WorkflowStepResult[] | null; modifiedFiles?: string[] | null; missionId?: string | null; sliceId?: string | null },
+    updates: { title?: string; description?: string; prompt?: string; worktree?: string | null; status?: string | null; dependencies?: string[]; blockedBy?: string | null; paused?: boolean; baseBranch?: string | null; branch?: string | null; baseCommitSha?: string | null; size?: "S" | "M" | "L"; reviewLevel?: number; mergeRetries?: number; stuckKillCount?: number | null; recoveryRetryCount?: number | null; nextRecoveryAt?: string | null; enabledWorkflowSteps?: string[]; modelProvider?: string | null; modelId?: string | null; validatorModelProvider?: string | null; validatorModelId?: string | null; error?: string | null; summary?: string | null; sessionFile?: string | null; workflowStepResults?: import("./types.js").WorkflowStepResult[] | null; modifiedFiles?: string[] | null; missionId?: string | null; sliceId?: string | null },
   ): Promise<Task> {
     return this.withTaskLock(id, async () => {
       // Validate that task doesn't depend on itself
@@ -1100,6 +1179,9 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         task.nextRecoveryAt = undefined;
       } else if (updates.nextRecoveryAt !== undefined) {
         task.nextRecoveryAt = updates.nextRecoveryAt;
+      }
+      if (updates.enabledWorkflowSteps !== undefined) {
+        task.enabledWorkflowSteps = await this.resolveEnabledWorkflowSteps(updates.enabledWorkflowSteps);
       }
       if (updates.modelProvider === null) {
         task.modelProvider = undefined;
@@ -2680,11 +2762,13 @@ ${stepsSection}`;
       const now = new Date().toISOString();
       const step: import("./types.js").WorkflowStep = {
         id,
+        templateId: input.templateId,
         name: input.name,
         description: input.description,
         mode,
         phase: input.phase || "pre-merge",
         prompt: mode === "prompt" ? (input.prompt || "") : "",
+        toolMode: mode === "prompt" ? (input.toolMode || "readonly") : undefined,
         scriptName: mode === "script" ? input.scriptName : undefined,
         enabled: input.enabled !== undefined ? input.enabled : true,
         defaultOn: input.defaultOn === true ? true : undefined,
@@ -2718,7 +2802,11 @@ ${stepsSection}`;
    */
   async getWorkflowStep(id: string): Promise<import("./types.js").WorkflowStep | undefined> {
     const config = await this.readConfig();
-    return (config.workflowSteps || []).find((ws) => ws.id === id);
+    const stored = (config.workflowSteps || []).find((ws) => ws.id === id);
+    if (stored) return stored;
+
+    const template = this.getBuiltInWorkflowTemplate(id);
+    return template ? this.toBuiltInWorkflowStep(template) : undefined;
   }
 
   /**
@@ -2748,12 +2836,14 @@ ${stepsSection}`;
         // When switching to script mode, clear prompt and model overrides
         if (newMode === "script") {
           step.prompt = "";
+          step.toolMode = undefined;
           step.modelProvider = undefined;
           step.modelId = undefined;
         }
         // When switching to prompt mode, clear scriptName
         if (newMode === "prompt") {
           step.scriptName = undefined;
+          step.toolMode = step.toolMode || "readonly";
         }
       }
 
@@ -2761,6 +2851,7 @@ ${stepsSection}`;
       if (updates.description !== undefined) step.description = updates.description;
       if (updates.phase !== undefined) step.phase = updates.phase;
       if (updates.prompt !== undefined && step.mode === "prompt") step.prompt = updates.prompt;
+      if (updates.toolMode !== undefined && step.mode === "prompt") step.toolMode = updates.toolMode;
       if (updates.scriptName !== undefined && step.mode === "script") step.scriptName = updates.scriptName;
       if (updates.enabled !== undefined) step.enabled = updates.enabled;
       if (updates.defaultOn !== undefined) step.defaultOn = updates.defaultOn;

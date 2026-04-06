@@ -5474,6 +5474,168 @@ describe("Workflow Steps Execution", () => {
     expect(store.moveTask).toHaveBeenCalledWith("FN-001", "in-review");
   });
 
+  it("runs browser verification workflow steps with coding tools", async () => {
+    const store = createMockStore();
+
+    store.getTask.mockResolvedValue({
+      id: "FN-001",
+      title: "Browser task",
+      description: "Verify browser behavior",
+      column: "in-progress",
+      dependencies: [],
+      steps: [{ name: "Preflight", status: "pending" }],
+      currentStep: 0,
+      log: [],
+      enabledWorkflowSteps: ["WS-001"],
+      prompt: "# test\n## Steps\n### Step 0: Preflight\n- [ ] check",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    store.getWorkflowStep.mockResolvedValue({
+      id: "WS-001",
+      templateId: "browser-verification",
+      name: "Browser Verification",
+      description: "Verify with browser automation",
+      mode: "prompt",
+      toolMode: "coding",
+      prompt: "Use browser automation to verify the app.",
+      enabled: true,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    let callIdx = 0;
+    mockedCreateHaiAgent.mockImplementation((async (opts: any) => {
+      callIdx++;
+      if (callIdx === 1) {
+        const customTools = opts.customTools || [];
+        const session = {
+          prompt: vi.fn().mockImplementation(async () => {
+            const taskDoneTool = customTools.find((t: any) => t.name === "task_done");
+            if (taskDoneTool) await taskDoneTool.execute("tool-1", {});
+          }),
+          dispose: vi.fn(),
+          subscribe: vi.fn(),
+          on: vi.fn(),
+          sessionManager: { getLeafId: vi.fn().mockReturnValue("leaf-1") },
+          state: {},
+        };
+        return { session };
+      }
+
+      return {
+        session: {
+          prompt: vi.fn().mockResolvedValue(undefined),
+          dispose: vi.fn(),
+          subscribe: vi.fn(),
+          on: vi.fn(),
+          state: {},
+        },
+      };
+    }) as any);
+
+    const executor = new TaskExecutor(store, "/tmp/test");
+    await executor.execute({
+      id: "FN-001",
+      title: "Browser task",
+      description: "Verify browser behavior",
+      column: "in-progress",
+      dependencies: [],
+      steps: [{ name: "Preflight", status: "pending" }],
+      currentStep: 0,
+      log: [],
+      enabledWorkflowSteps: ["WS-001"],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    expect(mockedCreateHaiAgent).toHaveBeenCalledTimes(2);
+    const secondCall = mockedCreateHaiAgent.mock.calls[1];
+    expect(secondCall[0].tools).toBe("coding");
+  });
+
+  it("runs QA workflow steps with coding tools", async () => {
+    const store = createMockStore();
+
+    store.getTask.mockResolvedValue({
+      id: "FN-001",
+      title: "QA task",
+      description: "Verify tests pass",
+      column: "in-progress",
+      dependencies: [],
+      steps: [{ name: "Preflight", status: "pending" }],
+      currentStep: 0,
+      log: [],
+      enabledWorkflowSteps: ["WS-001"],
+      prompt: "# test\n## Steps\n### Step 0: Preflight\n- [ ] check",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    store.getWorkflowStep.mockResolvedValue({
+      id: "WS-001",
+      templateId: "qa-check",
+      name: "QA Check",
+      description: "Run tests and verify they pass",
+      mode: "prompt",
+      toolMode: "coding",
+      prompt: "Run the test suite and report results.",
+      enabled: true,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    let callIdx = 0;
+    mockedCreateHaiAgent.mockImplementation((async (opts: any) => {
+      callIdx++;
+      if (callIdx === 1) {
+        const customTools = opts.customTools || [];
+        const session = {
+          prompt: vi.fn().mockImplementation(async () => {
+            const taskDoneTool = customTools.find((t: any) => t.name === "task_done");
+            if (taskDoneTool) await taskDoneTool.execute("tool-1", {});
+          }),
+          dispose: vi.fn(),
+          subscribe: vi.fn(),
+          on: vi.fn(),
+          sessionManager: { getLeafId: vi.fn().mockReturnValue("leaf-1") },
+          state: {},
+        };
+        return { session };
+      }
+
+      return {
+        session: {
+          prompt: vi.fn().mockResolvedValue(undefined),
+          dispose: vi.fn(),
+          subscribe: vi.fn(),
+          on: vi.fn(),
+          state: {},
+        },
+      };
+    }) as any);
+
+    const executor = new TaskExecutor(store, "/tmp/test");
+    await executor.execute({
+      id: "FN-001",
+      title: "QA task",
+      description: "Verify tests pass",
+      column: "in-progress",
+      dependencies: [],
+      steps: [{ name: "Preflight", status: "pending" }],
+      currentStep: 0,
+      log: [],
+      enabledWorkflowSteps: ["WS-001"],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    expect(mockedCreateHaiAgent).toHaveBeenCalledTimes(2);
+    const secondCall = mockedCreateHaiAgent.mock.calls[1];
+    expect(secondCall[0].tools).toBe("coding");
+  });
+
   it("skips workflow steps with no prompt", async () => {
     const store = createMockStore();
 

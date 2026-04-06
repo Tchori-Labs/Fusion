@@ -1402,6 +1402,7 @@ describe("PATCH /tasks/:id", () => {
       description: undefined,
       prompt: undefined,
       dependencies: ["FN-002"],
+      enabledWorkflowSteps: undefined,
       modelProvider: null,
       modelId: null,
       validatorModelProvider: null,
@@ -1423,6 +1424,7 @@ describe("PATCH /tasks/:id", () => {
       description: undefined,
       prompt: undefined,
       dependencies: undefined,
+      enabledWorkflowSteps: undefined,
       modelProvider: null,
       modelId: null,
       validatorModelProvider: null,
@@ -1454,6 +1456,7 @@ describe("PATCH /tasks/:id", () => {
       description: undefined,
       prompt: undefined,
       dependencies: undefined,
+      enabledWorkflowSteps: undefined,
       modelProvider: "anthropic",
       modelId: "claude-sonnet-4-5",
       validatorModelProvider: "openai",
@@ -1503,11 +1506,49 @@ describe("PATCH /tasks/:id", () => {
       description: undefined,
       prompt: undefined,
       dependencies: undefined,
+      enabledWorkflowSteps: undefined,
       modelProvider: null,
       modelId: null,
       validatorModelProvider: null,
       validatorModelId: null,
     });
+  });
+
+  it("forwards enabledWorkflowSteps to store.updateTask", async () => {
+    (store.updateTask as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...FAKE_TASK_DETAIL,
+      enabledWorkflowSteps: ["browser-verification"],
+    });
+
+    const res = await REQUEST(buildApp(), "PATCH", "/api/tasks/KB-001", JSON.stringify({
+      enabledWorkflowSteps: ["browser-verification"],
+    }), {
+      "Content-Type": "application/json",
+    });
+
+    expect(res.status).toBe(200);
+    expect(store.updateTask).toHaveBeenCalledWith("KB-001", {
+      title: undefined,
+      description: undefined,
+      prompt: undefined,
+      dependencies: undefined,
+      enabledWorkflowSteps: ["browser-verification"],
+      modelProvider: null,
+      modelId: null,
+      validatorModelProvider: null,
+      validatorModelId: null,
+    });
+  });
+
+  it("returns 400 for invalid enabledWorkflowSteps type", async () => {
+    const res = await REQUEST(buildApp(), "PATCH", "/api/tasks/KB-001", JSON.stringify({
+      enabledWorkflowSteps: [123],
+    }), {
+      "Content-Type": "application/json",
+    });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain("enabledWorkflowSteps must be an array of strings");
   });
 });
 
@@ -6941,9 +6982,11 @@ describe("POST /workflow-step-templates/:id/create", () => {
     expect(res.body.id).toBe("WS-001");
     expect(res.body.name).toBe("Documentation Review");
     expect(store.createWorkflowStep).toHaveBeenCalledWith({
+      templateId: "documentation-review",
       name: "Documentation Review",
       description: "Verify all public APIs, functions, and complex logic have appropriate documentation",
       prompt: expect.stringContaining("documentation reviewer"),
+      toolMode: "readonly",
       enabled: true,
     });
   });
@@ -6968,9 +7011,11 @@ describe("POST /workflow-step-templates/:id/create", () => {
     expect(res.status).toBe(201);
     expect(res.body.name).toBe("QA Check");
     expect(store.createWorkflowStep).toHaveBeenCalledWith({
+      templateId: "qa-check",
       name: "QA Check",
       description: "Run tests and verify they pass, check for obvious bugs",
       prompt: expect.stringContaining("QA tester"),
+      toolMode: "coding",
       enabled: true,
     });
   });

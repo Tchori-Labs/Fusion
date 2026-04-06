@@ -1744,7 +1744,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
       );
       res.status(201).json(task);
     } catch (err: any) {
-      const status = err.message?.includes("must be a string") ? 400 : 500;
+      const status = err.message?.includes("must be a string") || err.message?.includes("must be an array of strings") ? 400 : 500;
       res.status(status).json({ error: err.message });
     }
   });
@@ -2457,7 +2457,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   router.patch("/tasks/:id", async (req, res) => {
     try {
       const scopedStore = await getScopedStore(req);
-      const { title, description, prompt, dependencies, modelProvider, modelId, validatorModelProvider, validatorModelId } = req.body;
+      const { title, description, prompt, dependencies, enabledWorkflowSteps, modelProvider, modelId, validatorModelProvider, validatorModelId } = req.body;
 
       // Validate model fields are strings or undefined/null
       const validateModelField = (value: unknown, name: string): string | null | undefined => {
@@ -2473,11 +2473,18 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
       const validatedValidatorModelProvider = validateModelField(validatorModelProvider, "validatorModelProvider");
       const validatedValidatorModelId = validateModelField(validatorModelId, "validatorModelId");
 
+      if (enabledWorkflowSteps !== undefined) {
+        if (!Array.isArray(enabledWorkflowSteps) || !enabledWorkflowSteps.every((id: unknown) => typeof id === "string")) {
+          throw new Error("enabledWorkflowSteps must be an array of strings");
+        }
+      }
+
       const task = await scopedStore.updateTask(req.params.id, {
         title,
         description,
         prompt,
         dependencies,
+        enabledWorkflowSteps,
         modelProvider: validatedModelProvider,
         modelId: validatedModelId,
         validatorModelProvider: validatedValidatorModelProvider,
@@ -2485,7 +2492,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
       });
       res.json(task);
     } catch (err: any) {
-      const status = err.message?.includes("must be a string") ? 400 : 500;
+      const status = err.message?.includes("must be a string") || err.message?.includes("must be an array of strings") ? 400 : 500;
       res.status(status).json({ error: err.message });
     }
   });
@@ -6205,7 +6212,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   router.post("/workflow-steps", async (req, res) => {
     try {
       const scopedStore = await getScopedStore(req);
-      const { name, description, mode, phase, prompt, scriptName, enabled, defaultOn, modelProvider, modelId } = req.body;
+      const { name, description, mode, phase, prompt, toolMode, scriptName, enabled, defaultOn, modelProvider, modelId } = req.body;
 
       if (!name || typeof name !== "string" || !name.trim()) {
         res.status(400).json({ error: "name is required" });
@@ -6231,6 +6238,10 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
 
       if (prompt !== undefined && typeof prompt !== "string") {
         res.status(400).json({ error: "prompt must be a string" });
+        return;
+      }
+      if (toolMode !== undefined && toolMode !== "readonly" && toolMode !== "coding") {
+        res.status(400).json({ error: "toolMode must be 'readonly' or 'coding'" });
         return;
       }
       if (scriptName !== undefined && typeof scriptName !== "string") {
@@ -6276,6 +6287,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         mode: resolvedMode,
         phase,
         prompt: prompt?.trim(),
+        toolMode,
         scriptName: scriptName?.trim(),
         enabled,
         defaultOn: defaultOn === true,
@@ -6298,7 +6310,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   router.patch("/workflow-steps/:id", async (req, res) => {
     try {
       const scopedStore = await getScopedStore(req);
-      const { name, description, mode, phase, prompt, scriptName, enabled, defaultOn, modelProvider, modelId } = req.body;
+      const { name, description, mode, phase, prompt, toolMode, scriptName, enabled, defaultOn, modelProvider, modelId } = req.body;
 
       const updates: Record<string, unknown> = {};
       if (name !== undefined) {
@@ -6335,6 +6347,13 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
           return;
         }
         updates.prompt = prompt;
+      }
+      if (toolMode !== undefined) {
+        if (toolMode !== "readonly" && toolMode !== "coding") {
+          res.status(400).json({ error: "toolMode must be 'readonly' or 'coding'" });
+          return;
+        }
+        updates.toolMode = toolMode;
       }
       if (scriptName !== undefined) {
         if (typeof scriptName !== "string") {
@@ -6537,9 +6556,11 @@ Output ONLY the prompt text (no markdown, no explanations).`;
       }
 
       const step = await scopedStore.createWorkflowStep({
+        templateId: template.id,
         name: template.name,
         description: template.description,
         prompt: template.prompt,
+        toolMode: template.toolMode,
         enabled: true,
       });
 

@@ -59,6 +59,7 @@ export interface ModelPreset {
 /** A reusable workflow step definition that can run after task implementation. */
 /** Execution mode for a workflow step. */
 export type WorkflowStepMode = "prompt" | "script";
+export type WorkflowStepToolMode = "readonly" | "coding";
 
 /** Lifecycle phase for workflow step execution. */
 export type WorkflowStepPhase = "pre-merge" | "post-merge";
@@ -66,6 +67,8 @@ export type WorkflowStepPhase = "pre-merge" | "post-merge";
 export interface WorkflowStep {
   /** Unique identifier (e.g., "WS-001") */
   id: string;
+  /** Built-in template source ID when this step was materialized from a template. */
+  templateId?: string;
   /** Display name (e.g., "Documentation Review") */
   name: string;
   /** Short description for UI display */
@@ -76,6 +79,8 @@ export interface WorkflowStep {
   phase?: WorkflowStepPhase;
   /** Full agent prompt to execute when this step runs (used when mode is "prompt") */
   prompt: string;
+  /** Tool set available to prompt-mode workflow agents. Defaults to readonly. */
+  toolMode?: WorkflowStepToolMode;
   /** Name of a script from project settings `scripts` map to execute (required when mode is "script") */
   scriptName?: string;
   /** Whether this step is available for selection on new tasks */
@@ -102,6 +107,8 @@ export interface WorkflowStep {
 export type NtfyNotificationEvent = "in-review" | "merged" | "failed";
 
 export interface WorkflowStepInput {
+  /** Built-in template source ID when creating a concrete step from a template. */
+  templateId?: string;
   name: string;
   description: string;
   /** Execution mode — defaults to "prompt" if not specified */
@@ -110,6 +117,8 @@ export interface WorkflowStepInput {
   phase?: WorkflowStepPhase;
   /** Agent prompt (used when mode is "prompt"). Optional — can be AI-generated later via refinement. */
   prompt?: string;
+  /** Tool set available to prompt-mode workflow agents. Defaults to readonly. */
+  toolMode?: WorkflowStepToolMode;
   /** Script name from project settings (required when mode is "script").
    *  Must reference a named script in `settings.scripts` — no raw commands. */
   scriptName?: string;
@@ -152,6 +161,8 @@ export interface WorkflowStepTemplate {
   description: string;
   /** Full agent prompt template */
   prompt: string;
+  /** Tool set available when the template runs as a prompt-mode step. */
+  toolMode?: WorkflowStepToolMode;
   /** Grouping category (e.g., "Quality", "Security") */
   category: string;
   /** Optional icon identifier for UI (e.g., "file-text", "shield") */
@@ -166,6 +177,7 @@ export const WORKFLOW_STEP_TEMPLATES: WorkflowStepTemplate[] = [
     description: "Verify all public APIs, functions, and complex logic have appropriate documentation",
     category: "Quality",
     icon: "file-text",
+    toolMode: "readonly",
     prompt: `You are a documentation reviewer. Review the completed task and verify documentation quality.
 
 Review Criteria:
@@ -191,6 +203,7 @@ Output Requirements:
     description: "Run tests and verify they pass, check for obvious bugs",
     category: "Quality",
     icon: "check-circle",
+    toolMode: "coding",
     prompt: `You are a QA tester. Verify the task implementation by running tests and checking for bugs.
 
 Test Execution:
@@ -215,6 +228,7 @@ Output Requirements:
     description: "Check for common security vulnerabilities and anti-patterns",
     category: "Security",
     icon: "shield",
+    toolMode: "readonly",
     prompt: `You are a security auditor. Review the task changes for common security vulnerabilities.
 
 Security Checklist:
@@ -242,6 +256,7 @@ Output Requirements:
     description: "Check for performance anti-patterns and optimization opportunities",
     category: "Quality",
     icon: "zap",
+    toolMode: "readonly",
     prompt: `You are a performance reviewer. Analyze the task changes for performance implications.
 
 Performance Checklist:
@@ -268,6 +283,7 @@ Output Requirements:
     description: "Verify UI changes meet accessibility standards (WCAG 2.1)",
     category: "Quality",
     icon: "eye",
+    toolMode: "readonly",
     prompt: `You are an accessibility reviewer. Check UI changes for WCAG 2.1 compliance.
 
 Accessibility Checklist:
@@ -294,6 +310,7 @@ Output Requirements:
     description: "Verify web application functionality using browser automation",
     category: "Quality",
     icon: "globe",
+    toolMode: "coding",
     prompt: `You are a browser verification specialist. Verify web application functionality after task implementation using the agent-browser CLI tool.
 
 ## Prerequisites

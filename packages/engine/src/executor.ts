@@ -1902,6 +1902,7 @@ export class TaskExecutor {
     worktreePath: string,
     settings: Settings,
   ): Promise<{ success: boolean; output?: string; error?: string }> {
+    const toolMode: "coding" | "readonly" = workflowStep.toolMode || "readonly";
     const systemPrompt = `You are a workflow step agent executing: ${workflowStep.name}
 
 Task Context:
@@ -1937,7 +1938,7 @@ If issues are found that need attention, describe them clearly.`;
       const { session } = await createKbAgent({
         cwd: worktreePath,
         systemPrompt,
-        tools: "readonly",
+        tools: toolMode,
         defaultProvider: stepProvider,
         defaultModelId: stepModelId,
         fallbackProvider: settings.fallbackProvider,

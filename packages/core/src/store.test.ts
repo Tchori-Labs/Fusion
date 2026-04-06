@@ -4762,6 +4762,40 @@ Task with acceptance criteria
       expect(task.enabledWorkflowSteps).toEqual([ws1.id, ws2.id]);
     });
 
+    it("should materialize built-in workflow templates when creating a task", async () => {
+      const task = await store.createTask({
+        description: "Task with browser verification",
+        enabledWorkflowSteps: ["browser-verification"],
+      });
+
+      expect(task.enabledWorkflowSteps).toEqual(["WS-001"]);
+
+      const step = await store.getWorkflowStep("WS-001");
+      expect(step).toMatchObject({
+        id: "WS-001",
+        templateId: "browser-verification",
+        name: "Browser Verification",
+        toolMode: "coding",
+      });
+    });
+
+    it("should reuse an existing materialized built-in workflow step", async () => {
+      const first = await store.createTask({
+        description: "First browser verification task",
+        enabledWorkflowSteps: ["browser-verification"],
+      });
+      const second = await store.createTask({
+        description: "Second browser verification task",
+        enabledWorkflowSteps: ["browser-verification"],
+      });
+
+      expect(first.enabledWorkflowSteps).toEqual(["WS-001"]);
+      expect(second.enabledWorkflowSteps).toEqual(["WS-001"]);
+
+      const steps = await store.listWorkflowSteps();
+      expect(steps.filter((step) => step.templateId === "browser-verification")).toHaveLength(1);
+    });
+
     it("should not set enabledWorkflowSteps when empty array provided", async () => {
       const task = await store.createTask({
         description: "Task without workflow steps",
@@ -4992,6 +5026,32 @@ Task with acceptance criteria
       const task = await store.createTask({ description: "Test task" });
 
       expect(task.enabledWorkflowSteps).toEqual(["WS-001", "WS-002"]);
+    });
+
+    it("should update task workflow steps and materialize built-in templates", async () => {
+      const task = await store.createTask({ description: "Editable task" });
+
+      const updated = await store.updateTask(task.id, {
+        enabledWorkflowSteps: ["browser-verification"],
+      });
+
+      expect(updated.enabledWorkflowSteps).toEqual(["WS-001"]);
+
+      const persisted = await store.getTask(task.id);
+      expect(persisted.enabledWorkflowSteps).toEqual(["WS-001"]);
+    });
+
+    it("should resolve built-in workflow templates from getWorkflowStep", async () => {
+      const step = await store.getWorkflowStep("browser-verification");
+
+      expect(step).toMatchObject({
+        id: "browser-verification",
+        templateId: "browser-verification",
+        name: "Browser Verification",
+        mode: "prompt",
+        phase: "pre-merge",
+        toolMode: "coding",
+      });
     });
 
     // ── Workflow Step Phase ──────────────────────────────────────────────
