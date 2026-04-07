@@ -315,6 +315,7 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
     aiMergeTask(store, cwd, taskId, {
       pool,
       usageLimitPauser,
+      agentStore,
       onAgentText: (delta) => process.stdout.write(delta),
       onSession: (session) => { activeMergeSession = session; },
     });
@@ -580,6 +581,7 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
     const triage = new TriageProcessor(store, cwd, {
       semaphore,
       usageLimitPauser,
+      agentStore,
       onSpecifyStart: (t) => console.log(`[engine] Specifying ${t.id}...`),
       onSpecifyComplete: (t) => console.log(`[engine] ✓ ${t.id} → todo`),
       onSpecifyError: (t, e) => console.log(`[engine] ✗ ${t.id}: ${e.message}`),

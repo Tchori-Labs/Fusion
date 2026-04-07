@@ -8,6 +8,7 @@ import { AgentLogger } from "./agent-logger.js";
 import { mergerLog } from "./logger.js";
 import { isUsageLimitError, checkSessionError, type UsageLimitPauser } from "./usage-limit-detector.js";
 import { withRateLimitRetry } from "./rate-limit-retry.js";
+import { resolveAgentInstructions, buildSystemPromptWithInstructions } from "./agent-instructions.js";
 import type { ToolDefinition } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 
@@ -597,6 +598,8 @@ export interface MergerOptions {
    *  caller (e.g. dashboard.ts) to track and externally dispose the session
    *  when a global pause is triggered. */
   onSession?: (session: { dispose: () => void }) => void;
+  /** AgentStore for resolving per-agent custom instructions. */
+  agentStore?: import("@fusion/core").AgentStore;
 }
 
 /**
@@ -927,7 +930,7 @@ export async function aiMergeTask(
 
   // 8. Run post-merge workflow steps (failures logged but do not block completion)
   try {
-    await runPostMergeWorkflowSteps(store, taskId, rootDir, settings);
+    await runPostMergeWorkflowSteps(store, taskId, rootDir, settings, options);
   } catch (err: any) {
     mergerLog.error(`${taskId}: post-merge workflow steps error: ${err.message}`);
     // Non-fatal — task still moves to done
@@ -1331,9 +1334,29 @@ async function runAiAgentForCommit(params: AiAgentParams): Promise<{ success: bo
       : undefined,
   });
 
+  // Resolve per-agent custom instructions for the merger role
+  let mergerInstructions = "";
+  if (options.agentStore) {
+    try {
+      const agents = await options.agentStore.listAgents({ role: "merger" });
+      for (const agent of agents) {
+        if (agent.instructionsText || agent.instructionsPath) {
+          mergerInstructions = await resolveAgentInstructions(agent, rootDir);
+          break;
+        }
+      }
+    } catch {
+      // Graceful fallback
+    }
+  }
+  const mergerSystemPrompt = buildSystemPromptWithInstructions(
+    buildMergeSystemPrompt(includeTaskId, settings.agentPrompts),
+    mergerInstructions,
+  );
+
   const { session } = await createKbAgent({
     cwd: rootDir,
-    systemPrompt: buildMergeSystemPrompt(includeTaskId, settings.agentPrompts),
+    systemPrompt: mergerSystemPrompt,
     tools: "coding",
     customTools: [reportBuildFailureTool],
     onText: agentLogger.onText,
@@ -1489,6 +1512,7 @@ async function runPostMergeWorkflowSteps(
   taskId: string,
   rootDir: string,
   settings: Settings,
+  mergeOptions: MergerOptions = {},
 ): Promise<void> {
   const task = await store.getTask(taskId);
   if (!task.enabledWorkflowSteps?.length) return;
@@ -1547,7 +1571,7 @@ async function runPostMergeWorkflowSteps(
     try {
       const result = stepMode === "script"
         ? await executePostMergeScriptStep(store, taskId, ws, rootDir, settings)
-        : await executePostMergePromptStep(store, taskId, ws, rootDir, settings);
+        : await executePostMergePromptStep(store, taskId, ws, rootDir, settings, mergeOptions);
       const completedAt = new Date().toISOString();
 
       if (result.success) {
@@ -1640,6 +1664,7 @@ async function executePostMergePromptStep(
   workflowStep: WorkflowStep,
   rootDir: string,
   settings: Settings,
+  mergeOptions: MergerOptions = {},
 ): Promise<{ success: boolean; output?: string; error?: string }> {
   const toolMode: "coding" | "readonly" = workflowStep.toolMode || "readonly";
   const systemPrompt = `You are a post-merge workflow step agent executing: ${workflowStep.name}
@@ -1667,9 +1692,26 @@ If issues are found that need attention, describe them clearly.`;
     const stepModelId = workflowStep.modelId || settings.defaultModelId;
     const useOverride = !!(workflowStep.modelProvider && workflowStep.modelId);
 
+    // Post-merge step agents inherit merger instructions
+    let postMergeInstructions = "";
+    if (mergeOptions.agentStore) {
+      try {
+        const agents = await mergeOptions.agentStore.listAgents({ role: "merger" });
+        for (const agent of agents) {
+          if (agent.instructionsText || agent.instructionsPath) {
+            postMergeInstructions = await resolveAgentInstructions(agent, rootDir);
+            break;
+          }
+        }
+      } catch {
+        // Graceful fallback
+      }
+    }
+    const postMergeSystemPrompt = buildSystemPromptWithInstructions(systemPrompt, postMergeInstructions);
+
     const { session } = await createKbAgent({
       cwd: rootDir,
-      systemPrompt,
+      systemPrompt: postMergeSystemPrompt,
       tools: toolMode,
       defaultProvider: stepProvider,
       defaultModelId: stepModelId,

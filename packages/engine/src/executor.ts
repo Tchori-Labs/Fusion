@@ -22,6 +22,7 @@ import { computeRecoveryDecision, formatDelay, MAX_RECOVERY_RETRIES } from "./re
 import type { StuckTaskDetector, StuckTaskEvent } from "./stuck-task-detector.js";
 import { isContextLimitError } from "./context-limit-detector.js";
 import { StepSessionExecutor, type StepSessionExecutorOptions, type StepResult } from "./step-session-executor.js";
+import { resolveAgentInstructions, buildSystemPromptWithInstructions } from "./agent-instructions.js";
 import { createTaskCreateTool as sharedCreateTaskCreateTool, createTaskLogTool as sharedCreateTaskLogTool, taskCreateParams, taskLogParams } from "./agent-tools.js";
 
 // Re-export for backward compatibility (tests import from executor.ts)
@@ -511,6 +512,27 @@ export class TaskExecutor {
    * 3. Otherwise, create a fresh worktree via `git worktree add` and run the
    *    `worktreeInitCommand` if configured.
    */
+
+  /**
+   * Resolve custom instructions for a given agent role by looking up agents
+   * in the AgentStore that have instructions configured.
+   * Returns an empty string if no instructions are found.
+   */
+  private async resolveInstructionsForRole(role: string): Promise<string> {
+    if (!this.options.agentStore) return "";
+    try {
+      const agents = await this.options.agentStore.listAgents({ role: role as AgentCapability });
+      for (const agent of agents) {
+        if (agent.instructionsText || agent.instructionsPath) {
+          return await resolveAgentInstructions(agent, this.rootDir);
+        }
+      }
+    } catch {
+      // Graceful fallback — no instructions if lookup fails
+    }
+    return "";
+  }
+
   private resolveDependencyWorktree(task: Task, allTasks: Task[]): string | null {
     if (task.dependencies.length === 0) return null;
 
@@ -992,9 +1014,16 @@ export class TaskExecutor {
 
         executorLog.log(`${task.id}: creating agent session (provider=${executorProvider ?? "default"}, model=${executorModelId ?? "default"}, resuming=${isResuming})`);
 
+        // Resolve per-agent custom instructions for the executor role
+        const executorInstructions = await this.resolveInstructionsForRole("executor");
+        const executorSystemPrompt = buildSystemPromptWithInstructions(
+          getExecutorSystemPrompt(settings),
+          executorInstructions,
+        );
+
         let { session, sessionFile } = await createKbAgent({
           cwd: worktreePath,
-          systemPrompt: getExecutorSystemPrompt(settings),
+          systemPrompt: executorSystemPrompt,
           tools: "coding",
           customTools,
           onText: agentLogger.onText,
@@ -1181,7 +1210,7 @@ export class TaskExecutor {
 
             const { session: retrySession, sessionFile: retrySessionFile } = await createKbAgent({
               cwd: worktreePath,
-              systemPrompt: getExecutorSystemPrompt(settings),
+              systemPrompt: executorSystemPrompt,
               tools: "coding",
               customTools,
               onText: agentLogger.onText,
@@ -1720,6 +1749,8 @@ export class TaskExecutor {
               store,
               taskId,
               agentPrompts: settings.agentPrompts,
+              agentStore: this.options.agentStore,
+              rootDir: this.rootDir,
             },
           );
 
@@ -2145,9 +2176,13 @@ If issues are found that need attention, describe them clearly.`;
       const stepModelId = workflowStep.modelId || settings.defaultModelId;
       const useOverride = !!(workflowStep.modelProvider && workflowStep.modelId);
 
+      // Workflow step agents inherit executor instructions
+      const stepInstructions = await this.resolveInstructionsForRole("executor");
+      const stepSystemPrompt = buildSystemPromptWithInstructions(systemPrompt, stepInstructions);
+
       const { session } = await createKbAgent({
         cwd: worktreePath,
-        systemPrompt,
+        systemPrompt: stepSystemPrompt,
         tools: toolMode,
         defaultProvider: stepProvider,
         defaultModelId: stepModelId,
@@ -2873,10 +2908,15 @@ If issues are found that need attention, describe them clearly.`;
           // Transition agent to active state
           await this.options.agentStore.updateAgentState(agent.id, "active");
 
+          // Child agents inherit executor instructions
+          const childInstructions = await this.resolveInstructionsForRole("executor");
+          const childBasePrompt = `You are a child agent spawned by a parent task executor. Your job is to complete the following delegated task. Work autonomously and thoroughly. Report your findings and results.\n\nParent task: ${taskId}\nChild agent: ${agent.id} (${name})`;
+          const childSystemPrompt = buildSystemPromptWithInstructions(childBasePrompt, childInstructions);
+
           // Create child agent session
           const { session: childSession } = await createKbAgent({
             cwd: childWorktreePath,
-            systemPrompt: `You are a child agent spawned by a parent task executor. Your job is to complete the following delegated task. Work autonomously and thoroughly. Report your findings and results.\n\nParent task: ${taskId}\nChild agent: ${agent.id} (${name})`,
+            systemPrompt: childSystemPrompt,
             tools: "coding",
             defaultProvider: settings.defaultProvider,
             defaultModelId: settings.defaultModelId,

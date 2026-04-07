@@ -6,7 +6,7 @@ import {
   ChevronDown, ChevronRight
 } from "lucide-react";
 import type { AgentDetail, AgentState, AgentHeartbeatRun } from "../api";
-import { fetchAgent, updateAgent, updateAgentState, deleteAgent, fetchAgentLogs, fetchAgentRunLogs, fetchAgentChildren, fetchAgentRuns, fetchAgentRunDetail, startAgentRun } from "../api";
+import { fetchAgent, updateAgent, updateAgentState, deleteAgent, fetchAgentLogs, fetchAgentRunLogs, fetchAgentChildren, fetchAgentRuns, fetchAgentRunDetail, startAgentRun, updateAgentInstructions } from "../api";
 import type { Agent } from "../api";
 import type { AgentLogEntry } from "@fusion/core";
 import { AgentLogViewer } from "./AgentLogViewer";
@@ -1179,8 +1179,14 @@ function ConfigTab({
   });
 
   const [isSaving, setIsSaving] = useState(false);
+  const [isSavingInstructions, setIsSavingInstructions] = useState(false);
   const [errors, setErrors] = useState<ValidationErrors>({});
   const [justSaved, setJustSaved] = useState(false);
+  const [justSavedInstructions, setJustSavedInstructions] = useState(false);
+
+  // Custom instructions state
+  const [instructionsText, setInstructionsText] = useState(agent.instructionsText ?? "");
+  const [instructionsPath, setInstructionsPath] = useState(agent.instructionsPath ?? "");
 
   /** Detect whether any local value differs from the persisted metadata */
   const hasChanges = (() => {
@@ -1199,6 +1205,14 @@ function ConfigTab({
       if (current !== persisted) return true;
     }
     return false;
+  })();
+
+  const hasInstructionsChanges = (() => {
+    const currentText = instructionsText ?? "";
+    const persistedText = agent.instructionsText ?? "";
+    const currentPath = instructionsPath?.trim() ?? "";
+    const persistedPath = agent.instructionsPath?.trim() ?? "";
+    return currentText !== persistedText || currentPath !== persistedPath;
   })();
 
   const handleFieldChange = (key: string, value: string) => {
@@ -1288,6 +1302,28 @@ function ConfigTab({
       addToast(`Failed to save settings: ${err.message}`, "error");
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleSaveInstructions = async () => {
+    setIsSavingInstructions(true);
+    try {
+      await updateAgentInstructions(
+        agent.id,
+        {
+          instructionsText: instructionsText || undefined,
+          instructionsPath: instructionsPath.trim() || undefined,
+        },
+        projectId,
+      );
+      addToast("Instructions saved", "success");
+      setJustSavedInstructions(true);
+      setTimeout(() => setJustSavedInstructions(false), 3000);
+      await onSaved();
+    } catch (err: any) {
+      addToast(`Failed to save instructions: ${err.message}`, "error");
+    } finally {
+      setIsSavingInstructions(false);
     }
   };
 
@@ -1441,6 +1477,74 @@ function ConfigTab({
             <span className="config-saved-indicator">
               <CheckCircle size={14} />
               Settings saved
+            </span>
+          )}
+        </div>
+      </div>
+
+      <div className="config-section">
+        <h3>Custom Instructions</h3>
+        <p className="config-description">
+          Append custom instructions to this agent&apos;s system prompt at execution time. Use this to customize behavior, coding style, or project conventions without modifying built-in prompts.
+        </p>
+
+        <div className="config-fields">
+          <div className="config-field">
+            <label htmlFor="instructions-text">Inline Instructions</label>
+            <textarea
+              id="instructions-text"
+              className="input"
+              rows={10}
+              placeholder="Enter custom instructions to append to this agent's system prompt..."
+              value={instructionsText}
+              onChange={(e) => {
+                setInstructionsText(e.target.value);
+                setJustSavedInstructions(false);
+              }}
+              style={{ fontFamily: "monospace", fontSize: "0.875rem", resize: "vertical" }}
+            />
+            <span className="config-hint">Markdown formatting supported. Max 50,000 characters.</span>
+          </div>
+
+          <div className="config-field">
+            <label htmlFor="instructions-path">Instructions File Path</label>
+            <input
+              id="instructions-path"
+              type="text"
+              className="input"
+              placeholder="e.g., .fusion/agents/my-agent-instructions.md"
+              value={instructionsPath}
+              onChange={(e) => {
+                setInstructionsPath(e.target.value);
+                setJustSavedInstructions(false);
+              }}
+            />
+            <span className="config-hint">Path to a .md file (relative to project root). Contents are read and appended at execution time.</span>
+          </div>
+        </div>
+
+        <div className="config-actions">
+          <button
+            className="btn btn--primary"
+            disabled={!hasInstructionsChanges || isSavingInstructions}
+            onClick={() => void handleSaveInstructions()}
+          >
+            {isSavingInstructions ? (
+              <>
+                <Loader2 size={16} className="animate-spin" />
+                Saving…
+              </>
+            ) : (
+              <>
+                <CheckCircle size={16} />
+                Save Instructions
+              </>
+            )}
+          </button>
+          {!hasInstructionsChanges && justSavedInstructions && (
+            <span className="config-saved-indicator">
+              <CheckCircle size={14} />
+              Instructions saved
             </span>
           )}
         </div>

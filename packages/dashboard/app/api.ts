@@ -1790,6 +1790,18 @@ export function updateAgent(agentId: string, updates: AgentUpdateInput, projectI
   });
 }
 
+/** Update agent custom instructions */
+export function updateAgentInstructions(
+  agentId: string,
+  instructions: { instructionsPath?: string; instructionsText?: string },
+  projectId?: string,
+): Promise<Agent> {
+  return api<Agent>(withProjectId(`/agents/${encodeURIComponent(agentId)}/instructions`, projectId), {
+    method: "PATCH",
+    body: JSON.stringify(instructions),
+  });
+}
+
 /** Update an agent's state */
 export function updateAgentState(agentId: string, state: AgentState, projectId?: string): Promise<Agent> {
   return api<Agent>(withProjectId(`/agents/${encodeURIComponent(agentId)}/state`, projectId), {

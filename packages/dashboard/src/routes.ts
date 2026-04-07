@@ -7059,6 +7059,63 @@ Output ONLY the prompt text (no markdown, no explanations).`;
   });
 
   /**
+   * PATCH /api/agents/:id/instructions
+   * Update agent custom instructions.
+   * Body: { instructionsPath?: string, instructionsText?: string }
+   */
+  router.patch("/agents/:id/instructions", async (req, res) => {
+    try {
+      const { instructionsPath, instructionsText } = req.body;
+
+      // Validate instructionsPath if provided
+      if (instructionsPath !== undefined && instructionsPath !== "") {
+        if (typeof instructionsPath !== "string") {
+          res.status(400).json({ error: "instructionsPath must be a string" });
+          return;
+        }
+        if (instructionsPath.length > 500) {
+          res.status(400).json({ error: "instructionsPath must be at most 500 characters" });
+          return;
+        }
+        if (instructionsPath.includes("..")) {
+          res.status(400).json({ error: "instructionsPath must not contain parent directory traversal (..)" });
+          return;
+        }
+        if (!instructionsPath.endsWith(".md")) {
+          res.status(400).json({ error: "instructionsPath must end in .md" });
+          return;
+        }
+      }
+
+      // Validate instructionsText if provided
+      if (instructionsText !== undefined && instructionsText !== "") {
+        if (typeof instructionsText !== "string") {
+          res.status(400).json({ error: "instructionsText must be a string" });
+          return;
+        }
+        if (instructionsText.length > 50000) {
+          res.status(400).json({ error: "instructionsText must be at most 50,000 characters" });
+          return;
+        }
+      }
+
+      const scopedStore = await getScopedStore(req);
+      const { AgentStore } = await import("@fusion/core");
+      const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
+      await agentStore.init();
+
+      const agent = await agentStore.updateAgent(req.params.id, { instructionsPath, instructionsText });
+      res.json(agent);
+    } catch (err: any) {
+      if (err.message?.includes("not found")) {
+        res.status(404).json({ error: err.message });
+      } else {
+        res.status(500).json({ error: err.message });
+      }
+    }
+  });
+
+  /**
    * POST /api/agents/:id/state
    * Update agent state.
    * Body: { state: AgentState }

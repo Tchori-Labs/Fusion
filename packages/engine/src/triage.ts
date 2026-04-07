@@ -16,6 +16,7 @@ import { createKbAgent, describeModel, promptWithFallback } from "./pi.js";
 import { reviewStep, type ReviewVerdict } from "./reviewer.js";
 import { PRIORITY_SPECIFY, type AgentSemaphore } from "./concurrency.js";
 import { AgentLogger } from "./agent-logger.js";
+import { resolveAgentInstructions, buildSystemPromptWithInstructions } from "./agent-instructions.js";
 import { triageLog, reviewerLog } from "./logger.js";
 import {
   isUsageLimitError,
@@ -236,6 +237,8 @@ export interface TriageProcessorOptions {
   onSpecifyComplete?: (task: Task) => void;
   onSpecifyError?: (task: Task, error: Error) => void;
   onAgentText?: (taskId: string, delta: string) => void;
+  /** AgentStore for resolving per-agent custom instructions. */
+  agentStore?: import("@fusion/core").AgentStore;
 }
 
 /**
@@ -492,9 +495,29 @@ export class TriageProcessor {
           ),
         ];
 
+        // Resolve per-agent custom instructions for the triage role
+        let triageInstructions = "";
+        if (this.options.agentStore) {
+          try {
+            const agents = await this.options.agentStore.listAgents({ role: "triage" });
+            for (const agent of agents) {
+              if (agent.instructionsText || agent.instructionsPath) {
+                triageInstructions = await resolveAgentInstructions(agent, this.rootDir);
+                break;
+              }
+            }
+          } catch {
+            // Graceful fallback
+          }
+        }
+        const triageSystemPrompt = buildSystemPromptWithInstructions(
+          resolveAgentPrompt("triage", settings.agentPrompts) || TRIAGE_SYSTEM_PROMPT,
+          triageInstructions,
+        );
+
         const { session } = await createKbAgent({
           cwd: this.rootDir,
-          systemPrompt: resolveAgentPrompt("triage", settings.agentPrompts) || TRIAGE_SYSTEM_PROMPT,
+          systemPrompt: triageSystemPrompt,
           tools: "coding",
           customTools,
           onText: agentLogger.onText,
@@ -1049,6 +1072,8 @@ export class TriageProcessor {
               store,
               taskId,
               userComments: currentUserComments.length > 0 ? currentUserComments : undefined,
+              agentStore: this.options.agentStore,
+              rootDir,
             },
           );
 

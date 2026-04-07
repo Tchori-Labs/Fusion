@@ -14,6 +14,7 @@ import { createKbAgent, describeModel, promptWithFallback } from "./pi.js";
 import { AgentLogger } from "./agent-logger.js";
 import { reviewerLog } from "./logger.js";
 import { checkSessionError } from "./usage-limit-detector.js";
+import { resolveAgentInstructions, buildSystemPromptWithInstructions } from "./agent-instructions.js";
 
 export const REVIEWER_SYSTEM_PROMPT = `You are an independent code and plan reviewer.
 
@@ -198,6 +199,10 @@ export interface ReviewOptions {
   userComments?: TaskComment[];
   /** Agent prompt configuration for resolving custom reviewer prompts. */
   agentPrompts?: AgentPromptsConfig;
+  /** AgentStore for resolving per-agent custom instructions. */
+  agentStore?: import("@fusion/core").AgentStore;
+  /** Project root directory for resolving relative instructionsPath files. */
+  rootDir?: string;
 }
 
 /**
@@ -245,10 +250,30 @@ export async function reviewStep(
     ? options.validatorFallbackModelId
     : options.fallbackModelId;
 
+  // Resolve per-agent custom instructions for the reviewer role
+  let reviewerInstructions = "";
+  if (options.agentStore && options.rootDir) {
+    try {
+      const agents = await options.agentStore.listAgents({ role: "reviewer" });
+      for (const agent of agents) {
+        if (agent.instructionsText || agent.instructionsPath) {
+          reviewerInstructions = await resolveAgentInstructions(agent, options.rootDir);
+          break;
+        }
+      }
+    } catch {
+      // Graceful fallback
+    }
+  }
+  const reviewerSystemPrompt = buildSystemPromptWithInstructions(
+    resolveAgentPrompt("reviewer", options.agentPrompts) || REVIEWER_SYSTEM_PROMPT,
+    reviewerInstructions,
+  );
+
   // Spawn a reviewer agent with read-only tools
   const { session } = await createKbAgent({
     cwd,
-    systemPrompt: resolveAgentPrompt("reviewer", options.agentPrompts) || REVIEWER_SYSTEM_PROMPT,
+    systemPrompt: reviewerSystemPrompt,
     tools: "readonly",
     onText: agentLogger ? agentLogger.onText : (delta) => options.onText?.(delta),
     onThinking: agentLogger?.onThinking,

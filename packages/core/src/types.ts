@@ -1499,6 +1499,11 @@ export interface Agent {
   totalOutputTokens?: number;
   /** Last error message */
   lastError?: string;
+  /** Path to a markdown file containing custom instructions (resolved relative to project root).
+   *  Must end in `.md`, no `..` traversal. Max 500 chars. */
+  instructionsPath?: string;
+  /** Inline custom instructions appended to the agent's system prompt at execution time. Max 50,000 chars. */
+  instructionsText?: string;
 }
 
 /** Per-agent heartbeat configuration, stored in agent.runtimeConfig */
@@ -1531,6 +1536,8 @@ export interface AgentCreateInput {
   reportsTo?: string;
   runtimeConfig?: Record<string, unknown>;
   permissions?: Record<string, boolean>;
+  instructionsPath?: string;
+  instructionsText?: string;
 }
 
 /** Input for updating an existing agent */
@@ -1547,6 +1554,8 @@ export interface AgentUpdateInput {
   lastError?: string;
   totalInputTokens?: number;
   totalOutputTokens?: number;
+  instructionsPath?: string;
+  instructionsText?: string;
 }
 
 /** Per-task session persistence for an agent */

@@ -76,9 +76,9 @@ interface AgentData {
   totalInputTokens?: number;
   totalOutputTokens?: number;
   lastError?: string;
+  instructionsPath?: string;
+  instructionsText?: string;
 }
-
-/** Per-agent write lock for serialization */
 interface AgentLock {
   promise: Promise<unknown>;
 }
@@ -136,6 +136,8 @@ export class AgentStore extends EventEmitter {
       ...(input.reportsTo && { reportsTo: input.reportsTo }),
       ...(input.runtimeConfig && { runtimeConfig: input.runtimeConfig }),
       ...(input.permissions && { permissions: input.permissions }),
+      ...(input.instructionsPath && { instructionsPath: input.instructionsPath }),
+      ...(input.instructionsText && { instructionsText: input.instructionsText }),
     };
 
     await this.writeAgent(agent);
@@ -214,6 +216,8 @@ export class AgentStore extends EventEmitter {
         ...(updates.lastError !== undefined && { lastError: updates.lastError }),
         ...(updates.totalInputTokens !== undefined && { totalInputTokens: updates.totalInputTokens }),
         ...(updates.totalOutputTokens !== undefined && { totalOutputTokens: updates.totalOutputTokens }),
+        ...(updates.instructionsPath !== undefined && { instructionsPath: updates.instructionsPath }),
+        ...(updates.instructionsText !== undefined && { instructionsText: updates.instructionsText }),
       };
 
       await this.writeAgent(updated);
@@ -767,6 +771,8 @@ export class AgentStore extends EventEmitter {
       totalInputTokens: data.totalInputTokens,
       totalOutputTokens: data.totalOutputTokens,
       lastError: data.lastError,
+      instructionsPath: data.instructionsPath,
+      instructionsText: data.instructionsText,
     };
   }
 
@@ -791,6 +797,8 @@ export class AgentStore extends EventEmitter {
       totalInputTokens: agent.totalInputTokens,
       totalOutputTokens: agent.totalOutputTokens,
       lastError: agent.lastError,
+      instructionsPath: agent.instructionsPath,
+      instructionsText: agent.instructionsText,
     };
 
     // Write atomically using temp file
