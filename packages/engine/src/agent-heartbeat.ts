@@ -20,7 +20,7 @@
 import type { AgentStore, AgentHeartbeatRun, HeartbeatInvocationSource, TaskStore, TaskDetail } from "@fusion/core";
 import type { ToolDefinition } from "@mariozechner/pi-coding-agent";
 import { Type, type Static } from "@mariozechner/pi-ai";
-import { createTaskCreateTool, createTaskLogTool } from "./agent-tools.js";
+import { createTaskCreateTool, createTaskLogTool, taskCreateParams } from "./agent-tools.js";
 import { heartbeatLog } from "./logger.js";
 
 // Lazy import for pi — avoids pulling the pi SDK into the module graph
@@ -149,6 +149,9 @@ export class HeartbeatMonitor {
   private agentStartLocks: Map<string, Promise<unknown>> = new Map();
   private pollInterval: NodeJS.Timeout | null = null;
   private isRunning = false;
+
+  /** Tasks created per agent during heartbeat runs (keyed by agentId) */
+  private runCreatedTasks: Map<string, Array<{ id: string; description: string }>> = new Map();
 
   constructor(options: HeartbeatMonitorOptions) {
     this.store = options.store;
@@ -291,6 +294,13 @@ export class HeartbeatMonitor {
     if (!run) return;
 
     const tracked = this.trackedAgents.get(agentId);
+
+    // Merge accumulated task creations into resultJson
+    const createdTasks = this.runCreatedTasks.get(agentId);
+    const enrichedResultJson = createdTasks?.length
+      ? { ...result.resultJson, tasksCreated: createdTasks }
+      : result.resultJson;
+
     const completedRun: AgentHeartbeatRun = {
       ...run,
       endedAt: new Date().toISOString(),
@@ -299,12 +309,15 @@ export class HeartbeatMonitor {
       sessionIdBefore: tracked?.sessionIdBefore,
       sessionIdAfter: result.sessionIdAfter,
       usageJson: result.usageJson,
-      resultJson: result.resultJson,
+      resultJson: enrichedResultJson,
       stdoutExcerpt: result.stdoutExcerpt,
       stderrExcerpt: result.stderrExcerpt,
     };
 
     await this.store.saveRun(completedRun);
+
+    // Clear accumulated run state for this agent
+    this.clearRunState(agentId);
 
     // Update cumulative usage on agent
     if (result.usageJson) {
@@ -516,16 +529,16 @@ export class HeartbeatMonitor {
         // Lazy-load createKbAgent and promptWithFallback
         const { createKbAgent, promptWithFallback } = await import("./pi.js");
 
+        // Build tools with task creation tracking
+        const heartbeatTools = this.createHeartbeatTools(agentId, taskStore, taskId);
+        heartbeatTools.push(heartbeatDoneTool);
+
         // Create agent session
         const { session } = await createKbAgent({
           cwd: rootDir,
           systemPrompt: HEARTBEAT_SYSTEM_PROMPT,
           tools: "readonly",
-          customTools: [
-            createTaskCreateTool(taskStore),
-            createTaskLogTool(taskStore, taskId),
-            heartbeatDoneTool,
-          ],
+          customTools: heartbeatTools,
           defaultProvider: agent.runtimeConfig?.modelProvider as string | undefined,
           defaultModelId: agent.runtimeConfig?.modelId as string | undefined,
           onText: (delta) => { outputLength += delta.length; },
@@ -595,6 +608,73 @@ export class HeartbeatMonitor {
         return (await this.store.getRunDetail(agentId, run.id))!;
       }
     });
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Heartbeat tools: createHeartbeatTools / clearRunState
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Create the tool set for a heartbeat agent session.
+   *
+   * Returns tools with tracking wrappers that record task creations
+   * so they can be included in the run's `resultJson.tasksCreated`.
+   *
+   * @param agentId - The agent ID (used for tracking and logging)
+   * @param taskStore - TaskStore for task creation and logging
+   * @param taskId - The assigned task ID (for task_log context)
+   * @returns Array of ToolDefinitions for the heartbeat session
+   */
+  createHeartbeatTools(agentId: string, taskStore: TaskStore, taskId: string): ToolDefinition[] {
+    const tools: ToolDefinition[] = [];
+
+    // Wrap createTaskCreateTool with tracking and agent-link logging
+    const baseCreateTool = createTaskCreateTool(taskStore);
+    const trackedCreateTool: ToolDefinition = {
+      ...baseCreateTool,
+      execute: async (id: string, params: Static<typeof taskCreateParams>, _signal?: unknown, _onUpdate?: unknown, _ctx?: unknown) => {
+        const result = await baseCreateTool.execute(id, params, undefined as any, undefined as any, undefined as any);
+
+        // Extract created task ID from the response text ("Created FN-XXX: ...")
+        const firstContent = result.content[0];
+        const responseText = firstContent && "text" in firstContent ? firstContent.text : "";
+        const taskIdMatch = responseText.match(/Created (FN-\d+|KB-\d+|\w+-\d+):/);
+        const createdTaskId = taskIdMatch?.[1] ?? "unknown";
+
+        // Log agent link on the created task
+        try {
+          await taskStore.logEntry(createdTaskId, `Created by agent ${agentId} during heartbeat run`);
+        } catch {
+          // Non-critical — task was created, just the log failed
+        }
+
+        // Accumulate for inclusion in run resultJson
+        if (!this.runCreatedTasks.has(agentId)) {
+          this.runCreatedTasks.set(agentId, []);
+        }
+        this.runCreatedTasks.get(agentId)!.push({
+          id: createdTaskId,
+          description: params.description,
+        });
+
+        return result;
+      },
+    };
+    tools.push(trackedCreateTool);
+
+    // task_log tool (standard, no tracking needed)
+    tools.push(createTaskLogTool(taskStore, taskId));
+
+    return tools;
+  }
+
+  /**
+   * Clear accumulated run state for an agent.
+   * Called after completing a run to reset the `runCreatedTasks` accumulator.
+   * @param agentId - The agent ID
+   */
+  clearRunState(agentId: string): void {
+    this.runCreatedTasks.delete(agentId);
   }
 
   // ─────────────────────────────────────────────────────────────────────────

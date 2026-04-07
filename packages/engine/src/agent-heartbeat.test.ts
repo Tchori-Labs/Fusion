@@ -1315,4 +1315,280 @@ describe("HeartbeatMonitor", () => {
       });
     });
   });
+
+  // ── Task Creation Tracking Tests ──────────────────────────────────────
+
+  describe("createHeartbeatTools", () => {
+    let mockTaskStore: TaskStore;
+
+    function createMockTaskStoreForTools(overrides: Partial<TaskStore> = {}): TaskStore {
+      return {
+        createTask: vi.fn().mockResolvedValue({
+          id: "FN-100",
+          description: "Follow-up task",
+          dependencies: [],
+          column: "triage",
+        }),
+        logEntry: vi.fn().mockResolvedValue({}),
+        getTask: vi.fn().mockResolvedValue({
+          id: "FN-001",
+          title: "Test Task",
+          description: "Test task description",
+          prompt: "",
+          steps: [],
+          column: "todo",
+          dependencies: [],
+          log: [],
+          attachments: [],
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        } as unknown as TaskDetail),
+        ...overrides,
+      } as unknown as TaskStore;
+    }
+
+    beforeEach(() => {
+      mockTaskStore = createMockTaskStoreForTools();
+    });
+
+    it("returns task_create and task_log tools", () => {
+      const store = createMockStore();
+      const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: "/tmp" });
+
+      const tools = monitor.createHeartbeatTools("agent-001", mockTaskStore, "FN-001");
+
+      expect(tools).toHaveLength(2);
+      expect(tools[0]!.name).toBe("task_create");
+      expect(tools[1]!.name).toBe("task_log");
+    });
+
+    it("task_create tool creates a task in triage via TaskStore", async () => {
+      const store = createMockStore();
+      const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: "/tmp" });
+
+      const tools = monitor.createHeartbeatTools("agent-001", mockTaskStore, "FN-001");
+      const createTool = tools[0]!;
+
+      const result = await createTool.execute("call-1", { description: "Follow-up task" }, undefined as any, undefined as any, undefined as any);
+
+      expect(mockTaskStore.createTask).toHaveBeenCalledWith({
+        description: "Follow-up task",
+        dependencies: undefined,
+        column: "triage",
+      });
+
+      const responseText = result.content[0] && "text" in result.content[0] ? result.content[0].text : "";
+      expect(responseText).toContain("Created FN-100");
+    });
+
+    it("logs agent link on created task", async () => {
+      const store = createMockStore();
+      const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: "/tmp" });
+
+      const tools = monitor.createHeartbeatTools("agent-001", mockTaskStore, "FN-001");
+      await tools[0]!.execute("call-1", { description: "Follow-up task" }, undefined as any, undefined as any, undefined as any);
+
+      expect(mockTaskStore.logEntry).toHaveBeenCalledWith(
+        "FN-100",
+        "Created by agent agent-001 during heartbeat run",
+      );
+    });
+
+    it("accumulates created tasks in runCreatedTasks", async () => {
+      const store = createMockStore();
+      const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: "/tmp" });
+
+      const tools = monitor.createHeartbeatTools("agent-001", mockTaskStore, "FN-001");
+
+      await tools[0]!.execute("call-1", { description: "First task" }, undefined as any, undefined as any, undefined as any);
+      await tools[0]!.execute("call-2", { description: "Second task" }, undefined as any, undefined as any, undefined as any);
+
+      // Internally tracked — verify via completeRun integration
+      // For now verify the tool was called twice
+      expect(mockTaskStore.createTask).toHaveBeenCalledTimes(2);
+    });
+
+    it("handles logEntry failure gracefully", async () => {
+      mockTaskStore.logEntry = vi.fn().mockRejectedValue(new Error("DB error"));
+      const store = createMockStore();
+      const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: "/tmp" });
+
+      const tools = monitor.createHeartbeatTools("agent-001", mockTaskStore, "FN-001");
+
+      // Should not throw even though logEntry fails
+      const result = await tools[0]!.execute("call-1", { description: "Follow-up task" }, undefined as any, undefined as any, undefined as any);
+      expect(result).toBeDefined();
+      // Task was still created
+      expect(mockTaskStore.createTask).toHaveBeenCalled();
+    });
+  });
+
+  describe("completeRun task tracking", () => {
+    it("includes tasksCreated in resultJson when tasks were created", async () => {
+      const savedRuns: Map<string, AgentHeartbeatRun> = new Map();
+      const store = createMockStore();
+      const mockTaskStore: TaskStore = {
+        createTask: vi.fn().mockResolvedValue({
+          id: "FN-200",
+          description: "Created task",
+          dependencies: [],
+          column: "triage",
+        }),
+        logEntry: vi.fn().mockResolvedValue({}),
+        getTask: vi.fn().mockResolvedValue({
+          id: "FN-001",
+          title: "Test Task",
+          description: "Test task description",
+          prompt: "",
+          steps: [],
+          column: "todo",
+          dependencies: [],
+          log: [],
+          attachments: [],
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        } as unknown as TaskDetail),
+      } as unknown as TaskStore;
+
+      // Set up store to return a run that we can verify
+      const initialRun: AgentHeartbeatRun = {
+        id: "run-track-001",
+        agentId: "agent-001",
+        startedAt: new Date().toISOString(),
+        endedAt: null,
+        status: "active",
+      };
+      savedRuns.set("run-track-001", { ...initialRun });
+
+      (store as any).startHeartbeatRun = vi.fn().mockResolvedValue(initialRun);
+      (store as any).saveRun = vi.fn().mockImplementation(async (run: AgentHeartbeatRun) => {
+        savedRuns.set(run.id, run);
+      });
+      (store as any).getRunDetail = vi.fn().mockImplementation(async (_agentId: string, runId: string) => {
+        return savedRuns.get(runId);
+      });
+      (store as any).endHeartbeatRun = vi.fn().mockResolvedValue(undefined);
+      (store as any).getAgent = vi.fn().mockResolvedValue({
+        id: "agent-001",
+        name: "Test Agent",
+        role: "executor",
+        state: "active",
+        taskId: "FN-001",
+        runtimeConfig: {},
+      } as Agent);
+      (store as any).updateAgent = vi.fn().mockResolvedValue(undefined);
+      (store as any).updateAgentState = vi.fn().mockResolvedValue(undefined);
+
+      const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: "/tmp" });
+
+      // Use createHeartbeatTools to create a task
+      const tools = monitor.createHeartbeatTools("agent-001", mockTaskStore, "FN-001");
+      await tools[0]!.execute("call-1", { description: "Created task" }, undefined as any, undefined as any, undefined as any);
+
+      // Now complete the run
+      await monitor.completeRun("agent-001", "run-track-001", {
+        status: "completed",
+        resultJson: { summary: "test" },
+      });
+
+      // Check the saved run has tasksCreated
+      const savedRun = savedRuns.get("run-track-001");
+      expect(savedRun).toBeDefined();
+      expect(savedRun!.resultJson).toBeDefined();
+      expect((savedRun!.resultJson as any).tasksCreated).toEqual([
+        { id: "FN-200", description: "Created task" },
+      ]);
+      // Original resultJson fields should still be present
+      expect((savedRun!.resultJson as any).summary).toBe("test");
+    });
+
+    it("does not include tasksCreated in resultJson when no tasks were created", async () => {
+      const savedRuns: Map<string, AgentHeartbeatRun> = new Map();
+      const store = createMockStore();
+
+      (store as any).saveRun = vi.fn().mockImplementation(async (run: AgentHeartbeatRun) => {
+        savedRuns.set(run.id, run);
+      });
+      (store as any).getRunDetail = vi.fn().mockResolvedValue({
+        id: "run-empty-001",
+        agentId: "agent-002",
+        startedAt: new Date().toISOString(),
+        endedAt: null,
+        status: "active",
+      } as AgentHeartbeatRun);
+      (store as any).endHeartbeatRun = vi.fn().mockResolvedValue(undefined);
+      (store as any).updateAgentState = vi.fn().mockResolvedValue(undefined);
+
+      const monitor = new HeartbeatMonitor({ store });
+
+      await monitor.completeRun("agent-002", "run-empty-001", {
+        status: "completed",
+        resultJson: { summary: "nothing created" },
+      });
+
+      const savedRun = savedRuns.get("run-empty-001");
+      expect(savedRun).toBeDefined();
+      expect((savedRun!.resultJson as any).tasksCreated).toBeUndefined();
+      expect((savedRun!.resultJson as any).summary).toBe("nothing created");
+    });
+  });
+
+  describe("clearRunState", () => {
+    it("resets accumulated task state for an agent", async () => {
+      const savedRuns: Map<string, AgentHeartbeatRun> = new Map();
+      const store = createMockStore();
+      const mockTaskStore: TaskStore = {
+        createTask: vi.fn().mockResolvedValue({
+          id: "FN-300",
+          description: "Created task",
+          dependencies: [],
+          column: "triage",
+        }),
+        logEntry: vi.fn().mockResolvedValue({}),
+        getTask: vi.fn().mockResolvedValue({} as any),
+      } as unknown as TaskStore;
+
+      const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: "/tmp" });
+
+      // Create a task via the tracking tools
+      const tools = monitor.createHeartbeatTools("agent-001", mockTaskStore, "FN-001");
+      await tools[0]!.execute("call-1", { description: "Task to track" }, undefined as any, undefined as any, undefined as any);
+
+      // Set up store to verify second completeRun
+      (store as any).saveRun = vi.fn().mockImplementation(async (run: AgentHeartbeatRun) => {
+        savedRuns.set(run.id, run);
+      });
+      (store as any).getRunDetail = vi.fn().mockResolvedValue({
+        id: "run-clear-001",
+        agentId: "agent-001",
+        startedAt: new Date().toISOString(),
+        endedAt: null,
+        status: "active",
+      } as AgentHeartbeatRun);
+      (store as any).endHeartbeatRun = vi.fn().mockResolvedValue(undefined);
+      (store as any).updateAgentState = vi.fn().mockResolvedValue(undefined);
+
+      // First completeRun should have tasksCreated
+      await monitor.completeRun("agent-001", "run-clear-001", { status: "completed" });
+      let savedRun = savedRuns.get("run-clear-001");
+      expect((savedRun!.resultJson as any)?.tasksCreated).toEqual([
+        { id: "FN-300", description: "Task to track" },
+      ]);
+
+      // Reset mock for second run
+      savedRuns.clear();
+      (store as any).getRunDetail = vi.fn().mockResolvedValue({
+        id: "run-clear-002",
+        agentId: "agent-001",
+        startedAt: new Date().toISOString(),
+        endedAt: null,
+        status: "active",
+      } as AgentHeartbeatRun);
+
+      // Second completeRun (after clearRunState) should NOT have tasksCreated
+      await monitor.completeRun("agent-001", "run-clear-002", { status: "completed" });
+      savedRun = savedRuns.get("run-clear-002");
+      expect((savedRun!.resultJson as any)?.tasksCreated).toBeUndefined();
+    });
+  });
 });
