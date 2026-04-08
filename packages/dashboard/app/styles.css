@@ -12389,6 +12389,10 @@ html .column.drag-over * {
 }
 
 .planning-confirm-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-sm);
   flex: 1;
   padding: var(--space-md) var(--space-xl);
   border: 1px solid var(--border);
