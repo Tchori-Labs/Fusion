@@ -809,6 +809,106 @@ describe("requirePlanApproval setting", () => {
   });
 });
 
+describe("approved triage recovery", () => {
+  const rootDir = join(__dirname, "__test_triage_recovery__");
+
+  beforeEach(async () => {
+    await mkdir(join(rootDir, ".fusion", "tasks", "FN-001"), { recursive: true });
+    await writeFile(
+      join(rootDir, ".fusion", "tasks", "FN-001", "PROMPT.md"),
+      "# Task: FN-001\n\n**Size:** M\n\n## Review Level: 2\n\nRecovered specification",
+    );
+  });
+
+  afterEach(async () => {
+    await rm(rootDir, { recursive: true, force: true });
+  });
+
+  it("moves approved specifying task to todo during recovery", async () => {
+    const store = createMockStore({
+      getSettings: vi.fn().mockResolvedValue({
+        maxConcurrent: 2,
+        maxWorktrees: 4,
+        pollIntervalMs: 10000,
+        groupOverlappingFiles: false,
+        autoMerge: true,
+        requirePlanApproval: false,
+      } as Settings),
+      parseDependenciesFromPrompt: vi.fn().mockResolvedValue(["FN-1247"]),
+    });
+
+    const processor = new TriageProcessor(store, rootDir);
+    const recovered = await processor.recoverApprovedTask({
+      id: "FN-001",
+      description: "Recovered triage task",
+      column: "triage",
+      status: "specifying",
+      dependencies: [],
+      steps: [],
+      currentStep: 0,
+      log: [
+        { timestamp: "2026-01-01T00:00:00.000Z", action: "Spec review requested" },
+        { timestamp: "2026-01-01T00:01:00.000Z", action: "Spec review: APPROVE" },
+      ],
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:02:00.000Z",
+    });
+
+    expect(recovered).toBe(true);
+    expect(store.updateTask).toHaveBeenCalledWith("FN-001", {
+      status: null,
+      error: null,
+      dependencies: ["FN-1247"],
+      size: "M",
+      reviewLevel: 2,
+    });
+    expect(store.moveTask).toHaveBeenCalledWith("FN-001", "todo");
+    expect(store.logEntry).toHaveBeenCalledWith(
+      "FN-001",
+      "Auto-recovered approved specification stuck in specifying — moved to todo",
+    );
+  });
+
+  it("moves approved specifying task to awaiting-approval when manual approval is required", async () => {
+    const store = createMockStore({
+      getSettings: vi.fn().mockResolvedValue({
+        maxConcurrent: 2,
+        maxWorktrees: 4,
+        pollIntervalMs: 10000,
+        groupOverlappingFiles: false,
+        autoMerge: true,
+        requirePlanApproval: true,
+      } as Settings),
+    });
+
+    const processor = new TriageProcessor(store, rootDir);
+    const recovered = await processor.recoverApprovedTask({
+      id: "FN-001",
+      description: "Recovered triage task",
+      column: "triage",
+      status: "specifying",
+      dependencies: [],
+      steps: [],
+      currentStep: 0,
+      log: [
+        { timestamp: "2026-01-01T00:00:00.000Z", action: "Spec review: APPROVE" },
+      ],
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:02:00.000Z",
+    });
+
+    expect(recovered).toBe(true);
+    expect(store.moveTask).not.toHaveBeenCalled();
+    expect(store.updateTask).toHaveBeenCalledWith("FN-001", {
+      status: "awaiting-approval",
+    });
+    expect(store.logEntry).toHaveBeenCalledWith(
+      "FN-001",
+      "Auto-recovered approved specification stuck in specifying — awaiting manual approval",
+    );
+  });
+});
+
 describe("taskCreate tool model inheritance", () => {
   it("inherits parent task model settings when creating subtasks", async () => {
     const parentTask: Task = {

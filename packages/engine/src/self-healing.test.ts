@@ -594,4 +594,108 @@ describe("SelfHealingManager", () => {
       managerWithRecovery.stop();
     });
   });
+
+  describe("recoverApprovedTriageTasks", () => {
+    it("recovers approved specifying triage tasks that are not actively processing", async () => {
+      const recoverFn = vi.fn().mockResolvedValue(true);
+      const getSpecifying = vi.fn().mockReturnValue(new Set<string>());
+
+      const managerWithRecovery = new SelfHealingManager(store, {
+        rootDir: "/tmp/test-project",
+        recoverApprovedTriageTask: recoverFn,
+        getSpecifyingTaskIds: getSpecifying,
+      });
+
+      (store.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue([
+        {
+          id: "FN-100",
+          column: "triage",
+          status: "specifying",
+          paused: false,
+          log: [
+            { action: "Spec review requested" },
+            { action: "Spec review: APPROVE" },
+          ],
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+      ]);
+
+      vi.setSystemTime(new Date("2026-01-01T00:05:00.000Z"));
+
+      const result = await managerWithRecovery.recoverApprovedTriageTasks();
+
+      expect(result).toBe(1);
+      expect(recoverFn).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "FN-100" }),
+      );
+
+      managerWithRecovery.stop();
+    });
+
+    it("skips tasks that are still actively being specified", async () => {
+      const recoverFn = vi.fn().mockResolvedValue(true);
+      const getSpecifying = vi.fn().mockReturnValue(new Set(["FN-101"]));
+
+      const managerWithRecovery = new SelfHealingManager(store, {
+        rootDir: "/tmp/test-project",
+        recoverApprovedTriageTask: recoverFn,
+        getSpecifyingTaskIds: getSpecifying,
+      });
+
+      (store.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue([
+        {
+          id: "FN-101",
+          column: "triage",
+          status: "specifying",
+          paused: false,
+          log: [{ action: "Spec review: APPROVE" }],
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+      ]);
+
+      vi.setSystemTime(new Date("2026-01-01T00:05:00.000Z"));
+
+      const result = await managerWithRecovery.recoverApprovedTriageTasks();
+
+      expect(result).toBe(0);
+      expect(recoverFn).not.toHaveBeenCalled();
+
+      managerWithRecovery.stop();
+    });
+
+    it("skips specifying triage tasks whose latest review is not APPROVE", async () => {
+      const recoverFn = vi.fn().mockResolvedValue(true);
+      const getSpecifying = vi.fn().mockReturnValue(new Set<string>());
+
+      const managerWithRecovery = new SelfHealingManager(store, {
+        rootDir: "/tmp/test-project",
+        recoverApprovedTriageTask: recoverFn,
+        getSpecifyingTaskIds: getSpecifying,
+      });
+
+      (store.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue([
+        {
+          id: "FN-102",
+          column: "triage",
+          status: "specifying",
+          paused: false,
+          log: [
+            { action: "Spec review: APPROVE" },
+            { action: "Spec review requested" },
+            { action: "Spec review: REVISE" },
+          ],
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+      ]);
+
+      vi.setSystemTime(new Date("2026-01-01T00:05:00.000Z"));
+
+      const result = await managerWithRecovery.recoverApprovedTriageTasks();
+
+      expect(result).toBe(0);
+      expect(recoverFn).not.toHaveBeenCalled();
+
+      managerWithRecovery.stop();
+    });
+  });
 });

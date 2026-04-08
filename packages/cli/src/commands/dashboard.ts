@@ -583,6 +583,8 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
       rootDir: cwd,
       recoverCompletedTask: (task) => executorRef.current?.recoverCompletedTask(task) ?? Promise.resolve(false),
       getExecutingTaskIds: () => executorRef.current?.getExecutingTaskIds() ?? new Set(),
+      recoverApprovedTriageTask: (task) => triageRef.current?.recoverApprovedTask(task) ?? Promise.resolve(false),
+      getSpecifyingTaskIds: () => triageRef.current?.getProcessingTaskIds() ?? new Set(),
     });
 
     // ── Stuck task detector: monitors agent sessions for stagnation ────

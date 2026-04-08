@@ -40,7 +40,19 @@ export interface SelfHealingOptions {
    * Used to avoid recovering tasks that are actively being worked on.
    */
   getExecutingTaskIds?: () => Set<string>;
+  /**
+   * Recover a triage task whose spec was approved but whose final transition
+   * out of `status: "specifying"` never completed.
+   */
+  recoverApprovedTriageTask?: (task: Task) => Promise<boolean>;
+  /**
+   * Returns the set of task IDs currently being specified by triage.
+   * Used to avoid recovering active triage sessions.
+   */
+  getSpecifyingTaskIds?: () => Set<string>;
 }
+
+const APPROVED_TRIAGE_RECOVERY_GRACE_MS = 60_000;
 
 export class SelfHealingManager {
   // ── Auto-unpause state ──────────────────────────────────────────────
@@ -251,6 +263,7 @@ export class SelfHealingManager {
       this.checkpointWal();
       await this.enforceWorktreeCap();
       await this.recoverCompletedTasks();
+      await this.recoverApprovedTriageTasks();
 
       const elapsedMs = Date.now() - startMs;
       log.log(`Maintenance cycle completed in ${elapsedMs}ms`);
@@ -304,6 +317,52 @@ export class SelfHealingManager {
       return recovered;
     } catch (err: any) {
       log.error(`Completed task recovery failed: ${err.message}`);
+      return 0;
+    }
+  }
+
+  /**
+   * Recover triage tasks that already have an approved specification but were
+   * left stuck in `status: "specifying"` without an active triage session.
+   *
+   * This catches the mirror-image of executor recovery: the review completed,
+   * but the final transition to `todo` / `awaiting-approval` never happened.
+   */
+  async recoverApprovedTriageTasks(): Promise<number> {
+    const recoverFn = this.options.recoverApprovedTriageTask;
+    if (!recoverFn) return 0;
+
+    try {
+      const tasks = await this.store.listTasks();
+      const specifyingIds = this.options.getSpecifyingTaskIds?.() ?? new Set<string>();
+      const now = Date.now();
+
+      const orphanedApproved = tasks.filter((t) =>
+        t.column === "triage" &&
+        t.status === "specifying" &&
+        !t.paused &&
+        !specifyingIds.has(t.id) &&
+        now - new Date(t.updatedAt).getTime() >= APPROVED_TRIAGE_RECOVERY_GRACE_MS &&
+        hasLatestSpecReviewApproval(t),
+      );
+
+      if (orphanedApproved.length === 0) return 0;
+
+      log.warn(`Found ${orphanedApproved.length} approved triage task(s) stuck in specifying`);
+
+      let recovered = 0;
+      for (const task of orphanedApproved) {
+        log.log(`Recovering approved triage task ${task.id}: ${task.title || task.description?.slice(0, 60) || "(untitled)"}`);
+        const success = await recoverFn(task);
+        if (success) recovered++;
+      }
+
+      if (recovered > 0) {
+        log.log(`Recovered ${recovered} approved triage task(s) out of specifying`);
+      }
+      return recovered;
+    } catch (err: any) {
+      log.error(`Approved triage recovery failed: ${err.message}`);
       return 0;
     }
   }
@@ -478,4 +537,14 @@ export class SelfHealingManager {
       log.error(`Worktree cap enforcement failed: ${err.message}`);
     }
   }
+}
+
+function hasLatestSpecReviewApproval(task: Task): boolean {
+  for (let i = task.log.length - 1; i >= 0; i--) {
+    const action = task.log[i]?.action ?? "";
+    if (action.startsWith("Spec review: ")) {
+      return action === "Spec review: APPROVE";
+    }
+  }
+  return false;
 }

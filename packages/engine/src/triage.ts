@@ -27,6 +27,8 @@ import { isTransientError, isSilentTransientError } from "./transient-error-dete
 import { withRateLimitRetry } from "./rate-limit-retry.js";
 import { computeRecoveryDecision, formatDelay, MAX_RECOVERY_RETRIES } from "./recovery-policy.js";
 import type { StuckTaskDetector } from "./stuck-task-detector.js";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 
 export const TRIAGE_SYSTEM_PROMPT = `You are a task specification agent for "kb", an AI-orchestrated task board.
 
@@ -358,6 +360,45 @@ export class TriageProcessor {
   }
 
   /**
+   * Return a snapshot of tasks currently being specified by this processor.
+   * Used by self-healing maintenance to avoid recovering live sessions.
+   */
+  getProcessingTaskIds(): Set<string> {
+    return new Set(this.processing);
+  }
+
+  /**
+   * Recover a triage task whose spec was already approved but the final
+   * handoff out of `status: "specifying"` never completed.
+   */
+  async recoverApprovedTask(task: Task): Promise<boolean> {
+    if (task.column !== "triage" || task.status !== "specifying") {
+      return false;
+    }
+
+    if (!hasLatestSpecReviewApproval(task)) {
+      return false;
+    }
+
+    const settings = await this.store.getSettings();
+    const promptPath = join(this.rootDir, ".fusion", "tasks", task.id, "PROMPT.md");
+    const written = await readFile(promptPath, "utf-8").catch(() => "");
+
+    if (!written.trim()) {
+      triageLog.warn(`${task.id} approved-spec recovery skipped — PROMPT.md missing or empty`);
+      return false;
+    }
+
+    await this.finalizeApprovedTask(task, written, settings, {
+      recoveryLogAction: settings.requirePlanApproval
+        ? "Auto-recovered approved specification stuck in specifying — awaiting manual approval"
+        : "Auto-recovered approved specification stuck in specifying — moved to todo",
+    });
+
+    return true;
+  }
+
+  /**
    * If `newIntervalMs` differs from the currently active timer, restart
    * the `setInterval` so the new cadence takes effect immediately.
    */
@@ -665,10 +706,6 @@ export class TriageProcessor {
             return;
           }
 
-          // Check if the agent flagged a duplicate
-          const { readFile } = await import("node:fs/promises");
-          const { join } = await import("node:path");
-
           // Stale-approval detection: re-read the task to check if new user
           // comments arrived after the spec was approved.  If the comment
           // fingerprint changed, the approval is stale and the task needs
@@ -691,70 +728,12 @@ export class TriageProcessor {
             join(this.rootDir, promptPath),
             "utf-8",
           ).catch(() => "");
-          const dupMatch = written.match(/^DUPLICATE:\s*([A-Z]+-\d+)/i);
 
-          if (dupMatch) {
-            const dupId = dupMatch[1];
-            triageLog.log(`${task.id} is a duplicate of ${dupId} — closing`);
-            await this.store.logEntry(
-              task.id,
-              `Duplicate of ${dupId} — closed`,
-            );
-            await this.store.deleteTask(task.id);
-          } else {
-            // Parse dependencies, size, and review level from the generated PROMPT.md
-            const parsedDeps = await this.store.parseDependenciesFromPrompt(
-              task.id,
-            );
-            const taskUpdates: Record<string, any> = { status: null };
-
-            if (parsedDeps.length > 0) {
-              taskUpdates.dependencies = parsedDeps;
-              triageLog.log(
-                `${task.id} dependencies: ${parsedDeps.join(", ")}`,
-              );
-            }
-
-            // Extract size (S|M|L) from front-matter
-            const sizeMatch = written.match(/^\*\*Size:\*\*\s+(S|M|L)\b/m);
-            if (sizeMatch) {
-              taskUpdates.size = sizeMatch[1] as "S" | "M" | "L";
-            }
-
-            // Extract review level from heading
-            const reviewMatch = written.match(/^##\s+Review\s+Level:\s+(\d+)/m);
-            if (reviewMatch) {
-              taskUpdates.reviewLevel = parseInt(reviewMatch[1], 10);
-            }
-
-            await this.store.updateTask(task.id, taskUpdates);
-
-            // Check if manual plan approval is required
-            if (settings.requirePlanApproval) {
-              // Set awaiting-approval status instead of moving to todo
-              await this.store.updateTask(task.id, { status: "awaiting-approval" });
-              await this.store.logEntry(
-                task.id,
-                "Specification approved by AI — awaiting manual approval",
-              );
-              triageLog.log(
-                `✓ ${task.id} specified and awaiting manual approval`,
-              );
-            } else {
-              // Auto-move to todo (existing behavior)
-              await this.store.moveTask(task.id, "todo");
-
-              // Log completion for re-specification
-              if (isRespecify) {
-                await this.store.logEntry(task.id, "Spec revised by AI", feedback);
-                triageLog.log(`✓ ${task.id} re-specified and moved to todo`);
-              } else {
-                triageLog.log(`✓ ${task.id} specified and moved to todo`);
-              }
-            }
-
-            this.options.onSpecifyComplete?.(task);
-          }
+          await this.finalizeApprovedTask(task, written, settings, {
+            isRespecify,
+            feedback,
+          });
+          this.options.onSpecifyComplete?.(task);
         } finally {
           this.activeSessions.delete(task.id);
           stuckDetector?.untrackTask(task.id);
@@ -1192,6 +1171,85 @@ export class TriageProcessor {
       },
     };
   }
+
+  private async finalizeApprovedTask(
+    task: Task,
+    written: string,
+    settings: Settings,
+    options: {
+      isRespecify?: boolean;
+      feedback?: string;
+      recoveryLogAction?: string;
+    } = {},
+  ): Promise<void> {
+    const dupMatch = written.match(/^DUPLICATE:\s*([A-Z]+-\d+)/i);
+
+    if (dupMatch) {
+      const dupId = dupMatch[1];
+      triageLog.log(`${task.id} is a duplicate of ${dupId} — closing`);
+      await this.store.logEntry(
+        task.id,
+        `Duplicate of ${dupId} — closed`,
+      );
+      await this.store.deleteTask(task.id);
+      return;
+    }
+
+    const parsedDeps = await this.store.parseDependenciesFromPrompt(task.id);
+    const taskUpdates: Record<string, any> = { status: null, error: null };
+
+    if (parsedDeps.length > 0) {
+      taskUpdates.dependencies = parsedDeps;
+      triageLog.log(`${task.id} dependencies: ${parsedDeps.join(", ")}`);
+    }
+
+    const sizeMatch = written.match(/^\*\*Size:\*\*\s+(S|M|L)\b/m);
+    if (sizeMatch) {
+      taskUpdates.size = sizeMatch[1] as "S" | "M" | "L";
+    }
+
+    const reviewMatch = written.match(/^##\s+Review\s+Level:\s+(\d+)/m);
+    if (reviewMatch) {
+      taskUpdates.reviewLevel = parseInt(reviewMatch[1], 10);
+    }
+
+    await this.store.updateTask(task.id, taskUpdates);
+
+    if (settings.requirePlanApproval) {
+      await this.store.updateTask(task.id, { status: "awaiting-approval" });
+      await this.store.logEntry(
+        task.id,
+        options.recoveryLogAction ?? "Specification approved by AI — awaiting manual approval",
+      );
+      triageLog.log(`✓ ${task.id} specified and awaiting manual approval`);
+      return;
+    }
+
+    await this.store.moveTask(task.id, "todo");
+
+    if (options.recoveryLogAction) {
+      await this.store.logEntry(task.id, options.recoveryLogAction);
+      triageLog.log(`✓ ${task.id} recovered and moved to todo`);
+      return;
+    }
+
+    if (options.isRespecify) {
+      await this.store.logEntry(task.id, "Spec revised by AI", options.feedback);
+      triageLog.log(`✓ ${task.id} re-specified and moved to todo`);
+    } else {
+      triageLog.log(`✓ ${task.id} specified and moved to todo`);
+    }
+  }
+}
+
+function hasLatestSpecReviewApproval(task: Task): boolean {
+  for (let i = task.log.length - 1; i >= 0; i--) {
+    const action = task.log[i]?.action ?? "";
+    if (action.startsWith("Spec review: ")) {
+      return action === "Spec review: APPROVE";
+    }
+  }
+  return false;
 }
 
 /** Content read from an attachment file for inlining in the prompt. */
