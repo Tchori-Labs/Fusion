@@ -4198,6 +4198,7 @@ body {
 .markdown-body input[type="checkbox"] {
   margin-right: 0.4em;
   vertical-align: middle;
+  accent-color: var(--todo);
 }
 
 .markdown-body hr {
@@ -7152,6 +7153,7 @@ body {
 .list-header-checkbox input[type="checkbox"],
 .list-cell-checkbox input[type="checkbox"] {
   cursor: pointer;
+  accent-color: var(--todo);
 }
 
 .list-cell-checkbox input[type="checkbox"]:disabled {
@@ -16113,6 +16115,10 @@ body[data-color-theme="terminal"][data-theme="light"]::before {
   cursor: pointer;
 }
 
+.wfm-checkbox-label input[type="checkbox"] {
+  accent-color: var(--todo);
+}
+
 /* Form actions */
 .wfm-form-actions {
   display: flex;
@@ -20769,6 +20775,10 @@ body[data-color-theme="terminal"][data-theme="light"]::before {
   cursor: pointer;
 }
 
+.mission-checkbox input[type="checkbox"] {
+  accent-color: var(--todo);
+}
+
 /* ── Confirm & Link Panels ── */
 .mission-confirm-panel {
   flex-shrink: 0;
@@ -21163,6 +21173,7 @@ body[data-color-theme="terminal"][data-theme="light"]::before {
   opacity: 0;
   width: 0;
   height: 0;
+  accent-color: var(--todo);
 }
 
 .mission-toggle__track {
