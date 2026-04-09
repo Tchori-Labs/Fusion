@@ -339,4 +339,88 @@ describe("ProjectOverview", () => {
     const erroredTab = screen.getAllByText("Errored").find(el => el.tagName === "BUTTON");
     expect(erroredTab?.className).toContain("has-errors");
   });
+
+  describe("mobile responsive structure", () => {
+    it("renders overview with correct class structure for mobile CSS targets", () => {
+      const { container } = render(
+        <ProjectOverview
+          projects={[makeProject()]}
+          onSelectProject={noop}
+          onAddProject={noop}
+          onPauseProject={noop}
+          onResumeProject={noop}
+          onRemoveProject={noop}
+        />
+      );
+
+      // Verify container class exists for mobile override targeting
+      expect(container.querySelector(".project-overview")).not.toBeNull();
+      // Verify header section
+      expect(container.querySelector(".project-overview__header")).not.toBeNull();
+      // Verify stats section
+      expect(container.querySelector(".project-overview__stats")).not.toBeNull();
+      // Verify filters section
+      expect(container.querySelector(".project-overview__filters")).not.toBeNull();
+      // Verify grid container
+      expect(container.querySelector(".project-grid")).not.toBeNull();
+    });
+
+    it("renders stat elements with value/label structure for mobile sizing", () => {
+      const { container } = render(
+        <ProjectOverview
+          projects={[makeProject()]}
+          onSelectProject={noop}
+          onAddProject={noop}
+          onPauseProject={noop}
+          onResumeProject={noop}
+          onRemoveProject={noop}
+        />
+      );
+
+      // Stats should have the nested structure mobile CSS targets
+      const stats = container.querySelectorAll(".project-stat");
+      expect(stats.length).toBeGreaterThanOrEqual(3); // Total, Active Tasks, Completed
+      stats.forEach((stat) => {
+        expect(stat.querySelector(".project-stat__value")).not.toBeNull();
+        expect(stat.querySelector(".project-stat__label")).not.toBeNull();
+      });
+    });
+
+    it("renders filter tabs with correct classes for mobile stacking", () => {
+      const { container } = render(
+        <ProjectOverview
+          projects={[makeProject()]}
+          onSelectProject={noop}
+          onAddProject={noop}
+          onPauseProject={noop}
+          onResumeProject={noop}
+          onRemoveProject={noop}
+        />
+      );
+
+      expect(container.querySelector(".project-filter-tabs")).not.toBeNull();
+      const tabs = container.querySelectorAll(".project-filter-tab");
+      expect(tabs.length).toBe(4); // All, Active, Paused, Errored
+      tabs.forEach((tab) => {
+        expect(tab.querySelector(".project-filter-count")).not.toBeNull();
+      });
+    });
+
+    it("renders sort select with aria-label for mobile full-width targeting", () => {
+      const { container } = render(
+        <ProjectOverview
+          projects={[makeProject()]}
+          onSelectProject={noop}
+          onAddProject={noop}
+          onPauseProject={noop}
+          onResumeProject={noop}
+          onRemoveProject={noop}
+        />
+      );
+
+      expect(container.querySelector(".project-sort")).not.toBeNull();
+      expect(container.querySelector(".project-sort-select")).not.toBeNull();
+      expect(screen.getByLabelText("Sort projects")).toBeDefined();
+    });
+  });
 });

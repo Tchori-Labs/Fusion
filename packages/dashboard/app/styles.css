@@ -2241,6 +2241,109 @@ body {
 .project-card--skeleton:nth-child(5) .project-skeleton--title { animation-delay: 0.4s; }
 .project-card--skeleton:nth-child(6) .project-skeleton--title { animation-delay: 0.5s; }
 
+/* === ProjectOverview Mobile Responsive (FN-1316) === */
+@media (max-width: 768px) {
+  /* Overview container */
+  .project-overview {
+    padding: var(--space-md);
+  }
+
+  /* Header */
+  .project-overview__header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-md);
+  }
+
+  .project-overview__title {
+    font-size: 18px;
+  }
+
+  .project-overview__stats {
+    flex-direction: row;
+    flex-wrap: wrap;
+    flex: none;
+  }
+
+  .project-stat {
+    padding: var(--space-xs) var(--space-sm);
+  }
+
+  .project-stat__value {
+    font-size: 14px;
+  }
+
+  .project-stat__label {
+    font-size: 10px;
+  }
+
+  .project-overview__add-btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  /* Filters */
+  .project-overview__filters {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .project-filter-tabs {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .project-filter-tab {
+    flex: 1;
+    justify-content: center;
+    font-size: 12px;
+    padding: 6px 8px;
+  }
+
+  .project-sort {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .project-sort-select {
+    flex: 1;
+    margin-left: var(--space-sm);
+  }
+
+  /* Grid */
+  .project-grid {
+    grid-template-columns: 1fr;
+    gap: var(--space-md);
+  }
+
+  /* Cards */
+  .project-card {
+    min-width: 0;
+  }
+
+  .project-card-health {
+    flex-wrap: wrap;
+    gap: var(--space-md);
+  }
+
+  .project-card-footer {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-sm);
+  }
+
+  .project-card-actions {
+    justify-content: flex-end;
+    flex-wrap: wrap;
+  }
+
+  /* Empty state */
+  .project-empty-state {
+    padding: var(--space-lg);
+    max-width: 100%;
+  }
+}
+
 /* --- Dashboard Loader --- */
 @keyframes dashboard-loader-pulse {
   0%,

@@ -459,4 +459,28 @@ describe("ProjectCard", () => {
     // The formatted date should show (1/15/2026 format in US locale)
     expect(screen.getByText(/1\//)).toBeDefined();
   });
+
+  describe("mobile responsive structure", () => {
+    it("renders card with correct class structure for mobile CSS targets", () => {
+      const { container } = render(
+        <ProjectCard
+          project={makeProject()}
+          health={makeHealth()}
+          onSelect={noop}
+          onPause={noop}
+          onResume={noop}
+          onRemove={noop}
+        />
+      );
+
+      // Verify all mobile-targeted class names exist
+      expect(container.querySelector(".project-card")).not.toBeNull();
+      expect(container.querySelector(".project-card-header")).not.toBeNull();
+      expect(container.querySelector(".project-card-health")).not.toBeNull();
+      expect(container.querySelector(".project-card-footer")).not.toBeNull();
+      expect(container.querySelector(".project-card-actions")).not.toBeNull();
+      // Verify action buttons have mobile-targeted classes
+      expect(container.querySelector(".project-card-action")).not.toBeNull();
+    });
+  });
 });
