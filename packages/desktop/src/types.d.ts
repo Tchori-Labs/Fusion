@@ -27,6 +27,7 @@ export interface FusionAPI {
   // App info
   getSystemInfo(): Promise<SystemInfo>;
   checkForUpdates(): Promise<UpdateCheckResult>;
+  getServerPort(): Promise<number | undefined>;
 
   // Tray status
   updateTrayStatus(status: string): Promise<void>;

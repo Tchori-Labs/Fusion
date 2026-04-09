@@ -1,4 +1,5 @@
-export { DASHBOARD_URL, createMainWindow, initializeApp, run } from "./main.js";
+export { DASHBOARD_URL, IS_DEVELOPMENT, getRendererUrl, getRendererFilePath, isDevelopmentMode, isUrlRenderer } from "./renderer.js";
+export { createMainWindow, initializeApp, run } from "./main.js";
 export { registerIpcHandlers } from "./ipc.js";
 
 export * from "./tray.js";

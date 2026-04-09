@@ -20956,6 +20956,7 @@ body[data-color-theme="terminal"][data-theme="light"]::before {
     font-size: 11px;
     height: 32px;
     overflow: hidden;
+    bottom: calc(56px + env(safe-area-inset-bottom, 0px));
   }
 
   .executor-status-bar__segment {
@@ -27304,7 +27305,7 @@ body[data-color-theme="terminal"][data-theme="light"]::before {
   }
 
   .mobile-nav-bar--with-footer {
-    bottom: 32px;
+    bottom: 0;
   }
 
   /* Content padding: mobile nav only (no footer) */

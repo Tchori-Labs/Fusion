@@ -1,6 +1,6 @@
 import { app, BrowserWindow, nativeImage, Tray } from "electron";
 import { join, resolve } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { setupDeepLinkHandler, registerDeepLinkProtocol } from "./deep-link.js";
 import { registerIpcHandlers } from "./ipc.js";
 import { buildAppMenu } from "./menu.js";
@@ -12,25 +12,15 @@ import {
   type WindowState,
 } from "./native.js";
 import { setupTray } from "./tray.js";
+import { getRendererUrl, getRendererFilePath, IS_DEVELOPMENT, isUrlRenderer } from "./renderer.js";
+
+// Re-export for backward compatibility
+export { IS_DEVELOPMENT } from "./renderer.js";
+export { DASHBOARD_URL } from "./renderer.js";
 
 interface AppWithQuitFlag {
   isQuitting?: boolean;
 }
-
-const DEFAULT_DEV_DASHBOARD_URL = "http://localhost:5173";
-
-function isDevelopmentMode(): boolean {
-  return process.env.NODE_ENV === "development" || process.argv.includes("--dev");
-}
-
-const PRODUCTION_DASHBOARD_URL = pathToFileURL(
-  join(import.meta.dirname, "client", "index.html"),
-).toString();
-
-export const IS_DEVELOPMENT = isDevelopmentMode();
-export const DASHBOARD_URL = process.env.FUSION_DASHBOARD_URL ?? (
-  IS_DEVELOPMENT ? DEFAULT_DEV_DASHBOARD_URL : PRODUCTION_DASHBOARD_URL
-);
 
 function enableSourceMaps(): void {
   const processWithSourceMaps = process as NodeJS.Process & {
@@ -63,7 +53,12 @@ export function createMainWindow(state?: WindowState): BrowserWindow {
     },
   });
 
-  void window.loadURL(DASHBOARD_URL);
+  // Use renderer module to determine how to load the UI
+  if (isUrlRenderer()) {
+    void window.loadURL(getRendererUrl());
+  } else {
+    void window.loadFile(getRendererFilePath());
+  }
 
   window.on("close", (event) => {
     saveWindowState(window);

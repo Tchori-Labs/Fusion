@@ -33,6 +33,7 @@ function getFusionApi() {
     isMaximized: () => Promise<boolean>;
     getSystemInfo: () => Promise<unknown>;
     checkForUpdates: () => Promise<unknown>;
+    getServerPort: () => Promise<number | undefined>;
     updateTrayStatus: (status: string) => Promise<void>;
     showExportDialog: () => Promise<string | null>;
     showImportDialog: () => Promise<string | null>;
@@ -111,6 +112,15 @@ describe("preload", () => {
     await api?.checkForUpdates();
 
     expect(mocks.ipcRenderer.invoke).toHaveBeenCalledWith("app:checkForUpdates");
+  });
+
+  it("getServerPort invokes app:getServerPort", async () => {
+    await importPreloadModule();
+
+    const api = getFusionApi();
+    await api?.getServerPort();
+
+    expect(mocks.ipcRenderer.invoke).toHaveBeenCalledWith("app:getServerPort");
   });
 
   it("updateTrayStatus invokes tray:updateStatus with status argument", async () => {

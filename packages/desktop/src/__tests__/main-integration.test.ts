@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => {
 
     return {
       loadURL: vi.fn(() => Promise.resolve()),
+      loadFile: vi.fn(() => Promise.resolve()),
       on: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
         listeners.set(event, handler);
       }),
@@ -150,6 +151,16 @@ vi.mock("../native.js", () => ({
   saveWindowState: mocks.saveWindowState,
   setupAutoUpdater: mocks.setupAutoUpdater,
   DEFAULT_WINDOW_STATE: mocks.DEFAULT_WINDOW_STATE,
+}));
+
+// Mock renderer module
+vi.mock("../renderer.js", () => ({
+  isDevelopmentMode: vi.fn(() => false),
+  getRendererUrl: vi.fn(() => "file:///path/to/dist/client/index.html"),
+  getRendererFilePath: vi.fn(() => "/path/to/dist/client/index.html"),
+  isUrlRenderer: vi.fn(() => false),
+  IS_DEVELOPMENT: false,
+  DASHBOARD_URL: "file:///path/to/dist/client/index.html",
 }));
 
 async function importMainModule() {

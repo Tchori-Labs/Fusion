@@ -113,23 +113,28 @@ export async function runDesktop(options: RunDesktopOptions = {}): Promise<void>
   }
 
   const runtime = await startDashboardRuntime(rootDir, Boolean(options.paused));
-  const rendererUrl = options.dev
-    ? process.env.FUSION_DASHBOARD_URL ?? "http://localhost:5173"
-    : `http://localhost:${runtime.port}`;
 
   const electronBinary = resolveElectronBinary();
   const desktopEntry = join(rootDir, "packages", "desktop", "dist", "main.js");
   const electronArgs = ["--enable-source-maps", desktopEntry, ...(options.dev ? ["--dev"] : [])];
 
+  // Build environment for Electron process
+  const electronEnv: NodeJS.ProcessEnv = {
+    ...process.env,
+    FUSION_SERVER_PORT: String(runtime.port),
+  };
+
+  // In dev mode, set FUSION_DASHBOARD_URL to the dashboard runtime URL
+  // In production mode, renderer uses embedded assets (no FUSION_DASHBOARD_URL needed)
+  if (options.dev) {
+    electronEnv.FUSION_DASHBOARD_URL = process.env.FUSION_DASHBOARD_URL ?? "http://localhost:5173";
+    electronEnv.NODE_ENV = "development";
+  }
+
   const electronProcess = spawn(electronBinary, electronArgs, {
     cwd: rootDir,
     stdio: "inherit",
-    env: {
-      ...process.env,
-      FUSION_DASHBOARD_URL: rendererUrl,
-      FUSION_SERVER_PORT: String(runtime.port),
-      ...(options.dev ? { NODE_ENV: "development" } : {}),
-    },
+    env: electronEnv,
   });
 
   let isShuttingDown = false;

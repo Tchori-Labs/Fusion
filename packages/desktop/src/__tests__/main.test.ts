@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => {
   const browserWindowInstance = {
     loadURL: vi.fn(),
+    loadFile: vi.fn(),
     on: vi.fn(),
     isVisible: vi.fn(() => true),
     show: vi.fn(),
@@ -74,12 +75,23 @@ vi.mock("electron", () => ({
   shell: mocks.shell,
 }));
 
+// Mock renderer module
+vi.mock("../renderer.js", () => ({
+  isDevelopmentMode: vi.fn(() => false),
+  getRendererUrl: vi.fn(() => "file:///path/to/dist/client/index.html"),
+  getRendererFilePath: vi.fn(() => "/path/to/dist/client/index.html"),
+  isUrlRenderer: vi.fn(() => false),
+  IS_DEVELOPMENT: false,
+  DASHBOARD_URL: "file:///path/to/dist/client/index.html",
+}));
+
 async function importMainModule() {
   return import("../main.ts");
 }
 
 describe("main process", () => {
   const originalDashboardUrl = process.env.FUSION_DASHBOARD_URL;
+  const originalNodeEnv = process.env.NODE_ENV;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -89,6 +101,16 @@ describe("main process", () => {
     } else {
       process.env.FUSION_DASHBOARD_URL = originalDashboardUrl;
     }
+    if (originalNodeEnv === undefined) {
+      delete process.env.NODE_ENV;
+    } else {
+      process.env.NODE_ENV = originalNodeEnv;
+    }
+    // Ensure we're in production mode for these tests
+    vi.mocked(require("../renderer.js")).isDevelopmentMode.mockReturnValue(false);
+    vi.mocked(require("../renderer.js")).getRendererUrl.mockReturnValue("file:///path/to/dist/client/index.html");
+    vi.mocked(require("../renderer.js")).getRendererFilePath.mockReturnValue("/path/to/dist/client/index.html");
+    vi.mocked(require("../renderer.js")).isUrlRenderer.mockReturnValue(false);
   });
 
   it("DASHBOARD_URL defaults to local file URL in production mode", async () => {
@@ -100,8 +122,13 @@ describe("main process", () => {
     expect(DASHBOARD_URL).toContain("/client/index.html");
   });
 
-  it("DASHBOARD_URL uses env override", async () => {
+  it("DASHBOARD_URL uses env override in development mode", async () => {
     process.env.FUSION_DASHBOARD_URL = "http://localhost:5050";
+    // Mock development mode to use the env var
+    vi.mocked(require("../renderer.js")).isDevelopmentMode.mockReturnValue(true);
+    vi.mocked(require("../renderer.js")).getRendererUrl.mockReturnValue("http://localhost:5050");
+    vi.mocked(require("../renderer.js")).getRendererFilePath.mockReturnValue("");
+    vi.mocked(require("../renderer.js")).isUrlRenderer.mockReturnValue(true);
 
     const { DASHBOARD_URL } = await importMainModule();
 
@@ -129,12 +156,30 @@ describe("main process", () => {
     expect(options.webPreferences.preload).toContain("preload.js");
   });
 
-  it("createMainWindow loads the dashboard URL", async () => {
-    const { createMainWindow, DASHBOARD_URL } = await importMainModule();
+  it("createMainWindow loads the renderer URL in URL mode", async () => {
+    vi.mocked(require("../renderer.js")).isUrlRenderer.mockReturnValue(true);
+    vi.mocked(require("../renderer.js")).getRendererUrl.mockReturnValue("http://localhost:3000/index.html");
+    vi.mocked(require("../renderer.js")).getRendererFilePath.mockReturnValue("");
+
+    const { createMainWindow } = await importMainModule();
 
     createMainWindow();
 
-    expect(mocks.browserWindowInstance.loadURL).toHaveBeenCalledWith(DASHBOARD_URL);
+    expect(mocks.browserWindowInstance.loadURL).toHaveBeenCalledWith("http://localhost:3000/index.html");
+    expect(mocks.browserWindowInstance.loadFile).not.toHaveBeenCalled();
+  });
+
+  it("createMainWindow loads the renderer file in file mode (production)", async () => {
+    vi.mocked(require("../renderer.js")).isUrlRenderer.mockReturnValue(false);
+    vi.mocked(require("../renderer.js")).getRendererUrl.mockReturnValue("file:///path/to/dist/client/index.html");
+    vi.mocked(require("../renderer.js")).getRendererFilePath.mockReturnValue("/path/to/dist/client/index.html");
+
+    const { createMainWindow } = await importMainModule();
+
+    createMainWindow();
+
+    expect(mocks.browserWindowInstance.loadFile).toHaveBeenCalledWith("/path/to/dist/client/index.html");
+    expect(mocks.browserWindowInstance.loadURL).not.toHaveBeenCalled();
   });
 
   it("exports initializeApp for lifecycle orchestration", async () => {

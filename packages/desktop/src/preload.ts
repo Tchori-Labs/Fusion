@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld("fusionAPI", {
   // App info
   getSystemInfo: (): Promise<SystemInfo> => ipcRenderer.invoke("app:getSystemInfo"),
   checkForUpdates: (): Promise<UpdateCheckResult> => ipcRenderer.invoke("app:checkForUpdates"),
+  getServerPort: (): Promise<number | undefined> => ipcRenderer.invoke("app:getServerPort"),
 
   // Tray status
   updateTrayStatus: (status: string): Promise<void> => ipcRenderer.invoke("tray:updateStatus", status),

@@ -50,4 +50,10 @@ export function registerIpcHandlers(mainWindow: BrowserWindow, tray: Tray): void
 
   ipcMain.handle("native:showExportDialog", () => showExportSettingsDialog(mainWindow));
   ipcMain.handle("native:showImportDialog", () => showImportSettingsDialog(mainWindow));
+
+  // Return the server port from environment variable (set by CLI)
+  ipcMain.handle("app:getServerPort", () => {
+    const port = process.env.FUSION_SERVER_PORT;
+    return port ? parseInt(port, 10) : undefined;
+  });
 }

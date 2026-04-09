@@ -2,7 +2,7 @@
 
 Electron desktop shell for Fusion.
 
-This package provides a native Electron wrapper around the existing Fusion dashboard web UI. The desktop shell connects to a running dashboard server and presents native desktop affordances including a system tray and application menu.
+This package provides a native Electron wrapper around the existing Fusion dashboard web UI. The desktop shell presents native desktop affordances including a system tray and application menu, with an embedded renderer for production deployments.
 
 ## Running the Desktop Shell
 
@@ -29,12 +29,35 @@ By default it uses `http://localhost:5173`. Override with `FUSION_DASHBOARD_URL`
 fn desktop
 ```
 
-`fn desktop` builds desktop artifacts, starts an embedded dashboard server on an ephemeral port, and launches Electron against that server.
+`fn desktop` builds desktop artifacts, starts an embedded dashboard server on an ephemeral port, and launches Electron with embedded renderer assets.
 
 Useful flags:
 
 - `fn desktop --dev` — use dev renderer URL (`FUSION_DASHBOARD_URL` or `http://localhost:5173`)
 - `fn desktop --paused` — start with engine paused
+
+## Renderer Architecture
+
+The desktop uses a dual-mode renderer strategy:
+
+### Production Mode (default)
+- Loads embedded dashboard assets from `dist/client/` (bundled at build time)
+- Uses `window.loadFile()` to load `dist/client/index.html`
+- Renderer connects to the embedded API server via IPC (`getServerPort()`)
+
+### Development Mode (`--dev` or `NODE_ENV=development`)
+- Loads renderer from `FUSION_DASHBOARD_URL` (defaults to `http://localhost:5173`)
+- Uses `window.loadURL()` for live reload support
+- Renderer connects to the dev API server
+
+### Renderer Resolution (`src/renderer.ts`)
+
+```typescript
+isDevelopmentMode()  // Checks NODE_ENV or --dev flag
+isUrlRenderer()     // true in dev mode, false in production
+getRendererUrl()     // Returns URL or file:// path
+getRendererFilePath() // Returns absolute file path for loadFile()
+```
 
 ## IPC Channel Reference
 
@@ -50,6 +73,7 @@ Useful flags:
 | `window:isMaximized` | renderer → main | none | `Promise<boolean>` |
 | `app:getSystemInfo` | renderer → main | none | `Promise<{ platform; arch; electronVersion; nodeVersion; appVersion; }>` |
 | `app:checkForUpdates` | renderer → main | none | `Promise<{ status: "checking" } \| { status: "error"; error: string }>` |
+| `app:getServerPort` | renderer → main | none | `Promise<number \| undefined>` |
 | `tray:updateStatus` | renderer → main | `status: "running" \| "paused" \| "stopped"` | `Promise<void>` |
 | `native:showExportDialog` | renderer → main | none | `Promise<string \| null>` |
 | `native:showImportDialog` | renderer → main | none | `Promise<string \| null>` |
@@ -96,7 +120,7 @@ Useful flags:
 `src/preload.ts` exposes a safe, context-isolated bridge:
 
 - Window control: `minimize()`, `maximize()`, `close()`, `isMaximized()`
-- App/system: `getSystemInfo()`, `checkForUpdates()`
+- App/system: `getSystemInfo()`, `checkForUpdates()`, `getServerPort()`
 - Tray: `updateTrayStatus(status)`
 - Native dialogs: `showExportDialog()`, `showImportDialog()`
 - Event subscriptions (return unsubscribe functions):
@@ -245,25 +269,36 @@ Run `pnpm --filter @fusion/desktop build` before `pack`/`dist` to ensure `dist/`
 
 ## Environment
 
-- `FUSION_DASHBOARD_URL` — override the default dashboard URL used by the desktop shell (`http://localhost:4040`)
+- `FUSION_DASHBOARD_URL` — override the default dashboard URL in development mode (`http://localhost:5173`)
+- `FUSION_SERVER_PORT` — internal: port for embedded API server (set by CLI)
+- `FUSION_ELECTRON_BINARY` — path to Electron binary (for testing)
 
-## Renderer Architecture
+## Build Pipeline
 
-The desktop package now includes a renderer layer under `src/renderer/` that adapts the dashboard UI for Electron while preserving web-dashboard compatibility.
+### Development Build (`pnpm --filter @fusion/desktop dev`)
+1. Bundle `main.ts` and `preload.ts` with esbuild
+2. Start dashboard Vite dev server
+3. Launch Electron with `--dev` flag
 
-### Electron-aware API transport
+### Production Build (`pnpm --filter @fusion/desktop build`)
+1. Build dashboard client to `packages/dashboard/dist/client/`
+2. Bundle `main.ts` and `preload.ts` with esbuild
+3. Copy dashboard client to `packages/desktop/dist/client/`
 
-- `src/renderer/api-electron.ts` provides `createApiClient()` with runtime detection.
-- In browser/web contexts, it uses a standard fetch transport.
-- In Electron contexts, it uses an IPC transport (`electronAPI.invoke("api-request", ...)`) and can resolve the dashboard server port dynamically via `electronAPI.getServerPort()`.
+### CLI Launch (`fn desktop`)
+1. Build desktop artifacts (unless `--dev`)
+2. Start embedded API server on ephemeral port
+3. Launch Electron:
+   - **Production:** Uses embedded renderer assets, `getServerPort()` for API connection
+   - **Development (`--dev`):** Uses `FUSION_DASHBOARD_URL` for live reload
 
-### Desktop shell UI components
+## Desktop Shell UI Components
 
 - `src/renderer/components/DesktopWrapper.tsx` wraps the dashboard app for Electron-only chrome.
 - `src/renderer/components/TitleBar.tsx` implements a custom frameless title bar with Fusion branding, drag region behavior, and window controls (minimize/maximize/close).
 - The title bar styling lives in `src/renderer/components/TitleBar.css` and uses dashboard theme tokens (`--surface`, `--border`, `--text`, etc.).
 
-### Desktop hooks
+## Desktop Hooks
 
 Reusable renderer hooks in `src/renderer/hooks/` expose Electron runtime capabilities:
 
@@ -271,7 +306,7 @@ Reusable renderer hooks in `src/renderer/hooks/` expose Electron runtime capabil
 - `useAutoUpdate()` — update-available subscription + install trigger
 - `useDeepLink()` — deep-link subscription and `fusion://task/...` / `fusion://project/...` parsing
 
-### Renderer entrypoint
+## Renderer Entrypoint
 
 - `src/renderer/index.html` mirrors dashboard theme initialization logic with Electron-safe defaults.
 - `src/renderer/index.tsx` mounts the dashboard app in `StrictMode` and wraps it in `DesktopWrapper`.

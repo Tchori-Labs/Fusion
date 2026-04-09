@@ -199,13 +199,14 @@ describe("runDesktop", () => {
     expect(mocks.store.updateSettings).toHaveBeenCalledWith({ enginePaused: true });
     expect(mocks.app.listen).toHaveBeenCalledWith(0);
 
+    // In production mode (not dev), renderer uses embedded assets, so no FUSION_DASHBOARD_URL
     expect(mocks.spawn).toHaveBeenCalledWith(
       "electron-bin",
       ["--enable-source-maps", "/repo/packages/desktop/dist/main.js"],
       expect.objectContaining({
         cwd: "/repo",
         env: expect.objectContaining({
-          FUSION_DASHBOARD_URL: "http://localhost:4545",
+          // No FUSION_DASHBOARD_URL in production
           FUSION_SERVER_PORT: "4545",
         }),
       }),

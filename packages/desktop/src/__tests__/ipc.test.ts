@@ -92,6 +92,7 @@ describe("ipc handlers", () => {
       "window:isMaximized",
       "app:getSystemInfo",
       "app:checkForUpdates",
+      "app:getServerPort",
       "tray:updateStatus",
       "native:showExportDialog",
       "native:showImportDialog",
@@ -216,5 +217,26 @@ describe("ipc handlers", () => {
     await handler?.({}, "paused");
 
     expect(mocks.updateTrayStatus).toHaveBeenCalledWith(tray, "paused");
+  });
+
+  it("app:getServerPort returns port from environment", async () => {
+    process.env.FUSION_SERVER_PORT = "4545";
+    await registerHandlers();
+
+    const handler = mocks.ipcHandlers.get("app:getServerPort");
+    const result = await handler?.({});
+
+    expect(result).toBe(4545);
+    delete process.env.FUSION_SERVER_PORT;
+  });
+
+  it("app:getServerPort returns undefined when env var not set", async () => {
+    delete process.env.FUSION_SERVER_PORT;
+    await registerHandlers();
+
+    const handler = mocks.ipcHandlers.get("app:getServerPort");
+    const result = await handler?.({});
+
+    expect(result).toBeUndefined();
   });
 });

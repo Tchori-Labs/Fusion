@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => {
 
   const browserWindow = {
     loadURL: vi.fn(),
+    loadFile: vi.fn(),
     on: vi.fn(),
     hide: vi.fn(),
     show: vi.fn(),
@@ -73,6 +74,16 @@ vi.mock("../native.js", () => ({
   loadWindowState: mocks.loadWindowState,
   saveWindowState: mocks.saveWindowState,
   setupAutoUpdater: mocks.setupAutoUpdater,
+}));
+
+// Mock renderer module
+vi.mock("../renderer.js", () => ({
+  isDevelopmentMode: vi.fn(() => false),
+  getRendererUrl: vi.fn(() => "file:///path/to/dist/client/index.html"),
+  getRendererFilePath: vi.fn(() => "/path/to/dist/client/index.html"),
+  isUrlRenderer: vi.fn(() => false),
+  IS_DEVELOPMENT: false,
+  DASHBOARD_URL: "file:///path/to/dist/client/index.html",
 }));
 
 describe("main module integration", () => {
