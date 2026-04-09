@@ -444,13 +444,18 @@ body {
 .btn-icon svg {
   stroke: currentColor;
 }
-.btn-icon:hover {
-  color: var(--text);
-  background: var(--border);
+@media (hover: hover) {
+  .btn-icon:hover {
+    color: var(--text);
+    background: var(--border);
+  }
 }
 .btn-icon:focus-visible {
   box-shadow: var(--focus-ring-strong);
   outline: none;
+}
+.btn-icon:active {
+  opacity: 0.7;
 }
 .btn-icon--terminal {
   position: relative;
@@ -492,14 +497,18 @@ body {
 .btn-icon--paused {
   color: var(--triage);
 }
-.btn-icon--paused:hover {
-  color: var(--triage);
+@media (hover: hover) {
+  .btn-icon--paused:hover {
+    color: var(--triage);
+  }
 }
 .btn-icon--stopped {
   color: var(--color-error);
 }
-.btn-icon--stopped:hover {
-  color: var(--color-error);
+@media (hover: hover) {
+  .btn-icon--stopped:hover {
+    color: var(--color-error);
+  }
 }
 
 /* Header badge for active sessions */
@@ -15453,10 +15462,12 @@ body[data-color-theme="terminal"][data-theme="light"]::before {
   transition: all var(--transition-fast);
 }
 
-.subtask-item-actions .btn-icon:hover:not(:disabled) {
-  background: var(--card-hover);
-  border-color: var(--border);
-  color: var(--text);
+@media (hover: hover) {
+  .subtask-item-actions .btn-icon:hover:not(:disabled) {
+    background: var(--card-hover);
+    border-color: var(--border);
+    color: var(--text);
+  }
 }
 
 .subtask-item-actions .btn-icon:disabled {
@@ -16904,10 +16915,12 @@ body[data-color-theme="terminal"][data-theme="light"]::before {
   transition: all var(--transition-fast);
 }
 
-.workflow-step-order-actions .btn-icon:hover:not(:disabled) {
-  background: var(--card-hover);
-  border-color: var(--border);
-  color: var(--text);
+@media (hover: hover) {
+  .workflow-step-order-actions .btn-icon:hover:not(:disabled) {
+    background: var(--card-hover);
+    border-color: var(--border);
+    color: var(--text);
+  }
 }
 
 .workflow-step-order-actions .btn-icon:disabled {
