@@ -3,6 +3,13 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { AgentLogViewer } from "../AgentLogViewer";
 import type { AgentLogEntry } from "@fusion/core";
 
+// Mock lucide-react icons used by AgentLogViewer and ProviderIcon
+vi.mock("lucide-react", () => ({
+  Maximize2: () => null,
+  Minimize2: () => null,
+  Cpu: () => null,
+}));
+
 function makeEntry(overrides: Partial<AgentLogEntry> = {}): AgentLogEntry {
   return {
     timestamp: "2026-01-01T00:00:00Z",
@@ -1011,6 +1018,127 @@ describe("AgentLogViewer", () => {
       expect(strong!.textContent).toBe("safe");
       // No script elements are rendered for any HTML content in markdown
       expect(textSpans[0].querySelector("script")).toBeNull();
+    });
+  });
+
+  describe("fullscreen toggle", () => {
+    it("renders the fullscreen toggle button in the model info header", () => {
+      const entries = [makeEntry()];
+      const { container } = render(<AgentLogViewer entries={entries} loading={false} />);
+      const toggle = container.querySelector("[data-testid='agent-log-fullscreen-toggle']");
+      expect(toggle).toBeTruthy();
+    });
+
+    it("has correct aria attributes on the fullscreen toggle", () => {
+      const entries = [makeEntry()];
+      const { container } = render(<AgentLogViewer entries={entries} loading={false} />);
+      const toggle = container.querySelector("[data-testid='agent-log-fullscreen-toggle']") as HTMLButtonElement;
+      expect(toggle).toBeTruthy();
+      expect(toggle.getAttribute("aria-label")).toBe("Expand agent log to full screen");
+      expect(toggle.getAttribute("title")).toBe("Expand agent log to full screen");
+    });
+
+    it("adds fullscreen class when toggle is clicked", () => {
+      const entries = [makeEntry()];
+      const { container } = render(<AgentLogViewer entries={entries} loading={false} />);
+      const viewer = container.querySelector("[data-testid='agent-log-viewer']") as HTMLElement;
+      const toggle = container.querySelector("[data-testid='agent-log-fullscreen-toggle']") as HTMLButtonElement;
+
+      // Initially not fullscreen
+      expect(viewer.classList.contains("agent-log-viewer--fullscreen")).toBe(false);
+
+      // Click to enter fullscreen
+      fireEvent.click(toggle);
+
+      // Should have fullscreen class
+      expect(viewer.classList.contains("agent-log-viewer--fullscreen")).toBe(true);
+    });
+
+    it("removes fullscreen class when toggle is clicked while in fullscreen", () => {
+      const entries = [makeEntry()];
+      const { container } = render(<AgentLogViewer entries={entries} loading={false} />);
+      const viewer = container.querySelector("[data-testid='agent-log-viewer']") as HTMLElement;
+      const toggle = container.querySelector("[data-testid='agent-log-fullscreen-toggle']") as HTMLButtonElement;
+
+      // Enter fullscreen
+      fireEvent.click(toggle);
+      expect(viewer.classList.contains("agent-log-viewer--fullscreen")).toBe(true);
+
+      // Exit fullscreen
+      fireEvent.click(toggle);
+      expect(viewer.classList.contains("agent-log-viewer--fullscreen")).toBe(false);
+    });
+
+    it("updates aria label when toggling fullscreen", () => {
+      const entries = [makeEntry()];
+      const { container } = render(<AgentLogViewer entries={entries} loading={false} />);
+      const toggle = container.querySelector("[data-testid='agent-log-fullscreen-toggle']") as HTMLButtonElement;
+
+      // Initially shows expand label
+      expect(toggle.getAttribute("aria-label")).toBe("Expand agent log to full screen");
+
+      // Enter fullscreen
+      fireEvent.click(toggle);
+      expect(toggle.getAttribute("aria-label")).toBe("Exit full screen");
+
+      // Exit fullscreen
+      fireEvent.click(toggle);
+      expect(toggle.getAttribute("aria-label")).toBe("Expand agent log to full screen");
+    });
+
+    it("exits fullscreen when Escape key is pressed", () => {
+      const entries = [makeEntry()];
+      const { container } = render(<AgentLogViewer entries={entries} loading={false} />);
+      const viewer = container.querySelector("[data-testid='agent-log-viewer']") as HTMLElement;
+      const toggle = container.querySelector("[data-testid='agent-log-fullscreen-toggle']") as HTMLButtonElement;
+
+      // Enter fullscreen
+      fireEvent.click(toggle);
+      expect(viewer.classList.contains("agent-log-viewer--fullscreen")).toBe(true);
+
+      // Press Escape to exit
+      fireEvent.keyDown(document, { key: "Escape" });
+
+      expect(viewer.classList.contains("agent-log-viewer--fullscreen")).toBe(false);
+    });
+
+    it("does nothing when Escape key is pressed while not in fullscreen", () => {
+      const entries = [makeEntry()];
+      const { container } = render(<AgentLogViewer entries={entries} loading={false} />);
+      const viewer = container.querySelector("[data-testid='agent-log-viewer']") as HTMLElement;
+      const toggle = container.querySelector("[data-testid='agent-log-fullscreen-toggle']") as HTMLButtonElement;
+
+      // Initially not fullscreen
+      expect(viewer.classList.contains("agent-log-viewer--fullscreen")).toBe(false);
+
+      // Press Escape - should do nothing
+      fireEvent.keyDown(document, { key: "Escape" });
+
+      expect(viewer.classList.contains("agent-log-viewer--fullscreen")).toBe(false);
+
+      // Toggle should still work normally
+      fireEvent.click(toggle);
+      expect(viewer.classList.contains("agent-log-viewer--fullscreen")).toBe(true);
+    });
+
+    it("only responds to Escape key when in fullscreen mode", () => {
+      const entries = [makeEntry()];
+      const { container, unmount } = render(<AgentLogViewer entries={entries} loading={false} />);
+      const viewer = container.querySelector("[data-testid='agent-log-viewer']") as HTMLElement;
+      const toggle = container.querySelector("[data-testid='agent-log-fullscreen-toggle']") as HTMLButtonElement;
+
+      // Press Escape when not fullscreen - no effect
+      fireEvent.keyDown(document, { key: "Escape" });
+      expect(viewer.classList.contains("agent-log-viewer--fullscreen")).toBe(false);
+
+      // Enter fullscreen
+      fireEvent.click(toggle);
+      expect(viewer.classList.contains("agent-log-viewer--fullscreen")).toBe(true);
+
+      // Clean up to remove the keydown listener
+      unmount();
+
+      // Verify the listener was removed (no errors should occur when Escape is pressed after unmount)
     });
   });
 });

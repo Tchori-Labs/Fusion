@@ -3717,6 +3717,27 @@ body {
   border-color: var(--accent);
 }
 
+/* Fullscreen mode for agent log viewer */
+.agent-log-viewer--fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  background: var(--surface);
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: var(--space-lg);
+}
+
+.agent-log-viewer--fullscreen .agent-log-model-header {
+  position: sticky;
+  top: 0;
+  background: var(--surface);
+  z-index: 1;
+  padding-bottom: var(--space-md);
+  margin-bottom: var(--space-md);
+  border-bottom: 1px solid var(--border);
+}
+
 .detail-spec-edit-trigger {
   margin-bottom: var(--space-md);
 }

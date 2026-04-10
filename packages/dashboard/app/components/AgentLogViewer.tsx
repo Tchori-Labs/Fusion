@@ -1,9 +1,10 @@
 import type { AgentLogEntry } from "@fusion/core";
 import { ProviderIcon } from "./ProviderIcon";
-import { useRef, useEffect, useState } from "react";
+import { useRef, useEffect, useState, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Components } from "react-markdown";
+import { Maximize2, Minimize2 } from "lucide-react";
 
 function formatTimestamp(iso: string): string {
   const date = new Date(iso);
@@ -71,6 +72,7 @@ export function AgentLogViewer({ entries, loading, executorModel, validatorModel
   const containerRef = useRef<HTMLDivElement>(null);
   const previousEntryCountRef = useRef<number>(0);
   const [renderMarkdown, setRenderMarkdown] = useState(true);
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
   // Auto-scroll to top when new entries arrive (since newest are first)
   useEffect(() => {
@@ -92,6 +94,22 @@ export function AgentLogViewer({ entries, loading, executorModel, validatorModel
 
     previousEntryCountRef.current = newEntryCount;
   }, [entries]);
+
+  // Escape key handler to exit fullscreen mode
+  const handleKeyDown = useCallback((e: KeyboardEvent) => {
+    if (e.key === "Escape" && isFullscreen) {
+      setIsFullscreen(false);
+    }
+  }, [isFullscreen]);
+
+  useEffect(() => {
+    if (isFullscreen) {
+      document.addEventListener("keydown", handleKeyDown);
+      return () => {
+        document.removeEventListener("keydown", handleKeyDown);
+      };
+    }
+  }, [isFullscreen, handleKeyDown]);
 
   if (loading && entries.length === 0) {
     return (
@@ -119,7 +137,7 @@ export function AgentLogViewer({ entries, loading, executorModel, validatorModel
   return (
     <div
       ref={containerRef}
-      className="agent-log-viewer agent-log-viewer--streaming"
+      className={`agent-log-viewer agent-log-viewer--streaming${isFullscreen ? " agent-log-viewer--fullscreen" : ""}`}
       data-testid="agent-log-viewer"
     >
       {/* Model info header */}
@@ -168,6 +186,15 @@ export function AgentLogViewer({ entries, loading, executorModel, validatorModel
             title={renderMarkdown ? "Show raw text" : "Show formatted markdown"}
           >
             {renderMarkdown ? "Markdown" : "Plain"}
+          </button>
+          <button
+            className="agent-log-mode-toggle"
+            onClick={() => setIsFullscreen((prev) => !prev)}
+            aria-label={isFullscreen ? "Exit full screen" : "Expand agent log to full screen"}
+            data-testid="agent-log-fullscreen-toggle"
+            title={isFullscreen ? "Exit full screen" : "Expand agent log to full screen"}
+          >
+            {isFullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
           </button>
         </div>
       </div>
