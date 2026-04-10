@@ -24,10 +24,21 @@ export {
   type ScreenComponentProps,
 } from "./components/screen-router.js";
 
-import React from "react";
+// Re-export global shortcuts hooks
+export {
+  useGlobalShortcuts,
+  HelpOverlay,
+  FocusGuardRef,
+  type UseGlobalShortcutsOptions,
+  type UseGlobalShortcutsResult,
+  type HelpOverlayProps,
+} from "./hooks/use-global-shortcuts.js";
+
+import React, { useState } from "react";
 import { render, Box, Text } from "ink";
 import { FusionProvider, useFusion } from "./fusion-context.js";
-import { ScreenRouter } from "./components/screen-router.js";
+import { ScreenRouter, type ScreenId } from "./components/screen-router.js";
+import { useGlobalShortcuts, HelpOverlay } from "./hooks/use-global-shortcuts.js";
 import { fileURLToPath } from "url";
 
 /**
@@ -37,17 +48,34 @@ import { fileURLToPath } from "url";
  */
 function DemoApp() {
   const { projectPath } = useFusion();
+  const [activeScreen, setActiveScreen] = useState<ScreenId>("board");
+
+  // Global keyboard shortcuts - handles Ctrl+C, q, ?/h, 1-5
+  const { helpVisible, toggleHelp } = useGlobalShortcuts({
+    onScreenChange: setActiveScreen,
+  });
 
   return (
     <Box flexDirection="column" flexGrow={1}>
+      {/* Help Overlay - shown when toggled, displayed at top */}
+      {helpVisible && (
+        <Box marginBottom={1}>
+          <HelpOverlay onClose={toggleHelp} />
+        </Box>
+      )}
+
       {/* Header */}
       <Box paddingBottom={1}>
         <Text bold>Fusion TUI</Text>
         <Text> | Project: {projectPath}</Text>
+        <Text dimColor> (Press ? for help)</Text>
       </Box>
 
       {/* Screen Router */}
-      <ScreenRouter>
+      <ScreenRouter
+        activeScreen={activeScreen}
+        onScreenChange={setActiveScreen}
+      >
         {({ activeScreen }) => (
           <Box flexDirection="column" flexGrow={1}>
             {activeScreen === "board" && (

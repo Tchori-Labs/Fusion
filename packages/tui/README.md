@@ -151,6 +151,9 @@ The tab bar displays all five tabs horizontally with:
 
 | Prop | Type | Description |
 |------|------|-------------|
+| `initialScreen` | `ScreenId` (optional) | Initial screen to display on mount (default: `"board"`) |
+| `onScreenChange` | `(screenId: ScreenId) => void` (optional) | Callback when user navigates to a different screen |
+| `activeScreen` | `ScreenId` (optional) | Externally controlled active screen |
 | `children` | `(props: ScreenComponentProps) => React.ReactNode` | Render function that receives `activeScreen` and returns the screen content |
 
 #### ScreenComponentProps
@@ -168,12 +171,107 @@ The following are exported from `@fusion/tui`:
 - `getScreenIndex(id)` — Get screen index by ID
 - `type ScreenId` — Type for screen identifiers
 
+### Global Keyboard Shortcuts
+
+The TUI provides centralized global keyboard shortcuts via the `useGlobalShortcuts` hook. Place this hook at the app root level to enable consistent shortcut handling across all screens.
+
+```tsx
+import { useGlobalShortcuts, HelpOverlay } from "@fusion/tui";
+
+function App() {
+  const { helpVisible, toggleHelp } = useGlobalShortcuts({
+    onScreenChange: setActiveScreen,
+  });
+
+  return (
+    <>
+      {helpVisible && <HelpOverlay onClose={toggleHelp} />}
+      <ScreenRouter ... />
+    </>
+  );
+}
+```
+
+#### Available Shortcuts
+
+| Key | Action | Focus Guard |
+|-----|--------|-------------|
+| `Ctrl+C` | Quit (emergency exit) | Always works |
+| `q` | Quit | Only when no text input focused |
+| `?` | Toggle help overlay | Only when no text input focused |
+| `h` | Toggle help overlay (alternate) | Only when no text input focused |
+| `1` - `5` | Switch screens | Only when no text input focused |
+
+#### Focus Guard
+
+Global shortcuts (except `Ctrl+C`) are suppressed when text input is focused. This prevents accidental navigation while typing.
+
+To enable focus guarding for text inputs, import `FocusGuardRef` and set `isFocused` on focus/blur events:
+
+```tsx
+import { FocusGuardRef } from "@fusion/tui";
+
+function TextInput() {
+  return (
+    <Input
+      onFocus={() => { FocusGuardRef.isFocused = true; }}
+      onBlur={() => { FocusGuardRef.isFocused = false; }}
+    />
+  );
+}
+```
+
+#### useGlobalShortcuts Hook
+
+```tsx
+const result = useGlobalShortcuts({
+  onScreenChange: (screenId) => {
+    // Handle screen switch triggered by number keys
+  },
+});
+```
+
+##### Options
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `onScreenChange` | `(screenId: ScreenId) => void` (optional) | Callback when user presses 1-5 to switch screens |
+
+##### Returns
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `helpVisible` | `boolean` | Whether the help overlay is currently visible |
+| `toggleHelp` | `() => void` | Toggle the help overlay visibility |
+| `hideHelp` | `() => void` | Hide the help overlay |
+
+#### HelpOverlay Component
+
+The `HelpOverlay` component displays available keyboard shortcuts. It handles `Escape` and `q` to close.
+
+```tsx
+<HelpOverlay onClose={toggleHelp} />
+```
+
+##### Props
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `onClose` | `() => void` | Callback to close the overlay |
+
+#### Exports
+
+The following are exported from `@fusion/tui`:
+- `useGlobalShortcuts` — Hook for handling global keyboard shortcuts
+- `HelpOverlay` — Component for displaying keyboard shortcuts
+- `FocusGuardRef` — Shared ref for tracking text input focus state
+
 ## Example
 
 ```tsx
-import React from "react";
+import React, { useState } from "react";
 import { render, Box, Text } from "ink";
-import { FusionProvider, useFusion, ScreenRouter } from "@fusion/tui";
+import { FusionProvider, useFusion, ScreenRouter, useGlobalShortcuts, HelpOverlay } from "@fusion/tui";
 
 function ProjectInfo() {
   const { store, projectPath } = useFusion();
@@ -191,25 +289,54 @@ function ProjectInfo() {
   );
 }
 
-render(
-  <FusionProvider>
-    <ScreenRouter>
-      {({ activeScreen }) => (
-        <Box flexDirection="column">
-          <Text bold>Fusion TUI</Text>
-          {activeScreen === "board" && (
-            <Box>
-              <Text>Board Screen - Use 1-5 to switch tabs</Text>
-            </Box>
-          )}
-          {activeScreen === "detail" && (
-            <Box>
-              <Text>Detail Screen</Text>
-            </Box>
-          )}
+function App() {
+  const [activeScreen, setActiveScreen] = useState("board");
+
+  // Global keyboard shortcuts
+  const { helpVisible, toggleHelp } = useGlobalShortcuts({
+    onScreenChange: setActiveScreen,
+  });
+
+  return (
+    <Box flexDirection="column">
+      {/* Help overlay */}
+      {helpVisible && (
+        <Box marginBottom={1}>
+          <HelpOverlay onClose={toggleHelp} />
         </Box>
       )}
-    </ScreenRouter>
+
+      {/* Header */}
+      <Text bold>Fusion TUI</Text>
+      <Text dimColor>(Press ? for help)</Text>
+
+      {/* Screen router */}
+      <ScreenRouter
+        activeScreen={activeScreen}
+        onScreenChange={setActiveScreen}
+      >
+        {({ activeScreen }) => (
+          <Box flexDirection="column">
+            {activeScreen === "board" && (
+              <Box>
+                <Text>Board Screen</Text>
+              </Box>
+            )}
+            {activeScreen === "detail" && (
+              <Box>
+                <Text>Detail Screen</Text>
+              </Box>
+            )}
+          </Box>
+        )}
+      </ScreenRouter>
+    </Box>
+  );
+}
+
+render(
+  <FusionProvider>
+    <App />
   </FusionProvider>
 );
 ```

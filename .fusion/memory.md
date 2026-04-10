@@ -253,3 +253,25 @@ Three example plugins demonstrate different plugin capabilities:
 - Tools and routes registration patterns
 - Plugin context API reference
 - Testing patterns and publishing guide
+
+## TUI Package (FN-1471)
+
+The `@fusion/tui` package provides Ink-based React components for terminal UI.
+
+**Global Shortcuts Implementation**:
+- `useGlobalShortcuts` hook centralizes all keyboard shortcuts at the app root level
+- `FocusGuardRef` module-level ref tracks text input focus state for focus guarding
+- Shortcuts blocked when focused: `q`, `?`, `h`, `1-5` (only when `FocusGuardRef.isFocused === true`)
+- `Ctrl+C` always works (emergency exit)
+- `HelpOverlay` component displays shortcuts and handles `Escape`/`q` to close
+
+**Focus Guard Pattern**:
+- Ink's `useFocusManager` doesn't provide global "is anything focused" detection
+- Use module-level ref (`FocusGuardRef`) for cross-component focus state
+- Text inputs should set `FocusGuardRef.isFocused = true` on focus and `false` on blur
+
+**Testing TUI Components**:
+- Use Ink's `render()` function from `ink/testing` for tests
+- Mock `useInput` with `vi.mock("ink", ...)` to avoid "Raw mode is not supported" errors
+- Use `setTimeout(resolve, ms)` for async state updates in tests
+- Track captured handlers via module-level variables for test assertions

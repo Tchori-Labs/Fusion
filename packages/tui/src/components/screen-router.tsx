@@ -49,6 +49,21 @@ export interface ScreenComponentProps {
  */
 export interface ScreenRouterProps {
   /**
+   * Initial screen to display on mount.
+   * @default "board"
+   */
+  initialScreen?: ScreenId;
+  /**
+   * Callback invoked when the user navigates to a different screen.
+   * Use this to sync with external state (e.g., global shortcuts).
+   */
+  onScreenChange?: (screenId: ScreenId) => void;
+  /**
+   * Externally controlled active screen.
+   * When provided, the router uses this instead of internal state.
+   */
+  activeScreen?: ScreenId;
+  /**
    * Render function for each screen.
    * Receives the screen ID and should return the screen component.
    */
@@ -79,21 +94,32 @@ export interface ScreenRouterProps {
  * </ScreenRouter>
  * ```
  */
-export function ScreenRouter({ children }: ScreenRouterProps): React.ReactNode {
-  const [activeScreen, setActiveScreen] = useState<ScreenId>("board");
+export function ScreenRouter({ children, initialScreen = "board", onScreenChange, activeScreen: externalActiveScreen }: ScreenRouterProps): React.ReactNode {
+  // Use external state if provided, otherwise use internal state
+  const [internalActiveScreen, setInternalActiveScreen] = useState<ScreenId>(initialScreen);
+  const activeScreen = externalActiveScreen ?? internalActiveScreen;
 
   // Navigate to a specific screen by index
   const navigateToIndex = useCallback((index: number) => {
     const normalizedIndex = ((index % SCREENS.length) + SCREENS.length) % SCREENS.length;
-    setActiveScreen(SCREENS[normalizedIndex].id);
-  }, []);
+    const newScreen = SCREENS[normalizedIndex].id;
+    // Only update internal state if not externally controlled
+    if (externalActiveScreen === undefined) {
+      setInternalActiveScreen(newScreen);
+    }
+    onScreenChange?.(newScreen);
+  }, [externalActiveScreen, onScreenChange]);
 
   // Handle keyboard input
   useInput((input, key) => {
     // Number keys 1-5 for direct selection
     const num = parseInt(input, 10);
     if (num >= 1 && num <= SCREENS.length) {
-      setActiveScreen(SCREENS[num - 1].id);
+      const newScreen = SCREENS[num - 1].id;
+      if (externalActiveScreen === undefined) {
+        setInternalActiveScreen(newScreen);
+      }
+      onScreenChange?.(newScreen);
       return;
     }
 
