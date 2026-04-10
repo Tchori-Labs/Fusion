@@ -252,6 +252,37 @@ describe("SubtaskBreakdownModal", () => {
     await waitFor(() => expect(onClose).toHaveBeenCalled());
   });
 
+  it("close button explicitly cancels the session (destructive)", async () => {
+    renderModal();
+    await waitFor(() => expect(mockStartSubtaskBreakdown).toHaveBeenCalled());
+
+    fireEvent.click(await screen.findByLabelText("Close"));
+
+    await waitFor(() => {
+      expect(mockCancelSubtaskBreakdown).toHaveBeenCalledWith("session-123", undefined, expect.any(String));
+    });
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it("escape key cancels session when in editing state (destructive)", async () => {
+    renderModal();
+    await waitFor(() => expect(mockStartSubtaskBreakdown).toHaveBeenCalled());
+
+    // First transition to editing state
+    await waitFor(() => expect(streamHandlers).toBeDefined());
+    streamHandlers.onSubtasks(SAMPLE_SUBTASKS);
+    await screen.findByDisplayValue("First");
+
+    // Now escape should trigger confirm dialog then cancel
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    // confirm() returns true (stubbed in beforeEach)
+    await waitFor(() => {
+      expect(mockCancelSubtaskBreakdown).toHaveBeenCalledWith("session-123", undefined, expect.any(String));
+    });
+    expect(onClose).toHaveBeenCalled();
+  });
+
   it("escape closes modal", async () => {
     renderModal();
     await waitFor(() => expect(mockStartSubtaskBreakdown).toHaveBeenCalled());
