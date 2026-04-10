@@ -64,6 +64,12 @@ const COLOR_THEMES: { value: ColorTheme; label: string; className: string }[] = 
   { value: "copper", label: "Copper", className: "theme-swatch-copper" },
   { value: "foundry", label: "Foundry", className: "theme-swatch-foundry" },
   { value: "carbon", label: "Carbon", className: "theme-swatch-carbon" },
+  { value: "sandstone", label: "Sandstone", className: "theme-swatch-sandstone" },
+  { value: "lagoon", label: "Lagoon", className: "theme-swatch-lagoon" },
+  { value: "frost", label: "Frost", className: "theme-swatch-frost" },
+  { value: "lavender", label: "Lavender", className: "theme-swatch-lavender" },
+  { value: "neon-bloom", label: "Neon Bloom", className: "theme-swatch-neon-bloom" },
+  { value: "sepia", label: "Sepia", className: "theme-swatch-sepia" },
 ];
 
 /**
