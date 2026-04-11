@@ -104,12 +104,19 @@ async function api<T = unknown>(path: string, opts: RequestInit = {}): Promise<T
   return data as T;
 }
 
-export function fetchTasks(limit?: number, offset?: number, projectId?: string, q?: string): Promise<Task[]> {
+export function fetchTasks(
+  limit?: number,
+  offset?: number,
+  projectId?: string,
+  q?: string,
+  includeArchived?: boolean,
+): Promise<Task[]> {
   const search = new URLSearchParams();
   if (limit !== undefined) search.set("limit", String(limit));
   if (offset !== undefined) search.set("offset", String(offset));
   if (projectId) search.set("projectId", projectId);
   if (q) search.set("q", q);
+  if (includeArchived) search.set("includeArchived", "1");
   const suffix = search.size > 0 ? `?${search.toString()}` : "";
   return api<Task[]>(`/tasks${suffix}`);
 }
@@ -2762,7 +2769,7 @@ export interface NodeInfo {
   url?: NodeConfig["url"];
   apiKey?: NodeConfig["apiKey"];
   status: NodeStatus;
-  capabilities?: string[];
+  capabilities?: NodeConfig["capabilities"];
   maxConcurrent: NodeConfig["maxConcurrent"];
   createdAt: NodeConfig["createdAt"];
   updatedAt: NodeConfig["updatedAt"];
@@ -4047,7 +4054,7 @@ export async function previewEnrichedDescription(
 
 export interface AiSessionSummary {
   id: string;
-  type: "planning" | "subtask" | "mission_interview";
+  type: "planning" | "subtask" | "mission_interview" | "milestone_interview" | "slice_interview";
   status: "generating" | "awaiting_input" | "complete" | "error";
   title: string;
   projectId: string | null;
