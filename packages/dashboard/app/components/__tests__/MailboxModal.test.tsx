@@ -344,6 +344,84 @@ describe("MailboxModal", () => {
     });
   });
 
+  it("shows compose button in Agents tab", async () => {
+    render(<MailboxModal {...defaultProps} />);
+    fireEvent.click(screen.getByTestId("mailbox-tab-agents"));
+    await waitFor(() => {
+      expect(screen.getByTestId("mailbox-compose-btn")).toBeDefined();
+    });
+  });
+
+  it("compose opened from Agents tab without selected agent shows recipient select", async () => {
+    render(<MailboxModal {...defaultProps} />);
+    fireEvent.click(screen.getByTestId("mailbox-tab-agents"));
+    await waitFor(() => {
+      expect(screen.getByTestId("mailbox-compose-btn")).toBeDefined();
+    });
+    fireEvent.click(screen.getByTestId("mailbox-compose-btn"));
+    await waitFor(() => {
+      expect(screen.getByTestId("message-composer")).toBeDefined();
+    });
+    // Should show recipient dropdown (not pre-filled)
+    expect(screen.getByTestId("message-composer-recipient")).toBeDefined();
+  });
+
+  it("compose opened from Agents tab pre-fills selected agent recipient", async () => {
+    mockFetchAgentMailbox.mockResolvedValue({
+      ownerId: "agent-001",
+      ownerType: "agent",
+      unreadCount: 0,
+      messages: [],
+    });
+    render(<MailboxModal {...defaultProps} />);
+    fireEvent.click(screen.getByTestId("mailbox-tab-agents"));
+    await waitFor(() => {
+      expect(screen.getByTestId("mailbox-agent-select")).toBeDefined();
+    });
+    // Select an agent
+    fireEvent.change(screen.getByTestId("mailbox-agent-select"), { target: { value: "agent-001" } });
+    await waitFor(() => {
+      expect(mockFetchAgentMailbox).toHaveBeenCalledWith("agent-001", undefined);
+    });
+    // Click compose
+    fireEvent.click(screen.getByTestId("mailbox-compose-btn"));
+    await waitFor(() => {
+      expect(screen.getByTestId("message-composer")).toBeDefined();
+    });
+    // Should show pre-filled recipient (not dropdown)
+    expect(screen.getByText("agent-001")).toBeDefined();
+  });
+
+  it("successful send from Agents tab keeps user on Agents tab and preserves selected agent", async () => {
+    render(<MailboxModal {...defaultProps} />);
+    fireEvent.click(screen.getByTestId("mailbox-tab-agents"));
+    await waitFor(() => {
+      expect(screen.getByTestId("mailbox-agent-select")).toBeDefined();
+    });
+    // Select an agent
+    fireEvent.change(screen.getByTestId("mailbox-agent-select"), { target: { value: "agent-001" } });
+    await waitFor(() => {
+      expect(mockFetchAgentMailbox).toHaveBeenCalledWith("agent-001", undefined);
+    });
+    // Open compose (pre-filled)
+    fireEvent.click(screen.getByTestId("mailbox-compose-btn"));
+    await waitFor(() => {
+      expect(screen.getByTestId("message-composer")).toBeDefined();
+    });
+    // Type and send message
+    fireEvent.change(screen.getByTestId("message-composer-content"), {
+      target: { value: "Hello agent!" },
+    });
+    fireEvent.click(screen.getByTestId("message-composer-send"));
+    await waitFor(() => {
+      expect(screen.queryByTestId("message-composer")).toBeNull();
+    });
+    // Verify still on Agents tab and agent is still selected
+    expect(screen.getByTestId("mailbox-agents")).toBeDefined();
+    const select = screen.getByTestId("mailbox-agent-select") as HTMLSelectElement;
+    expect(select.value).toBe("agent-001");
+  });
+
   it("shows loading skeleton while loading", async () => {
     mockFetchInbox.mockImplementation(() => new Promise(() => {})); // Never resolves
     render(<MailboxModal {...defaultProps} />);

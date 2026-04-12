@@ -24770,6 +24770,17 @@ html .column.drag-over * {
   flex-shrink: 0;
 }
 
+.mailbox-agents-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.mailbox-compose-btn {
+  flex-shrink: 0;
+}
+
 .mailbox-agent-select {
   width: 100%;
   max-width: 300px;

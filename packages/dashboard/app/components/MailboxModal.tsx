@@ -6,13 +6,11 @@ import {
   Inbox as InboxIcon,
   Bot,
   Trash2,
-  Check,
   CheckCheck,
   Loader2,
   RefreshCw,
   MessageSquare,
   User,
-  AlertCircle,
 } from "lucide-react";
 import type { Message, MessageType, ParticipantType } from "@fusion/core";
 import {
@@ -243,9 +241,20 @@ export function MailboxModal({
     setShowComposer(false);
     setComposeRecipient(null);
     addToast?.("Message sent", "success");
-    // Refresh outbox
+    // Refresh current tab
     if (activeTab === "outbox") loadOutbox();
-  }, [activeTab, loadOutbox, addToast]);
+    else if (activeTab === "agents" && selectedAgentId) loadAgentMailbox(selectedAgentId);
+  }, [activeTab, loadOutbox, selectedAgentId, loadAgentMailbox, addToast]);
+
+  const handleOpenCompose = useCallback(() => {
+    // Pre-fill recipient from selected agent if available
+    if (activeTab === "agents" && selectedAgentId) {
+      setComposeRecipient({ id: selectedAgentId, type: "agent" });
+    } else {
+      setComposeRecipient(null);
+    }
+    setShowComposer(true);
+  }, [activeTab, selectedAgentId]);
 
   const handleComposeCancel = useCallback(() => {
     setShowComposer(false);
@@ -517,20 +526,30 @@ export function MailboxModal({
                     </div>
                   ) : (
                     <>
-                      <div className="mailbox-agents-dropdown">
-                        <select
-                          className="message-composer-select mailbox-agent-select"
-                          value={selectedAgentId ?? ""}
-                          onChange={(e) => setSelectedAgentId(e.target.value || null)}
-                          data-testid="mailbox-agent-select"
+                      <div className="mailbox-agents-header">
+                        <div className="mailbox-agents-dropdown">
+                          <select
+                            className="message-composer-select mailbox-agent-select"
+                            value={selectedAgentId ?? ""}
+                            onChange={(e) => setSelectedAgentId(e.target.value || null)}
+                            data-testid="mailbox-agent-select"
+                          >
+                            <option value="">Select an agent…</option>
+                            {agents.map((agent) => (
+                              <option key={agent.id} value={agent.id}>
+                                {agent.name || agent.id}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <button
+                          className="btn-sm btn-secondary mailbox-compose-btn"
+                          onClick={handleOpenCompose}
+                          data-testid="mailbox-compose-btn"
                         >
-                          <option value="">Select an agent…</option>
-                          {agents.map((agent) => (
-                            <option key={agent.id} value={agent.id}>
-                              {agent.name || agent.id}
-                            </option>
-                          ))}
-                        </select>
+                          <MessageSquare size={14} />
+                          <span>Compose</span>
+                        </button>
                       </div>
                       <div className="mailbox-agents-content">
                         {!selectedAgentId && (
@@ -582,7 +601,7 @@ export function MailboxModal({
         {!selectedMessage && !showComposer && activeTab !== "agents" && (
           <button
             className="mailbox-compose-fab"
-            onClick={() => setShowComposer(true)}
+            onClick={handleOpenCompose}
             title="Compose message"
             data-testid="mailbox-compose-fab"
           >
