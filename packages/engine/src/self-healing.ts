@@ -103,6 +103,7 @@ export class SelfHealingManager {
    * stale in-progress/specifying tasks that no longer have a live worker.
    */
   async runStartupRecovery(): Promise<void> {
+    await this.recoverNoProgressNoTaskDoneFailures();
     await this.recoverCompletedTasks();
     await this.recoverMisclassifiedFailures();
     await this.recoverOrphanedExecutions();
@@ -342,6 +343,7 @@ export class SelfHealingManager {
       await this.recoverMergeableReviewTasks();
       await this.recoverMergedReviewTasks();
       await this.recoverMisclassifiedFailures();
+      await this.recoverNoProgressNoTaskDoneFailures();
       await this.recoverOrphanedExecutions();
       await this.recoverApprovedTriageTasks();
       await this.archiveStaleDoneTasks();
@@ -676,6 +678,109 @@ export class SelfHealingManager {
   }
 
   /**
+   * Recover `in-progress` tasks that failed only because the agent exited
+   * without calling task_done, and where there is no sign of work to preserve.
+   *
+   * These are safe to requeue automatically when no steps progressed and git
+   * has neither worktree changes nor branch commits. Cases with any evidence
+   * of work are left alone for manual inspection or the normal orphan recovery
+   * path.
+   */
+  async recoverNoProgressNoTaskDoneFailures(): Promise<number> {
+    try {
+      const tasks = await this.store.listTasks({ slim: true, column: "in-progress" });
+      const executingIds = this.options.getExecutingTaskIds?.() ?? new Set<string>();
+
+      const candidates = tasks.filter((task) =>
+        task.column === "in-progress" &&
+        task.status === "failed" &&
+        isNoTaskDoneFailure(task) &&
+        !task.paused &&
+        !executingIds.has(task.id) &&
+        !isTaskWorkComplete(task) &&
+        !hasStepProgress(task),
+      );
+
+      if (candidates.length === 0) return 0;
+
+      log.warn(`Found ${candidates.length} no-progress no-task_done failure(s) in in-progress`);
+
+      let recovered = 0;
+      for (const task of candidates) {
+        try {
+          if (this.hasRecoverableGitWork(task)) {
+            log.log(`${task.id} has recoverable git work — leaving in-progress for inspection`);
+            continue;
+          }
+
+          await this.store.updateTask(task.id, {
+            status: "stuck-killed",
+            worktree: null,
+            branch: null,
+          });
+          await this.store.logEntry(
+            task.id,
+            "Auto-recovered no-progress no-task_done failure — clean worktree, moved back to todo",
+          );
+          await this.store.moveTask(task.id, "todo");
+          recovered++;
+        } catch (err: any) {
+          log.error(`Failed to recover no-progress no-task_done failure ${task.id}: ${err.message}`);
+        }
+      }
+
+      if (recovered > 0) {
+        log.log(`Recovered ${recovered} no-progress no-task_done failure(s) → todo`);
+      }
+      return recovered;
+    } catch (err: any) {
+      log.error(`No-progress no-task_done recovery failed: ${err.message}`);
+      return 0;
+    }
+  }
+
+  private hasRecoverableGitWork(task: Task): boolean {
+    if (task.worktree && existsSync(task.worktree)) {
+      try {
+        const status = execSync("git status --porcelain", {
+          cwd: task.worktree,
+          stdio: "pipe",
+          encoding: "utf-8",
+          timeout: 30_000,
+        }).trim();
+        if (status.length > 0) return true;
+      } catch {
+        // If we cannot inspect an existing worktree, preserve it.
+        return true;
+      }
+    }
+
+    const branchName = task.branch || `fusion/${task.id.toLowerCase()}`;
+    try {
+      execSync(`git rev-parse --verify "${branchName}"`, {
+        cwd: this.options.rootDir,
+        stdio: "pipe",
+        timeout: 30_000,
+      });
+    } catch {
+      return false;
+    }
+
+    try {
+      const uniqueCommits = execSync(`git rev-list --count HEAD.."${branchName}"`, {
+        cwd: this.options.rootDir,
+        stdio: "pipe",
+        encoding: "utf-8",
+        timeout: 30_000,
+      }).trim();
+      return Number.parseInt(uniqueCommits, 10) > 0;
+    } catch {
+      // If the branch exists but cannot be compared, preserve it.
+      return true;
+    }
+  }
+
+  /**
    * Recover triage tasks that already have an approved specification but were
    * left stuck in `status: "specifying"` without an active triage session.
    *
@@ -906,4 +1011,12 @@ function hasLatestSpecReviewApproval(task: Task): boolean {
 function isTaskWorkComplete(task: Task): boolean {
   if (task.steps.length === 0) return false;
   return task.steps.every((step) => step.status === "done" || step.status === "skipped");
+}
+
+function isNoTaskDoneFailure(task: Task): boolean {
+  return task.error?.includes("without calling task_done") === true;
+}
+
+function hasStepProgress(task: Task): boolean {
+  return task.steps.some((step) => step.status !== "pending");
 }

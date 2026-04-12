@@ -29,6 +29,7 @@ import { existsSync } from "node:fs";
 import { scanOrphanedBranches } from "./worktree-pool.js";
 
 const mockedExecSync = vi.mocked(execSync);
+const mockedExistsSync = vi.mocked(existsSync);
 const mockedScanOrphanedBranches = vi.mocked(scanOrphanedBranches);
 
 // ── Mock helpers ────────────────────────────────────────────────────
@@ -322,6 +323,7 @@ describe("SelfHealingManager", () => {
     });
 
     it("runStartupRecovery invokes the startup recovery subset", async () => {
+      const recoverNoProgressNoTaskDoneFailures = vi.spyOn(manager, "recoverNoProgressNoTaskDoneFailures").mockResolvedValue(1);
       const recoverCompletedTasks = vi.spyOn(manager, "recoverCompletedTasks").mockResolvedValue(1);
       const recoverMisclassifiedFailures = vi.spyOn(manager, "recoverMisclassifiedFailures").mockResolvedValue(1);
       const recoverOrphanedExecutions = vi.spyOn(manager, "recoverOrphanedExecutions").mockResolvedValue(1);
@@ -329,10 +331,120 @@ describe("SelfHealingManager", () => {
 
       await manager.runStartupRecovery();
 
+      expect(recoverNoProgressNoTaskDoneFailures).toHaveBeenCalledTimes(1);
       expect(recoverCompletedTasks).toHaveBeenCalledTimes(1);
       expect(recoverMisclassifiedFailures).toHaveBeenCalledTimes(1);
       expect(recoverOrphanedExecutions).toHaveBeenCalledTimes(1);
       expect(recoverApprovedTriageTasks).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("recoverNoProgressNoTaskDoneFailures", () => {
+    it("requeues clean in-progress no-task_done failures with no step progress", async () => {
+      const managerWithRecovery = new SelfHealingManager(store, {
+        rootDir: "/tmp/test-project",
+        getExecutingTaskIds: () => new Set<string>(),
+      });
+      vi.spyOn(managerWithRecovery as any, "hasRecoverableGitWork").mockReturnValue(false);
+
+      (store.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue([
+        {
+          id: "FN-1473",
+          column: "in-progress",
+          status: "failed",
+          error: "Agent finished without calling task_done (after retry)",
+          paused: false,
+          steps: [],
+        },
+      ]);
+
+      const result = await managerWithRecovery.recoverNoProgressNoTaskDoneFailures();
+
+      expect(result).toBe(1);
+      expect(store.updateTask).toHaveBeenCalledWith("FN-1473", {
+        status: "stuck-killed",
+        worktree: null,
+        branch: null,
+      });
+      expect(store.logEntry).toHaveBeenCalledWith(
+        "FN-1473",
+        expect.stringContaining("no-progress no-task_done failure"),
+      );
+      expect(store.moveTask).toHaveBeenCalledWith("FN-1473", "todo");
+
+      managerWithRecovery.stop();
+    });
+
+    it("skips no-task_done failures with step progress", async () => {
+      const managerWithRecovery = new SelfHealingManager(store, {
+        rootDir: "/tmp/test-project",
+        getExecutingTaskIds: () => new Set<string>(),
+      });
+      vi.spyOn(managerWithRecovery as any, "hasRecoverableGitWork").mockReturnValue(false);
+
+      (store.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue([
+        {
+          id: "FN-1473",
+          column: "in-progress",
+          status: "failed",
+          error: "Agent finished without calling task_done (after retry)",
+          paused: false,
+          steps: [{ status: "done" }, { status: "pending" }],
+        },
+      ]);
+
+      const result = await managerWithRecovery.recoverNoProgressNoTaskDoneFailures();
+
+      expect(result).toBe(0);
+      expect(store.updateTask).not.toHaveBeenCalledWith("FN-1473", expect.anything());
+      expect(store.moveTask).not.toHaveBeenCalledWith("FN-1473", "todo");
+
+      managerWithRecovery.stop();
+    });
+
+    it("skips when git work should be preserved", async () => {
+      const managerWithRecovery = new SelfHealingManager(store, {
+        rootDir: "/tmp/test-project",
+        getExecutingTaskIds: () => new Set<string>(),
+      });
+      vi.spyOn(managerWithRecovery as any, "hasRecoverableGitWork").mockReturnValue(true);
+
+      (store.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue([
+        {
+          id: "FN-1473",
+          column: "in-progress",
+          status: "failed",
+          error: "Agent finished without calling task_done (after retry)",
+          paused: false,
+          steps: [{ status: "pending" }],
+        },
+      ]);
+
+      const result = await managerWithRecovery.recoverNoProgressNoTaskDoneFailures();
+
+      expect(result).toBe(0);
+      expect(store.updateTask).not.toHaveBeenCalledWith("FN-1473", expect.anything());
+      expect(store.moveTask).not.toHaveBeenCalledWith("FN-1473", "todo");
+
+      managerWithRecovery.stop();
+    });
+
+    it("treats dirty worktrees as recoverable git work", () => {
+      const task = {
+        id: "FN-1473",
+        worktree: "/tmp/test-project/.worktrees/fn-1473",
+        branch: "fusion/fn-1473",
+      } as Task;
+      mockedExistsSync.mockReturnValue(true);
+      mockedExecSync.mockImplementation((command) => {
+        if (String(command) === "git status --porcelain") {
+          return " M packages/engine/src/executor.ts\n" as any;
+        }
+        return "" as any;
+      });
+
+      expect((manager as any).hasRecoverableGitWork(task)).toBe(true);
+      mockedExecSync.mockClear();
     });
   });
 

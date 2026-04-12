@@ -417,7 +417,11 @@ export class InProcessRuntime
       // 8. Set up event forwarding from TaskStore
       this.setupEventForwarding();
 
-      // 9. Resume orphaned in-progress tasks
+      // 9. Requeue no-progress no-task_done failures before resumeOrphaned
+      // can restart them.
+      await this.selfHealingManager.recoverNoProgressNoTaskDoneFailures();
+
+      // 10. Resume orphaned in-progress tasks
       await this.executor.resumeOrphaned();
 
       // Some "stuck" tasks are already orphaned by the time the runtime boots:
@@ -426,10 +430,10 @@ export class InProcessRuntime
       // SelfHealingManager so the policy lives in one place.
       await this.selfHealingManager.runStartupRecovery();
 
-      // 10. Start scheduler
+      // 11. Start scheduler
       this.scheduler.start();
 
-      // 11. Start MissionExecutionLoop for validation cycle handling
+      // 12. Start MissionExecutionLoop for validation cycle handling
       this.missionExecutionLoop = missionExecutionLoop;
       if (missionExecutionLoop) {
         missionExecutionLoop.start();
@@ -446,7 +450,7 @@ export class InProcessRuntime
         void activeMissionAutopilot.recoverMissions(activeMissionStore);
       }
 
-      // 12. Reconcile feature status for all active missions (not just autopilot)
+      // 13. Reconcile feature status for all active missions (not just autopilot)
       if (activeMissionStore) {
         void this.scheduler.reconcileAllMissionFeatures();
       }

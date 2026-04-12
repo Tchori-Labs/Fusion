@@ -606,6 +606,12 @@ export class TaskExecutor {
     return task.steps.every((s) => s.status === "done" || s.status === "skipped");
   }
 
+  private isNoProgressNoTaskDoneFailure(task: Task): boolean {
+    return task.status === "failed" &&
+      task.error?.includes("without calling task_done") === true &&
+      task.steps.every((step) => step.status === "pending");
+  }
+
   private async clearResumeFailureState(task: Task): Promise<void> {
     if (task.status === "failed" || task.error) {
       await this.store.updateTask(task.id, { status: null, error: null });
@@ -733,6 +739,11 @@ export class TaskExecutor {
       if (this.isTaskWorkComplete(task)) {
         executorLog.log(`${task.id} is already complete — fast-pathing to in-review`);
         await this.recoverCompletedTask(task);
+        continue;
+      }
+
+      if (this.isNoProgressNoTaskDoneFailure(task)) {
+        executorLog.log(`${task.id} failed without task_done and has no step progress — leaving for self-healing requeue`);
         continue;
       }
 

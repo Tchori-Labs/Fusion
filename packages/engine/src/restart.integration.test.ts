@@ -427,6 +427,25 @@ describe("In-progress task resume after restart", () => {
     );
   });
 
+  it("resumeOrphaned() leaves no-progress no-task_done failures for self-healing", async () => {
+    const store = createMockStore();
+    const failedTask = makeTask("FN-1473", "in-progress", {
+      status: "failed",
+      error: "Agent finished without calling task_done (after retry)",
+      steps: [],
+    });
+    store.listTasks.mockResolvedValue([failedTask]);
+
+    const executor = new TaskExecutor(store, "/tmp/test");
+    const executeSpy = vi.spyOn(executor, "execute");
+
+    await executor.resumeOrphaned();
+
+    expect(executeSpy).not.toHaveBeenCalled();
+    expect(mockedCreateHaiAgent).not.toHaveBeenCalled();
+    expect(store.logEntry).not.toHaveBeenCalledWith("FN-1473", "Resumed after engine restart");
+  });
+
   it("recoverCompletedTask() marks task failed then moves to in-review when workflow fails", async () => {
     const store = createMockStore({
       getTask: vi.fn().mockResolvedValue(makeTaskDetail("FN-963", "in-progress", {

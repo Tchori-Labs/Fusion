@@ -11,12 +11,14 @@ const {
   mockSelfHealingStart,
   mockSelfHealingStop,
   mockSelfHealingCtor,
+  mockRecoverNoProgressNoTaskDoneFailures,
   mockRunStartupRecovery,
   mockExecutorCtor,
 } = vi.hoisted(() => ({
   mockSelfHealingStart: vi.fn(),
   mockSelfHealingStop: vi.fn(),
   mockSelfHealingCtor: vi.fn(),
+  mockRecoverNoProgressNoTaskDoneFailures: vi.fn().mockResolvedValue(0),
   mockRunStartupRecovery: vi.fn().mockResolvedValue(undefined),
   mockExecutorCtor: vi.fn(),
 }));
@@ -97,6 +99,7 @@ vi.mock("../self-healing.js", async () => {
       return {
         start: mockSelfHealingStart,
         stop: mockSelfHealingStop,
+        recoverNoProgressNoTaskDoneFailures: mockRecoverNoProgressNoTaskDoneFailures,
         runStartupRecovery: mockRunStartupRecovery,
       };
     }),
@@ -207,6 +210,7 @@ describe("InProcessRuntime", () => {
     it("runs self-healing startup recovery immediately after orphan resume on startup", async () => {
       await runtime.start();
 
+      expect(mockRecoverNoProgressNoTaskDoneFailures).toHaveBeenCalledTimes(1);
       expect(mockRunStartupRecovery).toHaveBeenCalledTimes(1);
     }, 30000);
 
