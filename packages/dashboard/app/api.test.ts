@@ -25,6 +25,7 @@ import {
   fetchWorkspaceFileList,
   fetchWorkspaceFileContent,
   saveWorkspaceFileContent,
+  deleteFile,
   startPlanningStreaming,
   fetchTasks,
   summarizeTitle,
@@ -1552,6 +1553,50 @@ describe("Git Management API", () => {
         headers: { "Content-Type": "application/json" },
         method: "POST",
         body: JSON.stringify({ content: "hello" }),
+      });
+    });
+
+    it("deleteFile sends POST to the delete route with encoded URL and workspace query", async () => {
+      // FN-1492 regression: ensure folder delete (e.g., "somefolder/") doesn't hit the
+      // generic write route POST /files/{*filepath} and get rejected for missing `content`.
+      const payload = { success: true, mtime: null, size: 0 };
+      globalThis.fetch = vi.fn().mockReturnValue(mockFetchResponse(true, payload));
+
+      const response = await deleteFile("FN-001", "src/old");
+
+      expect(response).toEqual(payload);
+      // Verify the delete operation goes to /files/{encoded-path}/delete (not the write route)
+      expect(globalThis.fetch).toHaveBeenCalledWith("/api/files/src%2Fold/delete?workspace=FN-001", {
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      });
+    });
+
+    it("deleteFile URL-encodes nested paths correctly", async () => {
+      const payload = { success: true, mtime: null, size: 0 };
+      globalThis.fetch = vi.fn().mockReturnValue(mockFetchResponse(true, payload));
+
+      await deleteFile("FN-001", "a/b/c");
+
+      // Forward slashes in path segments must be encoded so Express matches
+      // POST /files/{*filepath}/delete rather than POST /files/{*filepath}
+      expect(globalThis.fetch).toHaveBeenCalledWith("/api/files/a%2Fb%2Fc/delete?workspace=FN-001", {
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      });
+    });
+
+    it("deleteFile handles folder paths (FN-1492 regression)", async () => {
+      const payload = { success: true, mtime: null, size: 0 };
+      globalThis.fetch = vi.fn().mockReturnValue(mockFetchResponse(true, payload));
+
+      // Deleting a folder should work without hitting write-route validation
+      const response = await deleteFile("FN-001", "old-folder");
+
+      expect(response).toEqual(payload);
+      expect(globalThis.fetch).toHaveBeenCalledWith("/api/files/old-folder/delete?workspace=FN-001", {
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
       });
     });
 
