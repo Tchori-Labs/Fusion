@@ -9,12 +9,20 @@ import { runAgentImport } from "./agent-import.js";
 function makeAgentManifest(options: {
   name: string;
   title?: string;
+  slug?: string;
+  reportsTo?: string;
   skills?: string[];
   body?: string;
 }): string {
   const lines = ["---", `name: ${options.name}`];
   if (options.title) {
     lines.push(`title: ${options.title}`);
+  }
+  if (options.slug) {
+    lines.push(`slug: ${options.slug}`);
+  }
+  if (options.reportsTo) {
+    lines.push(`reportsTo: ${options.reportsTo}`);
   }
   if (options.skills && options.skills.length > 0) {
     lines.push("skills:");
@@ -55,6 +63,48 @@ function createCompanyDirectory(basePath: string, agentName = "CEO"): string {
   return basePath;
 }
 
+function createHierarchyCompanyDirectory(basePath: string): string {
+  mkdirSync(basePath, { recursive: true });
+  writeFileSync(
+    join(basePath, "COMPANY.md"),
+    "---\nname: Example Company\nslug: example-company\n---\nCompany description",
+  );
+
+  mkdirSync(join(basePath, "agents", "ceo"), { recursive: true });
+  writeFileSync(
+    join(basePath, "agents", "ceo", "AGENTS.md"),
+    makeAgentManifest({
+      name: "CEO",
+      slug: "ceo",
+      title: "Chief Executive",
+      body: "Lead the company",
+    }),
+  );
+
+  mkdirSync(join(basePath, "agents", "vp-eng"), { recursive: true });
+  writeFileSync(
+    join(basePath, "agents", "vp-eng", "AGENTS.md"),
+    makeAgentManifest({
+      name: "VP Engineering",
+      slug: "vp-eng",
+      reportsTo: "ceo",
+      body: "Lead engineering",
+    }),
+  );
+
+  mkdirSync(join(basePath, "agents", "staff-eng"), { recursive: true });
+  writeFileSync(
+    join(basePath, "agents", "staff-eng", "AGENTS.md"),
+    makeAgentManifest({
+      name: "Staff Engineer",
+      reportsTo: "../vp-eng/AGENTS.md",
+      body: "Build systems",
+    }),
+  );
+
+  return basePath;
+}
+
 describe("agent-import", () => {
   const tmpDir = join(tmpdir(), `kb-agent-import-test-${process.pid}`);
   let createAgentMock: ReturnType<typeof vi.fn>;
@@ -63,7 +113,10 @@ describe("agent-import", () => {
 
   beforeEach(() => {
     mkdirSync(tmpDir, { recursive: true });
-    createAgentMock = vi.fn();
+    createAgentMock = vi.fn().mockImplementation(async (input: any) => ({
+      id: `agent-${String(input.name).toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
+      ...input,
+    }));
     listAgentsMock = vi.fn().mockResolvedValue([]);
     initMock = vi.fn().mockResolvedValue(undefined);
 
@@ -131,6 +184,55 @@ describe("agent-import", () => {
     expect(createAgentMock).toHaveBeenCalledWith(
       expect.objectContaining({ name: "CEO", role: "custom", title: "Chief Executive" }),
     );
+  });
+
+  it("resolves imported manager hierarchy to created Fusion agent ids", async () => {
+    const companyDir = createHierarchyCompanyDirectory(join(tmpDir, "company-hierarchy"));
+    createAgentMock
+      .mockResolvedValueOnce({ id: "agent-ceo", name: "CEO" })
+      .mockResolvedValueOnce({ id: "agent-vp-eng", name: "VP Engineering" })
+      .mockResolvedValueOnce({ id: "agent-staff-eng", name: "Staff Engineer" });
+
+    await runAgentImport(companyDir);
+
+    expect(createAgentMock).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      name: "CEO",
+      role: "custom",
+    }));
+    expect(createAgentMock).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      name: "VP Engineering",
+      role: "custom",
+      reportsTo: "agent-ceo",
+    }));
+    expect(createAgentMock).toHaveBeenNthCalledWith(3, expect.objectContaining({
+      name: "Staff Engineer",
+      role: "custom",
+      reportsTo: "agent-vp-eng",
+    }));
+  });
+
+  it("resolves skipped existing managers before importing their reports", async () => {
+    const companyDir = createHierarchyCompanyDirectory(join(tmpDir, "company-existing-manager"));
+    listAgentsMock.mockResolvedValue([
+      {
+        id: "agent-ceo-existing",
+        name: "CEO",
+        role: "custom",
+        metadata: { agentCompaniesSlug: "ceo" },
+      },
+    ]);
+
+    await runAgentImport(companyDir, { skipExisting: true });
+
+    expect(createAgentMock).toHaveBeenCalledTimes(2);
+    expect(createAgentMock).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      name: "VP Engineering",
+      reportsTo: "agent-ceo-existing",
+    }));
+    expect(createAgentMock).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      name: "Staff Engineer",
+      reportsTo: "agent-vp-engineering",
+    }));
   });
 
   it("imports agents from a single AGENTS.md file", async () => {

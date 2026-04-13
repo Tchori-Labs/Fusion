@@ -180,10 +180,10 @@ function createUniqueManifestKey(baseKey: string, usedKeys: Set<string>): string
   return candidate;
 }
 
-function topologicallySortImportPlanItems(
-  items: PreparedAgentCompaniesImportItem[],
+function topologicallySortImportPlanItems<T extends PreparedAgentCompaniesImportItem>(
+  items: T[],
 ): {
-  orderedItems: PreparedAgentCompaniesImportItem[];
+  orderedItems: T[];
   cycleErrors: Array<{ name: string; error: string }>;
 } {
   const byKey = new Map(items.map((item) => [item.manifestKey, item]));
@@ -209,7 +209,7 @@ function topologicallySortImportPlanItems(
   const ready = items
     .filter((item) => (indegree.get(item.manifestKey) ?? 0) === 0)
     .sort((a, b) => a.index - b.index);
-  const orderedItems: PreparedAgentCompaniesImportItem[] = [];
+  const orderedItems: T[] = [];
 
   while (ready.length > 0) {
     const current = ready.shift();

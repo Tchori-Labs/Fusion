@@ -14,7 +14,7 @@ import {
   parseCompanyDirectory,
   parseCompanyArchive,
   parseSingleAgentManifest,
-  convertAgentCompanies,
+  prepareAgentCompaniesImport,
   AgentCompaniesParseError,
 } from "@fusion/core";
 import type { AgentCreateInput } from "@fusion/core";
@@ -111,12 +111,23 @@ export async function runAgentImport(
 
   const existingAgents = await agentStore.listAgents();
   const existingNames = new Set(existingAgents.map((a) => a.name));
-  const conversionOptions = skipExisting ? { skipExisting: [...existingNames] } : undefined;
+  const conversionOptions = {
+    ...(skipExisting ? { skipExisting: [...existingNames] } : {}),
+    existingAgents,
+  };
 
   let companyName: string | undefined;
   let agentCount = 0;
   let teamCount = 0;
-  let inputs: AgentCreateInput[] = [];
+  let importItems: Array<{
+    manifestKey: string;
+    input: AgentCreateInput;
+    reportsTo?: {
+      raw: string;
+      resolvedAgentId?: string;
+      deferredManifestKey?: string;
+    };
+  }> = [];
   let result: {
     created: string[];
     skipped: string[];
@@ -135,13 +146,13 @@ export async function runAgentImport(
       companyName = pkg.company?.name;
       agentCount = pkg.agents.length;
       teamCount = pkg.teams.length;
-      ({ inputs, result } = convertAgentCompanies(pkg, conversionOptions));
+      ({ items: importItems, result } = prepareAgentCompaniesImport(pkg, conversionOptions));
     } else if (isArchivePath(sourcePath)) {
       const pkg = await parseCompanyArchive(sourcePath);
       companyName = pkg.company?.name;
       agentCount = pkg.agents.length;
       teamCount = pkg.teams.length;
-      ({ inputs, result } = convertAgentCompanies(pkg, conversionOptions));
+      ({ items: importItems, result } = prepareAgentCompaniesImport(pkg, conversionOptions));
     } else if (sourcePath.endsWith(".md")) {
       const content = readFileSync(sourcePath, "utf-8");
       const { manifest } = parseSingleAgentManifest(content);
@@ -154,7 +165,7 @@ export async function runAgentImport(
       };
       agentCount = pkg.agents.length;
       teamCount = 0;
-      ({ inputs, result } = convertAgentCompanies(pkg, conversionOptions));
+      ({ items: importItems, result } = prepareAgentCompaniesImport(pkg, conversionOptions));
     } else {
       throw new Error(UNSUPPORTED_FORMAT_MESSAGE);
     }
@@ -189,19 +200,40 @@ export async function runAgentImport(
   // Create agents
   const created: string[] = [];
   const errors: Array<{ name: string; error: string }> = [...result.errors];
+  const createdAgentIdsByManifestKey = new Map<string, string>();
 
-  for (const input of inputs) {
+  for (const item of importItems) {
     try {
       // Double-check for duplicates if not using skipExisting
-      if (!skipExisting && existingNames.has(input.name)) {
-        errors.push({ name: input.name, error: "Agent with this name already exists" });
+      if (!skipExisting && existingNames.has(item.input.name)) {
+        errors.push({ name: item.input.name, error: "Agent with this name already exists" });
         continue;
       }
 
-      await agentStore.createAgent(input);
+      const input: AgentCreateInput = {
+        ...item.input,
+        ...(item.input.metadata ? { metadata: { ...item.input.metadata } } : {}),
+      };
+
+      if (item.reportsTo?.deferredManifestKey) {
+        const resolvedReportsTo = createdAgentIdsByManifestKey.get(item.reportsTo.deferredManifestKey);
+        if (!resolvedReportsTo) {
+          errors.push({
+            name: item.input.name,
+            error: `Could not resolve reportsTo reference "${item.reportsTo.raw}" because the manager was not created`,
+          });
+          continue;
+        }
+        input.reportsTo = resolvedReportsTo;
+      } else if (item.reportsTo?.resolvedAgentId) {
+        input.reportsTo = item.reportsTo.resolvedAgentId;
+      }
+
+      const agent = await agentStore.createAgent(input);
       created.push(input.name);
+      createdAgentIdsByManifestKey.set(item.manifestKey, agent.id);
     } catch (err) {
-      errors.push({ name: input.name, error: (err as Error).message });
+      errors.push({ name: item.input.name, error: (err as Error).message });
     }
   }
 
