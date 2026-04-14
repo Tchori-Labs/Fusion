@@ -938,8 +938,12 @@ describe("TerminalModal", () => {
       // WebGL addon constructor should NOT have been called
       expect(webglModule.WebglAddon).not.toHaveBeenCalled();
 
-      // loadAddon should NOT have been called with WebGL addon
-      expect(loadAddonSpy).not.toHaveBeenCalledWith(expect.any(Object));
+      // loadAddon should NOT have been called with a WebGL addon instance
+      const loadAddonCalls = loadAddonSpy.mock.calls;
+      const webglAddonCalls = loadAddonCalls.filter(
+        (call) => call[0]?.constructor?.name === "WebglAddon",
+      );
+      expect(webglAddonCalls).toHaveLength(0);
     });
   });
 

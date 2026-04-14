@@ -12,6 +12,12 @@ import {
 } from "../api";
 import type { ToastType } from "../hooks/useToast";
 import { CustomModelDropdown } from "./CustomModelDropdown";
+import {
+  getOnboardingState,
+  saveOnboardingState,
+  clearOnboardingState,
+  type OnboardingStepId,
+} from "./model-onboarding-state";
 
 export interface ModelOnboardingModalProps {
   /** Called when onboarding is complete or dismissed */
@@ -40,8 +46,14 @@ export function ModelOnboardingModal({
   onOpenNewTask,
   onOpenGitHubImport,
 }: ModelOnboardingModalProps) {
+  // Initialize from persisted state if available (allows resume from last step)
+  const persistedState = getOnboardingState();
+  const initialStep: OnboardingStep = persistedState && persistedState.currentStep !== "complete"
+    ? persistedState.currentStep
+    : "ai-setup";
+
   const [isOpen, setIsOpen] = useState(true);
-  const [step, setStep] = useState<OnboardingStep>("ai-setup");
+  const [step, setStep] = useState<OnboardingStep>(initialStep);
   const [authProviders, setAuthProviders] = useState<AuthProvider[]>([]);
   const [authLoading, setAuthLoading] = useState(true);
   const [authActionInProgress, setAuthActionInProgress] = useState<string | null>(null);
@@ -61,6 +73,13 @@ export function ModelOnboardingModal({
 
   // Get current step index for progress indicator
   const currentStepIndex = steps.findIndex((s) => s.key === step);
+
+  // Persist step state whenever it changes (for resume functionality)
+  useEffect(() => {
+    if (step !== "complete") {
+      saveOnboardingState({ currentStep: step as OnboardingStepId });
+    }
+  }, [step]);
 
   // Load auth providers
   const loadAuthStatus = useCallback(async () => {
@@ -271,6 +290,8 @@ export function ModelOnboardingModal({
 
       await updateGlobalSettings(updates);
       setStep("complete");
+      // Clear persisted onboarding state now that onboarding is complete
+      clearOnboardingState();
     } catch (err: unknown) {
       addToast(
         err instanceof Error ? err.message : "Failed to save settings",
@@ -309,6 +330,8 @@ export function ModelOnboardingModal({
       }
 
       await updateGlobalSettings(updates);
+      // Clear persisted onboarding state now that onboarding is complete
+      clearOnboardingState();
     } catch {
       // Best-effort: continue even if save fails
     } finally {
@@ -349,6 +372,8 @@ export function ModelOnboardingModal({
       }
 
       await updateGlobalSettings(updates);
+      // Clear persisted onboarding state now that onboarding is complete
+      clearOnboardingState();
     } catch {
       // Best-effort: continue even if save fails
     } finally {

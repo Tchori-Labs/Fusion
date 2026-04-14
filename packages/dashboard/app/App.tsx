@@ -13,6 +13,8 @@ import { AppModals } from "./components/AppModals";
 import { DashboardLoader, type DashboardLoaderStage } from "./components/DashboardLoader";
 import { ExecutorStatusBar } from "./components/ExecutorStatusBar";
 import { SessionNotificationBanner } from "./components/SessionNotificationBanner";
+import { OnboardingResumeCard } from "./components/OnboardingResumeCard";
+import { isOnboardingResumable } from "./components/model-onboarding-state";
 import { MobileNavBar } from "./components/MobileNavBar";
 import { QuickChatFAB } from "./components/QuickChatFAB";
 import { ToastContainer } from "./components/ToastContainer";
@@ -483,6 +485,9 @@ function AppInner() {
           onDismissSession={bgDismiss}
           onDismissAll={handleDismissAllNeedingInputSessions}
         />
+      )}
+      {viewMode === "project" && currentProject && !modalManager.modelOnboardingOpen && isOnboardingResumable() && (
+        <OnboardingResumeCard onContinue={modalManager.openModelOnboarding} />
       )}
       <div
         className={`project-content${viewMode === "project" && currentProject ? " project-content--with-footer" : ""}${isMobile ? " project-content--with-mobile-nav" : ""}`}
