@@ -2,7 +2,16 @@
  * Project Memory Bootstrap
  *
  * Provides the canonical path and default scaffold for `.fusion/memory.md`,
- * plus an idempotent `ensure` function that creates the file only when missing.
+ * plus idempotent `ensure` functions that create memory only when missing.
+ *
+ * This module supports both file-based (direct filesystem) and backend-aware
+ * memory operations. Backend-aware operations use the configured memory backend
+ * for storage, enabling pluggable backends like QMD.
+ *
+ * Key behaviors:
+ * - Bootstrap is idempotent: existing memory is NEVER overwritten
+ * - Non-writable backends do not throw during bootstrap (non-fatal)
+ * - Backend selection is based on project settings
  *
  * This module is the single source of truth for:
  * - The memory file path relative to project root
@@ -60,9 +69,9 @@ export function getDefaultMemoryScaffold(): string {
 // ── Bootstrap ────────────────────────────────────────────────────────
 
 /**
- * Ensure the project memory file exists. Creates it with the default
- * scaffold only when the file is missing. Never overwrites user-edited
- * content.
+ * Ensure the project memory file exists using direct filesystem access.
+ * Creates it with the default scaffold only when the file is missing.
+ * Never overwrites user-edited content.
  *
  * Also ensures the `.fusion` directory exists.
  *
@@ -82,6 +91,108 @@ export async function ensureMemoryFile(rootDir: string): Promise<boolean> {
 
   await writeFile(filePath, getDefaultMemoryScaffold(), "utf-8");
   return true;
+}
+
+/**
+ * Settings type for memory backend resolution.
+ */
+type MemorySettings = {
+  memoryEnabled?: boolean;
+  memoryBackendType?: string;
+  [key: string]: unknown;
+};
+
+// Import memory backend utilities lazily to avoid circular dependencies
+async function getMemoryBackendUtils() {
+  const module = await import("./memory-backend.js");
+  return {
+    resolveMemoryBackend: module.resolveMemoryBackend,
+    MEMORY_BACKEND_SETTINGS_KEYS: module.MEMORY_BACKEND_SETTINGS_KEYS,
+    DEFAULT_MEMORY_BACKEND: module.DEFAULT_MEMORY_BACKEND,
+  };
+}
+
+/**
+ * Ensure project memory exists using the configured backend.
+ *
+ * This function provides backend-aware memory bootstrap that:
+ * - Creates memory with default scaffold when missing (idempotent)
+ * - Never overwrites existing memory content
+ * - Does not throw for non-writable backends (non-fatal)
+ *
+ * @param rootDir - Absolute path to the project root directory.
+ * @param settings - Project settings including memoryBackendType.
+ * @returns `true` if memory was created/initialized, `false` if it already existed.
+ */
+export async function ensureMemoryFileWithBackend(
+  rootDir: string,
+  settings?: MemorySettings,
+): Promise<boolean> {
+  const { resolveMemoryBackend, MEMORY_BACKEND_SETTINGS_KEYS, DEFAULT_MEMORY_BACKEND } =
+    await getMemoryBackendUtils();
+
+  const backendType =
+    (settings?.[MEMORY_BACKEND_SETTINGS_KEYS.MEMORY_BACKEND_TYPE] as string) ||
+    DEFAULT_MEMORY_BACKEND;
+  const backend = resolveMemoryBackend(settings);
+
+  // Check if memory already exists using the backend
+  if (backend.exists) {
+    const exists = await backend.exists(rootDir);
+    if (exists) {
+      return false; // Memory already exists, don't overwrite
+    }
+  } else {
+    // Fall back to direct file check
+    const filePath = memoryFilePath(rootDir);
+    if (existsSync(filePath)) {
+      return false; // Memory already exists, don't overwrite
+    }
+  }
+
+  // Ensure directory exists for file-based operations
+  const dir = join(rootDir, ".fusion");
+  if (!existsSync(dir)) {
+    await mkdir(dir, { recursive: true });
+  }
+
+  // Try to write using the backend
+  try {
+    const result = await backend.write(rootDir, getDefaultMemoryScaffold());
+    return result.success;
+  } catch (err) {
+    // Non-writable backends (readonly) don't throw during bootstrap
+    // This is intentional - bootstrap should not fail for non-writable backends
+    // The error is caught and we return false to indicate no action was taken
+    return false;
+  }
+}
+
+/**
+ * Read project memory using the configured backend.
+ *
+ * This function provides backend-aware memory read that:
+ * - Returns empty string if memory doesn't exist
+ * - Gracefully handles read failures by returning empty string
+ *
+ * @param rootDir - Absolute path to the project root directory.
+ * @param settings - Project settings including memoryBackendType.
+ * @returns The memory content, or empty string if not found.
+ */
+export async function readProjectMemoryWithBackend(
+  rootDir: string,
+  settings?: MemorySettings,
+): Promise<string> {
+  const { resolveMemoryBackend } = await getMemoryBackendUtils();
+  const backend = resolveMemoryBackend(settings);
+
+  try {
+    const result = await backend.read(rootDir);
+    return result.content;
+  } catch {
+    // Read failures return empty string (graceful degradation)
+    return "";
+  }
 }
 
 // ── Memory Instructions for Prompts ──────────────────────────────────

@@ -1132,7 +1132,9 @@ export interface ProjectSettings {
    *  Default: true (enabled for backward compatibility). */
   memoryEnabled?: boolean;
   /** Memory backend type for pluggable memory storage.
+   *  Available built-in backends:
    *  - "file": File-based backend storing memory in `.fusion/memory.md` (default)
+   *  - "qmd": QMD (Quantized Memory Distillation) backend using the qmd CLI tool
    *  - "readonly": Read-only backend that returns empty memory (for external management)
    *  - Any registered custom backend type
    *  Default: "file" */

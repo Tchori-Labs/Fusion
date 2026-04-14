@@ -13,7 +13,7 @@ import { PluginStore } from "./plugin-store.js";
 import { BackwardCompat, ProjectRequiredError } from "./migration.js";
 import { CentralCore } from "./central-core.js";
 import { getTaskMergeBlocker } from "./task-merge.js";
-import { ensureMemoryFile } from "./project-memory.js";
+import { ensureMemoryFile, ensureMemoryFileWithBackend } from "./project-memory.js";
 import { runCommandAsync } from "./run-command.js";
 
 /**
@@ -189,7 +189,8 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       const config = await this.readConfig();
       const mergedSettings: Settings = { ...DEFAULT_SETTINGS, ...config.settings };
       if (mergedSettings.memoryEnabled !== false) {
-        await ensureMemoryFile(this.rootDir);
+        // Use backend-aware bootstrap to honor memoryBackendType setting
+        await ensureMemoryFileWithBackend(this.rootDir, mergedSettings);
       }
     } catch {
       // Non-fatal — memory bootstrap failure should not block startup
@@ -800,7 +801,8 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       // Bootstrap project memory file when memory is toggled on
       if (updatedMerged.memoryEnabled !== false && previousMerged.memoryEnabled === false) {
         try {
-          await ensureMemoryFile(this.rootDir);
+          // Use backend-aware bootstrap to honor memoryBackendType setting
+          await ensureMemoryFileWithBackend(this.rootDir, updatedMerged);
         } catch {
           // Non-fatal — memory bootstrap failure should not block settings update
         }

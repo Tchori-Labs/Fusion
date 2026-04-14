@@ -385,9 +385,11 @@ export {
   memoryFilePath,
   getDefaultMemoryScaffold,
   ensureMemoryFile,
+  ensureMemoryFileWithBackend,
   buildTriageMemoryInstructions,
   buildExecutionMemoryInstructions,
   readProjectMemory,
+  readProjectMemoryWithBackend,
 } from "./project-memory.js";
 
 // ── Memory Backend ───────────────────────────────────────
@@ -395,6 +397,7 @@ export {
 export {
   FileMemoryBackend,
   ReadOnlyMemoryBackend,
+  QmdMemoryBackend,
 } from "./memory-backend.js";
 
 export {

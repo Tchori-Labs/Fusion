@@ -1,6 +1,6 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdir, rm } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { describe, it, expect, beforeEach, afterEach, vi, beforeAll } from "vitest";
+import { mkdir, rm, writeFile, unlink } from "node:fs/promises";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -8,21 +8,28 @@ import {
   memoryFilePath,
   getDefaultMemoryScaffold,
   ensureMemoryFile,
+  ensureMemoryFileWithBackend,
   buildTriageMemoryInstructions,
   buildExecutionMemoryInstructions,
   readProjectMemory,
+  readProjectMemoryWithBackend,
 } from "./project-memory.js";
 
 describe("project-memory", () => {
   let testDir: string;
+  let memoryPath: string;
 
   beforeEach(async () => {
     testDir = join(tmpdir(), `kb-memory-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    memoryPath = join(testDir, ".fusion", "memory.md");
+    // Create the test directory but not the .fusion subdirectory
+    // Individual tests can create .fusion as needed
     await mkdir(testDir, { recursive: true });
   });
 
   afterEach(async () => {
-    await rm(testDir, { recursive: true, force: true });
+    // Clean up entire test directory
+    rmSync(testDir, { recursive: true, force: true });
   });
 
   // ── Constants ────────────────────────────────────────────────────
@@ -202,6 +209,163 @@ describe("project-memory", () => {
       const instructions = buildExecutionMemoryInstructions(testDir);
       // Should use .fusion/memory.md (project root relative) not absolute worktree paths
       expect(instructions).toContain("`.fusion/memory.md`");
+    });
+  });
+
+  // ── ensureMemoryFileWithBackend ─────────────────────────────────────
+
+  describe("ensureMemoryFileWithBackend", () => {
+    it("creates memory file with default backend when memory does not exist", async () => {
+      // Ensure clean state - create .fusion dir if needed
+      await mkdir(join(testDir, ".fusion"), { recursive: true });
+      if (existsSync(memoryPath)) await unlink(memoryPath);
+      expect(existsSync(memoryPath)).toBe(false);
+
+      const created = await ensureMemoryFileWithBackend(testDir);
+
+      expect(created).toBe(true);
+      expect(existsSync(memoryPath)).toBe(true);
+      const content = readFileSync(memoryPath, "utf-8");
+      expect(content).toBe(getDefaultMemoryScaffold());
+    });
+
+    it("does not overwrite existing memory content", async () => {
+      // Create initial file with custom content
+      await ensureMemoryFile(testDir);
+      const customContent = "# Custom Memory\n\nMy custom content";
+      await writeFile(memoryPath, customContent, "utf-8");
+
+      // Ensure again with backend - should NOT overwrite
+      const created = await ensureMemoryFileWithBackend(testDir);
+      expect(created).toBe(false);
+
+      const content = readFileSync(memoryPath, "utf-8");
+      expect(content).toBe(customContent);
+    });
+
+    it("returns false when file already exists", async () => {
+      await ensureMemoryFile(testDir);
+      const created = await ensureMemoryFileWithBackend(testDir);
+      expect(created).toBe(false);
+    });
+
+    it("works with file backend type in settings", async () => {
+      // Ensure clean state
+      await mkdir(join(testDir, ".fusion"), { recursive: true });
+      if (existsSync(memoryPath)) await unlink(memoryPath);
+
+      const settings = { memoryBackendType: "file" };
+      const created = await ensureMemoryFileWithBackend(testDir, settings);
+
+      expect(created).toBe(true);
+      expect(existsSync(memoryPath)).toBe(true);
+    });
+
+    it("does not throw for readonly backend (non-fatal bootstrap)", async () => {
+      // Ensure .fusion dir exists but no memory file
+      await mkdir(join(testDir, ".fusion"), { recursive: true });
+      if (existsSync(memoryPath)) await unlink(memoryPath);
+
+      const settings = { memoryBackendType: "readonly" };
+      
+      // Should not throw - readonly backend is non-fatal during bootstrap
+      const result = await ensureMemoryFileWithBackend(testDir, settings);
+
+      // Should return false since readonly can't write
+      expect(result).toBe(false);
+    });
+  });
+
+  // ── readProjectMemoryWithBackend ─────────────────────────────────────
+
+  describe("readProjectMemoryWithBackend", () => {
+    it("returns empty string when memory does not exist", async () => {
+      // Ensure clean state
+      await mkdir(join(testDir, ".fusion"), { recursive: true });
+      if (existsSync(memoryPath)) await unlink(memoryPath);
+      expect(existsSync(memoryPath)).toBe(false);
+
+      const content = await readProjectMemoryWithBackend(testDir);
+      expect(content).toBe("");
+    });
+
+    it("returns memory content when file exists", async () => {
+      await ensureMemoryFile(testDir);
+      const content = await readProjectMemoryWithBackend(testDir);
+      expect(content).toContain("# Project Memory");
+    });
+
+    it("returns custom content when file has been edited", async () => {
+      await ensureMemoryFile(testDir);
+      const customContent = "# Custom Memory\n\nSome custom content";
+      await writeFile(memoryPath, customContent, "utf-8");
+
+      const content = await readProjectMemoryWithBackend(testDir);
+      expect(content).toBe(customContent);
+    });
+
+    it("works with file backend type in settings", async () => {
+      await ensureMemoryFile(testDir);
+      const settings = { memoryBackendType: "file" };
+      const content = await readProjectMemoryWithBackend(testDir, settings);
+      expect(content).toContain("# Project Memory");
+    });
+
+    it("returns empty string for readonly backend", async () => {
+      // Ensure clean state
+      await mkdir(join(testDir, ".fusion"), { recursive: true });
+      if (existsSync(memoryPath)) await unlink(memoryPath);
+
+      const settings = { memoryBackendType: "readonly" };
+      const content = await readProjectMemoryWithBackend(testDir, settings);
+      // Readonly backend always returns empty content
+      expect(content).toBe("");
+    });
+
+    it("returns empty string on read error (graceful degradation)", async () => {
+      // Ensure clean state
+      await mkdir(join(testDir, ".fusion"), { recursive: true });
+      if (existsSync(memoryPath)) await unlink(memoryPath);
+
+      const settings = { memoryBackendType: "nonexistent" };
+      // Unknown backend should fall back gracefully
+      const content = await readProjectMemoryWithBackend(testDir, settings);
+      expect(content).toBe("");
+    });
+  });
+
+  // ── Backend-aware bootstrap integration ─────────────────────────────
+
+  describe("backend-aware bootstrap integration", () => {
+    it("idempotent bootstrap preserves user edits regardless of backend", async () => {
+      // Create file with default backend
+      await ensureMemoryFile(testDir);
+      
+      // Edit the content
+      const customContent = "# User Edit\n\nI modified this";
+      await writeFile(memoryPath, customContent, "utf-8");
+
+      // Bootstrap again with different backends - none should overwrite
+      await ensureMemoryFileWithBackend(testDir, { memoryBackendType: "file" });
+      expect(readFileSync(memoryPath, "utf-8")).toBe(customContent);
+
+      // Readonly should also preserve (even though it can't write)
+      await ensureMemoryFileWithBackend(testDir, { memoryBackendType: "readonly" });
+      expect(readFileSync(memoryPath, "utf-8")).toBe(customContent);
+    });
+
+    it("backend selection is honored for new memory creation with file backend", async () => {
+      // Ensure clean state
+      await mkdir(join(testDir, ".fusion"), { recursive: true });
+      if (existsSync(memoryPath)) await unlink(memoryPath);
+
+      // Create with file backend - should work reliably
+      const created = await ensureMemoryFileWithBackend(testDir, { memoryBackendType: "file" });
+      expect(created).toBe(true);
+      
+      // File should exist and have default scaffold content
+      const content = readFileSync(memoryPath, "utf-8");
+      expect(content).toBe(getDefaultMemoryScaffold());
     });
   });
 });
