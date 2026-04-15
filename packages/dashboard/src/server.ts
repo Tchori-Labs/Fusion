@@ -286,6 +286,22 @@ export function createServer(store: TaskStore, options?: ServerOptions): ReturnT
         };
       }
     }
+    if (!options!.routineStore) {
+      const rs = engine.getRoutineStore();
+      if (rs) options = { ...options, routineStore: rs };
+    }
+    if (!options!.routineRunner) {
+      const rr = engine.getRoutineRunner();
+      if (rr) {
+        options = {
+          ...options,
+          routineRunner: {
+            triggerManual: rr.triggerManual.bind(rr),
+            triggerWebhook: rr.triggerWebhook.bind(rr),
+          },
+        };
+      }
+    }
   }
 
   // Register callback for lazy engine startup on secondary projects

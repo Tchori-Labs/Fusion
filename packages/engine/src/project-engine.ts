@@ -15,6 +15,7 @@ import { PrMonitor } from "./pr-monitor.js";
 import { PrCommentHandler } from "./pr-comment-handler.js";
 import { NtfyNotifier } from "./notifier.js";
 import { CronRunner, createAiPromptExecutor } from "./cron-runner.js";
+import type { RoutineRunner } from "./routine-runner.js";
 import { aiMergeTask } from "./merger.js";
 import { PRIORITY_MERGE } from "./concurrency.js";
 import { runtimeLog } from "./logger.js";
@@ -284,6 +285,16 @@ export class ProjectEngine {
   /** Get the AutomationStore (if initialized). */
   getAutomationStore(): AutomationStoreType | undefined {
     return this.automationStore;
+  }
+
+  /** Get the RoutineStore (if initialized). */
+  getRoutineStore(): import("@fusion/core").RoutineStore | undefined {
+    return this.runtime.getRoutineStore();
+  }
+
+  /** Get the RoutineRunner (if initialized). */
+  getRoutineRunner(): RoutineRunner | undefined {
+    return this.runtime.getRoutineRunner();
   }
 
   /** Get the HeartbeatTriggerScheduler from the underlying runtime, if initialized. */

@@ -9,6 +9,7 @@ import type {
   PluginStore,
   PluginLoader,
   MessageStore,
+  RoutineStore,
 } from "@fusion/core";
 import { Scheduler } from "../scheduler.js";
 import { TaskExecutor, type TaskExecutorOptions } from "../executor.js";
@@ -88,6 +89,7 @@ export class InProcessRuntime
   private pluginStore?: PluginStore;
   private pluginLoader?: PluginLoader;
   private routineRunner?: RoutineRunner;
+  private routineStore?: RoutineStore;
   private routineScheduler?: RoutineScheduler;
   private missionExecutionLoop?: MissionExecutionLoop;
   private missionAutopilot?: MissionAutopilot;
@@ -446,6 +448,7 @@ export class InProcessRuntime
         if (typeof RoutineStoreClass.prototype.getDueRoutines === "function") {
           const routineStore = new RoutineStoreClass(this.taskStore.getFusionDir());
           await routineStore.init();
+          this.routineStore = routineStore;
 
           if (this.heartbeatMonitor) {
             const routineRunnerOptions: RoutineRunnerOptions = {
@@ -752,6 +755,14 @@ export class InProcessRuntime
    */
   getRoutineRunner(): RoutineRunner | undefined {
     return this.routineRunner;
+  }
+
+  /**
+   * Get the RoutineStore instance (if initialized).
+   * Returns undefined when RoutineStore is not available.
+   */
+  getRoutineStore(): RoutineStore | undefined {
+    return this.routineStore;
   }
 
   /**
