@@ -5,7 +5,6 @@ import { mkdtemp } from "node:fs/promises";
 import { Readable } from "node:stream";
 import { pipeline as streamPipeline } from "node:stream/promises";
 import { execFile } from "node:child_process";
-import { execSync } from "node:child_process";
 import { resolve, sep, join } from "node:path";
 import { tmpdir } from "node:os";
 import * as nodeFs from "node:fs";
@@ -676,11 +675,10 @@ function parseGitHubBadgeUrl(url: string | undefined): { owner: string; repo: st
  * Get GitHub remotes from the current git repository.
  * Executes `git remote -v` and parses the output.
  */
-function getGitHubRemotes(cwd?: string): GitRemote[] {
+async function getGitHubRemotes(cwd?: string): Promise<GitRemote[]> {
   try {
     // Execute git remote -v to get all remotes with their URLs
-    const execOptions = { encoding: "utf-8" as const, timeout: 5000, cwd };
-    const output = execSync("git remote -v", execOptions);
+    const output = await runGitCommand(["remote", "-v"], cwd, 5000);
 
     const remotes: GitRemote[] = [];
     const seen = new Set<string>();
@@ -720,10 +718,9 @@ function getGitHubRemotes(cwd?: string): GitRemote[] {
  * Check if the current directory is a git repository.
  * Used to validate git operations before executing commands.
  */
-function isGitRepo(cwd?: string): boolean {
+async function isGitRepo(cwd?: string): Promise<boolean> {
   try {
-    const execOptions = { encoding: "utf-8" as const, timeout: 5000, cwd, stdio: "pipe" as const };
-    execSync("git rev-parse --git-dir", execOptions);
+    await runGitCommand(["rev-parse", "--git-dir"], cwd, 5000);
     return true;
   } catch {
     return false;
@@ -734,30 +731,30 @@ function isGitRepo(cwd?: string): boolean {
  * Get the current git status including branch, commit hash, and dirty state.
  * Returns structured data for the Git Manager UI.
  */
-function getGitStatus(cwd?: string): {
+async function getGitStatus(cwd?: string): Promise<{
   branch: string;
   commit: string;
   isDirty: boolean;
   ahead: number;
   behind: number;
-} | null {
+} | null> {
   try {
-    const execOptions = { encoding: "utf-8" as const, timeout: 5000, cwd };
     // Get current branch
-    const branch = execSync("git branch --show-current", execOptions).trim() || "HEAD detached";
+    const branchOutput = await runGitCommand(["branch", "--show-current"], cwd, 5000);
+    const branch = branchOutput.trim() || "HEAD detached";
 
     // Get current commit hash (short)
-    const commit = execSync("git rev-parse --short HEAD", execOptions).trim();
+    const commit = (await runGitCommand(["rev-parse", "--short", "HEAD"], cwd, 5000)).trim();
 
     // Check if working directory is dirty
-    const statusOutput = execSync("git status --porcelain", execOptions).trim();
+    const statusOutput = (await runGitCommand(["status", "--porcelain"], cwd, 5000)).trim();
     const isDirty = statusOutput.length > 0;
 
     // Get ahead/behind counts from origin
     let ahead = 0;
     let behind = 0;
     try {
-      const revListOutput = execSync("git rev-list --left-right --count HEAD...@{u}", execOptions).trim();
+      const revListOutput = (await runGitCommand(["rev-list", "--left-right", "--count", "HEAD...@{u}"], cwd, 5000)).trim();
       const match = revListOutput.match(/(\d+)\s+(\d+)/);
       if (match) {
         ahead = parseInt(match[1], 10);
@@ -787,12 +784,11 @@ export interface GitCommit {
  * Get recent commits from the git log.
  * @param limit Maximum number of commits to return (default 20)
  */
-function getGitCommits(limit: number = 20, cwd?: string): GitCommit[] {
+async function getGitCommits(limit: number = 20, cwd?: string): Promise<GitCommit[]> {
   try {
     // Format: hash|shortHash|message|author|date|parents
     const format = "%H|%h|%s|%an|%aI|%P";
-    const execOptions = { encoding: "utf-8" as const, timeout: 10000, cwd };
-    const output = execSync(`git log --max-count=${limit} --pretty=format:"${format}"`, execOptions);
+    const output = await runGitCommand(["log", `--max-count=${limit}`, `--pretty=format:${format}`], cwd, 10000);
 
     const commits: GitCommit[] = [];
     for (const line of output.split("\n")) {
@@ -845,11 +841,10 @@ function isValidGitRef(ref: string): boolean {
  * @param limit Maximum number of commits to return
  * @param cwd Working directory
  */
-function getGitCommitsForBranch(branch: string, limit: number = 10, cwd?: string): GitCommit[] {
+async function getGitCommitsForBranch(branch: string, limit: number = 10, cwd?: string): Promise<GitCommit[]> {
   try {
     const format = "%H|%h|%s|%an|%aI|%P";
-    const execOptions = { encoding: "utf-8" as const, timeout: 10000, cwd, stdio: "pipe" as const };
-    const output = execSync(`git log --max-count=${limit} --pretty=format:"${format}" "${branch}"`, execOptions);
+    const output = await runGitCommand(["log", `--max-count=${limit}`, `--pretty=format:${format}`, branch], cwd, 10000);
 
     const commits: GitCommit[] = [];
     for (const line of output.split("\n")) {
@@ -880,12 +875,11 @@ function getGitCommitsForBranch(branch: string, limit: number = 10, cwd?: string
  * Returns the list of local commits not yet present on the upstream.
  * Returns an empty array if there is no upstream configured.
  */
-function getAheadCommits(cwd?: string): GitCommit[] {
+async function getAheadCommits(cwd?: string): Promise<GitCommit[]> {
   try {
-    const execOptions = { encoding: "utf-8" as const, timeout: 10000, cwd, stdio: "pipe" as const };
     // Check if an upstream is configured
     try {
-      execSync("git rev-parse --abbrev-ref @{u}", execOptions);
+      await runGitCommand(["rev-parse", "--abbrev-ref", "@{u}"], cwd, 10000);
     } catch {
       // No upstream configured
       return [];
@@ -893,7 +887,7 @@ function getAheadCommits(cwd?: string): GitCommit[] {
 
     // Format: hash|shortHash|message|author|date|parents
     const format = "%H|%h|%s|%an|%aI|%P";
-    const output = execSync(`git log @{u}..HEAD --pretty=format:"${format}"`, execOptions);
+    const output = await runGitCommand(["log", "@{u}..HEAD", `--pretty=format:${format}`], cwd, 10000);
 
     const commits: GitCommit[] = [];
     for (const line of output.split("\n")) {
@@ -970,17 +964,16 @@ async function getRemoteCommits(remoteRef: string, limit: number = 10, cwd?: str
  * @param hash The commit hash
  * @returns Object with stat and patch
  */
-function getCommitDiff(hash: string, cwd?: string): { stat: string; patch: string } | null {
+async function getCommitDiff(hash: string, cwd?: string): Promise<{ stat: string; patch: string } | null> {
   try {
-    const execOptions = { encoding: "utf-8" as const, timeout: 10000, cwd, stdio: "pipe" as const };
     // Validate the hash is a valid git object
-    execSync(`git cat-file -t ${hash}`, { encoding: "utf-8", timeout: 5000, cwd, stdio: "pipe" });
+    await runGitCommand(["cat-file", "-t", hash], cwd, 5000);
 
     // Get diff stat
-    const stat = execSync(`git show --stat --format="" ${hash}`, execOptions).trim();
+    const stat = (await runGitCommand(["show", "--stat", "--format=", hash], cwd, 10000)).trim();
 
     // Get patch
-    const patch = execSync(`git show --format="" ${hash}`, execOptions);
+    const patch = await runGitCommand(["show", "--format=", hash], cwd, 10000);
 
     return { stat, patch };
   } catch {
@@ -999,27 +992,22 @@ export interface GitBranch {
 /**
  * Get all local branches with their info.
  */
-function getGitBranches(cwd?: string): GitBranch[] {
+async function getGitBranches(cwd?: string): Promise<GitBranch[]> {
   try {
-    const execOptions = { encoding: "utf-8" as const, timeout: 5000, cwd };
     // Get current branch name
     let currentBranch = "";
     try {
-      currentBranch = execSync("git branch --show-current", execOptions).trim();
+      currentBranch = (await runGitCommand(["branch", "--show-current"], cwd, 5000)).trim();
     } catch {
       // Detached HEAD - no current branch
     }
 
     // Get all branches with info
     const format = "%(refname:short)|%(upstream:short)|%(committerdate:iso8601)|%(HEAD)";
-    const output = execSync(`git for-each-ref --format="${format}" refs/heads/`, {
-      encoding: "utf-8",
-      timeout: 10000,
-      cwd,
-    });
+    const output = (await runGitCommand(["for-each-ref", `--format=${format}`, "refs/heads/"], cwd, 10000)).trim();
 
     const branches: GitBranch[] = [];
-    for (const line of output.trim().split("\n")) {
+    for (const line of output.split("\n")) {
       const parts = line.split("|");
       if (parts.length < 4) continue;
 
@@ -1053,10 +1041,9 @@ export interface GitWorktree {
  * Get all git worktrees.
  * @param tasks Optional task list to correlate worktrees with tasks
  */
-function getGitWorktrees(tasks: { id: string; worktree?: string }[] = [], cwd?: string): GitWorktree[] {
+async function getGitWorktrees(tasks: { id: string; worktree?: string }[] = [], cwd?: string): Promise<GitWorktree[]> {
   try {
-    const execOptions = { encoding: "utf-8" as const, timeout: 10000, cwd };
-    const output = execSync("git worktree list --porcelain", execOptions);
+    const output = await runGitCommand(["worktree", "list", "--porcelain"], cwd, 10000);
 
     const worktrees: GitWorktree[] = [];
     let currentWorktree: Partial<GitWorktree> = {};
@@ -1304,10 +1291,9 @@ function isValidGitUrl(url: string): boolean {
  * Get all git remotes with their fetch and push URLs.
  * Executes `git remote -v` and parses the output.
  */
-function listGitRemotes(cwd?: string): GitRemoteDetailed[] {
+async function listGitRemotes(cwd?: string): Promise<GitRemoteDetailed[]> {
   try {
-    const execOptions = { encoding: "utf-8" as const, timeout: 5000, cwd };
-    const output = execSync("git remote -v", execOptions);
+    const output = await runGitCommand(["remote", "-v"], cwd, 5000);
 
     const remotes = new Map<string, { fetchUrl: string; pushUrl: string }>();
 
@@ -1457,13 +1443,9 @@ export interface GitFileChange {
 /**
  * Get list of stash entries.
  */
-function getGitStashList(cwd?: string): GitStash[] {
+async function getGitStashList(cwd?: string): Promise<GitStash[]> {
   try {
-    const output = execSync('git stash list --format="%gd|%gs|%ai"', {
-      encoding: "utf-8",
-      timeout: 5000,
-      cwd,
-    }).trim();
+    const output = (await runGitCommand(["stash", "list", '--format="%gd|%gs|%ai"'], cwd, 5000)).trim();
     if (!output) return [];
 
     const stashes: GitStash[] = [];
@@ -2656,16 +2638,9 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
       if (completedSteps.length > 0) {
         const branchName = task.branch || `fusion/${task.id.toLowerCase()}`;
         try {
-          const { execSync } = await import("node:child_process");
           const rootDir = scopedStore.getRootDir();
-          const mergeBase = execSync(
-            `git merge-base "${branchName}" HEAD 2>/dev/null`,
-            { cwd: rootDir, stdio: "pipe", encoding: "utf-8" },
-          ).trim();
-          const branchHead = execSync(
-            `git rev-parse "${branchName}" 2>/dev/null`,
-            { cwd: rootDir, stdio: "pipe", encoding: "utf-8" },
-          ).trim();
+          const mergeBase = (await runGitCommand(["merge-base", branchName, "HEAD"], rootDir, 5000)).trim();
+          const branchHead = (await runGitCommand(["rev-parse", branchName], rootDir, 5000)).trim();
 
           if (mergeBase === branchHead) {
             for (let i = 0; i < task.steps.length; i++) {
@@ -3943,7 +3918,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
     try {
       const { store: scopedStore } = await getProjectContext(req);
       const rootDir = scopedStore.getRootDir();
-      const remotes = getGitHubRemotes(rootDir);
+      const remotes = await getGitHubRemotes(rootDir);
       res.json(remotes);
     } catch (err: any) {
       if (err instanceof ApiError) {
@@ -3962,10 +3937,10 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
     try {
       const { store: scopedStore } = await getProjectContext(req);
       const rootDir = scopedStore.getRootDir();
-      if (!isGitRepo(rootDir)) {
+      if (!(await isGitRepo(rootDir))) {
         throw badRequest("Not a git repository");
       }
-      const remotes = listGitRemotes(rootDir);
+      const remotes = await listGitRemotes(rootDir);
       res.json(remotes);
     } catch (err: any) {
       if (err instanceof ApiError) {
@@ -3997,7 +3972,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
       if (!isValidGitUrl(url)) {
         throw badRequest("Invalid git URL format");
       }
-      if (!isGitRepo(rootDir)) {
+      if (!(await isGitRepo(rootDir))) {
         throw badRequest("Not a git repository");
       }
       await addGitRemote(name, url, rootDir);
@@ -4026,7 +4001,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
     try {
       const { store: scopedStore } = await getProjectContext(req);
       const rootDir = scopedStore.getRootDir();
-      if (!isGitRepo(rootDir)) {
+      if (!(await isGitRepo(rootDir))) {
         throw badRequest("Not a git repository");
       }
       const { name } = req.params;
@@ -4055,7 +4030,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
     try {
       const { store: scopedStore } = await getProjectContext(req);
       const rootDir = scopedStore.getRootDir();
-      if (!isGitRepo(rootDir)) {
+      if (!(await isGitRepo(rootDir))) {
         throw badRequest("Not a git repository");
       }
       const { name } = req.params;
@@ -4090,7 +4065,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
     try {
       const { store: scopedStore } = await getProjectContext(req);
       const rootDir = scopedStore.getRootDir();
-      if (!isGitRepo(rootDir)) {
+      if (!(await isGitRepo(rootDir))) {
         throw badRequest("Not a git repository");
       }
       const { name } = req.params;
@@ -4123,10 +4098,10 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
     try {
       const { store: scopedStore } = await getProjectContext(req);
       const rootDir = scopedStore.getRootDir();
-      if (!isGitRepo(rootDir)) {
+      if (!(await isGitRepo(rootDir))) {
         throw badRequest("Not a git repository");
       }
-      const status = getGitStatus(rootDir);
+      const status = await getGitStatus(rootDir);
       if (!status) {
         throw internalError("Failed to get git status");
       }
@@ -4148,11 +4123,11 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
     try {
       const { store: scopedStore } = await getProjectContext(req);
       const rootDir = scopedStore.getRootDir();
-      if (!isGitRepo(rootDir)) {
+      if (!(await isGitRepo(rootDir))) {
         throw badRequest("Not a git repository");
       }
       const limit = Math.min(parseInt(req.query.limit as string, 10) || 20, 100);
-      const commits = getGitCommits(limit, rootDir);
+      const commits = await getGitCommits(limit, rootDir);
       res.json(commits);
     } catch (err: any) {
       if (err instanceof ApiError) {
@@ -4171,7 +4146,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
     try {
       const { store: scopedStore } = await getProjectContext(req);
       const rootDir = scopedStore.getRootDir();
-      if (!isGitRepo(rootDir)) {
+      if (!(await isGitRepo(rootDir))) {
         throw badRequest("Not a git repository");
       }
       const { hash } = req.params;
@@ -4179,7 +4154,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
       if (!/^[a-f0-9]{7,40}$/i.test(hash)) {
         throw badRequest("Invalid commit hash format");
       }
-      const diff = getCommitDiff(hash, rootDir);
+      const diff = await getCommitDiff(hash, rootDir);
       if (!diff) {
         throw notFound("Commit not found");
       }
@@ -4201,10 +4176,10 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
     try {
       const { store: scopedStore } = await getProjectContext(req);
       const rootDir = scopedStore.getRootDir();
-      if (!isGitRepo(rootDir)) {
+      if (!(await isGitRepo(rootDir))) {
         throw badRequest("Not a git repository");
       }
-      const commits = getAheadCommits(rootDir);
+      const commits = await getAheadCommits(rootDir);
       res.json(commits);
     } catch (err: any) {
       if (err instanceof ApiError) {
@@ -4225,7 +4200,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
     try {
       const { store: scopedStore } = await getProjectContext(req);
       const rootDir = scopedStore.getRootDir();
-      if (!isGitRepo(rootDir)) {
+      if (!(await isGitRepo(rootDir))) {
         throw badRequest("Not a git repository");
       }
 
@@ -4294,10 +4269,10 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
     try {
       const { store: scopedStore } = await getProjectContext(req);
       const rootDir = scopedStore.getRootDir();
-      if (!isGitRepo(rootDir)) {
+      if (!(await isGitRepo(rootDir))) {
         throw badRequest("Not a git repository");
       }
-      const branches = getGitBranches(rootDir);
+      const branches = await getGitBranches(rootDir);
       res.json(branches);
     } catch (err: any) {
       if (err instanceof ApiError) {
@@ -4317,7 +4292,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
     try {
       const { store: scopedStore } = await getProjectContext(req);
       const rootDir = scopedStore.getRootDir();
-      if (!isGitRepo(rootDir)) {
+      if (!(await isGitRepo(rootDir))) {
         throw badRequest("Not a git repository");
       }
       const { name } = req.params;
@@ -4325,7 +4300,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         throw badRequest("Invalid branch name");
       }
       const limit = Math.min(Math.max(parseInt(String(req.query.limit)) || 10, 1), 100);
-      const commits = getGitCommitsForBranch(name, limit, rootDir);
+      const commits = await getGitCommitsForBranch(name, limit, rootDir);
       res.json(commits);
     } catch (err: any) {
       if (err instanceof ApiError) {
@@ -4344,12 +4319,12 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
     try {
       const { store: scopedStore } = await getProjectContext(req);
       const rootDir = scopedStore.getRootDir();
-      if (!isGitRepo(rootDir)) {
+      if (!(await isGitRepo(rootDir))) {
         throw badRequest("Not a git repository");
       }
       // Get tasks to correlate with worktrees
       const tasks = await scopedStore.listTasks({ slim: true, includeArchived: false });
-      const worktrees = getGitWorktrees(tasks, rootDir);
+      const worktrees = await getGitWorktrees(tasks, rootDir);
       res.json(worktrees);
     } catch (err: any) {
       if (err instanceof ApiError) {
@@ -4370,7 +4345,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
     try {
       const { store: scopedStore } = await getProjectContext(req);
       const rootDir = scopedStore.getRootDir();
-      if (!isGitRepo(rootDir)) {
+      if (!(await isGitRepo(rootDir))) {
         throw badRequest("Not a git repository");
       }
       const { name, base } = req.body;
@@ -4401,7 +4376,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
     try {
       const { store: scopedStore } = await getProjectContext(req);
       const rootDir = scopedStore.getRootDir();
-      if (!isGitRepo(rootDir)) {
+      if (!(await isGitRepo(rootDir))) {
         throw badRequest("Not a git repository");
       }
       const { name } = req.params;
@@ -4430,7 +4405,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
     try {
       const { store: scopedStore } = await getProjectContext(req);
       const rootDir = scopedStore.getRootDir();
-      if (!isGitRepo(rootDir)) {
+      if (!(await isGitRepo(rootDir))) {
         throw badRequest("Not a git repository");
       }
       const { name } = req.params;
@@ -4462,7 +4437,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
     try {
       const { store: scopedStore } = await getProjectContext(req);
       const rootDir = scopedStore.getRootDir();
-      if (!isGitRepo(rootDir)) {
+      if (!(await isGitRepo(rootDir))) {
         throw badRequest("Not a git repository");
       }
       const { remote } = req.body;
@@ -4490,7 +4465,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
     try {
       const { store: scopedStore } = await getProjectContext(req);
       const rootDir = scopedStore.getRootDir();
-      if (!isGitRepo(rootDir)) {
+      if (!(await isGitRepo(rootDir))) {
         throw badRequest("Not a git repository");
       }
       const result = await pullGitBranch(rootDir);
@@ -4516,7 +4491,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
     try {
       const { store: scopedStore } = await getProjectContext(req);
       const rootDir = scopedStore.getRootDir();
-      if (!isGitRepo(rootDir)) {
+      if (!(await isGitRepo(rootDir))) {
         throw badRequest("Not a git repository");
       }
       const result = await pushGitBranch(rootDir);
@@ -4545,10 +4520,10 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
     try {
       const { store: scopedStore } = await getProjectContext(req);
       const rootDir = scopedStore.getRootDir();
-      if (!isGitRepo(rootDir)) {
+      if (!(await isGitRepo(rootDir))) {
         throw badRequest("Not a git repository");
       }
-      const stashes = getGitStashList(rootDir);
+      const stashes = await getGitStashList(rootDir);
       res.json(stashes);
     } catch (err: any) {
       if (err instanceof ApiError) {
@@ -4567,7 +4542,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
     try {
       const { store: scopedStore } = await getProjectContext(req);
       const rootDir = scopedStore.getRootDir();
-      if (!isGitRepo(rootDir)) {
+      if (!(await isGitRepo(rootDir))) {
         throw badRequest("Not a git repository");
       }
       const { message } = req.body;
@@ -4594,7 +4569,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
     try {
       const { store: scopedStore } = await getProjectContext(req);
       const rootDir = scopedStore.getRootDir();
-      if (!isGitRepo(rootDir)) {
+      if (!(await isGitRepo(rootDir))) {
         throw badRequest("Not a git repository");
       }
       const index = parseInt(req.params.index, 10);
@@ -4620,7 +4595,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
     try {
       const { store: scopedStore } = await getProjectContext(req);
       const rootDir = scopedStore.getRootDir();
-      if (!isGitRepo(rootDir)) {
+      if (!(await isGitRepo(rootDir))) {
         throw badRequest("Not a git repository");
       }
       const index = parseInt(req.params.index, 10);
@@ -4645,7 +4620,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
     try {
       const { store: scopedStore } = await getProjectContext(req);
       const rootDir = scopedStore.getRootDir();
-      if (!isGitRepo(rootDir)) {
+      if (!(await isGitRepo(rootDir))) {
         throw badRequest("Not a git repository");
       }
       const diff = await getGitWorkingDiff(rootDir);
@@ -4666,7 +4641,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
     try {
       const { store: scopedStore } = await getProjectContext(req);
       const rootDir = scopedStore.getRootDir();
-      if (!isGitRepo(rootDir)) {
+      if (!(await isGitRepo(rootDir))) {
         throw badRequest("Not a git repository");
       }
       const changes = await getGitFileChanges(rootDir);
@@ -4688,7 +4663,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
     try {
       const { store: scopedStore } = await getProjectContext(req);
       const rootDir = scopedStore.getRootDir();
-      if (!isGitRepo(rootDir)) {
+      if (!(await isGitRepo(rootDir))) {
         throw badRequest("Not a git repository");
       }
       const { files } = req.body;
@@ -4714,7 +4689,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
     try {
       const { store: scopedStore } = await getProjectContext(req);
       const rootDir = scopedStore.getRootDir();
-      if (!isGitRepo(rootDir)) {
+      if (!(await isGitRepo(rootDir))) {
         throw badRequest("Not a git repository");
       }
       const { files } = req.body;
@@ -4740,7 +4715,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
     try {
       const { store: scopedStore } = await getProjectContext(req);
       const rootDir = scopedStore.getRootDir();
-      if (!isGitRepo(rootDir)) {
+      if (!(await isGitRepo(rootDir))) {
         throw badRequest("Not a git repository");
       }
       const { message } = req.body;
@@ -4770,7 +4745,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
     try {
       const { store: scopedStore } = await getProjectContext(req);
       const rootDir = scopedStore.getRootDir();
-      if (!isGitRepo(rootDir)) {
+      if (!(await isGitRepo(rootDir))) {
         throw badRequest("Not a git repository");
       }
       const { files } = req.body;
