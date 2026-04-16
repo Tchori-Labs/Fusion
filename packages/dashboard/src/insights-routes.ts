@@ -17,6 +17,7 @@ import type { TaskStore } from "@fusion/core";
 import {
   InsightStore,
   type InsightCategory,
+  type MemoryInsightCategory,
   type InsightStatus,
   type InsightListOptions,
   type InsightRunTrigger,
@@ -70,6 +71,27 @@ const VALID_STATUSES: InsightStatus[] = ["generated", "confirmed", "stale", "dis
 
 // Valid run triggers
 const VALID_TRIGGERS: InsightRunTrigger[] = ["schedule", "manual", "task_completion", "merge_event", "api"];
+
+const INSIGHT_CATEGORY_BY_MEMORY_CATEGORY: Record<MemoryInsightCategory, InsightCategory> = {
+  pattern: "workflow",
+  principle: "architecture",
+  convention: "workflow",
+  pitfall: "quality",
+  context: "other",
+};
+
+function toInsightTitle(content: string): string {
+  const trimmed = content.trim();
+  if (!trimmed) {
+    return "Untitled insight";
+  }
+
+  if (trimmed.length <= 100) {
+    return trimmed;
+  }
+
+  return `${trimmed.slice(0, 100).trimEnd()}...`;
+}
 
 /**
  * Create the insights router.
@@ -167,10 +189,21 @@ export function createInsightsRouter(store: TaskStore): Router {
 
   // ── Trigger Insight Run ───────────────────────────────────────────────
 
-  router.post("/run", (req: Request, res: Response) => {
+  /**
+   * Execute a full manual insight-generation lifecycle for the current project.
+   *
+   * Lifecycle:
+   * 1. Create run (pending)
+   * 2. Mark run running
+   * 3. Read working-memory context
+   * 4. Execute AI extraction prompt
+   * 5. Parse + persist extracted insights
+   * 6. Mark run completed (or failed on error)
+   */
+  router.post("/run", async (req: Request, res: Response) => {
     try {
       const projectId = getProjectId(req) ?? "";
-      const store = getInsightStore();
+      const insightStore = getInsightStore();
       const trigger: InsightRunTrigger = (req.body.trigger as InsightRunTrigger) ?? "manual";
 
       if (!VALID_TRIGGERS.includes(trigger)) {
@@ -182,8 +215,120 @@ export function createInsightsRouter(store: TaskStore): Router {
         inputMetadata: req.body.inputMetadata,
       };
 
-      const run = store.createRun(projectId, input);
-      res.status(201).json(run);
+      const run = insightStore.createRun(projectId, input);
+      insightStore.updateRun(run.id, {
+        status: "running",
+        startedAt: new Date().toISOString(),
+      });
+
+      const taskStore = requestContext.getStore();
+      if (!taskStore) {
+        throw new ApiError(500, "Store context not available");
+      }
+      const rootDir = taskStore.getRootDir();
+
+      const {
+        readWorkingMemory,
+        readInsightsMemory,
+        writeInsightsMemory,
+        buildInsightExtractionPrompt,
+        parseInsightExtractionResponse,
+        mergeInsights,
+        computeInsightFingerprint,
+      } = await import("@fusion/core");
+
+      const workingMemory = await readWorkingMemory(rootDir);
+      if (!workingMemory.trim()) {
+        const failedRun = insightStore.updateRun(run.id, {
+          status: "failed",
+          error: "No working memory to analyze",
+          completedAt: new Date().toISOString(),
+        });
+        res.status(201).json(failedRun ?? run);
+        return;
+      }
+
+      const existingInsights = await readInsightsMemory(rootDir);
+
+      try {
+        const { createKbAgent, promptWithFallback } = await import("@fusion/engine");
+
+        let responseText = "";
+        const { session } = await createKbAgent({
+          cwd: rootDir,
+          systemPrompt: [
+            "You extract durable project insights from working memory notes.",
+            "Return only valid JSON that matches the requested schema.",
+            "Do not execute tools or make code changes.",
+          ].join("\n"),
+          tools: "readonly",
+          onText: (delta: string) => {
+            responseText += delta;
+          },
+        });
+
+        try {
+          const prompt = buildInsightExtractionPrompt(workingMemory, existingInsights);
+          await promptWithFallback(session, prompt);
+        } finally {
+          try {
+            session.dispose();
+          } catch {
+            // Best-effort disposal
+          }
+        }
+
+        const parsedResult = parseInsightExtractionResponse(responseText);
+        const mergedInsightsContent = mergeInsights(existingInsights ?? "", parsedResult.insights);
+        await writeInsightsMemory(rootDir, mergedInsightsContent);
+
+        let insightsCreated = 0;
+        let insightsUpdated = 0;
+
+        for (const insight of parsedResult.insights) {
+          const category = INSIGHT_CATEGORY_BY_MEMORY_CATEGORY[insight.category] ?? "other";
+          const title = toInsightTitle(insight.content);
+          const fingerprint = computeInsightFingerprint(title, category);
+
+          const upsertedInsight = insightStore.upsertInsight(projectId, {
+            title,
+            content: insight.content,
+            category,
+            fingerprint,
+            provenance: {
+              trigger: "manual",
+              description: "Manual insight generation",
+              metadata: {
+                runId: run.id,
+                extractedAt: insight.extractedAt,
+              },
+            },
+          });
+
+          if (upsertedInsight.createdAt === upsertedInsight.updatedAt) {
+            insightsCreated += 1;
+          } else {
+            insightsUpdated += 1;
+          }
+        }
+
+        const completedRun = insightStore.updateRun(run.id, {
+          status: "completed",
+          insightsCreated,
+          insightsUpdated,
+          completedAt: new Date().toISOString(),
+          summary: parsedResult.summary,
+        });
+
+        res.status(201).json(completedRun ?? run);
+      } catch (err) {
+        insightStore.updateRun(run.id, {
+          status: "failed",
+          error: err instanceof Error ? err.message : String(err),
+          completedAt: new Date().toISOString(),
+        });
+        throw err;
+      }
     } catch (error) {
       rethrowAsApiError(error, "Failed to create insight run");
     }

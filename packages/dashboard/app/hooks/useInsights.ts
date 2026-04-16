@@ -15,10 +15,7 @@ import {
   dismissInsight,
   triggerInsightRun,
   fetchInsightRuns,
-  fetchInsightRun,
   getInsightCreateTaskData,
-  type InsightsListResponse,
-  type RunsListResponse,
 } from "../api";
 
 // Canonical insight categories (in display order)
@@ -196,30 +193,13 @@ export function useInsights(projectId?: string): UseInsightsResult {
       const run = await triggerInsightRun("manual", undefined, projectId);
       setLatestRun(run);
 
-      // Poll for completion (simple approach)
-      const pollInterval = setInterval(async () => {
-        try {
-          const updatedRun = await fetchInsightRun(run.id, projectId);
-          if (updatedRun.status === "completed" || updatedRun.status === "failed") {
-            clearInterval(pollInterval);
-            setLatestRun(updatedRun);
-            if (updatedRun.status === "failed" && updatedRun.error) {
-              setRunError(updatedRun.error);
-            }
-            // Refresh insights list
-            await refresh();
-          }
-        } catch {
-          // Ignore polling errors
-        }
-      }, 2000);
-
-      // Fallback: stop polling after 60 seconds
-      setTimeout(() => {
-        clearInterval(pollInterval);
-      }, 60000);
+      if (run.status === "completed") {
+        await refresh();
+      } else if (run.status === "failed" && run.error) {
+        setRunError(run.error);
+      }
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Failed to start insight generation";
+      const message = err instanceof Error ? err.message : "Failed to generate insights";
       setRunError(message);
       throw err;
     } finally {

@@ -12,7 +12,6 @@ vi.mock("../../api", () => ({
   dismissInsight: vi.fn(),
   triggerInsightRun: vi.fn(),
   fetchInsightRuns: vi.fn(),
-  fetchInsightRun: vi.fn(),
   getInsightCreateTaskData: vi.fn(),
 }));
 
@@ -42,7 +41,6 @@ import {
   dismissInsight,
   triggerInsightRun,
   fetchInsightRuns,
-  fetchInsightRun,
   getInsightCreateTaskData,
 } from "../../api";
 
@@ -50,7 +48,6 @@ const mockFetchInsights = vi.mocked(fetchInsights);
 const mockDismissInsight = vi.mocked(dismissInsight);
 const mockTriggerInsightRun = vi.mocked(triggerInsightRun);
 const mockFetchInsightRuns = vi.mocked(fetchInsightRuns);
-const mockFetchInsightRun = vi.mocked(fetchInsightRun);
 const mockGetInsightCreateTaskData = vi.mocked(getInsightCreateTaskData);
 
 describe("useInsights", () => {
@@ -198,27 +195,26 @@ describe("useInsights", () => {
   });
 
   describe("runInsights", () => {
-    it("should trigger manual insight run", async () => {
-      const mockRun = {
+    it("should trigger manual insight run and refresh when run completes", async () => {
+      const completedRun = {
         id: "RUN-1",
         projectId: "project-1",
         trigger: "manual" as const,
-        status: "pending" as const,
-        summary: null,
+        status: "completed" as const,
+        summary: "Generated insights",
         error: null,
-        insightsCreated: 0,
-        insightsUpdated: 0,
+        insightsCreated: 3,
+        insightsUpdated: 1,
         inputMetadata: {},
         outputMetadata: {},
         createdAt: "2024-01-01T00:00:00Z",
-        startedAt: null,
-        completedAt: null,
+        startedAt: "2024-01-01T00:00:10Z",
+        completedAt: "2024-01-01T00:01:00Z",
       };
 
       mockFetchInsights.mockResolvedValue({ insights: [], count: 0 });
       mockFetchInsightRuns.mockResolvedValue({ runs: [] });
-      mockTriggerInsightRun.mockResolvedValue(mockRun);
-      mockFetchInsightRun.mockResolvedValue({ ...mockRun, status: "completed" });
+      mockTriggerInsightRun.mockResolvedValue(completedRun);
 
       const { result } = renderHook(() => useInsights("project-1"));
 
@@ -231,10 +227,50 @@ describe("useInsights", () => {
       });
 
       expect(mockTriggerInsightRun).toHaveBeenCalledWith("manual", undefined, "project-1");
+      expect(result.current.latestRun?.status).toBe("completed");
       expect(result.current.isRunInFlight).toBe(false);
+      expect(mockFetchInsights.mock.calls.length).toBeGreaterThanOrEqual(2);
+      expect(mockFetchInsightRuns.mock.calls.length).toBeGreaterThanOrEqual(2);
     });
 
-    it("should handle run errors", async () => {
+    it("should surface failed run errors from triggerInsightRun response", async () => {
+      const failedRun = {
+        id: "RUN-1",
+        projectId: "project-1",
+        trigger: "manual" as const,
+        status: "failed" as const,
+        summary: null,
+        error: "No working memory to analyze",
+        insightsCreated: 0,
+        insightsUpdated: 0,
+        inputMetadata: {},
+        outputMetadata: {},
+        createdAt: "2024-01-01T00:00:00Z",
+        startedAt: "2024-01-01T00:00:10Z",
+        completedAt: "2024-01-01T00:01:00Z",
+      };
+
+      mockFetchInsights.mockResolvedValue({ insights: [], count: 0 });
+      mockFetchInsightRuns.mockResolvedValue({ runs: [] });
+      mockTriggerInsightRun.mockResolvedValue(failedRun);
+
+      const { result } = renderHook(() => useInsights("project-1"));
+
+      await waitFor(() => {
+        expect(result.current.loading).toBe(false);
+      });
+
+      await act(async () => {
+        await result.current.runInsights();
+      });
+
+      expect(result.current.runError).toBe("No working memory to analyze");
+      expect(result.current.isRunInFlight).toBe(false);
+      // Initial load only; failed run should not trigger refresh.
+      expect(mockFetchInsights).toHaveBeenCalledTimes(1);
+    });
+
+    it("should propagate trigger errors and always clear in-flight state", async () => {
       mockFetchInsights.mockResolvedValue({ insights: [], count: 0 });
       mockFetchInsightRuns.mockResolvedValue({ runs: [] });
       mockTriggerInsightRun.mockRejectedValue(new Error("Run failed"));
@@ -245,8 +281,19 @@ describe("useInsights", () => {
         expect(result.current.loading).toBe(false);
       });
 
-      // Test that runInsights throws
-      await expect(result.current.runInsights()).rejects.toThrow("Run failed");
+      let thrown: unknown = null;
+      await act(async () => {
+        try {
+          await result.current.runInsights();
+        } catch (error) {
+          thrown = error;
+        }
+      });
+
+      expect(thrown).toBeInstanceOf(Error);
+      expect((thrown as Error).message).toBe("Run failed");
+      expect(result.current.runError).toBe("Run failed");
+      expect(result.current.isRunInFlight).toBe(false);
     });
   });
 

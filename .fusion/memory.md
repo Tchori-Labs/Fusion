@@ -116,6 +116,7 @@ Reference: `useProjectHealth` in `packages/dashboard/app/hooks/useProjectHealth.
 
 ## Conventions
 
+- For cross-package imports from `@fusion/engine`, prefer root exports (for example `import("@fusion/engine")`) over undocumented deep subpaths like `@fusion/engine/pi` or `@fusion/engine/pi.js`; add any needed helpers to `packages/engine/src/index.ts` to keep runtime and test resolution consistent.
 - **LocalStorage completion state pattern (FN-1862)**: When implementing localStorage-based completion tracking that is distinct from dismissal, use a timestamp field (`completedAt`) to differentiate states:
   - `markOnboardingCompleted()` — Sets `completedAt` timestamp, preserves state for timestamp queries
   - `isOnboardingCompleted()` — Returns true only when `completedAt` is set
