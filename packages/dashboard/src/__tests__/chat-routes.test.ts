@@ -255,6 +255,7 @@ describe("Chat API Routes", () => {
     mockSendMessage.mockReset();
     mockAgentStoreInit.mockResolvedValue(undefined);
     mockAgentStoreGetAgent.mockReset();
+    mockGetOrCreateProjectStore.mockReset();
 
     // Setup default mocks
     mockListSessions.mockReturnValue([]);
