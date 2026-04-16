@@ -1,6 +1,18 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import { render, screen, cleanup } from "@testing-library/react";
 import { readFileSync } from "fs";
 import { resolve } from "path";
+
+// Mock API functions
+const mockFetchDiscoveredSkills = vi.fn().mockResolvedValue([]);
+const mockFetchSkillsCatalog = vi.fn().mockResolvedValue({ entries: [] });
+const mockToggleExecutionSkill = vi.fn().mockResolvedValue(undefined);
+
+vi.mock("../../../api", () => ({
+  fetchDiscoveredSkills: (...args: unknown[]) => mockFetchDiscoveredSkills(...args),
+  fetchSkillsCatalog: (...args: unknown[]) => mockFetchSkillsCatalog(...args),
+  toggleExecutionSkill: (...args: unknown[]) => mockToggleExecutionSkill(...args),
+}));
 
 function extractRuleBlock(css: string, selector: string): string {
   const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -172,5 +184,49 @@ describe("skills-view mobile css", () => {
     expect(cssContent).toContain(".skills-view-grid {");
     expect(cssContent).toContain(".skills-view-search {");
     expect(cssContent).toContain(".skills-view-toggle-slider {");
+  });
+
+  it(".skills-view-content has overflow-y auto in base CSS", () => {
+    // Verify the base rule exists in the CSS file
+    // The base rule contains overflow-y: auto with flex: 1 and padding: 20px
+    expect(cssContent).toMatch(/\.skills-view-content\s*\{[^}]*overflow-y:\s*auto[^}]*\}/s);
+    expect(cssContent).toMatch(/\.skills-view-content\s*\{[^}]*flex:\s*1[^}]*\}/s);
+    expect(cssContent).toMatch(/\.skills-view-content\s*\{[^}]*padding:\s*20px[^}]*\}/s);
+  });
+});
+
+describe("SkillsView component structure", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("renders .skills-view-content wrapper around sections", async () => {
+    const { SkillsView } = await import("../SkillsView");
+
+    render(
+      <SkillsView
+        projectId="test-project"
+        addToast={vi.fn()}
+        onClose={vi.fn()}
+      />
+    );
+
+    // The wrapper should exist
+    const contentWrapper = screen.getByTestId("skills-view").querySelector(".skills-view-content");
+    expect(contentWrapper).not.toBeNull();
+
+    // The two sections should be inside the wrapper
+    const sections = contentWrapper!.querySelectorAll(".skills-view-section");
+    expect(sections.length).toBe(2);
+
+    // Header should be outside the wrapper (directly on skills-view)
+    const skillsView = screen.getByTestId("skills-view");
+    const header = skillsView.querySelector(".skills-view-header");
+    expect(header).not.toBeNull();
+    expect(header!.parentElement).toBe(skillsView);
   });
 });

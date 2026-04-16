@@ -150,115 +150,118 @@ export function SkillsView({ projectId, addToast, onClose }: SkillsViewProps) {
         </div>
       </div>
 
-      {/* Discovered Skills Section */}
-      <section className="skills-view-section" aria-labelledby="discovered-skills-title">
-        <h3 id="discovered-skills-title" className="skills-view-section-title">
-          Discovered Skills
-        </h3>
+      {/* Scrollable content area */}
+      <div className="skills-view-content">
+        {/* Discovered Skills Section */}
+        <section className="skills-view-section" aria-labelledby="discovered-skills-title">
+          <h3 id="discovered-skills-title" className="skills-view-section-title">
+            Discovered Skills
+          </h3>
 
-        {isLoadingDiscovered ? (
-          <div className="skills-view-loading">
-            <span className="spinner" />
-            Loading discovered skills...
-          </div>
-        ) : discoveredSkills.length === 0 ? (
-          <div className="skills-view-empty">
-            <p>No skills discovered in this project.</p>
-          </div>
-        ) : (
-          <div className="skills-view-list">
-            {discoveredSkills.map((skill) => (
-              <div key={skill.id} className="skills-view-item">
-                <div className="skills-view-item-info">
-                  <span className="skills-view-item-name">{skill.name}</span>
-                  <span className="skills-view-item-path">{skill.relativePath}</span>
-                  <span className="skills-view-item-source">{skill.metadata.source}</span>
-                </div>
-                <label className="skills-view-item-toggle">
-                  <input
-                    type="checkbox"
-                    checked={skill.enabled}
-                    disabled={skill.toggling}
-                    onChange={() => void handleToggleSkill(skill.id, skill.enabled)}
-                    aria-label={`${skill.enabled ? "Disable" : "Enable"} ${skill.name}`}
-                  />
-                  <span className="skills-view-toggle-slider" />
-                </label>
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
-
-      {/* Catalog Section */}
-      <section className="skills-view-section" aria-labelledby="catalog-title">
-        <h3 id="catalog-title" className="skills-view-section-title">
-          Skills Catalog
-        </h3>
-
-        {/* Search */}
-        <div className="skills-view-search">
-          <input
-            type="text"
-            className="form-input"
-            placeholder="Search skills..."
-            value={searchQuery}
-            onChange={(e) => handleSearchChange(e.target.value)}
-            aria-label="Search skills catalog"
-          />
-        </div>
-
-        {/* Catalog Content */}
-        {catalogError ? (
-          <div className="skills-view-error">
-            <p>{catalogError}</p>
-            <button
-              className="btn btn-sm"
-              onClick={() => void loadCatalog(debouncedQuery)}
-            >
-              Try Again
-            </button>
-          </div>
-        ) : isLoadingCatalog ? (
-          <div className="skills-view-loading">
-            <span className="spinner" />
-            Loading catalog...
-          </div>
-        ) : catalogEntries.length === 0 ? (
-          <div className="skills-view-empty">
-            {searchQuery ? (
-              <p>No skills match your search.</p>
-            ) : (
-              <p>No skills available in the catalog.</p>
-            )}
-          </div>
-        ) : (
-          <div className="skills-view-grid">
-            {catalogEntries.map((entry) => (
-              <div key={entry.id} className="skills-view-card">
-                <h4 className="skills-view-card-title">{entry.name}</h4>
-                {entry.description && (
-                  <p className="skills-view-card-description">{entry.description}</p>
-                )}
-                {entry.tags && entry.tags.length > 0 && (
-                  <div className="skills-view-card-tags">
-                    {entry.tags.map((tag) => (
-                      <span key={tag} className="badge badge--sm">
-                        {tag}
-                      </span>
-                    ))}
+          {isLoadingDiscovered ? (
+            <div className="skills-view-loading">
+              <span className="spinner" />
+              Loading discovered skills...
+            </div>
+          ) : discoveredSkills.length === 0 ? (
+            <div className="skills-view-empty">
+              <p>No skills discovered in this project.</p>
+            </div>
+          ) : (
+            <div className="skills-view-list">
+              {discoveredSkills.map((skill) => (
+                <div key={skill.id} className="skills-view-item">
+                  <div className="skills-view-item-info">
+                    <span className="skills-view-item-name">{skill.name}</span>
+                    <span className="skills-view-item-path">{skill.relativePath}</span>
+                    <span className="skills-view-item-source">{skill.metadata.source}</span>
                   </div>
-                )}
-                {entry.installs !== undefined && (
-                  <span className="skills-view-card-installs">
-                    {entry.installs.toLocaleString()} installs
-                  </span>
-                )}
-              </div>
-            ))}
+                  <label className="skills-view-item-toggle">
+                    <input
+                      type="checkbox"
+                      checked={skill.enabled}
+                      disabled={skill.toggling}
+                      onChange={() => void handleToggleSkill(skill.id, skill.enabled)}
+                      aria-label={`${skill.enabled ? "Disable" : "Enable"} ${skill.name}`}
+                    />
+                    <span className="skills-view-toggle-slider" />
+                  </label>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+
+        {/* Catalog Section */}
+        <section className="skills-view-section" aria-labelledby="catalog-title">
+          <h3 id="catalog-title" className="skills-view-section-title">
+            Skills Catalog
+          </h3>
+
+          {/* Search */}
+          <div className="skills-view-search">
+            <input
+              type="text"
+              className="form-input"
+              placeholder="Search skills..."
+              value={searchQuery}
+              onChange={(e) => handleSearchChange(e.target.value)}
+              aria-label="Search skills catalog"
+            />
           </div>
-        )}
-      </section>
+
+          {/* Catalog Content */}
+          {catalogError ? (
+            <div className="skills-view-error">
+              <p>{catalogError}</p>
+              <button
+                className="btn btn-sm"
+                onClick={() => void loadCatalog(debouncedQuery)}
+              >
+                Try Again
+              </button>
+            </div>
+          ) : isLoadingCatalog ? (
+            <div className="skills-view-loading">
+              <span className="spinner" />
+              Loading catalog...
+            </div>
+          ) : catalogEntries.length === 0 ? (
+            <div className="skills-view-empty">
+              {searchQuery ? (
+                <p>No skills match your search.</p>
+              ) : (
+                <p>No skills available in the catalog.</p>
+              )}
+            </div>
+          ) : (
+            <div className="skills-view-grid">
+              {catalogEntries.map((entry) => (
+                <div key={entry.id} className="skills-view-card">
+                  <h4 className="skills-view-card-title">{entry.name}</h4>
+                  {entry.description && (
+                    <p className="skills-view-card-description">{entry.description}</p>
+                  )}
+                  {entry.tags && entry.tags.length > 0 && (
+                    <div className="skills-view-card-tags">
+                      {entry.tags.map((tag) => (
+                        <span key={tag} className="badge badge--sm">
+                          {tag}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {entry.installs !== undefined && (
+                    <span className="skills-view-card-installs">
+                      {entry.installs.toLocaleString()} installs
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      </div>
     </div>
   );
 }
