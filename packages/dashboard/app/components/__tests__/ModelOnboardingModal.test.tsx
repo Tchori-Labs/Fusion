@@ -1321,7 +1321,7 @@ describe("ModelOnboardingModal", () => {
       await waitFor(() => {
         expect(addToast).toHaveBeenCalledWith(
           "Login already in progress. Please wait or cancel the current attempt.",
-          "warning"
+          "info"
         );
       });
     });
@@ -1517,7 +1517,7 @@ describe("ModelOnboardingModal", () => {
       });
 
       // Should show timeout toast
-      expect(addToast).toHaveBeenCalledWith("Login timed out. Please try again.", "warning");
+      expect(addToast).toHaveBeenCalledWith("Login timed out. Please try again.", "info");
 
       // Cancel button should not be shown after timeout
       expect(screen.queryByText("Cancel")).toBeNull();

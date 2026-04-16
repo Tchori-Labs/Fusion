@@ -108,6 +108,7 @@ const mockClearOnboardingState = vi.fn();
 const mockIsOnboardingCompleted = vi.fn();
 const mockMarkOnboardingCompleted = vi.fn();
 const mockGetOnboardingCompletedAt = vi.fn();
+const mockGetStepData = vi.fn();
 
 vi.mock("../../components/model-onboarding-state", () => ({
   isOnboardingResumable: (...args: unknown[]) => mockIsOnboardingResumable(...args),
@@ -118,6 +119,7 @@ vi.mock("../../components/model-onboarding-state", () => ({
   isOnboardingCompleted: (...args: unknown[]) => mockIsOnboardingCompleted(...args),
   markOnboardingCompleted: (...args: unknown[]) => mockMarkOnboardingCompleted(...args),
   getOnboardingCompletedAt: (...args: unknown[]) => mockGetOnboardingCompletedAt(...args),
+  getStepData: (...args: unknown[]) => mockGetStepData(...args),
 }));
 
 // Mock CustomModelDropdown for onboarding modal tests

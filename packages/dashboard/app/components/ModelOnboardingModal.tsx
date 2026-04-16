@@ -248,7 +248,7 @@ export function ModelOnboardingModal({
             }
             setAuthActionInProgress(null);
             setLoginOutcomes((prev) => ({ ...prev, [providerId]: "timeout" }));
-            addToast("Login timed out. Please try again.", "warning");
+            addToast("Login timed out. Please try again.", "info");
             return;
           }
 
@@ -276,7 +276,7 @@ export function ModelOnboardingModal({
           (err && typeof err === "object" && "status" in err && (err as { status: number }).status === 409);
 
         if (isConcurrentLogin) {
-          addToast("Login already in progress. Please wait or cancel the current attempt.", "warning");
+          addToast("Login already in progress. Please wait or cancel the current attempt.", "info");
           setLoginOutcomes((prev) => ({ ...prev, [providerId]: "failed" }));
         } else {
           addToast(err instanceof Error ? err.message : "Login failed", "error");
