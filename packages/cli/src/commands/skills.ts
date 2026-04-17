@@ -204,6 +204,6 @@ export async function runSkillsInstall(
   }
 
   console.log(
-    `Installed skill from ${source}. Skills are discovered from .pi/skills/ and .agents/skills/.`,
+    `Installed skill from ${source}. Skills are discovered from .fusion/skills/, legacy .pi/skills/, and .agents/skills/.`,
   );
 }

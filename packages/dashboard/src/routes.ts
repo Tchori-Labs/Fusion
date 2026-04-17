@@ -63,8 +63,21 @@ import {
 } from "./api-error.js";
 import { rateLimit, RATE_LIMITS } from "./rate-limit.js";
 import { resolvePluginManifest } from "./plugin-routes.js";
+import { getAuthFileCandidates, getFusionAuthPath, type StoredAuthProvider } from "./auth-paths.js";
 
 const TASK_DETAIL_ACTIVITY_LOG_LIMIT = 500;
+
+async function readStoredAuthProvidersFromDisk(): Promise<Record<string, StoredAuthProvider>> {
+  for (const authJsonPath of getAuthFileCandidates()) {
+    try {
+      const authContent = await fsReadFile(authJsonPath, "utf-8");
+      return JSON.parse(authContent) as Record<string, StoredAuthProvider>;
+    } catch {
+      // Try the next candidate, preferring .fusion and falling back to legacy .pi.
+    }
+  }
+  return {};
+}
 
 /**
  * Minimal interface matching pi-coding-agent's ModelRegistry API surface
@@ -2673,7 +2686,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
 
       // Import AuthStorage and write credentials
       const { AuthStorage } = await import("@mariozechner/pi-coding-agent");
-      const authStorage = AuthStorage.create();
+      const authStorage = AuthStorage.create(getFusionAuthPath());
 
       const receivedProviders: string[] = [];
       for (const [providerId, credential] of Object.entries(providers)) {
@@ -2733,20 +2746,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
       // Get local node ID
       const localPeerInfo = await central.getLocalPeerInfo();
 
-      // Import AuthStorage and read credentials
-      const { AuthStorage } = await import("@mariozechner/pi-coding-agent");
-      const authStorage = AuthStorage.create();
-
-      // Read auth.json directly (async to avoid blocking event loop)
-      const authJsonPath = `${process.env.HOME || process.env.USERPROFILE}/.pi/agent/auth.json`;
-      let allProviders: Record<string, { type: string; key?: string; access?: string; refresh?: string; expires?: number; accountId?: string }> = {};
-
-      try {
-        const authContent = await fsReadFile(authJsonPath, "utf-8");
-        allProviders = JSON.parse(authContent);
-      } catch {
-        // Auth file doesn't exist - export empty
-      }
+      const allProviders = await readStoredAuthProvidersFromDisk();
 
       // Filter to only API-key-based providers (skip OAuth)
       const apiKeyProviders: Record<string, { type: string; key: string }> = {};
@@ -14944,23 +14944,14 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
 
       // Import AuthStorage
       const { AuthStorage } = await import("@mariozechner/pi-coding-agent");
-      const authStorage = AuthStorage.create();
+      const authStorage = AuthStorage.create(getFusionAuthPath());
 
       if (direction === "push") {
         // Get OAuth provider IDs to exclude
         const oauthProviders = authStorage.getOAuthProviders();
         const oauthIds = new Set(oauthProviders.map((p) => p.id));
 
-        // Read auth.json directly to get all providers (async to avoid blocking event loop)
-        const authJsonPath = `${process.env.HOME || process.env.USERPROFILE}/.pi/agent/auth.json`;
-        let allProviders: Record<string, { type: string; key?: string; access?: string; refresh?: string; expires?: number; accountId?: string }> = {};
-
-        try {
-          const authContent = await fsReadFile(authJsonPath, "utf-8");
-          allProviders = JSON.parse(authContent);
-        } catch {
-          // Auth file doesn't exist or is unreadable - sync empty
-        }
+        const allProviders = await readStoredAuthProvidersFromDisk();
 
         // Filter to only API-key-based providers (skip OAuth)
         const apiKeyProviders: Record<string, { type: string; key: string }> = {};
@@ -17201,7 +17192,7 @@ function registerModelsRoute(router: Router, modelRegistry?: ModelRegistryLike, 
 /**
  * Register authentication status, login, and logout routes.
  * Uses pi-coding-agent's AuthStorage for credential management.
- * If no AuthStorage is provided, creates one internally (reads from ~/.pi/agent/auth.json).
+ * If no AuthStorage is provided, authentication routes return an unavailable status.
  */
 function registerAuthRoutes(router: Router, authStorage?: AuthStorageLike): void {
   // Use injected AuthStorage or fail gracefully if not provided.

@@ -1713,7 +1713,7 @@ export default function kbExtension(pi: ExtensionAPI) {
     label: "FN: Install Skill",
     description:
       "Install an agent skill from skills.sh into the current project. " +
-      "Downloads skill files into the project's skill directories (.pi/skills/, .agents/skills/). " +
+      "Downloads skill files into the project's skill directories (.fusion/skills/, legacy .pi/skills/, .agents/skills/). " +
       "The skill becomes available to AI agents in subsequent sessions.",
     promptSnippet: "Install a skill from skills.sh into the current project",
     promptGuidelines: [
@@ -1807,7 +1807,7 @@ export default function kbExtension(pi: ExtensionAPI) {
         content: [
           {
             type: "text",
-            text: `Installed skill from ${params.source}. Skills are discovered from .pi/skills/ and .agents/skills/. The skill will be available in future agent sessions.`,
+            text: `Installed skill from ${params.source}. Skills are discovered from .fusion/skills/, legacy .pi/skills/, and .agents/skills/. The skill will be available in future agent sessions.`,
           },
         ],
         details: { source: params.source, skill: params.skill ?? "all" },

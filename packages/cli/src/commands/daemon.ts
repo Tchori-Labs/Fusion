@@ -38,6 +38,7 @@ import {
 import { promptForPort } from "./port-prompt.js";
 import { createReadOnlyProviderSettingsView } from "./provider-settings.js";
 import { wrapAuthStorageWithApiKeyProviders } from "./provider-auth.js";
+import { getFusionAuthPath } from "./auth-paths.js";
 
 const DIAGNOSTIC_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
 let daemonStartTime = 0;
@@ -324,7 +325,7 @@ export async function runDaemon(opts: DaemonOptions = {}) {
   const missionExecutionLoop = cwdEngine.getRuntime().getMissionExecutionLoop();
   const automationStore = cwdEngine.getAutomationStore();
 
-  const authStorage = AuthStorage.create();
+  const authStorage = AuthStorage.create(getFusionAuthPath());
   const modelRegistry = new ModelRegistry(authStorage);
 
   // PackageManager may be used for skills adapter even if extension loading fails

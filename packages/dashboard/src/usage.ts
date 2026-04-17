@@ -2,6 +2,7 @@ import * as path from "node:path";
 import { readFile } from "node:fs/promises";
 import * as https from "node:https";
 import * as child_process from "node:child_process";
+import { getAuthFileCandidates } from "./auth-paths.js";
 
 function execFileAsync(
   file: string,
@@ -228,19 +229,7 @@ function decodeJwtPayload(token: string): any {
   }
 }
 
-// ── Pi auth storage reader ──────────────────────────────────────────────────
-
-function getAuthFileCandidates(): string[] {
-  const home = process.env.HOME || "~";
-  return [
-    path.join(home, ".pi", "agent", "auth.json"),
-    path.join(home, ".pi", "auth.json"),
-    path.join(home, ".fusion", "agent", "auth.json"),
-    path.join(home, ".fusion", "auth.json"),
-    path.join(process.cwd(), ".fusion", "agent", "auth.json"),
-    path.join(process.cwd(), ".fusion", "auth.json"),
-  ];
-}
+// ── Auth storage reader ──────────────────────────────────────────────────
 
 async function readAuthKeyFromFile(authPath: string, provider: string): Promise<string | null> {
   try {

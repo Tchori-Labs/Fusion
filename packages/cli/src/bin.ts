@@ -1,41 +1,63 @@
 #!/usr/bin/env node
 
 /**
- * Bootstrap: when running as a bun-compiled binary, the bundled pi-coding-agent
- * reads package.json from the executable's directory at module-init time
- * (top-level `readFileSync` in its config module). We redirect that read to a
- * temp directory containing a minimal package.json so the binary works
- * standalone without any co-located package.json.
+ * Bootstrap: pi-coding-agent reads package.json at module-init time (top-level
+ * `readFileSync` in its config module) and uses `piConfig.configDir` to decide
+ * where project-local resources live. Fusion wants those resources in `.fusion`
+ * rather than `.pi`, so we provide pi with a package.json config before any
+ * application imports can load pi.
  *
  * Node built-ins are safe to import statically — they have no side-effects
  * that depend on package.json. All application imports MUST be dynamic
  * (after the env is configured) so they resolve after PI_PACKAGE_DIR is set.
  */
-import { mkdtempSync, writeFileSync, existsSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 
 // @ts-expect-error -- Bun-only global; undefined in Node
 const isBunBinary = typeof Bun !== "undefined" && !!Bun.embeddedFiles;
 
-if (isBunBinary) {
-  const execDir = dirname(process.execPath);
-  const localPkg = join(execDir, "package.json");
-
-  if (!existsSync(localPkg)) {
-    // Write a minimal package.json to a temp dir and redirect PI_PACKAGE_DIR
-    const tmp = mkdtempSync(join(tmpdir(), "fn-pkg-"));
-    writeFileSync(
-      join(tmp, "package.json"),
-      JSON.stringify(
-        { name: "fn", version: "0.1.0", type: "module", piConfig: { name: "fn", configDir: ".fusion" } },
-        null,
-        2,
-      ) + "\n",
-    );
-    process.env.PI_PACKAGE_DIR = tmp;
+function configurePiPackage(): void {
+  if (process.env.PI_PACKAGE_DIR) {
+    return;
   }
+
+  const tmp = mkdtempSync(join(tmpdir(), "fn-pkg-"));
+  let packageJson: Record<string, unknown> = {
+    name: "pi",
+    version: "0.1.0",
+    type: "module",
+  };
+
+  try {
+    const require = createRequire(import.meta.url);
+    const piPackagePath = require.resolve("@mariozechner/pi-coding-agent/package.json");
+    const piPackageDir = dirname(piPackagePath);
+    packageJson = JSON.parse(readFileSync(piPackagePath, "utf-8")) as Record<string, unknown>;
+
+    for (const entry of ["dist", "docs", "examples", "README.md", "CHANGELOG.md"]) {
+      const source = join(piPackageDir, entry);
+      if (existsSync(source)) {
+        symlinkSync(source, join(tmp, entry));
+      }
+    }
+  } catch {
+    // A bundled binary may not expose pi's package.json. The config value is
+    // the only part required by Fusion's non-interactive agent sessions.
+  }
+
+  packageJson.piConfig = {
+    ...((packageJson.piConfig as Record<string, unknown> | undefined) ?? {}),
+    configDir: ".fusion",
+  };
+
+  writeFileSync(join(tmp, "package.json"), JSON.stringify(packageJson, null, 2) + "\n");
+  process.env.PI_PACKAGE_DIR = tmp;
 }
+
+configurePiPackage();
 
 // Dynamic imports so the pi-coding-agent config module sees PI_PACKAGE_DIR
 const { runDashboard } = await import("./commands/dashboard.js");

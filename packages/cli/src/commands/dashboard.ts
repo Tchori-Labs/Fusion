@@ -10,6 +10,7 @@ import {
 import { promptForPort } from "./port-prompt.js";
 import { createReadOnlyProviderSettingsView, createProjectSettingsPersistence } from "./provider-settings.js";
 import { wrapAuthStorageWithApiKeyProviders } from "./provider-auth.js";
+import { getFusionAuthPath } from "./auth-paths.js";
 
 // Re-export for backward compatibility with tests
 export { promptForPort };
@@ -357,11 +358,11 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
   });
 
   // ── Auth & model wiring ────────────────────────────────────────────
-  // AuthStorage manages OAuth/API-key credentials (stored in ~/.pi/agent/auth.json).
+  // AuthStorage manages OAuth/API-key credentials (stored in ~/.fusion/agent/auth.json).
   // ModelRegistry discovers available models from configured providers.
   // Passing these to createServer enables the dashboard's Authentication
   // tab (login/logout) and Model selector.
-  const authStorage = AuthStorage.create();
+  const authStorage = AuthStorage.create(getFusionAuthPath());
   const modelRegistry = new ModelRegistry(authStorage);
 
   // PackageManager may be used for skills adapter even if extension loading fails

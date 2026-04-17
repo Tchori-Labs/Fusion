@@ -75,8 +75,8 @@ export async function runInit(options: InitOptions = {}): Promise<void> {
     console.log(`  ✓ Created .fusion/ directory`);
   }
 
-  // Add .fusion to .gitignore
-  await addFusionToGitignore(cwd);
+  // Add local Fusion/Pi storage directories to .gitignore
+  await addLocalStorageToGitignore(cwd);
 
   // Create fusion.db (empty SQLite file)
   if (!existsSync(dbPath)) {
@@ -164,10 +164,10 @@ async function detectProjectName(dir: string): Promise<string> {
 }
 
 /**
- * Add .fusion to .gitignore if not already present.
- * Idempotent: only adds if not already in the file.
+ * Add local Fusion/Pi storage directories to .gitignore if not already present.
+ * Idempotent: only adds missing entries.
  */
-async function addFusionToGitignore(cwd: string): Promise<void> {
+async function addLocalStorageToGitignore(cwd: string): Promise<void> {
   const gitignorePath = join(cwd, ".gitignore");
 
   let content = "";
@@ -179,17 +179,19 @@ async function addFusionToGitignore(cwd: string): Promise<void> {
     }
   }
 
-  // Check if .fusion is already in the file
   const lines = content.split(/\r?\n/);
-  if (lines.some((line) => line.trim() === ".fusion")) {
-    return; // Already present, skip
+  const existingEntries = new Set(lines.map((line) => line.trim()));
+  const missingEntries = [".fusion", ".pi"].filter((entry) => !existingEntries.has(entry));
+
+  if (missingEntries.length === 0) {
+    return;
   }
 
-  // Append .fusion to .gitignore
-  const newContent = content.endsWith("\n") ? content + ".fusion\n" : content + "\n.fusion\n";
+  const prefix = content.length === 0 || content.endsWith("\n") ? "" : "\n";
+  const newContent = `${content}${prefix}${missingEntries.join("\n")}\n`;
   try {
     writeFileSync(gitignorePath, newContent);
-    console.log(`  ✓ Added .fusion to .gitignore`);
+    console.log(`  ✓ Added ${missingEntries.join(" and ")} to .gitignore`);
   } catch {
     // Best-effort: don't fail init if we can't write to .gitignore
     console.log(`  ⚠ Could not update .gitignore (best-effort)`);

@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 const commandMocks = vi.hoisted(() => ({
   runDashboard: vi.fn(),
@@ -188,94 +190,14 @@ vi.mock("./commands/message.js", () => ({
 const originalArgv = process.argv;
 const originalExit = process.exit;
 const originalSkipMigration = process.env.KB_SKIP_MIGRATION;
+const originalPiPackageDir = process.env.PI_PACKAGE_DIR;
 
 let importCounter = 0;
 
 async function runBin(args: string[]) {
   process.argv = ["node", "bin.ts", ...args];
   importCounter += 1;
-
-  if (importCounter === 1) {
-    await import("./bin.ts?test=1");
-  } else if (importCounter === 2) {
-    await import("./bin.ts?test=2");
-  } else if (importCounter === 3) {
-    await import("./bin.ts?test=3");
-  } else if (importCounter === 4) {
-    await import("./bin.ts?test=4");
-  } else if (importCounter === 5) {
-    await import("./bin.ts?test=5");
-  } else if (importCounter === 6) {
-    await import("./bin.ts?test=6");
-  } else if (importCounter === 7) {
-    await import("./bin.ts?test=7");
-  } else if (importCounter === 8) {
-    await import("./bin.ts?test=8");
-  } else if (importCounter === 9) {
-    await import("./bin.ts?test=9");
-  } else if (importCounter === 10) {
-    await import("./bin.ts?test=10");
-  } else if (importCounter === 11) {
-    await import("./bin.ts?test=11");
-  } else if (importCounter === 12) {
-    await import("./bin.ts?test=12");
-  } else if (importCounter === 13) {
-    await import("./bin.ts?test=13");
-  } else if (importCounter === 14) {
-    await import("./bin.ts?test=14");
-  } else if (importCounter === 15) {
-    await import("./bin.ts?test=15");
-  } else if (importCounter === 16) {
-    await import("./bin.ts?test=16");
-  } else if (importCounter === 17) {
-    await import("./bin.ts?test=17");
-  } else if (importCounter === 18) {
-    await import("./bin.ts?test=18");
-  } else if (importCounter === 19) {
-    await import("./bin.ts?test=19");
-  } else if (importCounter === 20) {
-    await import("./bin.ts?test=20");
-  } else if (importCounter === 21) {
-    await import("./bin.ts?test=21");
-  } else if (importCounter === 22) {
-    await import("./bin.ts?test=22");
-  } else if (importCounter === 23) {
-    await import("./bin.ts?test=23");
-  } else if (importCounter === 24) {
-    await import("./bin.ts?test=24");
-  } else if (importCounter === 25) {
-    await import("./bin.ts?test=25");
-  } else if (importCounter === 26) {
-    await import("./bin.ts?test=26");
-  } else if (importCounter === 27) {
-    await import("./bin.ts?test=27");
-  } else if (importCounter === 28) {
-    await import("./bin.ts?test=28");
-  } else if (importCounter === 29) {
-    await import("./bin.ts?test=29");
-  } else if (importCounter === 30) {
-    await import("./bin.ts?test=30");
-  } else if (importCounter === 31) {
-    await import("./bin.ts?test=31");
-  } else if (importCounter === 32) {
-    await import("./bin.ts?test=32");
-  } else if (importCounter === 33) {
-    await import("./bin.ts?test=33");
-  } else if (importCounter === 34) {
-    await import("./bin.ts?test=34");
-  } else if (importCounter === 35) {
-    await import("./bin.ts?test=35");
-  } else if (importCounter === 36) {
-    await import("./bin.ts?test=36");
-  } else if (importCounter === 37) {
-    await import("./bin.ts?test=37");
-  } else if (importCounter === 38) {
-    await import("./bin.ts?test=38");
-  } else if (importCounter === 39) {
-    await import("./bin.ts?test=39");
-  } else {
-    await import("./bin.ts?test=40");
-  }
+  await import(/* @vite-ignore */ `./bin.ts?test=${importCounter}`);
 }
 
 describe("bin command routing and fallbacks", () => {
@@ -285,6 +207,7 @@ describe("bin command routing and fallbacks", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     process.env.KB_SKIP_MIGRATION = "1";
+    delete process.env.PI_PACKAGE_DIR;
     process.exit = vi.fn(((code?: number) => {
       throw new Error(`process.exit:${code ?? 0}`);
     }) as typeof process.exit);
@@ -298,6 +221,23 @@ describe("bin command routing and fallbacks", () => {
     } else {
       process.env.KB_SKIP_MIGRATION = originalSkipMigration;
     }
+
+    if (originalPiPackageDir === undefined) {
+      delete process.env.PI_PACKAGE_DIR;
+    } else {
+      process.env.PI_PACKAGE_DIR = originalPiPackageDir;
+    }
+  });
+
+  it("configures pi to use .fusion as its project config directory", async () => {
+    await expect(runBin(["--help"])).rejects.toThrow("process.exit:0");
+
+    const piPackageDir = process.env.PI_PACKAGE_DIR;
+    expect(piPackageDir).toBeTruthy();
+    const pkg = JSON.parse(readFileSync(join(piPackageDir!, "package.json"), "utf-8")) as {
+      piConfig?: { configDir?: string };
+    };
+    expect(pkg.piConfig?.configDir).toBe(".fusion");
   });
 
   it("shows help with --help and exits 0", async () => {

@@ -124,7 +124,7 @@ describe("init command", () => {
     expect(existsSync(join(fusionDir, "fusion.db"))).toBe(true);
   });
 
-  it("should add .fusion to .gitignore when it doesn't exist", async () => {
+  it("should add local storage directories to .gitignore when it doesn't exist", async () => {
     const gitignorePath = join(tempProjectDir, ".gitignore");
     expect(existsSync(gitignorePath)).toBe(false);
 
@@ -133,9 +133,10 @@ describe("init command", () => {
     expect(existsSync(gitignorePath)).toBe(true);
     const content = readFileSync(gitignorePath, "utf-8");
     expect(content).toContain(".fusion");
+    expect(content).toContain(".pi");
   });
 
-  it("should append .fusion to existing .gitignore", async () => {
+  it("should append local storage directories to existing .gitignore", async () => {
     const gitignorePath = join(tempProjectDir, ".gitignore");
     writeFileSync(gitignorePath, "node_modules\ndist\n");
 
@@ -145,9 +146,23 @@ describe("init command", () => {
     expect(content).toContain("node_modules");
     expect(content).toContain("dist");
     expect(content).toContain(".fusion");
+    expect(content).toContain(".pi");
   });
 
-  it("should not duplicate .fusion in .gitignore (idempotent)", async () => {
+  it("should not duplicate local storage directories in .gitignore (idempotent)", async () => {
+    const gitignorePath = join(tempProjectDir, ".gitignore");
+    writeFileSync(gitignorePath, "node_modules\n.fusion\n.pi\n");
+
+    await runInit({ path: tempProjectDir });
+
+    const content = readFileSync(gitignorePath, "utf-8");
+    const fusionMatches = content.match(/\.fusion/g);
+    const piMatches = content.match(/\.pi/g);
+    expect(fusionMatches).toHaveLength(1);
+    expect(piMatches).toHaveLength(1);
+  });
+
+  it("should add .pi when .fusion is already ignored", async () => {
     const gitignorePath = join(tempProjectDir, ".gitignore");
     writeFileSync(gitignorePath, "node_modules\n.fusion\n");
 
@@ -155,6 +170,8 @@ describe("init command", () => {
 
     const content = readFileSync(gitignorePath, "utf-8");
     const fusionMatches = content.match(/\.fusion/g);
+    const piMatches = content.match(/\.pi/g);
     expect(fusionMatches).toHaveLength(1);
+    expect(piMatches).toHaveLength(1);
   });
 });
