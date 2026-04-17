@@ -37,8 +37,8 @@ import {
 } from "./task-lifecycle.js";
 import { promptForPort } from "./port-prompt.js";
 import { createReadOnlyProviderSettingsView } from "./provider-settings.js";
-import { wrapAuthStorageWithApiKeyProviders } from "./provider-auth.js";
-import { getFusionAuthPath } from "./auth-paths.js";
+import { createReadOnlyAuthFileStorage, wrapAuthStorageWithApiKeyProviders } from "./provider-auth.js";
+import { getFusionAuthPath, getLegacyAuthPaths } from "./auth-paths.js";
 
 const DIAGNOSTIC_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
 let daemonStartTime = 0;
@@ -327,6 +327,8 @@ export async function runDaemon(opts: DaemonOptions = {}) {
 
   const authStorage = AuthStorage.create(getFusionAuthPath());
   const modelRegistry = new ModelRegistry(authStorage);
+  const legacyAuthStorage = createReadOnlyAuthFileStorage(getLegacyAuthPaths());
+  const dashboardAuthStorage = wrapAuthStorageWithApiKeyProviders(authStorage, modelRegistry, [legacyAuthStorage]);
 
   // PackageManager may be used for skills adapter even if extension loading fails
   let packageManager: DefaultPackageManager | undefined;
@@ -375,8 +377,6 @@ export async function runDaemon(opts: DaemonOptions = {}) {
     createExtensionRuntime();
     modelRegistry.refresh();
   }
-
-  const dashboardAuthStorage = wrapAuthStorageWithApiKeyProviders(authStorage, modelRegistry);
 
   // ── Skills adapter for skills discovery and execution toggling ─────────────
   const skillsAdapter = packageManager

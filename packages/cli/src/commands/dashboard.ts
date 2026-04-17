@@ -9,8 +9,8 @@ import {
 } from "./task-lifecycle.js";
 import { promptForPort } from "./port-prompt.js";
 import { createReadOnlyProviderSettingsView, createProjectSettingsPersistence } from "./provider-settings.js";
-import { wrapAuthStorageWithApiKeyProviders } from "./provider-auth.js";
-import { getFusionAuthPath } from "./auth-paths.js";
+import { createReadOnlyAuthFileStorage, wrapAuthStorageWithApiKeyProviders } from "./provider-auth.js";
+import { getFusionAuthPath, getLegacyAuthPaths } from "./auth-paths.js";
 
 // Re-export for backward compatibility with tests
 export { promptForPort };
@@ -364,6 +364,8 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
   // tab (login/logout) and Model selector.
   const authStorage = AuthStorage.create(getFusionAuthPath());
   const modelRegistry = new ModelRegistry(authStorage);
+  const legacyAuthStorage = createReadOnlyAuthFileStorage(getLegacyAuthPaths());
+  const dashboardAuthStorage = wrapAuthStorageWithApiKeyProviders(authStorage, modelRegistry, [legacyAuthStorage]);
 
   // PackageManager may be used for skills adapter even if extension loading fails
   let packageManager: DefaultPackageManager | undefined;
@@ -409,7 +411,7 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
       try {
         const settings = await store.getSettings();
         if (settings.openrouterModelSync === false) return;
-        const hasOrAuth = await authStorage.getApiKey("openrouter");
+        const hasOrAuth = await dashboardAuthStorage.getApiKey("openrouter");
         const headers: Record<string, string> = {};
         if (hasOrAuth) headers["Authorization"] = `Bearer ${hasOrAuth}`;
         const res = await fetch("https://openrouter.ai/api/v1/models", { headers });
@@ -449,8 +451,6 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
     createExtensionRuntime();
     modelRegistry.refresh();
   }
-
-  const dashboardAuthStorage = wrapAuthStorageWithApiKeyProviders(authStorage, modelRegistry);
 
   // ── Skills adapter for skills discovery and execution toggling ─────────────
   //

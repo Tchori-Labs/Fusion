@@ -38,8 +38,8 @@ import {
 } from "./task-lifecycle.js";
 import { promptForPort } from "./port-prompt.js";
 import { createReadOnlyProviderSettingsView, createProjectSettingsPersistence } from "./provider-settings.js";
-import { wrapAuthStorageWithApiKeyProviders } from "./provider-auth.js";
-import { getFusionAuthPath } from "./auth-paths.js";
+import { createReadOnlyAuthFileStorage, wrapAuthStorageWithApiKeyProviders } from "./provider-auth.js";
+import { getFusionAuthPath, getLegacyAuthPaths } from "./auth-paths.js";
 
 const DIAGNOSTIC_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
 let diagnosticIntervalHandle: ReturnType<typeof setInterval> | null = null;
@@ -386,6 +386,8 @@ export async function runServe(
 
   const authStorage = AuthStorage.create(getFusionAuthPath());
   const modelRegistry = new ModelRegistry(authStorage);
+  const legacyAuthStorage = createReadOnlyAuthFileStorage(getLegacyAuthPaths());
+  const dashboardAuthStorage = wrapAuthStorageWithApiKeyProviders(authStorage, modelRegistry, [legacyAuthStorage]);
 
   // PackageManager may be used for skills adapter even if extension loading fails
   let packageManager: DefaultPackageManager | undefined;
@@ -433,7 +435,7 @@ export async function runServe(
       try {
         const settings = await store.getSettings();
         if (settings.openrouterModelSync === false) return;
-        const hasOrAuth = await authStorage.getApiKey("openrouter");
+        const hasOrAuth = await dashboardAuthStorage.getApiKey("openrouter");
         const headers: Record<string, string> = {};
         if (hasOrAuth) headers["Authorization"] = `Bearer ${hasOrAuth}`;
         const res = await fetch("https://openrouter.ai/api/v1/models", {
@@ -512,8 +514,6 @@ export async function runServe(
     createExtensionRuntime();
     modelRegistry.refresh();
   }
-
-  const dashboardAuthStorage = wrapAuthStorageWithApiKeyProviders(authStorage, modelRegistry);
 
   // ── Daemon token resolution ─────────────────────────────────────────────
   //

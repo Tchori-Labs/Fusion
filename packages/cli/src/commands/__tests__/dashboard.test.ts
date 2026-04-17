@@ -444,7 +444,7 @@ describe("runDashboard — AuthStorage & ModelRegistry wiring", () => {
     ]);
   });
 
-  it("creates AuthStorage via AuthStorage.create()", async () => {
+  it("creates AuthStorage for Fusion writes", async () => {
     const { AuthStorage } = await import("@mariozechner/pi-coding-agent");
 
     await runDashboard(0, {});
@@ -938,4 +938,3 @@ describe("runDashboard — multi-project cwd/default engine resolution", () => {
     expect(serverOpts.engine).toBeDefined();
   });
 });
-
