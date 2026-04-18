@@ -495,6 +495,28 @@ describe("Header", () => {
       fireEvent.click(screen.getByTestId("view-toggle-overflow-trigger"));
       expect(screen.queryByTestId("view-overflow-skills")).toBeNull();
     });
+
+    it("does not render memory overflow item when memoryView is not enabled", () => {
+      const onChangeView = vi.fn();
+      render(<Header view="board" onChangeView={onChangeView} experimentalFeatures={{}} />);
+      fireEvent.click(screen.getByTestId("view-toggle-overflow-trigger"));
+      expect(screen.queryByTestId("view-toggle-memory")).toBeNull();
+    });
+
+    it("renders memory overflow item when memoryView is enabled", () => {
+      const onChangeView = vi.fn();
+      render(<Header view="board" onChangeView={onChangeView} experimentalFeatures={{ memoryView: true }} />);
+      fireEvent.click(screen.getByTestId("view-toggle-overflow-trigger"));
+      expect(screen.getByTestId("view-toggle-memory")).toBeDefined();
+    });
+
+    it("calls onChangeView with 'memory' when Memory overflow item is clicked", () => {
+      const onChangeView = vi.fn();
+      render(<Header view="board" onChangeView={onChangeView} experimentalFeatures={{ memoryView: true }} />);
+      fireEvent.click(screen.getByTestId("view-toggle-overflow-trigger"));
+      fireEvent.click(screen.getByTestId("view-toggle-memory"));
+      expect(onChangeView).toHaveBeenCalledWith("memory");
+    });
   });
 
   // ── Search Visibility by View ─────────────────────────────────────

@@ -193,6 +193,7 @@ function AppInner() {
     experimentalFeatures,
     insightsEnabled,
     roadmapEnabled,
+    memoryEnabled,
     toggleAutoMerge,
     toggleGlobalPause,
     toggleEnginePause,
@@ -216,7 +217,10 @@ function AppInner() {
     if (taskView === "agents" && !agentsEnabled) {
       handleChangeTaskView("board");
     }
-  }, [taskView, insightsEnabled, roadmapEnabled, experimentalFeatures, handleChangeTaskView, agentsEnabled]);
+    if (taskView === "memory" && !memoryEnabled) {
+      handleChangeTaskView("board");
+    }
+  }, [taskView, insightsEnabled, roadmapEnabled, experimentalFeatures, handleChangeTaskView, agentsEnabled, memoryEnabled]);
 
   // Auto-close nodes overlay if feature flag is toggled off while overlay is open
   useEffect(() => {
@@ -617,7 +621,7 @@ function AppInner() {
           }
         }}
         isRemote={isRemote}
-        experimentalFeatures={{ insights: insightsEnabled, roadmap: roadmapEnabled }}
+        experimentalFeatures={{ insights: insightsEnabled, roadmap: roadmapEnabled, memoryView: memoryEnabled }}
       />
       {viewMode === "project" && currentProject && !nodesOpen && taskView !== "missions" && !modalManager.isPlanningOpen && (
         <SessionNotificationBanner
@@ -680,7 +684,7 @@ function AppInner() {
         projectId={currentProject?.id}
         showSkillsTab={skillsEnabled}
         showAgentsTab={agentsEnabled}
-        experimentalFeatures={{ insights: insightsEnabled, roadmap: roadmapEnabled }}
+        experimentalFeatures={{ insights: insightsEnabled, roadmap: roadmapEnabled, memoryView: memoryEnabled }}
       />
       {viewMode === "project" && currentProject && taskView !== "chat" && taskView !== "mailbox" && taskView !== "insights" && (
         <QuickChatFAB

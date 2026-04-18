@@ -209,7 +209,7 @@ export interface HeaderProps {
   /** Whether the current view is a remote node */
   isRemote?: boolean;
   /** Experimental feature flags controlling visibility of nav items. */
-  experimentalFeatures?: { insights?: boolean; roadmap?: boolean };
+  experimentalFeatures?: { insights?: boolean; roadmap?: boolean; memoryView?: boolean };
 }
 
 export function Header({
@@ -851,18 +851,20 @@ export function Header({
                     <span>Skills</span>
                   </button>
                 )}
-                <button
-                  className={`view-toggle-overflow-item${view === "memory" ? " active" : ""}`}
-                  onClick={() => {
-                    onChangeView("memory");
-                    setIsViewOverflowOpen(false);
-                  }}
-                  role="menuitem"
-                  data-testid="view-toggle-memory"
-                >
-                  <Brain size={14} />
-                  <span>Memory</span>
-                </button>
+                {experimentalFeatures?.memoryView && (
+                  <button
+                    className={`view-toggle-overflow-item${view === "memory" ? " active" : ""}`}
+                    onClick={() => {
+                      onChangeView("memory");
+                      setIsViewOverflowOpen(false);
+                    }}
+                    role="menuitem"
+                    data-testid="view-toggle-memory"
+                  >
+                    <Brain size={14} />
+                    <span>Memory</span>
+                  </button>
+                )}
               </div>
             )}
           </div>

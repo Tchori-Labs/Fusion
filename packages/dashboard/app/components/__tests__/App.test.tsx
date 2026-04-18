@@ -15,7 +15,7 @@ const defaultSettings: Settings = {
   worktreeInitCommand: "",
   testCommand: "",
   buildCommand: "",
-  experimentalFeatures: { insights: true, roadmap: true, skillsView: true, agentsView: true },
+  experimentalFeatures: { insights: true, roadmap: true, skillsView: true, agentsView: true, memoryView: true },
 };
 
 vi.mock("../../api", async (importOriginal) => {
@@ -1347,6 +1347,49 @@ describe("App view switching", () => {
     // Open the overflow menu - Insights item should not be rendered
     fireEvent.click(screen.getByTestId("view-toggle-overflow-trigger"));
     expect(screen.queryByTestId("view-overflow-insights")).toBeNull();
+  });
+
+  it("does not render memory view button when memoryView experimental feature is disabled", async () => {
+    // Override fetchSettings to return memoryView as disabled
+    (fetchSettings as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ...defaultSettings,
+      experimentalFeatures: { memoryView: false },
+    });
+
+    render(<App />);
+
+    // Wait for the header to render
+    await waitFor(() => {
+      expect(screen.getByTitle("Board view")).toBeTruthy();
+    });
+
+    // Open the overflow menu - Memory item should not be rendered
+    fireEvent.click(screen.getByTestId("view-toggle-overflow-trigger"));
+    expect(screen.queryByTestId("view-toggle-memory")).toBeNull();
+  });
+
+  it("redirects to board when memoryView experimental feature is disabled and taskView is memory", async () => {
+    // Set localStorage to memory view but memoryView is disabled
+    localStorage.setItem(taskViewStorageKey(), "memory");
+    (fetchSettings as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ...defaultSettings,
+      experimentalFeatures: { memoryView: false },
+    });
+
+    render(<App />);
+
+    // Wait for the app to settle
+    await waitFor(() => {
+      expect(fetchSettings).toHaveBeenCalled();
+    });
+
+    // Should redirect to board view since memory is disabled
+    await waitFor(() => {
+      expect(document.querySelector(".board")).toBeTruthy();
+    });
+
+    // Cleanup
+    localStorage.removeItem(taskViewStorageKey());
   });
 });
 

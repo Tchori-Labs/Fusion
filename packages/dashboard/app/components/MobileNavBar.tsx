@@ -62,7 +62,7 @@ export interface MobileNavBarProps {
   /** When true, shows the Agents mobile tab. Hidden by default (experimental feature). */
   showAgentsTab?: boolean;
   /** Experimental feature flags controlling visibility of nav items. */
-  experimentalFeatures?: { insights?: boolean; roadmap?: boolean };
+  experimentalFeatures?: { insights?: boolean; roadmap?: boolean; memoryView?: boolean };
 }
 
 function GitHubLogo({ size = 20 }: { size?: number }) {
@@ -540,15 +540,17 @@ export function MobileNavBar({
               </button>
             )}
 
-            <button
-              type="button"
-              className="mobile-more-item"
-              data-testid="mobile-more-item-memory"
-              onClick={() => handleMoreAction(() => onChangeView("memory"))}
-            >
-              <Brain />
-              <span>Memory</span>
-            </button>
+            {experimentalFeatures?.memoryView && (
+              <button
+                type="button"
+                className="mobile-more-item"
+                data-testid="mobile-more-item-memory"
+                onClick={() => handleMoreAction(() => onChangeView("memory"))}
+              >
+                <Brain />
+                <span>Memory</span>
+              </button>
+            )}
 
             <div className="mobile-more-separator" />
 

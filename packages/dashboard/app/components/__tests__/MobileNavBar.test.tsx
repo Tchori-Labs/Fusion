@@ -241,6 +241,18 @@ describe("MobileNavBar", () => {
     expect(screen.getByTestId("mobile-more-item-insights")).toBeDefined();
   });
 
+  it("does not show memory in more sheet when memoryView is not enabled", () => {
+    render(<MobileNavBar {...createDefaultProps()} experimentalFeatures={{}} />);
+    fireEvent.click(screen.getByTestId("mobile-nav-tab-more"));
+    expect(screen.queryByTestId("mobile-more-item-memory")).toBeNull();
+  });
+
+  it("shows memory in more sheet when memoryView is enabled", () => {
+    render(<MobileNavBar {...createDefaultProps()} experimentalFeatures={{ memoryView: true }} />);
+    fireEvent.click(screen.getByTestId("mobile-nav-tab-more"));
+    expect(screen.getByTestId("mobile-more-item-memory")).toBeDefined();
+  });
+
   it("insights item in more sheet calls onChangeView with 'insights'", () => {
     const props = createDefaultProps();
     const { container } = render(<MobileNavBar {...props} experimentalFeatures={{ insights: true }} />);

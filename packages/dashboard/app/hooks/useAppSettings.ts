@@ -16,6 +16,7 @@ export interface UseAppSettingsResult {
   experimentalFeatures: Record<string, boolean>;
   insightsEnabled: boolean;
   roadmapEnabled: boolean;
+  memoryEnabled: boolean;
   toggleAutoMerge: () => Promise<void>;
   toggleGlobalPause: () => Promise<void>;
   toggleEnginePause: () => Promise<void>;
@@ -39,6 +40,7 @@ export function useAppSettings(projectId?: string): UseAppSettingsResult {
   const [experimentalFeatures, setExperimentalFeatures] = useState<Record<string, boolean>>({});
   const [insightsEnabled, setInsightsEnabled] = useState(false);
   const [roadmapEnabled, setRoadmapEnabled] = useState(false);
+  const [memoryEnabled, setMemoryEnabled] = useState(false);
 
   /**
    * Fetches config and settings from the backend and updates local state.
@@ -67,6 +69,7 @@ export function useAppSettings(projectId?: string): UseAppSettingsResult {
       const features = settings.experimentalFeatures ?? {};
       setInsightsEnabled(features.insights === true);
       setRoadmapEnabled(features.roadmap === true);
+      setMemoryEnabled(features.memoryView === true);
     }
   }, [projectId]);
 
@@ -130,6 +133,7 @@ export function useAppSettings(projectId?: string): UseAppSettingsResult {
     experimentalFeatures,
     insightsEnabled,
     roadmapEnabled,
+    memoryEnabled,
     toggleAutoMerge,
     toggleGlobalPause,
     toggleEnginePause,
