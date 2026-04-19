@@ -143,7 +143,7 @@ vi.mock("./step-session-executor.js", () => ({
 }));
 
 vi.mock("./rate-limit-retry.js", () => ({
-  withRateLimitRetry: (fn: () => Promise<any>) => fn(),
+  withRateLimitRetry: vi.fn((fn: () => Promise<unknown>) => fn()),
 }));
 vi.mock("@mariozechner/pi-coding-agent", () => {
   const mockSessionManager = {};
@@ -175,12 +175,14 @@ import type { Task, TaskDetail } from "@fusion/core";
 import { SessionManager } from "@mariozechner/pi-coding-agent";
 import { StepSessionExecutor } from "./step-session-executor.js";
 import { executorLog } from "./logger.js";
+import { withRateLimitRetry } from "./rate-limit-retry.js";
 
 const mockedCreateHaiAgent = vi.mocked(createKbAgent);
 const mockedSessionManager = vi.mocked(SessionManager);
 const mockedGenerateWorktreeName = vi.mocked(generateWorktreeName);
 const mockedFindWorktreeUser = vi.mocked(findWorktreeUser);
 const mockedStepSessionExecutor = vi.mocked(StepSessionExecutor);
+const mockedWithRateLimitRetry = vi.mocked(withRateLimitRetry);
 
 type EventListener = (...args: unknown[]) => void;
 
@@ -3240,6 +3242,141 @@ describe("TaskExecutor pause behavior", () => {
 });
 
 describe("session tracking failure diagnostics", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockedWithRateLimitRetry.mockImplementation((fn: () => Promise<unknown>) => fn());
+  });
+
+  it("logs warning when rate-limit retry logEntry fails in step-session mode", async () => {
+    const warnSpy = vi.spyOn(executorLog, "warn");
+    const store = createMockStore();
+
+    store.getSettings.mockResolvedValue({
+      maxConcurrent: 2,
+      maxWorktrees: 4,
+      pollIntervalMs: 15000,
+      groupOverlappingFiles: false,
+      autoMerge: false,
+      runStepsInNewSessions: true,
+      maxParallelSteps: 2,
+    });
+    store.getTask.mockResolvedValue({
+      id: "FN-001",
+      title: "Rate-limit step-session task",
+      description: "Rate-limit diagnostics",
+      column: "in-progress",
+      dependencies: [],
+      steps: [{ name: "Step 0", status: "pending" }],
+      currentStep: 0,
+      log: [],
+      prompt: "# test\n## Steps\n### Step 0: Preflight\n- [ ] check",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      baseCommitSha: "abc123",
+      enabledWorkflowSteps: [],
+    });
+
+    mockExecuteAll.mockResolvedValue([{ stepIndex: 0, success: true, retries: 0 }]);
+
+    store.logEntry.mockImplementation(async (_taskId: string, message: string) => {
+      if (message.includes("Rate limited — retry")) {
+        throw new Error("step-session retry log failure");
+      }
+      return undefined;
+    });
+
+    mockedWithRateLimitRetry.mockImplementationOnce((async (
+      fn: () => Promise<unknown>,
+      options?: { onRetry?: (attempt: number, delayMs: number, error: Error) => void },
+    ) => {
+      options?.onRetry?.(2, 4_000, new Error("rate limit"));
+      return fn();
+    }) as typeof withRateLimitRetry);
+
+    const executor = new TaskExecutor(store, "/tmp/test");
+    await expect(executor.execute({
+      id: "FN-001",
+      title: "Rate-limit step-session task",
+      description: "Rate-limit diagnostics",
+      column: "in-progress",
+      dependencies: [],
+      steps: [{ name: "Step 0", status: "pending" }],
+      currentStep: 0,
+      log: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    })).resolves.toBeUndefined();
+
+    expect(store.moveTask).toHaveBeenCalledWith("FN-001", "in-review");
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("FN-001: failed to log rate-limit retry 2: step-session retry log failure"),
+    );
+
+    warnSpy.mockRestore();
+  });
+
+  it("logs warning when rate-limit retry logEntry fails in main-agent mode", async () => {
+    const warnSpy = vi.spyOn(executorLog, "warn");
+    const store = createMockStore();
+    let capturedCustomTools: Array<{ name: string; execute: (callId: string, args: Record<string, unknown>) => Promise<unknown> }> = [];
+
+    store.logEntry.mockImplementation(async (_taskId: string, message: string) => {
+      if (message.includes("Rate limited — retry")) {
+        throw new Error("main-agent retry log failure");
+      }
+      return undefined;
+    });
+
+    mockedCreateHaiAgent.mockImplementation((async (opts: { customTools?: typeof capturedCustomTools }) => {
+      capturedCustomTools = opts.customTools ?? [];
+      return {
+        session: {
+          prompt: vi.fn().mockImplementation(async () => {
+            const taskDoneTool = capturedCustomTools.find((tool) => tool.name === "task_done");
+            if (taskDoneTool) {
+              await taskDoneTool.execute("call-1", { summary: "done" });
+            }
+          }),
+          dispose: vi.fn(),
+          subscribe: vi.fn(),
+          on: vi.fn(),
+          sessionManager: { getLeafId: vi.fn().mockReturnValue("leaf-1") },
+          state: {},
+        },
+        sessionFile: "/tmp/sessions/main-agent-rate-limit.jsonl",
+      };
+    }) as any);
+
+    mockedWithRateLimitRetry.mockImplementationOnce((async (
+      fn: () => Promise<unknown>,
+      options?: { onRetry?: (attempt: number, delayMs: number, error: Error) => void },
+    ) => {
+      options?.onRetry?.(1, 3_000, new Error("rate limit"));
+      return fn();
+    }) as typeof withRateLimitRetry);
+
+    const executor = new TaskExecutor(store, "/tmp/test");
+    await expect(executor.execute({
+      id: "FN-001",
+      title: "Rate-limit main-agent task",
+      description: "Rate-limit diagnostics",
+      column: "in-progress",
+      dependencies: [],
+      steps: [{ name: "Step 0", status: "pending" }],
+      currentStep: 0,
+      log: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    })).resolves.toBeUndefined();
+
+    expect(store.moveTask).toHaveBeenCalledWith("FN-001", "in-review");
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("FN-001: failed to log rate-limit retry 1: main-agent retry log failure"),
+    );
+
+    warnSpy.mockRestore();
+  });
+
   it("logs warning when sessionFile update fails during retry", async () => {
     const warnSpy = vi.spyOn(executorLog, "warn");
     const store = createMockStore();
@@ -3282,8 +3419,9 @@ describe("session tracking failure diagnostics", () => {
       updatedAt: new Date().toISOString(),
     })).resolves.toBeUndefined();
 
+    expect(mockedCreateHaiAgent).toHaveBeenCalledTimes(2);
     expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining("FN-001: failed to update sessionFile during retry"),
+      expect.stringContaining("FN-001: failed to persist retry session file: retry sessionFile write failed"),
     );
 
     warnSpy.mockRestore();
@@ -3322,8 +3460,9 @@ describe("session tracking failure diagnostics", () => {
       updatedAt: new Date().toISOString(),
     })).resolves.toBeUndefined();
 
+    expect(store.moveTask).toHaveBeenCalledWith("FN-001", "in-review");
     expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining("FN-001: failed to clear sessionFile on completion"),
+      expect.stringContaining("FN-001: failed to clear session file on exit: session clear failed"),
     );
 
     warnSpy.mockRestore();

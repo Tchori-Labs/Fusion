@@ -1434,7 +1434,7 @@ export class TaskExecutor {
             executorLog.warn(`⏳ ${task.id} rate limited — retry ${attempt} in ${delaySec}s: ${error.message}`);
             this.store.logEntry(task.id, `Rate limited — retry ${attempt} in ${delaySec}s`, undefined, this.currentRunContext).catch((err: unknown) => {
               const msg = err instanceof Error ? err.message : String(err);
-              executorLog.warn(`${task.id}: failed to log rate-limit entry during step-session execution: ${msg}`);
+              executorLog.warn(`${task.id}: failed to log rate-limit retry ${attempt}: ${msg}`);
             });
           },
         });
@@ -1917,7 +1917,7 @@ export class TaskExecutor {
             if (retrySessionFile) {
               this.store.updateTask(task.id, { sessionFile: retrySessionFile }).catch((err: unknown) => {
                 const msg = err instanceof Error ? err.message : String(err);
-                executorLog.warn(`${task.id}: failed to update sessionFile during retry: ${msg}`);
+                executorLog.warn(`${task.id}: failed to persist retry session file: ${msg}`);
               });
             }
 
@@ -2006,7 +2006,7 @@ export class TaskExecutor {
           if (!wasPaused && !this.pausedAborted.has(task.id)) {
             this.store.updateTask(task.id, { sessionFile: null }).catch((err: unknown) => {
               const msg = err instanceof Error ? err.message : String(err);
-              executorLog.warn(`${task.id}: failed to clear sessionFile on completion: ${msg}`);
+              executorLog.warn(`${task.id}: failed to clear session file on exit: ${msg}`);
             });
           }
           // Invoke plugin onAgentRunEnd hook (fire-and-forget)
@@ -2021,7 +2021,7 @@ export class TaskExecutor {
           executorLog.warn(`⏳ ${task.id} rate limited — retry ${attempt} in ${delaySec}s: ${error.message}`);
           this.store.logEntry(task.id, `Rate limited — retry ${attempt} in ${delaySec}s`, undefined, this.currentRunContext).catch((err: unknown) => {
             const msg = err instanceof Error ? err.message : String(err);
-            executorLog.warn(`${task.id}: failed to log rate-limit entry during regular execution: ${msg}`);
+            executorLog.warn(`${task.id}: failed to log rate-limit retry ${attempt}: ${msg}`);
           });
         },
       });
