@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 import { randomUUID } from "node:crypto";
-import { appendFile, mkdir, open, readFile, writeFile, rename, unlink } from "node:fs/promises";
+import { mkdir, readdir, readFile, writeFile, rename, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { existsSync, watch, type FSWatcher } from "node:fs";
 import type { Task, TaskDetail, TaskCreateInput, TaskAttachment, AgentLogEntry, BoardConfig, Column, MergeResult, Settings, GlobalSettings, ProjectSettings, ActivityLogEntry, ActivityEventType, TaskDocument, TaskDocumentRevision, TaskDocumentCreateInput, TaskDocumentWithTask, InboxTask, TaskLogEntry, RunMutationContext, RunAuditEvent, RunAuditEventInput, RunAuditEventFilter, ArchivedTaskEntry, ArchiveAgentLogMode } from "./types.js";
@@ -230,7 +230,8 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       await migrateFromLegacy(this.kbDir, this._db);
     }
     await this.migrateActiveArchivedTasksToArchiveDb();
-    
+    await this.importLegacyAgentLogsOnce();
+
     // Write config.json for backward compatibility if it doesn't exist
     if (!existsSync(this.configPath)) {
       const config = await this.readConfig();
@@ -593,7 +594,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
    */
   private upsertTask(task: Task): void {
     this.db.prepare(`
-      INSERT OR REPLACE INTO tasks (
+      INSERT INTO tasks (
         id, title, description, "column", status, size, reviewLevel, currentStep,
         worktree, blockedBy, paused, baseBranch, branch, baseCommitSha, modelPresetId, modelProvider,
         modelId, validatorModelProvider, validatorModelId, planningModelProvider, planningModelId, mergeRetries,
@@ -606,6 +607,58 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
       )
+      ON CONFLICT(id) DO UPDATE SET
+        title = excluded.title,
+        description = excluded.description,
+        "column" = excluded."column",
+        status = excluded.status,
+        size = excluded.size,
+        reviewLevel = excluded.reviewLevel,
+        currentStep = excluded.currentStep,
+        worktree = excluded.worktree,
+        blockedBy = excluded.blockedBy,
+        paused = excluded.paused,
+        baseBranch = excluded.baseBranch,
+        branch = excluded.branch,
+        baseCommitSha = excluded.baseCommitSha,
+        modelPresetId = excluded.modelPresetId,
+        modelProvider = excluded.modelProvider,
+        modelId = excluded.modelId,
+        validatorModelProvider = excluded.validatorModelProvider,
+        validatorModelId = excluded.validatorModelId,
+        planningModelProvider = excluded.planningModelProvider,
+        planningModelId = excluded.planningModelId,
+        mergeRetries = excluded.mergeRetries,
+        workflowStepRetries = excluded.workflowStepRetries,
+        stuckKillCount = excluded.stuckKillCount,
+        postReviewFixCount = excluded.postReviewFixCount,
+        recoveryRetryCount = excluded.recoveryRetryCount,
+        nextRecoveryAt = excluded.nextRecoveryAt,
+        error = excluded.error,
+        summary = excluded.summary,
+        thinkingLevel = excluded.thinkingLevel,
+        createdAt = excluded.createdAt,
+        updatedAt = excluded.updatedAt,
+        columnMovedAt = excluded.columnMovedAt,
+        dependencies = excluded.dependencies,
+        steps = excluded.steps,
+        log = excluded.log,
+        attachments = excluded.attachments,
+        steeringComments = excluded.steeringComments,
+        comments = excluded.comments,
+        workflowStepResults = excluded.workflowStepResults,
+        prInfo = excluded.prInfo,
+        issueInfo = excluded.issueInfo,
+        mergeDetails = excluded.mergeDetails,
+        breakIntoSubtasks = excluded.breakIntoSubtasks,
+        enabledWorkflowSteps = excluded.enabledWorkflowSteps,
+        modifiedFiles = excluded.modifiedFiles,
+        missionId = excluded.missionId,
+        sliceId = excluded.sliceId,
+        assignedAgentId = excluded.assignedAgentId,
+        assigneeUserId = excluded.assigneeUserId,
+        checkedOutBy = excluded.checkedOutBy,
+        checkedOutAt = excluded.checkedOutAt
     `).run(
       task.id,
       task.title ?? null,
@@ -3459,8 +3512,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   }
 
   /**
-   * Append an agent log entry to the task's agent log file (JSONL format).
-   * Each entry is a single JSON line appended to `.fusion/tasks/{ID}/agent.log`.
+   * Insert an agent log entry into the agentLogEntries SQLite table.
    * Also emits an `agent:log` event for live streaming.
    *
    * @param taskId - The task ID (e.g. "KB-001")
@@ -3476,88 +3528,34 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     detail?: string,
     agent?: AgentLogEntry["agent"],
   ): Promise<void> {
+    const timestamp = new Date().toISOString();
     const entry: AgentLogEntry = {
-      timestamp: new Date().toISOString(),
+      timestamp,
       taskId,
       text,
       type,
       ...(detail !== undefined && { detail }),
       ...(agent !== undefined && { agent }),
     };
-    const dir = this.taskDir(taskId);
-    const logPath = join(dir, "agent.log");
-    await mkdir(dir, { recursive: true });
-    await appendFile(logPath, JSON.stringify(entry) + "\n");
+
+    this.db.prepare(`
+      INSERT INTO agentLogEntries (taskId, timestamp, text, type, detail, agent)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(taskId, timestamp, text, type, detail ?? null, agent ?? null);
+
+    this.db.bumpLastModified();
     this.emit("agent:log", entry);
   }
 
-  private parseAgentLogLine(line: string): AgentLogEntry | null {
-    const trimmed = line.trim();
-    if (!trimmed) return null;
-    try {
-      return JSON.parse(trimmed) as AgentLogEntry;
-    } catch {
-      return null;
-    }
-  }
-
-  private parseAgentLogContent(content: string): AgentLogEntry[] {
-    const entries: AgentLogEntry[] = [];
-    for (const line of content.split("\n")) {
-      const entry = this.parseAgentLogLine(line);
-      if (entry) entries.push(entry);
-    }
-    return entries;
-  }
-
-  private async readAgentLogTail(logPath: string, limit: number): Promise<AgentLogEntry[]> {
-    const handle = await open(logPath, "r");
-    try {
-      const { size } = await handle.stat();
-      if (size === 0) return [];
-
-      const chunkSize = 64 * 1024;
-      let position = size;
-      let buffer = Buffer.alloc(0);
-      const entriesNewestFirst: AgentLogEntry[] = [];
-
-      while (position > 0 && entriesNewestFirst.length < limit) {
-        const readSize = Math.min(chunkSize, position);
-        position -= readSize;
-
-        const chunk = Buffer.allocUnsafe(readSize);
-        const { bytesRead } = await handle.read(chunk, 0, readSize, position);
-        if (bytesRead <= 0) break;
-
-        buffer = Buffer.concat([chunk.subarray(0, bytesRead), buffer]);
-
-        while (entriesNewestFirst.length < limit) {
-          const newlineIndex = buffer.lastIndexOf(10);
-          if (newlineIndex === -1) break;
-
-          const lineBuffer = buffer.subarray(newlineIndex + 1);
-          buffer = buffer.subarray(0, newlineIndex);
-
-          if (lineBuffer.length === 0) continue;
-
-          const entry = this.parseAgentLogLine(lineBuffer.toString("utf-8"));
-          if (entry) {
-            entriesNewestFirst.push(entry);
-          }
-        }
-      }
-
-      if (entriesNewestFirst.length < limit && buffer.length > 0) {
-        const entry = this.parseAgentLogLine(buffer.toString("utf-8"));
-        if (entry) {
-          entriesNewestFirst.push(entry);
-        }
-      }
-
-      return entriesNewestFirst.reverse();
-    } finally {
-      await handle.close();
-    }
+  private mapAgentLogRow(row: Record<string, unknown>): AgentLogEntry {
+    return {
+      timestamp: row.timestamp as string,
+      taskId: row.taskId as string,
+      text: row.text as string,
+      type: row.type as AgentLogEntry["type"],
+      ...(row.detail != null && { detail: row.detail as string }),
+      ...(row.agent != null && { agent: row.agent as AgentLogEntry["agent"] }),
+    };
   }
 
   async addTaskComment(id: string, text: string, author: string): Promise<Task> {
@@ -4108,27 +4106,23 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   }
 
   /**
-   * Read all historical agent log entries for a task from its agent log file.
+   * Read historical agent log entries for a task from SQLite.
    * Returns entries in chronological order (oldest first).
    *
    * Each entry's `text` and `detail` fields are returned in full — there is
-   * no per-entry truncation at the persistence layer.  The 500-entry cap
+   * no per-entry truncation at the persistence layer. The 500-entry cap
    * (`MAX_LOG_ENTRIES`) in the dashboard hooks is a whole-list limit only.
    *
    * @param taskId - The task ID (e.g. "KB-001")
    * @param options - Optional pagination options
    * @param options.limit - Maximum number of entries to return (most recent)
    * @param options.offset - Number of most-recent entries to skip (for pagination)
-   * @returns Array of agent log entries, empty if no log file exists
+   * @returns Array of agent log entries
    */
   async getAgentLogs(
     taskId: string,
     options?: { limit?: number; offset?: number },
   ): Promise<AgentLogEntry[]> {
-    const dir = this.taskDir(taskId);
-    const logPath = join(dir, "agent.log");
-    if (!existsSync(logPath)) return [];
-
     const limit = options?.limit !== undefined
       ? (Number.isFinite(options.limit) ? Math.max(0, Math.floor(options.limit)) : 0)
       : undefined;
@@ -4136,78 +4130,50 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       ? (Number.isFinite(options.offset) ? Math.max(0, Math.floor(options.offset)) : 0)
       : 0;
 
-    // If limit is specified, use readAgentLogTail for efficiency.
+    if (limit === 0) return [];
+
     if (limit !== undefined) {
-      if (limit === 0) return [];
-      // Offset means "skip this many most-recent entries", so read enough
-      // tail entries to include the requested older page.
       const readCount = offset > 0 ? limit + offset : limit;
-      const entries = await this.readAgentLogTail(logPath, readCount);
+      const rows = this.db.prepare(`
+        SELECT * FROM agentLogEntries
+        WHERE taskId = ?
+        ORDER BY timestamp DESC
+        LIMIT ?
+      `).all(taskId, readCount) as Array<Record<string, unknown>>;
+      const entries = rows.map((row) => this.mapAgentLogRow(row)).reverse();
       if (offset > 0) {
         return entries.slice(0, Math.max(0, entries.length - offset));
       }
       return entries;
     }
 
-    // No limit specified - read entire file
-    const content = await readFile(logPath, "utf-8");
-    const entries = this.parseAgentLogContent(content);
+    const rows = this.db.prepare(`
+      SELECT * FROM agentLogEntries
+      WHERE taskId = ?
+      ORDER BY timestamp ASC
+    `).all(taskId) as Array<Record<string, unknown>>;
+    const entries = rows.map((row) => this.mapAgentLogRow(row));
     if (offset > 0) {
-      return entries.slice(0, -offset);
+      return entries.slice(0, Math.max(0, entries.length - offset));
     }
     return entries;
   }
 
   /**
-   * Count total number of log entries in the agent log file.
-   * Uses efficient newline counting to avoid parsing entire file.
+   * Count total number of persisted agent log entries for a task in SQLite.
    *
    * @param taskId - The task ID (e.g. "KB-001")
-   * @returns Total number of log entries, or 0 if no log file exists
+   * @returns Total number of log entries
    */
   async getAgentLogCount(taskId: string): Promise<number> {
-    const dir = this.taskDir(taskId);
-    const logPath = join(dir, "agent.log");
-    if (!existsSync(logPath)) return 0;
-
-    const handle = await open(logPath, "r");
-    try {
-      const { size } = await handle.stat();
-      if (size === 0) return 0;
-
-      const chunkSize = 64 * 1024;
-      const buffer = Buffer.allocUnsafe(chunkSize);
-      let position = 0;
-      let count = 0;
-      let hasNonWhitespace = false;
-      let lastByte = 0;
-
-      while (position < size) {
-        const readSize = Math.min(chunkSize, size - position);
-        const { bytesRead } = await handle.read(buffer, 0, readSize, position);
-        if (bytesRead <= 0) break;
-        for (let i = 0; i < bytesRead; i++) {
-          const byte = buffer[i];
-          if (byte === 10) count++;
-          if (byte > 32) hasNonWhitespace = true;
-          lastByte = byte;
-        }
-        position += bytesRead;
-      }
-
-      if (!hasNonWhitespace) return 0;
-      return lastByte === 10 ? count : count + 1;
-    } finally {
-      await handle.close();
-    }
+    const row = this.db.prepare(
+      "SELECT COUNT(*) as count FROM agentLogEntries WHERE taskId = ?",
+    ).get(taskId) as { count: number } | undefined;
+    return row?.count ?? 0;
   }
 
   /**
-   * Get agent log entries for a task filtered by a time range.
-   *
-   * Returns all log entries whose `timestamp` falls within [startIso, endIso]
-   * (inclusive on both ends). If endIso is null (active run), the current
-   * time is used as the upper bound.
+   * Get persisted agent log entries for a task filtered by an inclusive time range.
    *
    * @param taskId - The task ID (e.g. "KB-001")
    * @param startIso - ISO-8601 start timestamp (inclusive)
@@ -4219,11 +4185,82 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     startIso: string,
     endIso: string | null,
   ): Promise<AgentLogEntry[]> {
-    const allEntries = await this.getAgentLogs(taskId);
     const end = endIso ?? new Date().toISOString();
-    return allEntries.filter((entry) => {
-      return entry.timestamp >= startIso && entry.timestamp <= end;
-    });
+    const rows = this.db.prepare(`
+      SELECT * FROM agentLogEntries
+      WHERE taskId = ? AND timestamp >= ? AND timestamp <= ?
+      ORDER BY timestamp ASC
+    `).all(taskId, startIso, end) as Array<Record<string, unknown>>;
+    return rows.map((row) => this.mapAgentLogRow(row));
+  }
+
+  async importLegacyAgentLogs(): Promise<number> {
+    if (!existsSync(this.tasksDir)) return 0;
+
+    const entries = await readdir(this.tasksDir, { withFileTypes: true });
+    let imported = 0;
+    const insertStmt = this.db.prepare(`
+      INSERT INTO agentLogEntries (taskId, timestamp, text, type, detail, agent)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const logPath = join(this.tasksDir, entry.name, "agent.log");
+      if (!existsSync(logPath)) continue;
+
+      try {
+        const content = await readFile(logPath, "utf-8");
+        for (const line of content.split("\n")) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+
+          try {
+            const parsed = JSON.parse(trimmed) as Record<string, unknown>;
+            const timestamp = typeof parsed.timestamp === "string" ? parsed.timestamp : null;
+            const parsedTaskId = typeof parsed.taskId === "string" ? parsed.taskId : null;
+            const type = typeof parsed.type === "string" ? parsed.type : null;
+            if (!timestamp || !parsedTaskId || !type) continue;
+
+            const text = typeof parsed.text === "string" ? parsed.text : "";
+            const detail = typeof parsed.detail === "string" ? parsed.detail : null;
+            const agent = typeof parsed.agent === "string" ? parsed.agent : null;
+
+            insertStmt.run(parsedTaskId, timestamp, text, type, detail, agent);
+            imported += 1;
+          } catch {
+            // Skip malformed JSONL lines.
+          }
+        }
+      } catch {
+        // Skip unreadable files.
+      }
+    }
+
+    if (imported > 0) {
+      this.db.bumpLastModified();
+    }
+
+    return imported;
+  }
+
+  private async importLegacyAgentLogsOnce(): Promise<void> {
+    const migrationKey = "agentLogLegacyFileImportVersion";
+    const migrationVersion = "1";
+    const row = this.db.prepare("SELECT value FROM __meta WHERE key = ?").get(migrationKey) as
+      | { value: string }
+      | undefined;
+
+    if (row?.value === migrationVersion) {
+      return;
+    }
+
+    await this.importLegacyAgentLogs();
+    this.db.prepare(`
+      INSERT INTO __meta (key, value) VALUES (?, ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value
+    `).run(migrationKey, migrationVersion);
+    this.db.bumpLastModified();
   }
 
   // ── Archive Cleanup Methods ─────────────────────────────────────────
@@ -4325,7 +4362,9 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
    * Restore a task from an archive entry.
    * Recreates task directory with task.json and PROMPT.md.
    * Clears transient execution state (worktree, status, blockedBy, etc.).
-   * Does NOT recreate agent.log (intentionally lost during archive).
+   * Agent log entries are stored in SQLite and are deleted by FK cascade when
+   * the task row is removed; archive snapshots (`agentLogFull`/`agentLogSnapshot`)
+   * preserve point-in-time log data inside the archived task record.
    */
   private async restoreFromArchive(entry: import("./types.js").ArchivedTaskEntry): Promise<Task> {
     const dir = this.taskDir(entry.id);

@@ -510,7 +510,7 @@ async function migrateAgents(kbDir: string, db: Database): Promise<void> {
 
 /**
  * Create backups of legacy files by renaming them with .bak suffix.
- * Note: .fusion/tasks/ is NOT renamed because blob files (PROMPT.md, agent.log,
+ * Note: .fusion/tasks/ is NOT renamed because blob files (PROMPT.md,
  * attachments) remain on the filesystem. Only task.json files inside each
  * task directory are the "migrated" data now in SQLite. We rename individual
  * task.json files to task.json.bak instead.

@@ -34,7 +34,7 @@ Only `@gsxdsm/fusion` is published. The others are internal workspace packages.
 
 ## Storage Model
 
-Fusion uses a hybrid storage architecture: structured metadata lives in SQLite (`.fusion/fusion.db`) while large blob files (PROMPT.md, agent.log, attachments) remain on the filesystem under `.fusion/tasks/{ID}/`. The database runs in WAL mode for concurrent access.
+Fusion uses a hybrid storage architecture: structured metadata lives in SQLite (`.fusion/fusion.db`) while large blob files (PROMPT.md, attachments) remain on the filesystem under `.fusion/tasks/{ID}/`. The database runs in WAL mode for concurrent access.
 
 See [docs/storage.md](./docs/storage.md) for the full storage architecture documentation.
 

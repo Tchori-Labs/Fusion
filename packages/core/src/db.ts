@@ -59,7 +59,7 @@ export function fromJson<T>(json: string | null | undefined): T | undefined {
 
 // ── Schema Definition ────────────────────────────────────────────────
 
-const SCHEMA_VERSION = 39;
+const SCHEMA_VERSION = 40;
 
 function normalizeTaskComments(
   steeringComments: SteeringComment[] | undefined,
@@ -282,6 +282,19 @@ CREATE TABLE IF NOT EXISTS agentRuns (
 );
 CREATE INDEX IF NOT EXISTS idxAgentRunsAgentIdStartedAt ON agentRuns(agentId, startedAt);
 CREATE INDEX IF NOT EXISTS idxAgentRunsStatus ON agentRuns(status);
+
+CREATE TABLE IF NOT EXISTS agentLogEntries (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  taskId TEXT NOT NULL,
+  timestamp TEXT NOT NULL,
+  text TEXT NOT NULL,
+  type TEXT NOT NULL,
+  detail TEXT,
+  agent TEXT,
+  FOREIGN KEY (taskId) REFERENCES tasks(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idxAgentLogEntriesTaskIdTimestamp ON agentLogEntries(taskId, timestamp);
+CREATE INDEX IF NOT EXISTS idxAgentLogEntriesTaskIdType ON agentLogEntries(taskId, type);
 
 CREATE TABLE IF NOT EXISTS agentTaskSessions (
   agentId TEXT NOT NULL,
@@ -1588,6 +1601,25 @@ export class Database {
             FOREIGN KEY (agentId) REFERENCES agents(id) ON DELETE CASCADE
           )
         `);
+      });
+    }
+
+    if (version < 40) {
+      this.applyMigration(40, () => {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS agentLogEntries (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            taskId TEXT NOT NULL,
+            timestamp TEXT NOT NULL,
+            text TEXT NOT NULL,
+            type TEXT NOT NULL,
+            detail TEXT,
+            agent TEXT,
+            FOREIGN KEY (taskId) REFERENCES tasks(id) ON DELETE CASCADE
+          )
+        `);
+        this.db.exec(`CREATE INDEX IF NOT EXISTS idxAgentLogEntriesTaskIdTimestamp ON agentLogEntries(taskId, timestamp)`);
+        this.db.exec(`CREATE INDEX IF NOT EXISTS idxAgentLogEntriesTaskIdType ON agentLogEntries(taskId, type)`);
       });
     }
 

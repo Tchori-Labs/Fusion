@@ -88,6 +88,21 @@ describe("TaskStore", () => {
     return dir;
   }
 
+  function insertLogEntryWithTimestamp(
+    targetStore: TaskStore,
+    taskId: string,
+    text: string,
+    type: string,
+    timestamp: string,
+    detail?: string,
+    agent?: string,
+  ): void {
+    (targetStore as any).db.prepare(`
+      INSERT INTO agentLogEntries (taskId, timestamp, text, type, detail, agent)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(taskId, timestamp, text, type, detail ?? null, agent ?? null);
+  }
+
   // ── Prompt generation (no duplicate description) ───────────────
 
   describe("prompt generation", () => {
@@ -3031,20 +3046,6 @@ describe("TaskStore", () => {
       expect(fetched.comments).toHaveLength(1);
     });
 
-    it("appendAgentLog recreates missing task directory before writing agent.log", async () => {
-      const task = await createTestTask();
-      const dir = await deleteTaskDir(task.id);
-
-      await store.appendAgentLog(task.id, "Recovered log", "text");
-
-      expect(existsSync(dir)).toBe(true);
-      expect(existsSync(join(dir, "agent.log"))).toBe(true);
-
-      const logs = await store.getAgentLogs(task.id);
-      expect(logs).toHaveLength(1);
-      expect(logs[0].text).toBe("Recovered log");
-    });
-
     it("addAttachment recreates missing task directory and attachment directory", async () => {
       const task = await createTestTask();
       const dir = await deleteTaskDir(task.id);
@@ -3569,11 +3570,21 @@ Task with acceptance criteria
   });
 
   describe("agent log persistence", () => {
-    it("appendAgentLog creates agent.log and getAgentLogs reads it back", async () => {
+    it("appendAgentLog inserts into agentLogEntries and getAgentLogs reads it back", async () => {
       const task = await createTestTask();
 
       await store.appendAgentLog(task.id, "Hello world", "text");
       await store.appendAgentLog(task.id, "Read", "tool");
+
+      const rows = (store as any).db.prepare(`
+        SELECT taskId, text, type FROM agentLogEntries
+        WHERE taskId = ?
+        ORDER BY timestamp ASC
+      `).all(task.id) as Array<{ taskId: string; text: string; type: string }>;
+      expect(rows).toEqual([
+        { taskId: task.id, text: "Hello world", type: "text" },
+        { taskId: task.id, text: "Read", type: "tool" },
+      ]);
 
       const logs = await store.getAgentLogs(task.id);
       expect(logs).toHaveLength(2);
@@ -3584,13 +3595,13 @@ Task with acceptance criteria
       expect(logs[1].type).toBe("tool");
     });
 
-    it("getAgentLogs returns empty array when no log file exists", async () => {
+    it("getAgentLogs returns empty array when no log entries exist", async () => {
       const task = await createTestTask();
       const logs = await store.getAgentLogs(task.id);
       expect(logs).toEqual([]);
     });
 
-    it("getAgentLogs returns empty array when the task directory is missing", async () => {
+    it("getAgentLogs returns empty array when task directory is missing", async () => {
       const task = await createTestTask();
       await deleteTaskDir(task.id);
 
@@ -3635,30 +3646,35 @@ Task with acceptance criteria
       expect(logs[0]).not.toHaveProperty("detail");
     });
 
-    it("handles multiple appends correctly (JSONL format)", async () => {
+    it("handles multiple appends correctly", async () => {
       const task = await createTestTask();
       for (let i = 0; i < 5; i++) {
         await store.appendAgentLog(task.id, `chunk ${i}`, "text");
       }
       const logs = await store.getAgentLogs(task.id);
       expect(logs).toHaveLength(5);
+      expect(logs[0].text).toBe("chunk 0");
       expect(logs[4].text).toBe("chunk 4");
     });
 
-    it("can return only the most recent agent log entries while skipping malformed lines", async () => {
+    it("getAgentLogCount returns the number of persisted log entries", async () => {
       const task = await createTestTask();
-      const dir = join(rootDir, ".fusion", "tasks", task.id);
-      const logPath = join(dir, "agent.log");
+      expect(await store.getAgentLogCount(task.id)).toBe(0);
+
+      await store.appendAgentLog(task.id, "chunk 0", "text");
+      await store.appendAgentLog(task.id, "chunk 1", "tool");
+
+      expect(await store.getAgentLogCount(task.id)).toBe(2);
+    });
+
+    it("returns the most recent agent log entries from SQLite in chronological order", async () => {
+      const task = await createTestTask();
 
       for (let i = 0; i < 5; i++) {
-        if (i === 2) {
-          await appendFile(logPath, "{not valid json}\n");
-        }
         await store.appendAgentLog(task.id, `chunk ${i}`, "text");
       }
 
       const logs = await store.getAgentLogs(task.id, { limit: 2 });
-
       expect(logs.map((entry) => entry.text)).toEqual(["chunk 3", "chunk 4"]);
     });
 
@@ -3815,20 +3831,12 @@ Task with acceptance criteria
 
     it("getAgentLogsByTimeRange filters entries by start and end timestamps (inclusive)", async () => {
       const task = await createTestTask();
-      const dir = (store as any).taskDir(task.id);
-      const { mkdirSync, writeFileSync } = await import("node:fs");
-      const { join } = await import("node:path");
 
-      // Write entries at specific timestamps directly to the JSONL file
-      mkdirSync(dir, { recursive: true });
-      const entries = [
-        { timestamp: "2024-01-01T00:00:00.000Z", taskId: task.id, text: "before start", type: "text" },
-        { timestamp: "2024-01-01T01:00:00.000Z", taskId: task.id, text: "at start", type: "text" },
-        { timestamp: "2024-01-01T02:00:00.000Z", taskId: task.id, text: "middle", type: "text" },
-        { timestamp: "2024-01-01T03:00:00.000Z", taskId: task.id, text: "at end", type: "text" },
-        { timestamp: "2024-01-01T04:00:00.000Z", taskId: task.id, text: "after end", type: "text" },
-      ];
-      writeFileSync(join(dir, "agent.log"), entries.map((e) => JSON.stringify(e)).join("\n") + "\n");
+      insertLogEntryWithTimestamp(store, task.id, "before start", "text", "2024-01-01T00:00:00.000Z");
+      insertLogEntryWithTimestamp(store, task.id, "at start", "text", "2024-01-01T01:00:00.000Z");
+      insertLogEntryWithTimestamp(store, task.id, "middle", "text", "2024-01-01T02:00:00.000Z");
+      insertLogEntryWithTimestamp(store, task.id, "at end", "text", "2024-01-01T03:00:00.000Z");
+      insertLogEntryWithTimestamp(store, task.id, "after end", "text", "2024-01-01T04:00:00.000Z");
 
       const logs = await store.getAgentLogsByTimeRange(
         task.id,
@@ -3842,18 +3850,10 @@ Task with acceptance criteria
 
     it("getAgentLogsByTimeRange uses current time when endIso is null", async () => {
       const task = await createTestTask();
-      const dir = (store as any).taskDir(task.id);
-      const { mkdirSync, writeFileSync } = await import("node:fs");
-      const { join } = await import("node:path");
 
-      mkdirSync(dir, { recursive: true });
-      const entries = [
-        { timestamp: "2024-01-01T00:00:00.000Z", taskId: task.id, text: "entry1", type: "text" },
-        { timestamp: "2024-06-01T00:00:00.000Z", taskId: task.id, text: "entry2", type: "text" },
-      ];
-      writeFileSync(join(dir, "agent.log"), entries.map((e) => JSON.stringify(e)).join("\n") + "\n");
+      insertLogEntryWithTimestamp(store, task.id, "entry1", "text", "2024-01-01T00:00:00.000Z");
+      insertLogEntryWithTimestamp(store, task.id, "entry2", "text", "2024-06-01T00:00:00.000Z");
 
-      // With null end, should include all entries after start
       const logs = await store.getAgentLogsByTimeRange(
         task.id,
         "2024-01-01T00:00:00.000Z",
@@ -3865,15 +3865,7 @@ Task with acceptance criteria
 
     it("getAgentLogsByTimeRange returns empty array when no entries match", async () => {
       const task = await createTestTask();
-      const dir = (store as any).taskDir(task.id);
-      const { mkdirSync, writeFileSync } = await import("node:fs");
-      const { join } = await import("node:path");
-
-      mkdirSync(dir, { recursive: true });
-      const entries = [
-        { timestamp: "2024-01-01T00:00:00.000Z", taskId: task.id, text: "entry1", type: "text" },
-      ];
-      writeFileSync(join(dir, "agent.log"), entries.map((e) => JSON.stringify(e)).join("\n") + "\n");
+      insertLogEntryWithTimestamp(store, task.id, "entry1", "text", "2024-01-01T00:00:00.000Z");
 
       const logs = await store.getAgentLogsByTimeRange(
         task.id,
@@ -3884,7 +3876,7 @@ Task with acceptance criteria
       expect(logs).toEqual([]);
     });
 
-    it("getAgentLogsByTimeRange returns empty array when no log file exists", async () => {
+    it("getAgentLogsByTimeRange returns empty array when no entries exist", async () => {
       const task = await createTestTask();
 
       const logs = await store.getAgentLogsByTimeRange(
@@ -3894,6 +3886,87 @@ Task with acceptance criteria
       );
 
       expect(logs).toEqual([]);
+    });
+
+    it("deleting a task cascades agent log entry deletion", async () => {
+      const task = await createTestTask();
+      await store.appendAgentLog(task.id, "cascade me", "text");
+
+      const before = (store as any).db.prepare(
+        "SELECT COUNT(*) as count FROM agentLogEntries WHERE taskId = ?",
+      ).get(task.id) as { count: number };
+      expect(before.count).toBe(1);
+
+      await store.deleteTask(task.id);
+
+      const after = (store as any).db.prepare(
+        "SELECT COUNT(*) as count FROM agentLogEntries WHERE taskId = ?",
+      ).get(task.id) as { count: number };
+      expect(after.count).toBe(0);
+    });
+
+    it("importLegacyAgentLogs imports JSONL entries from existing agent.log files", async () => {
+      const task = await createTestTask();
+      const dir = join(rootDir, ".fusion", "tasks", task.id);
+      const legacyEntries = [
+        {
+          timestamp: "2024-01-01T00:00:00.000Z",
+          taskId: task.id,
+          text: "legacy line 1",
+          type: "text",
+        },
+        {
+          timestamp: "2024-01-01T01:00:00.000Z",
+          taskId: task.id,
+          text: "legacy line 2",
+          type: "tool",
+          detail: "legacy detail",
+          agent: "executor",
+        },
+      ];
+      await writeFile(join(dir, "agent.log"), `${legacyEntries.map((entry) => JSON.stringify(entry)).join("\n")}\n`);
+
+      const imported = await store.importLegacyAgentLogs();
+
+      expect(imported).toBe(2);
+      const logs = await store.getAgentLogs(task.id);
+      expect(logs).toHaveLength(2);
+      expect(logs.map((log) => log.text)).toEqual(["legacy line 1", "legacy line 2"]);
+      expect(logs[1].detail).toBe("legacy detail");
+      expect(logs[1].agent).toBe("executor");
+    });
+
+    it("importLegacyAgentLogsOnce is idempotent via __meta guard", async () => {
+      const task = await createTestTask();
+      const dir = join(rootDir, ".fusion", "tasks", task.id);
+      const logPath = join(dir, "agent.log");
+
+      (store as any).db.prepare("DELETE FROM __meta WHERE key = ?").run("agentLogLegacyFileImportVersion");
+
+      await writeFile(logPath, `${JSON.stringify({
+        timestamp: "2024-01-01T00:00:00.000Z",
+        taskId: task.id,
+        text: "legacy line 1",
+        type: "text",
+      })}\n`);
+
+      await (store as any).importLegacyAgentLogsOnce();
+      expect(await store.getAgentLogCount(task.id)).toBe(1);
+
+      await appendFile(logPath, `${JSON.stringify({
+        timestamp: "2024-01-01T01:00:00.000Z",
+        taskId: task.id,
+        text: "legacy line 2",
+        type: "text",
+      })}\n`);
+
+      await (store as any).importLegacyAgentLogsOnce();
+      expect(await store.getAgentLogCount(task.id)).toBe(1);
+
+      const migrationRow = (store as any).db.prepare(
+        "SELECT value FROM __meta WHERE key = ?",
+      ).get("agentLogLegacyFileImportVersion") as { value: string } | undefined;
+      expect(migrationRow?.value).toBe("1");
     });
   });
 
