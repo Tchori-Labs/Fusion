@@ -46,7 +46,7 @@ describe("cross-tab session locking", () => {
 
   beforeEach(async () => {
     tmpRoot = mkdtempSync(join(tmpdir(), "kb-session-cross-tab-"));
-    taskStore = new TaskStore(tmpRoot);
+    taskStore = new TaskStore(tmpRoot, join(tmpRoot, ".fusion-global-settings"));
     await taskStore.init();
     aiSessionStore = new AiSessionStore(taskStore.getDatabase());
 

@@ -46,7 +46,7 @@ describe("MissionFactory Parity: Core MissionStore", () => {
     vi.setSystemTime(new Date("2026-04-11T00:00:00.000Z"));
 
     rootDir = makeTmpDir();
-    taskStore = new TaskStore(rootDir);
+    taskStore = new TaskStore(rootDir, join(rootDir, ".fusion-global-settings"));
     await taskStore.init();
   });
 
@@ -75,7 +75,7 @@ describe("MissionFactory Parity: Core MissionStore", () => {
 
       // Simulate restart by creating new store instance
       taskStore.close();
-      const taskStore2 = new TaskStore(rootDir);
+      const taskStore2 = new TaskStore(rootDir, join(rootDir, ".fusion-global-settings"));
       await taskStore2.init();
       const missionStore2 = taskStore2.getMissionStore();
 
@@ -99,7 +99,7 @@ describe("MissionFactory Parity: Core MissionStore", () => {
 
       // Restart
       taskStore.close();
-      const taskStore2 = new TaskStore(rootDir);
+      const taskStore2 = new TaskStore(rootDir, join(rootDir, ".fusion-global-settings"));
       await taskStore2.init();
       const missionStore2 = taskStore2.getMissionStore();
 
@@ -122,7 +122,7 @@ describe("MissionFactory Parity: Core MissionStore", () => {
 
       // Restart
       taskStore.close();
-      const taskStore2 = new TaskStore(rootDir);
+      const taskStore2 = new TaskStore(rootDir, join(rootDir, ".fusion-global-settings"));
       await taskStore2.init();
       const missionStore2 = taskStore2.getMissionStore();
 
@@ -145,7 +145,7 @@ describe("MissionFactory Parity: Core MissionStore", () => {
 
       // Restart
       taskStore.close();
-      const taskStore2 = new TaskStore(rootDir);
+      const taskStore2 = new TaskStore(rootDir, join(rootDir, ".fusion-global-settings"));
       await taskStore2.init();
       const missionStore2 = taskStore2.getMissionStore();
 
@@ -239,7 +239,7 @@ describe("MissionFactory Parity: Core MissionStore", () => {
 
       // Restart and verify link persists
       taskStore.close();
-      const taskStore2 = new TaskStore(rootDir);
+      const taskStore2 = new TaskStore(rootDir, join(rootDir, ".fusion-global-settings"));
       await taskStore2.init();
       const missionStore2 = taskStore2.getMissionStore();
 
@@ -391,7 +391,7 @@ describe("MissionFactory Parity: Core MissionStore", () => {
 
       // Restart
       taskStore.close();
-      const taskStore2 = new TaskStore(rootDir);
+      const taskStore2 = new TaskStore(rootDir, join(rootDir, ".fusion-global-settings"));
       await taskStore2.init();
       const missionStore2 = taskStore2.getMissionStore();
 
@@ -434,7 +434,7 @@ describe("MissionFactory Parity: Core MissionStore", () => {
 
       // Restart
       taskStore.close();
-      const taskStore2 = new TaskStore(rootDir);
+      const taskStore2 = new TaskStore(rootDir, join(rootDir, ".fusion-global-settings"));
       await taskStore2.init();
       const missionStore2 = taskStore2.getMissionStore();
 
@@ -456,7 +456,7 @@ describe("MissionFactory Parity: Core MissionStore", () => {
 
       // Restart
       taskStore.close();
-      const taskStore2 = new TaskStore(rootDir);
+      const taskStore2 = new TaskStore(rootDir, join(rootDir, ".fusion-global-settings"));
       await taskStore2.init();
       const missionStore2 = taskStore2.getMissionStore();
 
@@ -533,7 +533,7 @@ describe("MissionFactory Parity: Core MissionStore", () => {
 
       // Restart
       taskStore.close();
-      const taskStore2 = new TaskStore(rootDir);
+      const taskStore2 = new TaskStore(rootDir, join(rootDir, ".fusion-global-settings"));
       await taskStore2.init();
       const missionStore2 = taskStore2.getMissionStore();
 

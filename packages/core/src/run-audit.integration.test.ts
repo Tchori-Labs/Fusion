@@ -35,7 +35,7 @@ describe("Run Audit Integration", () => {
     kbDir = join(rootDir, ".fusion");
     db = new Database(kbDir);
     db.init();
-    store = new TaskStore(rootDir);
+    store = new TaskStore(rootDir, join(rootDir, ".fusion-global-settings"));
     await store.init();
   });
 

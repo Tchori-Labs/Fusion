@@ -15,7 +15,7 @@ describe("TaskStore.listTasks() sort order", () => {
 
   beforeEach(async () => {
     rootDir = makeTmpDir();
-    store = new TaskStore(rootDir);
+    store = new TaskStore(rootDir, join(rootDir, ".fusion-global-settings"));
     await store.init();
   });
 

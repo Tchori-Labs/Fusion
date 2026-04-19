@@ -10,6 +10,25 @@ function makeTmpDir(): string {
   return mkdtempSync(join(tmpdir(), "kb-global-settings-test-"));
 }
 
+/** Temporarily clear VITEST to test default GlobalSettingsStore resolution. */
+async function withDefaultGlobalSettingsStore<T>(
+  fn: (store: GlobalSettingsStore) => Promise<T>,
+): Promise<T> {
+  const savedVitest = process.env.VITEST;
+  delete process.env.VITEST;
+
+  try {
+    const store = new GlobalSettingsStore();
+    return await fn(store);
+  } finally {
+    if (savedVitest === undefined) {
+      delete process.env.VITEST;
+    } else {
+      process.env.VITEST = savedVitest;
+    }
+  }
+}
+
 describe("GlobalSettingsStore", () => {
   let dir: string;
   let store: GlobalSettingsStore;
@@ -78,17 +97,20 @@ describe("GlobalSettingsStore", () => {
         JSON.stringify({ themeMode: "light" }),
       );
 
-      const defaultStore = new GlobalSettingsStore();
-      await defaultStore.init();
+      try {
+        await withDefaultGlobalSettingsStore(async (defaultStore) => {
+          await defaultStore.init();
 
-      expect(defaultStore.getSettingsPath()).toBe(join(defaultGlobalDir(), "settings.json"));
-      expect(existsSync(join(homeDir, ".fusion", "settings.json"))).toBe(true);
-      expect(existsSync(join(homeDir, ".pi", "kb"))).toBe(false);
+          expect(defaultStore.getSettingsPath()).toBe(join(defaultGlobalDir(), "settings.json"));
+          expect(existsSync(join(homeDir, ".fusion", "settings.json"))).toBe(true);
+          expect(existsSync(join(homeDir, ".pi", "kb"))).toBe(false);
 
-      const settings = await defaultStore.getSettings();
-      expect(settings.themeMode).toBe("light");
-
-      await rm(homeDir, { recursive: true, force: true });
+          const settings = await defaultStore.getSettings();
+          expect(settings.themeMode).toBe("light");
+        });
+      } finally {
+        await rm(homeDir, { recursive: true, force: true });
+      }
     });
 
     it("adopts the legacy ~/.pi/fusion directory when ~/.fusion does not exist", async () => {
@@ -107,20 +129,22 @@ describe("GlobalSettingsStore", () => {
       expect(existsSync(join(homeDir, ".pi", "fusion", "settings.json"))).toBe(true);
       expect(existsSync(join(homeDir, ".fusion"))).toBe(false);
 
-      // Instantiate GlobalSettingsStore with no argument (uses default resolution)
-      const defaultStore = new GlobalSettingsStore();
-      await defaultStore.init();
+      try {
+        await withDefaultGlobalSettingsStore(async (defaultStore) => {
+          await defaultStore.init();
 
-      // Verify migration happened
-      expect(defaultStore.getSettingsPath()).toBe(join(defaultGlobalDir(), "settings.json"));
-      expect(existsSync(join(homeDir, ".fusion", "settings.json"))).toBe(true);
-      expect(existsSync(join(homeDir, ".pi", "fusion"))).toBe(false);
+          // Verify migration happened
+          expect(defaultStore.getSettingsPath()).toBe(join(defaultGlobalDir(), "settings.json"));
+          expect(existsSync(join(homeDir, ".fusion", "settings.json"))).toBe(true);
+          expect(existsSync(join(homeDir, ".pi", "fusion"))).toBe(false);
 
-      // Verify settings were preserved
-      const settings = await defaultStore.getSettings();
-      expect(settings.themeMode).toBe("light");
-
-      await rm(homeDir, { recursive: true, force: true });
+          // Verify settings were preserved
+          const settings = await defaultStore.getSettings();
+          expect(settings.themeMode).toBe("light");
+        });
+      } finally {
+        await rm(homeDir, { recursive: true, force: true });
+      }
     });
   });
 

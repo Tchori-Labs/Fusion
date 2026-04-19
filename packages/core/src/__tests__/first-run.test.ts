@@ -72,7 +72,9 @@ describe("FirstRunExperience", () => {
 
     it("should return true when central core is not initialized", async () => {
       const uninitializedCore = new CentralCore(tempDir);
-      const uninitializedFirstRun = new FirstRunExperience(uninitializedCore);
+      const { GlobalSettingsStore } = await import("../global-settings.js");
+      const globalSettingsStore = new GlobalSettingsStore(tempDir);
+      const uninitializedFirstRun = new FirstRunExperience(uninitializedCore, globalSettingsStore);
 
       const result = await uninitializedFirstRun.isFirstRun();
       expect(result).toBe(true);
@@ -298,8 +300,10 @@ describe("FirstRunExperience", () => {
   });
 
   describe("createFirstRunExperience", () => {
-    it("should create a FirstRunExperience instance", () => {
-      const instance = createFirstRunExperience(centralCore);
+    it("should create a FirstRunExperience instance", async () => {
+      const { GlobalSettingsStore } = await import("../global-settings.js");
+      const globalSettingsStore = new GlobalSettingsStore(tempDir);
+      const instance = createFirstRunExperience(centralCore, globalSettingsStore);
       expect(instance).toBeInstanceOf(FirstRunExperience);
     });
   });

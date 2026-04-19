@@ -177,7 +177,7 @@ describe("TaskStore Backward Compatibility", () => {
       mkdirSync(projectDir, { recursive: true });
 
       // Direct construction should still work
-      const store = new TaskStore(projectDir);
+      const store = new TaskStore(projectDir, join(projectDir, ".fusion-global-settings"));
       await store.init();
 
       expect(store).toBeInstanceOf(TaskStore);
@@ -198,7 +198,7 @@ describe("TaskStore Backward Compatibility", () => {
       const projectDir = join(tempDir, "event-test");
       mkdirSync(projectDir, { recursive: true });
 
-      const store = new TaskStore(projectDir);
+      const store = new TaskStore(projectDir, join(projectDir, ".fusion-global-settings"));
       await store.init();
 
       const taskCreatedListener = vi.fn();

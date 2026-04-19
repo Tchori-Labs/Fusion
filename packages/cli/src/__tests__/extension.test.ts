@@ -748,7 +748,7 @@ describe("fn pi extension", () => {
         makeCtx(tmpDir),
       );
 
-      const store = new TaskStore(tmpDir);
+      const store = new TaskStore(tmpDir, join(tmpDir, ".fusion-global-settings"));
       await store.init();
       const persisted = store.getMissionStore().getMilestone(result.details.milestoneId);
 
@@ -780,7 +780,7 @@ describe("fn pi extension", () => {
         makeCtx(tmpDir),
       );
 
-      const store = new TaskStore(tmpDir);
+      const store = new TaskStore(tmpDir, join(tmpDir, ".fusion-global-settings"));
       await store.init();
       const persisted = store.getMissionStore().getSlice(result.details.sliceId);
 
@@ -820,7 +820,7 @@ describe("fn pi extension", () => {
         makeCtx(tmpDir),
       );
 
-      const store = new TaskStore(tmpDir);
+      const store = new TaskStore(tmpDir, join(tmpDir, ".fusion-global-settings"));
       await store.init();
       const persisted = store.getMissionStore().getFeature(result.details.featureId);
 
@@ -890,7 +890,7 @@ describe("fn pi extension", () => {
         makeCtx(tmpDir),
       );
 
-      const store = new TaskStore(tmpDir);
+      const store = new TaskStore(tmpDir, join(tmpDir, ".fusion-global-settings"));
       await store.init();
       const persisted = store.getMissionStore().getSlice(slice.details.sliceId);
 
@@ -989,7 +989,7 @@ describe("fn pi extension", () => {
         makeCtx(tmpDir),
       );
 
-      const store = new TaskStore(tmpDir);
+      const store = new TaskStore(tmpDir, join(tmpDir, ".fusion-global-settings"));
       await store.init();
       const missionStore = store.getMissionStore();
       const persisted = missionStore.getFeature(feature.details.featureId);

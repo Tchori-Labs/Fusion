@@ -88,7 +88,7 @@ describe("MissionStore integration with TaskStore", () => {
     vi.setSystemTime(new Date("2026-04-01T00:00:00.000Z"));
 
     rootDir = makeTmpDir();
-    taskStore = new TaskStore(rootDir);
+    taskStore = new TaskStore(rootDir, join(rootDir, ".fusion-global-settings"));
     await taskStore.init();
   });
 
@@ -410,7 +410,7 @@ describe("MissionStore integration with TaskStore", () => {
 
       // Restart store
       taskStore.close();
-      const taskStore2 = new TaskStore(rootDir);
+      const taskStore2 = new TaskStore(rootDir, join(rootDir, ".fusion-global-settings"));
       await taskStore2.init();
       const missionStore2 = taskStore2.getMissionStore();
 
@@ -436,7 +436,7 @@ describe("MissionStore integration with TaskStore", () => {
 
       // Restart store
       taskStore.close();
-      const taskStore2 = new TaskStore(rootDir);
+      const taskStore2 = new TaskStore(rootDir, join(rootDir, ".fusion-global-settings"));
       await taskStore2.init();
       const missionStore2 = taskStore2.getMissionStore();
 
@@ -461,7 +461,7 @@ describe("MissionStore integration with TaskStore", () => {
 
       // Restart store
       taskStore.close();
-      const taskStore2 = new TaskStore(rootDir);
+      const taskStore2 = new TaskStore(rootDir, join(rootDir, ".fusion-global-settings"));
       await taskStore2.init();
       const missionStore2 = taskStore2.getMissionStore();
 
@@ -484,7 +484,7 @@ describe("MissionStore integration with TaskStore", () => {
 
       // Restart store
       taskStore.close();
-      const taskStore2 = new TaskStore(rootDir);
+      const taskStore2 = new TaskStore(rootDir, join(rootDir, ".fusion-global-settings"));
       await taskStore2.init();
       const missionStore2 = taskStore2.getMissionStore();
 
@@ -506,7 +506,7 @@ describe("MissionStore integration with TaskStore", () => {
 
       // Restart store
       taskStore.close();
-      const taskStore2 = new TaskStore(rootDir);
+      const taskStore2 = new TaskStore(rootDir, join(rootDir, ".fusion-global-settings"));
       await taskStore2.init();
       const missionStore2 = taskStore2.getMissionStore();
 
@@ -530,7 +530,7 @@ describe("MissionStore integration with TaskStore", () => {
 
       // Restart store
       taskStore.close();
-      const taskStore2 = new TaskStore(rootDir);
+      const taskStore2 = new TaskStore(rootDir, join(rootDir, ".fusion-global-settings"));
       await taskStore2.init();
       const missionStore2 = taskStore2.getMissionStore();
 
@@ -556,7 +556,7 @@ describe("MissionStore integration with TaskStore", () => {
 
       // Restart store
       taskStore.close();
-      const taskStore2 = new TaskStore(rootDir);
+      const taskStore2 = new TaskStore(rootDir, join(rootDir, ".fusion-global-settings"));
       await taskStore2.init();
       const missionStore2 = taskStore2.getMissionStore();
 

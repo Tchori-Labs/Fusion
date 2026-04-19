@@ -1719,7 +1719,7 @@ describe("planning routes lock enforcement", () => {
     setupMockAgent();
 
     tmpRoot = mkdtempSync(join(tmpdir(), "kb-planning-lock-routes-"));
-    taskStore = new TaskStore(tmpRoot);
+    taskStore = new TaskStore(tmpRoot, join(tmpRoot, ".fusion-global-settings"));
     await taskStore.init();
 
     db = new Database(join(tmpRoot, ".fusion-locks"));

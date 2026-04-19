@@ -41,9 +41,10 @@ const storeCache = new Map<string, TaskStore>();
  */
 export async function resolveProject(
   projectNameFlag?: string,
-  cwd: string = process.cwd()
+  cwd: string = process.cwd(),
+  globalDir?: string,
 ): Promise<ProjectContext> {
-  const central = new CentralCore();
+  const central = new CentralCore(globalDir);
   await central.init();
 
   try {
@@ -61,12 +62,12 @@ export async function resolveProject(
 
     // 2. Default project from global settings
     if (!project) {
-      const defaultProject = await getDefaultProject();
+      const defaultProject = await getDefaultProject(globalDir);
       if (defaultProject) {
         project = await central.getProject(defaultProject.id);
         // If default project was deleted from registry, clear it
         if (!project) {
-          await clearDefaultProject();
+          await clearDefaultProject(globalDir);
         }
       }
     }
@@ -82,8 +83,8 @@ export async function resolveProject(
 
       const isRegistered = Boolean(detected.id);
       const store = isRegistered
-        ? await getStoreForProject(detected.id, detected.path)
-        : await createLocalStore(detected.path);
+        ? await getStoreForProject(detected.id, detected.path, globalDir)
+        : await createLocalStore(detected.path, globalDir);
 
       // For unregistered projects, use the path as the project ID
       const projectId = isRegistered ? detected.id : detected.path;
@@ -97,7 +98,7 @@ export async function resolveProject(
       };
     }
 
-    const store = await getStoreForProject(project.id, project.path);
+    const store = await getStoreForProject(project.id, project.path, globalDir);
 
     return {
       projectId: project.id,
@@ -115,8 +116,8 @@ export async function resolveProject(
  * Get the default project from global settings.
  * Returns undefined if no default is set or if the project no longer exists.
  */
-export async function getDefaultProject(): Promise<RegisteredProject | undefined> {
-  const globalStore = new GlobalSettingsStore();
+export async function getDefaultProject(globalDir?: string): Promise<RegisteredProject | undefined> {
+  const globalStore = new GlobalSettingsStore(globalDir);
   await globalStore.init();
 
   const settings = await globalStore.getSettings();
@@ -124,7 +125,7 @@ export async function getDefaultProject(): Promise<RegisteredProject | undefined
     return undefined;
   }
 
-  const central = new CentralCore();
+  const central = new CentralCore(globalDir);
   await central.init();
   try {
     return await central.getProject(settings.defaultProjectId);
@@ -138,9 +139,9 @@ export async function getDefaultProject(): Promise<RegisteredProject | undefined
  * @param projectId - Project ID to set as default
  * @throws Error if project not found
  */
-export async function setDefaultProject(projectId: string): Promise<void> {
+export async function setDefaultProject(projectId: string, globalDir?: string): Promise<void> {
   // Verify project exists
-  const central = new CentralCore();
+  const central = new CentralCore(globalDir);
   await central.init();
   try {
     const project = await central.getProject(projectId);
@@ -151,7 +152,7 @@ export async function setDefaultProject(projectId: string): Promise<void> {
     await central.close();
   }
 
-  const globalStore = new GlobalSettingsStore();
+  const globalStore = new GlobalSettingsStore(globalDir);
   await globalStore.init();
   await globalStore.updateSettings({ defaultProjectId: projectId });
 }
@@ -159,8 +160,8 @@ export async function setDefaultProject(projectId: string): Promise<void> {
 /**
  * Clear the default project setting.
  */
-export async function clearDefaultProject(): Promise<void> {
-  const globalStore = new GlobalSettingsStore();
+export async function clearDefaultProject(globalDir?: string): Promise<void> {
+  const globalStore = new GlobalSettingsStore(globalDir);
   await globalStore.init();
   const current = await globalStore.getSettings();
    
@@ -243,7 +244,8 @@ async function findProjectByNameOrId(
  */
 export async function getStoreForProject(
   projectId: string,
-  projectPath: string
+  projectPath: string,
+  globalSettingsDir?: string,
 ): Promise<TaskStore> {
   // Check cache first
   const cached = storeCache.get(projectId);
@@ -252,7 +254,7 @@ export async function getStoreForProject(
   }
 
   // Create new store
-  const store = new TaskStore(projectPath);
+  const store = new TaskStore(projectPath, globalSettingsDir);
   await store.init();
 
   // Cache it
@@ -267,8 +269,11 @@ export function clearStoreCache(): void {
   storeCache.clear();
 }
 
-async function createLocalStore(projectPath: string): Promise<TaskStore> {
-  const store = new TaskStore(projectPath);
+async function createLocalStore(
+  projectPath: string,
+  globalSettingsDir?: string,
+): Promise<TaskStore> {
+  const store = new TaskStore(projectPath, globalSettingsDir);
   await store.init();
   return store;
 }
@@ -298,9 +303,10 @@ export function formatProjectLine(project: RegisteredProject, isDefault: boolean
  */
 export async function getStore(
   projectName?: string,
-  cwd: string = process.cwd()
+  cwd: string = process.cwd(),
+  globalDir?: string,
 ): Promise<TaskStore> {
-  const context = await resolveProject(projectName, cwd);
+  const context = await resolveProject(projectName, cwd, globalDir);
   return context.store;
 }
 

@@ -45,7 +45,15 @@ export function defaultGlobalDir(): string {
  * 4. Else → return `~/.fusion` (will be created on first use)
  */
 export function resolveGlobalDir(dir?: string): string {
-  if (dir) return dir;
+  const hasExplicitDir = typeof dir === "string" && dir.length > 0;
+
+  if (!hasExplicitDir && process.env.VITEST === "true") {
+    throw new Error(
+      "resolveGlobalDir() called without explicit dir during test execution. Pass a temp directory to avoid writing to real ~/.fusion/",
+    );
+  }
+
+  if (hasExplicitDir) return dir;
 
   const preferredDir = defaultGlobalDir();
 

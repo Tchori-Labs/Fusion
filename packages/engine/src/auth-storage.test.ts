@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { createFusionAuthStorage, getFusionAuthPath } from "./auth-storage.js";
 
 describe("createFusionAuthStorage", () => {
+  // HOME override required — createFusionAuthStorage() has no dir parameter
   const originalHome = process.env.HOME;
   let homeDir: string;
 

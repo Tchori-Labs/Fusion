@@ -1492,7 +1492,7 @@ describe("AgentStore", () => {
     let taskId: string;
 
     beforeEach(async () => {
-      taskStore = new TaskStore(rootDir);
+      taskStore = new TaskStore(rootDir, join(rootDir, ".fusion-global-settings"));
       await taskStore.init();
 
       store = new AgentStore({ rootDir, taskStore });

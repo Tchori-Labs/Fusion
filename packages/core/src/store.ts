@@ -86,7 +86,11 @@ export interface TaskStoreEvents {
 }
 
 export class TaskStore extends EventEmitter<TaskStoreEvents> {
-  static async getOrCreateForProject(projectId?: string, centralCore?: CentralCore): Promise<TaskStore> {
+  static async getOrCreateForProject(
+    projectId?: string,
+    centralCore?: CentralCore,
+    globalSettingsDir?: string,
+  ): Promise<TaskStore> {
     const central = centralCore ?? new CentralCore();
     let initializedHere = false;
 
@@ -98,7 +102,11 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     try {
       const compat = new BackwardCompat(central);
       const context = await compat.resolveProjectContext(process.cwd(), projectId);
-      const store = new TaskStore(context.workingDirectory);
+      const resolvedGlobalSettingsDir = globalSettingsDir
+        ?? (process.env.VITEST === "true"
+          ? join(context.workingDirectory, ".fusion-global-settings")
+          : undefined);
+      const store = new TaskStore(context.workingDirectory, resolvedGlobalSettingsDir);
       await store.init();
       return store;
     } catch (error) {
@@ -176,7 +184,9 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     this.kbDir = join(rootDir, ".fusion");
     this.tasksDir = join(this.kbDir, "tasks");
     this.configPath = join(this.kbDir, "config.json");
-    this.globalSettingsStore = new GlobalSettingsStore(globalSettingsDir);
+    const resolvedGlobalSettingsDir = globalSettingsDir
+      ?? (process.env.VITEST === "true" ? join(rootDir, ".fusion-global-settings") : undefined);
+    this.globalSettingsStore = new GlobalSettingsStore(resolvedGlobalSettingsDir);
   }
 
   /**

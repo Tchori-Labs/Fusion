@@ -60,6 +60,9 @@ function splitSettings(settings?: Partial<Settings>): {
  * This file provides per-fixture isolation on top of that safety net.
  *
  * Create an isolated temporary test project with a real TaskStore + SQLite DB.
+ *
+ * Note: we always pass an explicit `globalDir` into TaskStore so tests never
+ * hit `resolveGlobalDir()`'s VITEST guard or write to a real ~/.fusion path.
  */
 export async function createTestProject(
   options: CreateTestProjectOptions = {},

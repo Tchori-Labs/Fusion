@@ -21,14 +21,12 @@ describe("project-context", () => {
   let tempDir: string;
   let homeDir: string;
   let central: CentralCore;
-  const originalHome = process.env.HOME;
   const createdProjectIds: string[] = [];
 
   beforeEach(async () => {
     tempDir = mkdtempSync(join(tmpdir(), "kb-test-"));
     homeDir = mkdtempSync(join(tmpdir(), "kb-home-"));
-    process.env.HOME = homeDir;
-    central = new CentralCore();
+    central = new CentralCore(homeDir);
     await central.init();
   });
 
@@ -58,11 +56,6 @@ describe("project-context", () => {
       rmSync(homeDir, { recursive: true, force: true });
     } catch {
       // Ignore cleanup errors
-    }
-    if (originalHome === undefined) {
-      delete process.env.HOME;
-    } else {
-      process.env.HOME = originalHome;
     }
   });
 
@@ -167,7 +160,7 @@ describe("project-context", () => {
 
   describe("resolveProject", () => {
     it("should throw for unknown project name", async () => {
-      await expect(resolveProject("unknown-project", tempDir)).rejects.toThrow(
+      await expect(resolveProject("unknown-project", tempDir, homeDir)).rejects.toThrow(
         "not found"
       );
     });
@@ -175,7 +168,7 @@ describe("project-context", () => {
     it("should resolve unregistered local project from cwd", async () => {
       const projectPath = createMockProject("legacy-project");
 
-      const context = await resolveProject(undefined, projectPath);
+      const context = await resolveProject(undefined, projectPath, homeDir);
 
       expect(context.projectPath).toBe(resolve(projectPath));
       expect(context.projectName).toBe("legacy-project");
@@ -186,7 +179,7 @@ describe("project-context", () => {
       const randomDir = join(tempDir, "no-project-here");
       mkdirSync(randomDir, { recursive: true });
 
-      await expect(resolveProject(undefined, randomDir)).rejects.toThrow(
+      await expect(resolveProject(undefined, randomDir, homeDir)).rejects.toThrow(
         "No fusion project found"
       );
     });
