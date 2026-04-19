@@ -76,7 +76,7 @@ fn serve --interactive
 Start Fusion daemon (API server + AI engine, always requires bearer token authentication).
 
 ```bash
-fn daemon [--port <port>] [--host <host>] [--token <token>] [--paused] [--token-only]
+fn daemon [--port <port>] [--host <host>] [--token <token>] [--paused] [--interactive] [--token-only]
 ```
 
 | Option | Description |
@@ -98,12 +98,14 @@ Launch the Fusion desktop app (Electron).
 fn desktop
 fn desktop --dev
 fn desktop --paused
+fn desktop --interactive
 ```
 
 | Option | Description |
 |---|---|
 | `--dev` | Launch with hot-reload (connects to Vite dev server). |
 | `--paused` | Launch with automation paused. |
+| `--interactive` | Interactive port selection. |
 
 ---
 
@@ -304,9 +306,16 @@ Show and manage settings.
 ```bash
 fn settings
 fn settings set maxConcurrent 4
-fn settings export --scope both
-fn settings import fusion-settings.json --yes
+fn settings export [--scope global|project|both] [--output <file>]
+fn settings import <file> [--scope global|project|both] [--merge] [--yes]
 ```
+
+| Option | Description |
+|---|---|
+| `--scope` | Scope selector for `settings export` and `settings import`: `global`, `project`, or `both` (default: `both`). |
+| `--output` | Custom output file path for `settings export`. |
+| `--merge` | Merge imported values with existing settings (used by `settings import`). |
+| `--yes` | Skip confirmation prompt during `settings import`. |
 
 ---
 
@@ -354,20 +363,39 @@ Subcommands: `list|ls`, `install`, `uninstall`, `enable`, `disable`, `create`.
 
 ---
 
+## `fn skills`
+
+Browse and install agent skills from [skills.sh](https://skills.sh).
+
+```bash
+fn skills search <query> [--limit <n>]
+fn skills install <owner/repo> [--skill <name>]
+```
+
+Subcommands: `search`, `install`.
+
+| Option | Description |
+|---|---|
+| `--limit` | Max search results (default: 10, max: 50). Used by `search`. |
+| `--skill` | Install a specific skill by name. Used by `install`. |
+
+---
+
 ## Useful option flags by context
 
 | Option | Used by |
 |---|---|
-| `--port`, `-p` | `fn dashboard`, `fn serve` |
-| `--host` | `fn serve` |
-| `--interactive` | `fn dashboard`, `fn serve`, `fn task import`, `fn project add` |
-| `--paused` | `fn dashboard`, `fn serve`, `fn desktop` |
+| `--port`, `-p` | `fn dashboard`, `fn serve`, `fn daemon` |
+| `--host` | `fn serve`, `fn daemon` |
+| `--interactive` | `fn dashboard`, `fn serve`, `fn daemon`, `fn desktop`, `fn task import`, `fn project add` |
+| `--paused` | `fn dashboard`, `fn serve`, `fn daemon`, `fn desktop` |
 | `--dev` | `fn dashboard`, `fn desktop` |
 | `--attach` | `fn task create` |
 | `--depends` | `fn task create` |
 | `--feedback` | `fn task refine` |
 | `--yes` | confirmation-skipping flows (`task plan`, `settings import`, git pull/push, etc.) |
-| `--limit`, `-l` | `fn task import` |
+| `--limit`, `-l` | `fn task import` (default: 30, max: 100), `fn skills search` (default: 10, max: 50) |
 | `--labels`, `-L` | `fn task import` |
+| `--skill` | `fn skills install` |
 
 For configuration details used by these commands, see [Settings Reference](./settings-reference.md).

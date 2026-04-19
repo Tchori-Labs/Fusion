@@ -232,6 +232,9 @@ fn settings export                                   # Export configuration
 
 fn mission create "Auth System" "Build auth"         # Create mission
 fn mission activate-slice <slice-id>                # Activate a slice
+
+fn skills search react                              # Search skills.sh
+fn skills install firebase/agent-skills             # Install agent skills
 ```
 
 ## Packages
