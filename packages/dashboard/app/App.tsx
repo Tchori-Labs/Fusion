@@ -244,6 +244,7 @@ function AppInner() {
     insightsEnabled,
     roadmapEnabled,
     memoryEnabled,
+    devServerEnabled,
     toggleAutoMerge,
     toggleGlobalPause,
     toggleEnginePause,
@@ -252,7 +253,6 @@ function AppInner() {
 
   const skillsEnabled = experimentalFeatures.skillsView === true;
   const nodesEnabled = experimentalFeatures.nodesView === true;
-  const devServerEnabled = experimentalFeatures.devServerView === true;
   const agentsEnabled = true;
 
   // Redirect to board if feature-gated views are disabled.
@@ -271,8 +271,11 @@ function AppInner() {
     if (taskView === "memory" && !memoryEnabled) {
       handleChangeTaskView("board");
     }
-    if (taskView === "dev-server" && !devServerEnabled) {
+    if ((taskView === "devserver" || taskView === "dev-server") && !devServerEnabled) {
       handleChangeTaskView("board");
+    }
+    if (taskView === "dev-server" && devServerEnabled) {
+      handleChangeTaskView("devserver");
     }
   }, [taskView, insightsEnabled, roadmapEnabled, experimentalFeatures, handleChangeTaskView, agentsEnabled, memoryEnabled, devServerEnabled]);
 
@@ -545,7 +548,7 @@ function AppInner() {
       );
     }
 
-    if (taskView === "dev-server") {
+    if (taskView === "devserver" || taskView === "dev-server") {
       return (
         <PageErrorBoundary>
           <DevServerView addToast={addToast} projectId={currentProject?.id} />
@@ -684,7 +687,13 @@ function AppInner() {
           }
         }}
         isRemote={isRemote}
-        experimentalFeatures={{ insights: insightsEnabled, roadmap: roadmapEnabled, memoryView: memoryEnabled, devServerView: devServerEnabled }}
+        experimentalFeatures={{
+          insights: insightsEnabled,
+          roadmap: roadmapEnabled,
+          memoryView: memoryEnabled,
+          devServer: devServerEnabled,
+          devServerView: devServerEnabled,
+        }}
       />
       {viewMode === "project" && currentProject && !nodesOpen && taskView !== "missions" && !modalManager.isPlanningOpen && (
         <SessionNotificationBanner
@@ -753,9 +762,15 @@ function AppInner() {
         onOpenQuickChat={() => setQuickChatOpen(true)}
         projectId={currentProject?.id}
         showSkillsTab={skillsEnabled}
-        experimentalFeatures={{ insights: insightsEnabled, roadmap: roadmapEnabled, memoryView: memoryEnabled, devServerView: devServerEnabled }}
+        experimentalFeatures={{
+          insights: insightsEnabled,
+          roadmap: roadmapEnabled,
+          memoryView: memoryEnabled,
+          devServer: devServerEnabled,
+          devServerView: devServerEnabled,
+        }}
       />
-      {viewMode === "project" && currentProject && taskView !== "chat" && taskView !== "mailbox" && taskView !== "insights" && taskView !== "dev-server" && (
+      {viewMode === "project" && currentProject && taskView !== "chat" && taskView !== "mailbox" && taskView !== "insights" && taskView !== "devserver" && taskView !== "dev-server" && (
         <QuickChatFAB
           projectId={currentProject.id}
           addToast={addToast}

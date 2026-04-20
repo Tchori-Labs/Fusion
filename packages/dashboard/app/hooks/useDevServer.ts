@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  fetchDevServerCandidates,
+  detectDevServer,
   fetchDevServerStatus,
   getDevServerLogsStreamUrl,
   restartDevServer,
@@ -10,84 +10,118 @@ import {
   type DevServerCandidate,
   type DevServerState,
 } from "../api";
+import { subscribeSse } from "../sse-bus";
 
-const POLL_INTERVAL_MS = 3000;
 const MAX_LOG_LINES = 500;
+const POLL_INTERVAL_MS = 5000;
+
+let resetVersion = 0;
 
 function normalizeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function normalizeLines(lines: string[]): string[] {
+function capLogs(lines: string[]): string[] {
   if (lines.length <= MAX_LOG_LINES) {
     return lines;
   }
   return lines.slice(-MAX_LOG_LINES);
 }
 
-function appendLine(lines: string[], line: string): string[] {
-  return normalizeLines([...lines, line]);
+function appendLog(lines: string[], line: string): string[] {
+  return capLogs([...lines, line]);
 }
 
-function parseEventData<T>(event: MessageEvent<string>): T | null {
+function parseJson<T>(value: string): T | null {
   try {
-    return JSON.parse(event.data) as T;
+    return JSON.parse(value) as T;
   } catch {
     return null;
   }
 }
 
+function mapStateToHook(state: DevServerState | null): Pick<UseDevServerReturn, "status" | "detectedUrl" | "manualUrl" | "selectedCommand" | "serverState"> {
+  if (!state) {
+    return {
+      status: "stopped",
+      detectedUrl: null,
+      manualUrl: null,
+      selectedCommand: null,
+      serverState: null,
+    };
+  }
+
+  return {
+    status: state.status,
+    detectedUrl: state.detectedUrl ?? state.previewUrl ?? null,
+    manualUrl: state.manualUrl ?? state.manualPreviewUrl ?? null,
+    selectedCommand: state.command?.trim().length ? state.command : null,
+    serverState: state,
+  };
+}
+
+type DevServerStartArgs =
+  | string
+  | DevServerCandidate
+  | {
+    command: string;
+    cwd?: string;
+    scriptName?: string;
+    packagePath?: string;
+  };
+
 export interface UseDevServerReturn {
-  candidates: DevServerCandidate[];
-  serverState: DevServerState | null;
+  status: "starting" | "running" | "stopped" | "failed";
   logs: string[];
-  start: (arg: DevServerCandidate | { command: string; scriptName: string; cwd?: string }) => Promise<void>;
+  detectedUrl: string | null;
+  manualUrl: string | null;
+  selectedCommand: string | null;
+  candidates: DevServerCandidate[];
+  isLoading: boolean;
+  error: string | null;
+  start: (commandOrInput: DevServerStartArgs, cwd?: string, scriptName?: string, packagePath?: string) => Promise<void>;
   stop: () => Promise<void>;
   restart: () => Promise<void>;
-  setPreviewUrl: (url: string | null) => Promise<void>;
+  setManualUrl: (url: string | null) => Promise<void>;
+  detect: () => Promise<void>;
+  refreshStatus: () => Promise<void>;
+
+  // Back-compat aliases used by existing consumers/tests.
+  serverState: DevServerState | null;
   loading: boolean;
-  error: string | null;
+  setPreviewUrl: (url: string | null) => Promise<void>;
+}
+
+export function __resetUseDevServerForTests(): void {
+  resetVersion += 1;
 }
 
 export function useDevServer(projectId?: string): UseDevServerReturn {
-  const [candidates, setCandidates] = useState<DevServerCandidate[]>([]);
-  const [serverState, setServerState] = useState<DevServerState | null>(null);
+  const [status, setStatus] = useState<UseDevServerReturn["status"]>("stopped");
   const [logs, setLogs] = useState<string[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [detectedUrl, setDetectedUrl] = useState<string | null>(null);
+  const [manualUrl, setManualUrlState] = useState<string | null>(null);
+  const [selectedCommand, setSelectedCommand] = useState<string | null>(null);
+  const [candidates, setCandidates] = useState<DevServerCandidate[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [serverState, setServerState] = useState<DevServerState | null>(null);
 
-  const pollingIntervalRef = useRef<number | null>(null);
-  const eventSourceRef = useRef<EventSource | null>(null);
   const contextVersionRef = useRef(0);
 
-  const stopPolling = useCallback(() => {
-    if (pollingIntervalRef.current !== null) {
-      window.clearInterval(pollingIntervalRef.current);
-      pollingIntervalRef.current = null;
+  const applyStatusState = useCallback((state: DevServerState) => {
+    const mapped = mapStateToHook(state);
+    setStatus(mapped.status);
+    setDetectedUrl(mapped.detectedUrl);
+    setManualUrlState(mapped.manualUrl);
+    setSelectedCommand(mapped.selectedCommand);
+    setServerState(mapped.serverState);
+    if (Array.isArray(state.logs)) {
+      setLogs(capLogs(state.logs));
     }
   }, []);
 
-  const closeEventSource = useCallback(() => {
-    if (eventSourceRef.current) {
-      eventSourceRef.current.close();
-      eventSourceRef.current = null;
-    }
-  }, []);
-
-  const applyServerState = useCallback((nextState: DevServerState) => {
-    setServerState(nextState);
-    setLogs((prev) => {
-      if (!Array.isArray(nextState.logs)) {
-        return prev;
-      }
-      if (prev.length === nextState.logs.length && prev.every((line, index) => line === nextState.logs[index])) {
-        return prev;
-      }
-      return normalizeLines(nextState.logs);
-    });
-  }, []);
-
-  const pollStatus = useCallback(async () => {
+  const refreshStatus = useCallback(async () => {
     const versionAtStart = contextVersionRef.current;
 
     try {
@@ -95,170 +129,195 @@ export function useDevServer(projectId?: string): UseDevServerReturn {
       if (contextVersionRef.current !== versionAtStart) {
         return;
       }
-      applyServerState(nextState);
+      applyStatusState(nextState);
       setError(null);
-    } catch (pollError) {
+    } catch (refreshError) {
       if (contextVersionRef.current !== versionAtStart) {
         return;
       }
-      setError(normalizeError(pollError));
-      stopPolling();
+      setError(normalizeError(refreshError));
     }
-  }, [applyServerState, projectId, stopPolling]);
+  }, [applyStatusState, projectId]);
 
   useEffect(() => {
-    const versionAtStart = contextVersionRef.current + 1;
-    contextVersionRef.current = versionAtStart;
+    contextVersionRef.current += 1;
+    const versionAtStart = contextVersionRef.current;
 
-    setCandidates([]);
-    setServerState(null);
+    setStatus("stopped");
     setLogs([]);
-    setLoading(true);
+    setDetectedUrl(null);
+    setManualUrlState(null);
+    setSelectedCommand(null);
+    setCandidates([]);
+    setIsLoading(true);
     setError(null);
+    setServerState(null);
 
-    stopPolling();
-    closeEventSource();
-
-    void Promise.allSettled([
-      fetchDevServerCandidates(projectId),
-      fetchDevServerStatus(projectId),
-    ]).then((results) => {
-      if (contextVersionRef.current !== versionAtStart) {
-        return;
-      }
-
-      const [candidatesResult, statusResult] = results;
-      let nextError: string | null = null;
-
-      if (candidatesResult.status === "fulfilled") {
-        setCandidates(candidatesResult.value);
-      } else {
-        nextError = normalizeError(candidatesResult.reason);
-      }
-
-      if (statusResult.status === "fulfilled") {
-        applyServerState(statusResult.value);
-      } else {
-        nextError ??= normalizeError(statusResult.reason);
-      }
-
-      setError(nextError);
-      setLoading(false);
-    });
+    void fetchDevServerStatus(projectId)
+      .then((nextState) => {
+        if (contextVersionRef.current !== versionAtStart) {
+          return;
+        }
+        applyStatusState(nextState);
+        setError(null);
+      })
+      .catch((statusError) => {
+        if (contextVersionRef.current !== versionAtStart) {
+          return;
+        }
+        setError(normalizeError(statusError));
+      })
+      .finally(() => {
+        if (contextVersionRef.current === versionAtStart) {
+          setIsLoading(false);
+        }
+      });
 
     return () => {
-      stopPolling();
-      closeEventSource();
+      contextVersionRef.current += 1;
     };
-  }, [applyServerState, closeEventSource, projectId, stopPolling]);
+  }, [applyStatusState, projectId]);
 
   useEffect(() => {
-    const status = serverState?.status;
-    const shouldPoll = status === "starting" || status === "running";
-
-    if (!shouldPoll) {
-      stopPolling();
+    if (status !== "running" && status !== "starting") {
       return;
     }
 
-    if (pollingIntervalRef.current !== null) {
-      return;
-    }
-
-    pollingIntervalRef.current = window.setInterval(() => {
-      void pollStatus();
+    const intervalId = window.setInterval(() => {
+      void refreshStatus();
     }, POLL_INTERVAL_MS);
 
     return () => {
-      stopPolling();
+      window.clearInterval(intervalId);
     };
-  }, [pollStatus, serverState?.status, stopPolling]);
+  }, [refreshStatus, status]);
 
   useEffect(() => {
+    if (status !== "running" && status !== "starting") {
+      return;
+    }
+
     const versionAtStart = contextVersionRef.current;
-    const eventSource = new EventSource(getDevServerLogsStreamUrl(projectId));
-    eventSourceRef.current = eventSource;
 
-    const handleHistory = (event: MessageEvent<string>) => {
-      if (contextVersionRef.current !== versionAtStart) {
-        return;
-      }
+    const unsubscribe = subscribeSse(getDevServerLogsStreamUrl(projectId), {
+      events: {
+        history: (event) => {
+          if (contextVersionRef.current !== versionAtStart) {
+            return;
+          }
 
-      const payload = parseEventData<{ lines?: string[] }>(event);
-      if (!payload || !Array.isArray(payload.lines)) {
-        return;
-      }
+          const payload = parseJson<{ lines?: string[] }>(event.data);
+          const nextLogs = Array.isArray(payload?.lines)
+            ? payload.lines.filter((line): line is string => typeof line === "string")
+            : [];
+          setLogs(capLogs(nextLogs));
+        },
+        log: (event) => {
+          if (contextVersionRef.current !== versionAtStart) {
+            return;
+          }
 
-      setLogs(normalizeLines(payload.lines.filter((line): line is string => typeof line === "string")));
-    };
+          const payload = parseJson<{ line?: string; text?: string; stream?: "stdout" | "stderr" }>(event.data);
+          const text = typeof payload?.line === "string"
+            ? payload.line
+            : typeof payload?.text === "string"
+              ? payload.text
+              : event.data;
+          const stream = payload?.stream;
+          const formatted = stream === "stderr" ? `[stderr] ${text}` : text;
+          setLogs((current) => appendLog(current, formatted));
+        },
+        "dev-server:output": (event) => {
+          if (contextVersionRef.current !== versionAtStart) {
+            return;
+          }
 
-    const handleLog = (event: MessageEvent<string>) => {
-      if (contextVersionRef.current !== versionAtStart) {
-        return;
-      }
-
-      const payload = parseEventData<{ line?: string }>(event);
-      const line = typeof payload?.line === "string" ? payload.line : event.data;
-      setLogs((prev) => appendLine(prev, line));
-    };
-
-    const handleTerminalStateEvent = () => {
-      if (contextVersionRef.current !== versionAtStart) {
-        return;
-      }
-      void pollStatus();
-    };
-
-    const handleError = () => {
-      if (contextVersionRef.current !== versionAtStart) {
-        return;
-      }
-      eventSource.close();
-      eventSourceRef.current = null;
-    };
-
-    eventSource.addEventListener("history", handleHistory);
-    eventSource.addEventListener("log", handleLog);
-    eventSource.addEventListener("stopped", handleTerminalStateEvent);
-    eventSource.addEventListener("failed", handleTerminalStateEvent);
-    eventSource.addEventListener("error", handleError);
+          const payload = parseJson<{ text?: string; stream?: "stdout" | "stderr" }>(event.data);
+          if (!payload?.text) {
+            return;
+          }
+          const formatted = payload.stream === "stderr" ? `[stderr] ${payload.text}` : payload.text;
+          setLogs((current) => appendLog(current, formatted));
+        },
+        stopped: () => {
+          if (contextVersionRef.current !== versionAtStart) {
+            return;
+          }
+          void refreshStatus();
+        },
+        failed: () => {
+          if (contextVersionRef.current !== versionAtStart) {
+            return;
+          }
+          void refreshStatus();
+        },
+      },
+      onReconnect: () => {
+        if (contextVersionRef.current !== versionAtStart) {
+          return;
+        }
+        void refreshStatus();
+      },
+      onError: () => {
+        if (contextVersionRef.current !== versionAtStart) {
+          return;
+        }
+        setError((current) => current ?? "Lost log stream connection.");
+      },
+    });
 
     return () => {
-      eventSource.removeEventListener("history", handleHistory);
-      eventSource.removeEventListener("log", handleLog);
-      eventSource.removeEventListener("stopped", handleTerminalStateEvent);
-      eventSource.removeEventListener("failed", handleTerminalStateEvent);
-      eventSource.removeEventListener("error", handleError);
-      eventSource.close();
-      if (eventSourceRef.current === eventSource) {
-        eventSourceRef.current = null;
+      unsubscribe();
+    };
+  }, [projectId, refreshStatus, status]);
+
+  useEffect(() => {
+    const version = resetVersion;
+    return () => {
+      if (resetVersion !== version) {
+        contextVersionRef.current += 1;
       }
     };
-  }, [pollStatus, projectId]);
+  }, []);
 
-  const start = useCallback(async (arg: DevServerCandidate | { command: string; scriptName: string; cwd?: string }) => {
-    const versionAtStart = contextVersionRef.current;
-
-    const payload = "label" in arg
+  const start = useCallback(async (
+    commandOrInput: DevServerStartArgs,
+    cwd?: string,
+    scriptName?: string,
+    packagePath?: string,
+  ) => {
+    const payload = typeof commandOrInput === "string"
       ? {
-        command: arg.command,
-        scriptName: arg.scriptName,
-        cwd: arg.cwd,
+        command: commandOrInput,
+        cwd,
+        scriptName,
+        packagePath,
       }
       : {
-        command: arg.command,
-        scriptName: arg.scriptName,
-        cwd: arg.cwd,
+        command: commandOrInput.command,
+        cwd: commandOrInput.cwd ?? cwd,
+        scriptName: commandOrInput.scriptName ?? scriptName,
+        packagePath: commandOrInput.packagePath ?? cwd ?? commandOrInput.cwd ?? packagePath,
       };
 
+    const trimmedCommand = payload.command.trim();
+    if (!trimmedCommand) {
+      setError("Command is required to start the dev server.");
+      return;
+    }
+
+    const versionAtStart = contextVersionRef.current;
     setError(null);
+    setStatus("starting");
+    setSelectedCommand(trimmedCommand);
 
     try {
-      const nextState = await startDevServer(
+      await startDevServer(
         {
-          command: payload.command.trim(),
-          scriptName: payload.scriptName.trim(),
+          command: trimmedCommand,
           cwd: payload.cwd,
+          scriptName: payload.scriptName,
+          packagePath: payload.packagePath,
         },
         projectId,
       );
@@ -267,56 +326,65 @@ export function useDevServer(projectId?: string): UseDevServerReturn {
         return;
       }
 
-      applyServerState(nextState);
+      await refreshStatus();
     } catch (startError) {
       if (contextVersionRef.current !== versionAtStart) {
         return;
       }
-      const message = normalizeError(startError);
-      setError(message);
+
+      setStatus("failed");
+      setError(normalizeError(startError));
       throw startError;
     }
-  }, [applyServerState, projectId]);
+  }, [projectId, refreshStatus]);
 
   const stop = useCallback(async () => {
     const versionAtStart = contextVersionRef.current;
     setError(null);
 
     try {
-      const nextState = await stopDevServer(projectId);
+      await stopDevServer(projectId);
+
       if (contextVersionRef.current !== versionAtStart) {
         return;
       }
-      applyServerState(nextState);
+
+      setStatus("stopped");
+      await refreshStatus();
     } catch (stopError) {
       if (contextVersionRef.current !== versionAtStart) {
         return;
       }
+
       setError(normalizeError(stopError));
       throw stopError;
     }
-  }, [applyServerState, projectId]);
+  }, [projectId, refreshStatus]);
 
   const restart = useCallback(async () => {
     const versionAtStart = contextVersionRef.current;
     setError(null);
+    setStatus("starting");
 
     try {
-      const nextState = await restartDevServer(projectId);
+      await restartDevServer(projectId);
+
       if (contextVersionRef.current !== versionAtStart) {
         return;
       }
-      applyServerState(nextState);
+
+      await refreshStatus();
     } catch (restartError) {
       if (contextVersionRef.current !== versionAtStart) {
         return;
       }
+
       setError(normalizeError(restartError));
       throw restartError;
     }
-  }, [applyServerState, projectId]);
+  }, [projectId, refreshStatus]);
 
-  const setPreviewUrl = useCallback(async (url: string | null) => {
+  const setManualUrl = useCallback(async (url: string | null) => {
     const versionAtStart = contextVersionRef.current;
     setError(null);
 
@@ -325,25 +393,77 @@ export function useDevServer(projectId?: string): UseDevServerReturn {
       if (contextVersionRef.current !== versionAtStart) {
         return;
       }
-      applyServerState(nextState);
+
+      applyStatusState(nextState);
+      setManualUrlState(nextState.manualUrl ?? nextState.manualPreviewUrl ?? url ?? null);
     } catch (previewError) {
       if (contextVersionRef.current !== versionAtStart) {
         return;
       }
+
       setError(normalizeError(previewError));
       throw previewError;
     }
-  }, [applyServerState, projectId]);
+  }, [applyStatusState, projectId]);
 
-  return {
-    candidates,
-    serverState,
+  const detect = useCallback(async () => {
+    const versionAtStart = contextVersionRef.current;
+    setError(null);
+
+    try {
+      const detected = await detectDevServer(projectId);
+      if (contextVersionRef.current !== versionAtStart) {
+        return;
+      }
+
+      setCandidates(detected);
+    } catch (detectError) {
+      if (contextVersionRef.current !== versionAtStart) {
+        return;
+      }
+
+      setError(normalizeError(detectError));
+      throw detectError;
+    }
+  }, [projectId]);
+
+  const setPreviewUrl = useCallback((url: string | null) => setManualUrl(url), [setManualUrl]);
+
+  return useMemo(() => ({
+    status,
     logs,
+    detectedUrl,
+    manualUrl,
+    selectedCommand,
+    candidates,
+    isLoading,
+    error,
     start,
     stop,
     restart,
+    setManualUrl,
+    detect,
+    refreshStatus,
+
+    serverState,
+    loading: isLoading,
     setPreviewUrl,
-    loading,
+  }), [
+    status,
+    logs,
+    detectedUrl,
+    manualUrl,
+    selectedCommand,
+    candidates,
+    isLoading,
     error,
-  };
+    start,
+    stop,
+    restart,
+    setManualUrl,
+    detect,
+    refreshStatus,
+    serverState,
+    setPreviewUrl,
+  ]);
 }

@@ -4,7 +4,7 @@ import type { ProjectInfo } from "../api";
 import { getScopedItem, setScopedItem } from "../utils/projectStorage";
 
 export type ViewMode = "overview" | "project";
-export type TaskView = "board" | "list" | "agents" | "missions" | "chat" | "documents" | "roadmaps" | "skills" | "mailbox" | "insights" | "memory" | "dev-server";
+export type TaskView = "board" | "list" | "agents" | "missions" | "chat" | "documents" | "roadmaps" | "skills" | "mailbox" | "insights" | "memory" | "devserver" | "dev-server";
 
 const TASK_VIEWS: readonly TaskView[] = [
   "board",
@@ -18,11 +18,16 @@ const TASK_VIEWS: readonly TaskView[] = [
   "mailbox",
   "insights",
   "memory",
+  "devserver",
   "dev-server",
 ];
 
 function isTaskView(value: string | null): value is TaskView {
   return value !== null && TASK_VIEWS.includes(value as TaskView);
+}
+
+function normalizeTaskView(value: TaskView): TaskView {
+  return value === "dev-server" ? "devserver" : value;
 }
 
 interface UseViewStateOptions {
@@ -67,7 +72,7 @@ export function useViewState(options: UseViewStateOptions): UseViewStateResult {
 
   const [taskView, setTaskView] = useState<TaskView>(() => {
     const saved = getScopedItem("kb-dashboard-task-view");
-    if (isTaskView(saved)) return saved;
+    if (isTaskView(saved)) return normalizeTaskView(saved);
     return "board";
   });
 
@@ -78,14 +83,14 @@ export function useViewState(options: UseViewStateOptions): UseViewStateResult {
   useEffect(() => {
     const saved = getScopedItem("kb-dashboard-task-view", currentProject?.id);
     if (isTaskView(saved)) {
-      setTaskView(saved);
+      setTaskView(normalizeTaskView(saved));
       return;
     }
     setTaskView("board");
   }, [currentProject?.id]);
 
   useEffect(() => {
-    setScopedItem("kb-dashboard-task-view", taskView, currentProject?.id);
+    setScopedItem("kb-dashboard-task-view", normalizeTaskView(taskView), currentProject?.id);
   }, [currentProject?.id, taskView]);
 
   useEffect(() => {
@@ -116,7 +121,7 @@ export function useViewState(options: UseViewStateOptions): UseViewStateResult {
   ]);
 
   const handleChangeTaskView = useCallback((newView: TaskView) => {
-    setTaskView(newView);
+    setTaskView(normalizeTaskView(newView));
   }, []);
 
   const handleToggleTheme = useCallback(() => {

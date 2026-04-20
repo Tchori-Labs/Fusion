@@ -18,7 +18,7 @@ import {
   MoreHorizontal,
   Play,
   Settings,
-  Monitor,
+  Server,
   Sparkles,
   Target,
   Terminal,
@@ -31,9 +31,9 @@ import { useViewportMode } from "./Header";
 
 export interface MobileNavBarProps {
   /** Current task view mode */
-  view: "board" | "list" | "agents" | "missions" | "chat" | "documents" | "roadmaps" | "skills" | "mailbox" | "insights" | "memory" | "dev-server";
+  view: "board" | "list" | "agents" | "missions" | "chat" | "documents" | "roadmaps" | "skills" | "mailbox" | "insights" | "memory" | "devserver" | "dev-server";
   /** Change task view handler */
-  onChangeView: (view: "board" | "list" | "agents" | "missions" | "chat" | "documents" | "roadmaps" | "skills" | "mailbox" | "insights" | "memory" | "dev-server") => void;
+  onChangeView: (view: "board" | "list" | "agents" | "missions" | "chat" | "documents" | "roadmaps" | "skills" | "mailbox" | "insights" | "memory" | "devserver" | "dev-server") => void;
   /** Whether the ExecutorStatusBar footer is visible */
   footerVisible: boolean;
   /** Whether any full-screen modal is currently open (hides the tab bar) */
@@ -61,7 +61,7 @@ export interface MobileNavBarProps {
   /** Whether to show the skills tab */
   showSkillsTab?: boolean;
   /** Experimental feature flags controlling visibility of nav items. */
-  experimentalFeatures?: { insights?: boolean; roadmap?: boolean; memoryView?: boolean; devServerView?: boolean };
+  experimentalFeatures?: { insights?: boolean; roadmap?: boolean; memoryView?: boolean; devServer?: boolean; devServerView?: boolean };
 }
 
 function GitHubLogo({ size = 20 }: { size?: number }) {
@@ -185,6 +185,7 @@ export function MobileNavBar({
     view === "documents"
     || view === "insights"
     || view === "memory"
+    || view === "devserver"
     || view === "dev-server"
     || (view === "roadmaps" && !showRoadmapsTopLevel)
     || (view === "skills" && !showSkillsTopLevel);
@@ -578,14 +579,16 @@ export function MobileNavBar({
               </button>
             )}
 
-            {experimentalFeatures?.devServerView && (
+            {(experimentalFeatures?.devServer || experimentalFeatures?.devServerView) && (
               <button
                 type="button"
                 className="mobile-more-item"
-                data-testid="mobile-more-item-dev-server"
-                onClick={() => handleMoreAction(() => onChangeView("dev-server"))}
+                data-testid="mobile-more-item-devserver"
+                onClick={() => {
+                  handleMoreAction(() => onChangeView("devserver"));
+                }}
               >
-                <Monitor />
+                <Server size={14} />
                 <span>Dev Server</span>
               </button>
             )}

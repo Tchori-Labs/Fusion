@@ -1960,9 +1960,11 @@ function createResilientEventSource(
 }
 
 export interface DevServerCandidate {
-  name: string;
-  command: string;
   scriptName: string;
+  command: string;
+  packagePath: string;
+  confidence: number;
+  name: string;
   cwd: string;
   source: string;
   workspaceName?: string;
@@ -1979,16 +1981,21 @@ export interface DevServerState {
   pid?: number;
   startedAt?: string;
   previewUrl?: string;
+  detectedUrl?: string;
   detectedPort?: number;
   manualPreviewUrl?: string;
+  manualUrl?: string;
   logs: string[];
   exitCode?: number | null;
 }
 
+export type DevServerStatus = DevServerState;
+
 export interface DevServerStartInput {
   command: string;
-  scriptName: string;
+  scriptName?: string;
   cwd?: string;
+  packagePath?: string;
 }
 
 export interface DevServerConfig {
@@ -2005,6 +2012,8 @@ interface BackendDevServerCandidate {
   command: string;
   source?: string;
   packageName?: string;
+  packagePath?: string;
+  confidence?: number;
 }
 
 interface BackendDevServerState {
@@ -2029,6 +2038,12 @@ function mapBackendCandidateToFrontend(candidate: BackendDevServerCandidate): De
     : "root";
   const cwd = source === "root" ? "." : source;
   const scriptName = candidate.name;
+  const packagePath = typeof candidate.packagePath === "string" && candidate.packagePath.trim().length > 0
+    ? candidate.packagePath.trim()
+    : cwd;
+  const confidence = typeof candidate.confidence === "number"
+    ? candidate.confidence
+    : 1;
 
   const locationLabel = source === "root" ? "root" : source;
   const packageLabel = typeof candidate.packageName === "string" && candidate.packageName.trim().length > 0
@@ -2039,6 +2054,8 @@ function mapBackendCandidateToFrontend(candidate: BackendDevServerCandidate): De
     name: candidate.name,
     command: candidate.command,
     scriptName,
+    packagePath,
+    confidence,
     cwd,
     source,
     workspaceName: typeof candidate.packageName === "string" ? candidate.packageName : undefined,
@@ -2062,8 +2079,10 @@ function mapBackendStateToFrontend(state: BackendDevServerState): DevServerState
     pid: state.pid,
     startedAt: state.startedAt,
     previewUrl: state.detectedUrl,
+    detectedUrl: state.detectedUrl,
     detectedPort: state.detectedPort,
     manualPreviewUrl: state.manualUrl,
+    manualUrl: state.manualUrl,
     logs: Array.isArray(state.logHistory) ? state.logHistory : [],
     exitCode: state.exitCode,
   };
@@ -2073,6 +2092,10 @@ export function fetchDevServerCandidates(projectId?: string): Promise<DevServerC
   return api<{ candidates: BackendDevServerCandidate[] }>(withProjectId("/dev-server/detect", projectId)).then((response) =>
     (response.candidates ?? []).map(mapBackendCandidateToFrontend)
   );
+}
+
+export function detectDevServer(projectId?: string): Promise<DevServerCandidate[]> {
+  return fetchDevServerCandidates(projectId);
 }
 
 export function fetchDevServerConfig(projectId?: string): Promise<DevServerConfig> {
@@ -2091,12 +2114,16 @@ export function fetchDevServerStatus(projectId?: string): Promise<DevServerState
 }
 
 export function startDevServer(body: DevServerStartInput, projectId?: string): Promise<DevServerState> {
+  const cwd = body.cwd ?? body.packagePath ?? ".";
+  const scriptId = body.scriptName;
+
   return api<BackendDevServerState>(withProjectId("/dev-server/start", projectId), {
     method: "POST",
     body: JSON.stringify({
       command: body.command,
-      scriptId: body.scriptName,
-      cwd: body.cwd ?? ".",
+      scriptId,
+      cwd,
+      packagePath: body.packagePath,
     }),
   }).then(mapBackendStateToFrontend);
 }
@@ -2113,7 +2140,11 @@ export function restartDevServer(projectId?: string): Promise<DevServerState> {
   }).then(mapBackendStateToFrontend);
 }
 
-export function setDevServerPreviewUrl(body: { url: string | null }, projectId?: string): Promise<DevServerState> {
+export function setDevServerPreviewUrl(urlOrBody: string | { url: string | null }, projectId?: string): Promise<DevServerState> {
+  const body = typeof urlOrBody === "string"
+    ? { url: urlOrBody }
+    : urlOrBody;
+
   return api<BackendDevServerState>(withProjectId("/dev-server/preview-url", projectId), {
     method: "PUT",
     body: JSON.stringify(body),

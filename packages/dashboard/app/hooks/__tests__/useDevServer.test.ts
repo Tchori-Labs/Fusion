@@ -1,7 +1,7 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  fetchDevServerCandidates,
+  detectDevServer,
   fetchDevServerStatus,
   getDevServerLogsStreamUrl,
   restartDevServer,
@@ -11,26 +11,48 @@ import {
   type DevServerCandidate,
   type DevServerState,
 } from "../../api";
-import { MockEventSource } from "../../../vitest.setup";
-import { useDevServer } from "../useDevServer";
+import { subscribeSse, type SseSubscription } from "../../sse-bus";
+import { __resetUseDevServerForTests, useDevServer } from "../useDevServer";
 
 vi.mock("../../api", () => ({
-  fetchDevServerCandidates: vi.fn(),
+  detectDevServer: vi.fn(),
   fetchDevServerStatus: vi.fn(),
+  getDevServerLogsStreamUrl: vi.fn(),
   startDevServer: vi.fn(),
   stopDevServer: vi.fn(),
   restartDevServer: vi.fn(),
   setDevServerPreviewUrl: vi.fn(),
-  getDevServerLogsStreamUrl: vi.fn(),
 }));
 
-const mockFetchDevServerCandidates = vi.mocked(fetchDevServerCandidates);
+vi.mock("../../sse-bus", () => ({
+  subscribeSse: vi.fn(),
+}));
+
+const mockDetectDevServer = vi.mocked(detectDevServer);
 const mockFetchDevServerStatus = vi.mocked(fetchDevServerStatus);
+const mockGetDevServerLogsStreamUrl = vi.mocked(getDevServerLogsStreamUrl);
 const mockStartDevServer = vi.mocked(startDevServer);
 const mockStopDevServer = vi.mocked(stopDevServer);
 const mockRestartDevServer = vi.mocked(restartDevServer);
 const mockSetDevServerPreviewUrl = vi.mocked(setDevServerPreviewUrl);
-const mockGetDevServerLogsStreamUrl = vi.mocked(getDevServerLogsStreamUrl);
+const mockSubscribeSse = vi.mocked(subscribeSse);
+
+let activeSubscription: SseSubscription | null = null;
+let unsubscribeSpy = vi.fn();
+
+function createCandidate(overrides: Partial<DevServerCandidate> = {}): DevServerCandidate {
+  return {
+    scriptName: "dev",
+    command: "pnpm dev",
+    packagePath: ".",
+    confidence: 1,
+    name: "dev",
+    cwd: ".",
+    source: "root",
+    label: "project · dev (root)",
+    ...overrides,
+  };
+}
 
 function createState(overrides: Partial<DevServerState> = {}): DevServerState {
   return {
@@ -40,18 +62,9 @@ function createState(overrides: Partial<DevServerState> = {}): DevServerState {
     command: "pnpm dev",
     scriptName: "dev",
     cwd: ".",
+    detectedUrl: "http://localhost:5173",
+    manualUrl: undefined,
     logs: [],
-    ...overrides,
-  };
-}
-
-function createCandidate(overrides: Partial<DevServerCandidate> = {}): DevServerCandidate {
-  return {
-    name: "dev",
-    command: "pnpm dev",
-    scriptName: "dev",
-    cwd: ".",
-    label: "project · dev (root)",
     ...overrides,
   };
 }
@@ -67,186 +80,270 @@ describe("useDevServer", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useRealTimers();
+    __resetUseDevServerForTests();
 
-    mockFetchDevServerCandidates.mockResolvedValue([createCandidate()]);
+    activeSubscription = null;
+    unsubscribeSpy = vi.fn();
+
+    mockGetDevServerLogsStreamUrl.mockReturnValue("/api/dev-server/logs/stream");
     mockFetchDevServerStatus.mockResolvedValue(createState());
-    mockStartDevServer.mockResolvedValue(createState({ status: "running", pid: 1234 }));
+    mockDetectDevServer.mockResolvedValue([createCandidate()]);
+    mockStartDevServer.mockResolvedValue(createState({ status: "running", pid: 1111 }));
     mockStopDevServer.mockResolvedValue(createState({ status: "stopped", pid: undefined }));
-    mockRestartDevServer.mockResolvedValue(createState({ status: "running", pid: 4567 }));
-    mockSetDevServerPreviewUrl.mockResolvedValue(createState({ manualPreviewUrl: "https://localhost:5173" }));
-    mockGetDevServerLogsStreamUrl.mockReturnValue("/api/dev-server/logs/stream?projectId=project-a");
+    mockRestartDevServer.mockResolvedValue(createState({ status: "running", pid: 2222 }));
+    mockSetDevServerPreviewUrl.mockResolvedValue(createState({ manualUrl: "http://localhost:3000" }));
+
+    mockSubscribeSse.mockImplementation((_url, sub) => {
+      activeSubscription = sub;
+      return unsubscribeSpy;
+    });
   });
 
-  it("starts with loading state and triggers initial fetches", async () => {
+  it("fetches status on mount", async () => {
     const { result } = renderHook(() => useDevServer("project-a"));
 
-    expect(result.current.loading).toBe(true);
-    expect(result.current.candidates).toEqual([]);
-    expect(result.current.serverState).toBeNull();
+    expect(result.current.isLoading).toBe(true);
 
     await waitFor(() => {
-      expect(result.current.loading).toBe(false);
+      expect(result.current.isLoading).toBe(false);
     });
 
-    expect(mockFetchDevServerCandidates).toHaveBeenCalledWith("project-a");
     expect(mockFetchDevServerStatus).toHaveBeenCalledWith("project-a");
+    expect(result.current.status).toBe("stopped");
+    expect(result.current.detectedUrl).toBe("http://localhost:5173");
   });
 
-  it("populates candidates and server state from initial fetch", async () => {
-    mockFetchDevServerCandidates.mockResolvedValueOnce([
-      createCandidate({ name: "start", scriptName: "start", command: "npm run start" }),
-    ]);
-    mockFetchDevServerStatus.mockResolvedValueOnce(
-      createState({ status: "running", pid: 4321, logs: ["ready"] }),
-    );
+  it("starts polling while running", async () => {
+    vi.useFakeTimers();
 
-    const { result } = renderHook(() => useDevServer("project-a"));
+    mockFetchDevServerStatus
+      .mockResolvedValueOnce(createState({ status: "running" }))
+      .mockResolvedValue(createState({ status: "running" }));
 
-    await waitFor(() => {
-      expect(result.current.loading).toBe(false);
-    });
+    renderHook(() => useDevServer("project-a"));
 
-    expect(result.current.candidates).toHaveLength(1);
-    expect(result.current.serverState?.status).toBe("running");
-    expect(result.current.logs).toEqual(["ready"]);
-  });
-
-  it("creates EventSource and appends SSE log events", async () => {
-    const { result } = renderHook(() => useDevServer("project-a"));
-
-    await waitFor(() => {
-      expect(result.current.loading).toBe(false);
-    });
-
-    expect(mockGetDevServerLogsStreamUrl).toHaveBeenCalledWith("project-a");
-    expect(MockEventSource.instances).toHaveLength(1);
-
-    const source = MockEventSource.instances[0];
-
-    act(() => {
-      source._emit("history", { lines: ["history line"] });
-    });
-
-    await waitFor(() => {
-      expect(result.current.logs).toEqual(["history line"]);
-    });
-
-    act(() => {
-      source._emit("log", { line: "new line" });
-    });
-
-    await waitFor(() => {
-      expect(result.current.logs).toEqual(["history line", "new line"]);
-    });
-  });
-
-  it("calls start API for candidate and direct command arguments", async () => {
-    const { result } = renderHook(() => useDevServer("project-a"));
-
-    await waitFor(() => {
-      expect(result.current.loading).toBe(false);
-    });
-
-    const candidate = createCandidate({ command: "pnpm run dev", cwd: "apps/web" });
+    await flushMicrotasks();
+    expect(mockFetchDevServerStatus).toHaveBeenCalledTimes(1);
 
     await act(async () => {
-      await result.current.start(candidate);
+      vi.advanceTimersByTime(5000);
+      await Promise.resolve();
     });
 
-    expect(mockStartDevServer).toHaveBeenCalledWith(
-      { command: "pnpm run dev", scriptName: "dev", cwd: "apps/web" },
-      "project-a",
-    );
+    expect(mockFetchDevServerStatus).toHaveBeenCalledTimes(2);
 
     await act(async () => {
-      await result.current.start({ command: "npm run start", scriptName: "start", cwd: "." });
+      vi.advanceTimersByTime(5000);
+      await Promise.resolve();
     });
 
-    expect(mockStartDevServer).toHaveBeenCalledWith(
-      { command: "npm run start", scriptName: "start", cwd: "." },
-      "project-a",
-    );
+    expect(mockFetchDevServerStatus).toHaveBeenCalledTimes(3);
   });
 
-  it("calls stop, restart, and setPreviewUrl APIs", async () => {
+  it("does not poll while stopped", async () => {
+    vi.useFakeTimers();
+
+    mockFetchDevServerStatus.mockResolvedValue(createState({ status: "stopped" }));
+
+    renderHook(() => useDevServer("project-a"));
+
+    await flushMicrotasks();
+    expect(mockFetchDevServerStatus).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      vi.advanceTimersByTime(15000);
+      await Promise.resolve();
+    });
+
+    expect(mockFetchDevServerStatus).toHaveBeenCalledTimes(1);
+  });
+
+  it("subscribes to SSE while running and unsubscribes when stopped", async () => {
+    mockFetchDevServerStatus.mockResolvedValueOnce(createState({ status: "running" }));
+
     const { result } = renderHook(() => useDevServer("project-a"));
 
     await waitFor(() => {
-      expect(result.current.loading).toBe(false);
+      expect(mockSubscribeSse).toHaveBeenCalledTimes(1);
     });
 
     await act(async () => {
       await result.current.stop();
     });
-    expect(mockStopDevServer).toHaveBeenCalledWith("project-a");
 
-    await act(async () => {
-      await result.current.restart();
-    });
-    expect(mockRestartDevServer).toHaveBeenCalledWith("project-a");
-
-    await act(async () => {
-      await result.current.setPreviewUrl("https://localhost:3000");
-    });
-    expect(mockSetDevServerPreviewUrl).toHaveBeenCalledWith({ url: "https://localhost:3000" }, "project-a");
+    expect(unsubscribeSpy).toHaveBeenCalledTimes(1);
   });
 
-  it("sets error when API operations fail", async () => {
-    mockStartDevServer.mockRejectedValueOnce(new Error("start failed"));
+  it("appends logs from SSE events", async () => {
+    mockFetchDevServerStatus.mockResolvedValueOnce(createState({ status: "running", logs: [] }));
 
     const { result } = renderHook(() => useDevServer("project-a"));
 
     await waitFor(() => {
-      expect(result.current.loading).toBe(false);
+      expect(mockSubscribeSse).toHaveBeenCalledTimes(1);
     });
 
-    await act(async () => {
-      try {
-        await result.current.start({ command: "pnpm dev", scriptName: "dev" });
-      } catch {
-        // expected
+    act(() => {
+      activeSubscription?.events?.history?.({ data: JSON.stringify({ lines: ["from history"] }) } as MessageEvent<string>);
+      activeSubscription?.events?.log?.({ data: JSON.stringify({ line: "from log" }) } as MessageEvent<string>);
+      activeSubscription?.events?.["dev-server:output"]?.({
+        data: JSON.stringify({ text: "stderr line", stream: "stderr" }),
+      } as MessageEvent<string>);
+    });
+
+    await waitFor(() => {
+      expect(result.current.logs).toEqual(["from history", "from log", "[stderr] stderr line"]);
+    });
+  });
+
+  it("caps logs to 500 entries", async () => {
+    mockFetchDevServerStatus.mockResolvedValueOnce(createState({ status: "running", logs: [] }));
+
+    const { result } = renderHook(() => useDevServer("project-a"));
+
+    await waitFor(() => {
+      expect(mockSubscribeSse).toHaveBeenCalledTimes(1);
+    });
+
+    act(() => {
+      for (let index = 1; index <= 510; index += 1) {
+        activeSubscription?.events?.log?.({ data: JSON.stringify({ line: `line-${index}` }) } as MessageEvent<string>);
       }
     });
 
-    expect(result.current.error).toBe("start failed");
+    await waitFor(() => {
+      expect(result.current.logs).toHaveLength(500);
+      expect(result.current.logs[0]).toBe("line-11");
+      expect(result.current.logs[499]).toBe("line-510");
+    });
   });
 
-  it("polls status while running and stops polling when status becomes stopped", async () => {
-    vi.useFakeTimers();
+  it("start() calls API and sets status to starting", async () => {
+    let resolveStart: ((state: DevServerState) => void) | null = null;
+    const pendingStart = new Promise<DevServerState>((resolve) => {
+      resolveStart = resolve;
+    });
+
+    mockFetchDevServerStatus
+      .mockResolvedValueOnce(createState({ status: "stopped" }))
+      .mockResolvedValueOnce(createState({ status: "running" }));
+    mockStartDevServer.mockReturnValueOnce(pendingStart);
+
+    const { result } = renderHook(() => useDevServer("project-a"));
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    act(() => {
+      void result.current.start("pnpm dev", "apps/web", "dev", "apps/web");
+    });
+
+    expect(result.current.status).toBe("starting");
+
+    act(() => {
+      resolveStart?.(createState({ status: "running" }));
+    });
+
+    await waitFor(() => {
+      expect(mockStartDevServer).toHaveBeenCalledWith(
+        {
+          command: "pnpm dev",
+          cwd: "apps/web",
+          scriptName: "dev",
+          packagePath: "apps/web",
+        },
+        "project-a",
+      );
+    });
+  });
+
+  it("stop() calls API and sets status stopped", async () => {
+    mockFetchDevServerStatus.mockResolvedValueOnce(createState({ status: "running" }));
+
+    const { result } = renderHook(() => useDevServer("project-a"));
+
+    await waitFor(() => {
+      expect(result.current.status).toBe("running");
+    });
+
+    await act(async () => {
+      await result.current.stop();
+    });
+
+    expect(mockStopDevServer).toHaveBeenCalledWith("project-a");
+    expect(result.current.status).toBe("stopped");
+  });
+
+  it("restart() calls API and sets status starting", async () => {
+    let resolveRestart: ((state: DevServerState) => void) | null = null;
+    const pendingRestart = new Promise<DevServerState>((resolve) => {
+      resolveRestart = resolve;
+    });
 
     mockFetchDevServerStatus
       .mockResolvedValueOnce(createState({ status: "running" }))
-      .mockResolvedValueOnce(createState({ status: "running" }))
-      .mockResolvedValueOnce(createState({ status: "stopped" }))
-      .mockResolvedValue(createState({ status: "stopped" }));
+      .mockResolvedValueOnce(createState({ status: "running" }));
+    mockRestartDevServer.mockReturnValueOnce(pendingRestart);
 
-    renderHook(() => useDevServer("project-a"));
+    const { result } = renderHook(() => useDevServer("project-a"));
 
-    await flushMicrotasks();
-
-    expect(mockFetchDevServerStatus).toHaveBeenCalledTimes(1);
-
-    await act(async () => {
-      vi.advanceTimersByTime(3000);
+    await waitFor(() => {
+      expect(result.current.status).toBe("running");
     });
-    await flushMicrotasks();
-    expect(mockFetchDevServerStatus).toHaveBeenCalledTimes(2);
 
-    await act(async () => {
-      vi.advanceTimersByTime(3000);
+    act(() => {
+      void result.current.restart();
     });
-    await flushMicrotasks();
-    expect(mockFetchDevServerStatus).toHaveBeenCalledTimes(3);
 
-    await act(async () => {
-      vi.advanceTimersByTime(9000);
+    expect(result.current.status).toBe("starting");
+
+    act(() => {
+      resolveRestart?.(createState({ status: "running" }));
     });
-    await flushMicrotasks();
 
-    expect(mockFetchDevServerStatus).toHaveBeenCalledTimes(3);
+    await waitFor(() => {
+      expect(mockRestartDevServer).toHaveBeenCalledWith("project-a");
+    });
   });
 
-  it("cleans up EventSource and polling on unmount", async () => {
+  it("setManualUrl() calls API and updates local manual url", async () => {
+    const { result } = renderHook(() => useDevServer("project-a"));
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    await act(async () => {
+      await result.current.setManualUrl("http://localhost:3000");
+    });
+
+    expect(mockSetDevServerPreviewUrl).toHaveBeenCalledWith({ url: "http://localhost:3000" }, "project-a");
+    expect(result.current.manualUrl).toBe("http://localhost:3000");
+  });
+
+  it("detect() loads command candidates", async () => {
+    mockDetectDevServer.mockResolvedValueOnce([
+      createCandidate({ scriptName: "start", command: "pnpm start", packagePath: "apps/web" }),
+    ]);
+
+    const { result } = renderHook(() => useDevServer("project-a"));
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    await act(async () => {
+      await result.current.detect();
+    });
+
+    expect(mockDetectDevServer).toHaveBeenCalledWith("project-a");
+    expect(result.current.candidates).toEqual([
+      expect.objectContaining({ scriptName: "start", command: "pnpm start" }),
+    ]);
+  });
+
+  it("cleans up SSE and polling on unmount", async () => {
     vi.useFakeTimers();
 
     mockFetchDevServerStatus.mockResolvedValue(createState({ status: "running" }));
@@ -254,22 +351,17 @@ describe("useDevServer", () => {
     const { unmount } = renderHook(() => useDevServer("project-a"));
 
     await flushMicrotasks();
-
-    expect(MockEventSource.instances).toHaveLength(1);
-    const source = MockEventSource.instances[0];
-    const closeSpy = vi.spyOn(source, "close");
+    expect(mockSubscribeSse).toHaveBeenCalledTimes(1);
 
     unmount();
 
-    expect(closeSpy).toHaveBeenCalled();
-
-    const callsBefore = mockFetchDevServerStatus.mock.calls.length;
+    expect(unsubscribeSpy).toHaveBeenCalledTimes(1);
 
     await act(async () => {
-      vi.advanceTimersByTime(6000);
+      vi.advanceTimersByTime(10000);
+      await Promise.resolve();
     });
-    await flushMicrotasks();
 
-    expect(mockFetchDevServerStatus.mock.calls.length).toBe(callsBefore);
+    expect(mockFetchDevServerStatus).toHaveBeenCalledTimes(1);
   });
 });
