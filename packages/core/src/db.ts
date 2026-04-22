@@ -59,7 +59,7 @@ export function fromJson<T>(json: string | null | undefined): T | undefined {
 
 // ── Schema Definition ────────────────────────────────────────────────
 
-const SCHEMA_VERSION = 40;
+const SCHEMA_VERSION = 42;
 
 function normalizeTaskComments(
   steeringComments: SteeringComment[] | undefined,
@@ -151,6 +151,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   error TEXT,
   summary TEXT,
   thinkingLevel TEXT,
+  executionMode TEXT DEFAULT 'standard',
   createdAt TEXT NOT NULL,
   updatedAt TEXT NOT NULL,
   columnMovedAt TEXT,
@@ -1630,6 +1631,21 @@ export class Database {
       // a persistently-broken task cannot loop forever.
       this.applyMigration(41, () => {
         this.addColumnIfMissing("tasks", "taskDoneRetryCount", "INTEGER DEFAULT 0");
+      });
+    }
+
+    // Task execution mode contract (FN-2246)
+    // Adds executionMode column to tasks table with default 'standard'.
+    // Normalizes null/empty legacy values to 'standard'.
+    if (version < 42) {
+      this.applyMigration(42, () => {
+        this.addColumnIfMissing("tasks", "executionMode", "TEXT DEFAULT 'standard'");
+        // Normalize any existing null/empty executionMode values to 'standard'
+        this.db.exec(`
+          UPDATE tasks
+          SET executionMode = 'standard'
+          WHERE executionMode IS NULL OR executionMode = '' OR executionMode NOT IN ('standard', 'fast')
+        `);
       });
     }
 

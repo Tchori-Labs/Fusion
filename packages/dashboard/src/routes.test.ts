@@ -824,6 +824,81 @@ describe("POST /tasks", () => {
     expect(store.createTask).not.toHaveBeenCalled();
   });
 
+  it("forwards executionMode when provided with 'fast'", async () => {
+    const createdTask = {
+      ...FAKE_TASK_DETAIL,
+      column: "triage",
+      executionMode: "fast",
+    };
+    (store.createTask as ReturnType<typeof vi.fn>).mockResolvedValue(createdTask);
+
+    const res = await REQUEST(
+      buildApp(),
+      "POST",
+      "/api/tasks",
+      JSON.stringify({
+        description: "Fast task",
+        executionMode: "fast",
+      }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(201);
+    expect(store.createTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        description: "Fast task",
+        executionMode: "fast",
+      }),
+      expect.any(Object),
+    );
+  });
+
+  it("forwards executionMode when provided with 'standard'", async () => {
+    const createdTask = {
+      ...FAKE_TASK_DETAIL,
+      column: "triage",
+      executionMode: "standard",
+    };
+    (store.createTask as ReturnType<typeof vi.fn>).mockResolvedValue(createdTask);
+
+    const res = await REQUEST(
+      buildApp(),
+      "POST",
+      "/api/tasks",
+      JSON.stringify({
+        description: "Standard task",
+        executionMode: "standard",
+      }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(201);
+    expect(store.createTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        description: "Standard task",
+        executionMode: "standard",
+      }),
+      expect.any(Object),
+    );
+  });
+
+  it("returns 400 for invalid executionMode value", async () => {
+    const res = await REQUEST(
+      buildApp(),
+      "POST",
+      "/api/tasks",
+      JSON.stringify({
+        description: "Bad execution mode",
+        executionMode: "turbo",
+      }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain("executionMode must be one of");
+    expect(store.createTask).not.toHaveBeenCalled();
+  });
+
   it("forwards planningModelProvider and planningModelId when provided", async () => {
     const createdTask = {
       ...FAKE_TASK_DETAIL,
@@ -2797,6 +2872,77 @@ describe("PATCH /tasks/:id", () => {
 
     expect(res.status).toBe(400);
     expect(res.body.error).toContain("reviewLevel must be an integer between 0 and 3");
+  });
+
+  it("forwards executionMode to store.updateTask", async () => {
+    (store.updateTask as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...FAKE_TASK_DETAIL,
+      executionMode: "fast",
+    });
+
+    const res = await REQUEST(buildApp(), "PATCH", "/api/tasks/KB-001", JSON.stringify({
+      executionMode: "fast",
+    }), {
+      "Content-Type": "application/json",
+    });
+
+    expect(res.status).toBe(200);
+    expect(store.updateTask).toHaveBeenCalledWith("KB-001", {
+      executionMode: "fast",
+    });
+  });
+
+  it("accepts null to clear executionMode via PATCH", async () => {
+    (store.updateTask as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...FAKE_TASK_DETAIL,
+      executionMode: undefined,
+    });
+
+    const res = await REQUEST(buildApp(), "PATCH", "/api/tasks/KB-001", JSON.stringify({
+      executionMode: null,
+    }), {
+      "Content-Type": "application/json",
+    });
+
+    expect(res.status).toBe(200);
+    expect(store.updateTask).toHaveBeenCalledWith("KB-001", {
+      executionMode: null,
+    });
+  });
+
+  it("returns 400 for invalid executionMode value via PATCH", async () => {
+    const res = await REQUEST(buildApp(), "PATCH", "/api/tasks/KB-001", JSON.stringify({
+      executionMode: "turbo",
+    }), {
+      "Content-Type": "application/json",
+    });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain("executionMode must be one of");
+  });
+
+  it("omission does not overwrite executionMode via PATCH", async () => {
+    // When executionMode is not in the request body, it should not be passed to updateTask
+    const existingTask = {
+      ...FAKE_TASK_DETAIL,
+      executionMode: "fast",
+    };
+    (store.updateTask as ReturnType<typeof vi.fn>).mockResolvedValue(existingTask);
+
+    const res = await REQUEST(buildApp(), "PATCH", "/api/tasks/KB-001", JSON.stringify({
+      title: "Updated Title",  // Only update title, not executionMode
+    }), {
+      "Content-Type": "application/json",
+    });
+
+    expect(res.status).toBe(200);
+    // Verify executionMode was NOT included in the update
+    expect(store.updateTask).toHaveBeenCalledWith("KB-001", {
+      title: "Updated Title",
+    });
+    // The call should NOT include executionMode
+    const updateArg = (store.updateTask as ReturnType<typeof vi.fn>).mock.calls[0][1];
+    expect(updateArg).not.toHaveProperty("executionMode");
   });
 });
 

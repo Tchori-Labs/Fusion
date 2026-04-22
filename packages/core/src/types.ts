@@ -5,6 +5,18 @@ export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
 export const COLUMNS = ["triage", "todo", "in-progress", "in-review", "done", "archived"] as const;
 export type Column = (typeof COLUMNS)[number];
 
+/**
+ * Execution mode for task implementation.
+ * Controls how the executor agent approaches the task:
+ * - "standard": Full execution with complete review workflow (default)
+ * - "fast": Expedited execution with minimal overhead for simple tasks
+ */
+export const EXECUTION_MODES = ["standard", "fast"] as const;
+export type ExecutionMode = (typeof EXECUTION_MODES)[number];
+
+/** Default execution mode for new tasks */
+export const DEFAULT_EXECUTION_MODE: ExecutionMode = "standard";
+
 /** Theme mode for light/dark/system preference */
 export const THEME_MODES = ["dark", "light", "system"] as const;
 export type ThemeMode = (typeof THEME_MODES)[number];
@@ -747,6 +759,11 @@ export interface Task {
   nextRecoveryAt?: string;
   /** Thinking level for AI agent sessions — controls reasoning effort (off/minimal/low/medium/high) */
   thinkingLevel?: ThinkingLevel;
+  /** Execution mode for task implementation.
+   *  - "standard": Full execution with complete review workflow (default)
+   *  - "fast": Expedited execution with minimal overhead for simple tasks
+   *  Defaults to "standard" when not specified. */
+  executionMode?: ExecutionMode;
   /** Explicitly assigned agent ID for task-agent linking. Distinct from Agent.taskId active execution state. */
   assignedAgentId?: string;
   /** Explicitly assigned user ID for task-user linking. Used during review handoff to indicate
@@ -831,6 +848,11 @@ export interface TaskCreateInput {
   assigneeUserId?: string;
   /** Review level for task execution — controls review rigor: 0=None, 1=Plan Only, 2=Plan and Code, 3=Full */
   reviewLevel?: number;
+  /** Execution mode for task implementation.
+   *  - "standard": Full execution with complete review workflow (default)
+   *  - "fast": Expedited execution with minimal overhead for simple tasks
+   *  Defaults to "standard" when not specified. */
+  executionMode?: ExecutionMode;
 }
 
 // ── Settings Scope Types ────────────────────────────────────────────────
@@ -1503,6 +1525,10 @@ export interface ArchivedTaskEntry {
   currentStep: number;
   size?: "S" | "M" | "L";
   reviewLevel?: number;
+  /** Execution mode for task implementation at time of archival.
+   *  - "standard": Full execution with complete review workflow (default)
+   *  - "fast": Expedited execution with minimal overhead for simple tasks */
+  executionMode?: ExecutionMode;
   prInfo?: PrInfo;
   issueInfo?: IssueInfo;
   /** Attachment metadata (filenames, mime types, etc.) without file content */

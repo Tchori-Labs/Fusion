@@ -366,6 +366,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       error: row.error || undefined,
       summary: row.summary || undefined,
       thinkingLevel: row.thinkingLevel || undefined,
+      executionMode: row.executionMode || undefined,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
       columnMovedAt: row.columnMovedAt || undefined,
@@ -612,7 +613,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       "validatorModelProvider", "validatorModelId",
       "planningModelProvider", "planningModelId",
       "mergeRetries", "workflowStepRetries", "stuckKillCount", "postReviewFixCount", "recoveryRetryCount", "taskDoneRetryCount", "nextRecoveryAt",
-      "error", "summary", "thinkingLevel",
+      "error", "summary", "thinkingLevel", "executionMode",
       "createdAt", "updatedAt", "columnMovedAt",
       "dependencies", "steps", "comments", "workflowStepResults", "steeringComments",
       "attachments", "prInfo", "issueInfo", "mergeDetails",
@@ -630,7 +631,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       "validatorModelProvider", "validatorModelId",
       "planningModelProvider", "planningModelId",
       "mergeRetries", "workflowStepRetries", "stuckKillCount", "postReviewFixCount", "recoveryRetryCount", "taskDoneRetryCount", "nextRecoveryAt",
-      "error", "summary", "thinkingLevel",
+      "error", "summary", "thinkingLevel", "executionMode",
       "createdAt", "updatedAt", "columnMovedAt",
       "dependencies", "steps", "attachments", "steeringComments",
       "comments", "workflowStepResults", "prInfo", "issueInfo", "mergeDetails",
@@ -671,13 +672,13 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         worktree, blockedBy, paused, baseBranch, branch, baseCommitSha, modelPresetId, modelProvider,
         modelId, validatorModelProvider, validatorModelId, planningModelProvider, planningModelId, mergeRetries,
         workflowStepRetries, stuckKillCount, postReviewFixCount, recoveryRetryCount, taskDoneRetryCount, nextRecoveryAt, error,
-        summary, thinkingLevel, createdAt, updatedAt, columnMovedAt,
+        summary, thinkingLevel, executionMode, createdAt, updatedAt, columnMovedAt,
         dependencies, steps, log, attachments, steeringComments,
         comments, workflowStepResults, prInfo, issueInfo, mergeDetails,
         breakIntoSubtasks, enabledWorkflowSteps, modifiedFiles, missionId, sliceId, assignedAgentId, assigneeUserId, checkedOutBy, checkedOutAt
       ) VALUES (
         ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
       )
       ON CONFLICT(id) DO UPDATE SET
         title = excluded.title,
@@ -710,6 +711,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         error = excluded.error,
         summary = excluded.summary,
         thinkingLevel = excluded.thinkingLevel,
+        executionMode = excluded.executionMode,
         createdAt = excluded.createdAt,
         updatedAt = excluded.updatedAt,
         columnMovedAt = excluded.columnMovedAt,
@@ -764,6 +766,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       task.error ?? null,
       task.summary ?? null,
       task.thinkingLevel ?? null,
+      task.executionMode ?? null,
       task.createdAt,
       task.updatedAt,
       task.columnMovedAt ?? null,
@@ -1683,6 +1686,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       planningModelId: input.planningModelId,
       thinkingLevel: input.thinkingLevel,
       reviewLevel: input.reviewLevel,
+      executionMode: input.executionMode,
       missionId: input.missionId,
       sliceId: input.sliceId,
       steps: [],
@@ -2211,7 +2215,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
 
   async updateTask(
     id: string,
-    updates: { title?: string; description?: string; prompt?: string; worktree?: string | null; status?: string | null; dependencies?: string[]; steps?: import("./types.js").TaskStep[]; blockedBy?: string | null; assignedAgentId?: string | null; assigneeUserId?: string | null; checkedOutBy?: string | null; checkedOutAt?: string | null; paused?: boolean; baseBranch?: string | null; branch?: string | null; baseCommitSha?: string | null; size?: "S" | "M" | "L"; reviewLevel?: number; mergeRetries?: number; workflowStepRetries?: number; stuckKillCount?: number | null; postReviewFixCount?: number | null; recoveryRetryCount?: number | null; taskDoneRetryCount?: number | null; nextRecoveryAt?: string | null; enabledWorkflowSteps?: string[]; modelProvider?: string | null; modelId?: string | null; validatorModelProvider?: string | null; validatorModelId?: string | null; planningModelProvider?: string | null; planningModelId?: string | null; thinkingLevel?: string | null; error?: string | null; summary?: string | null; sessionFile?: string | null; workflowStepResults?: import("./types.js").WorkflowStepResult[] | null; mergeDetails?: import("./types.js").MergeDetails | null; modifiedFiles?: string[] | null; missionId?: string | null; sliceId?: string | null },
+    updates: { title?: string; description?: string; prompt?: string; worktree?: string | null; status?: string | null; dependencies?: string[]; steps?: import("./types.js").TaskStep[]; blockedBy?: string | null; assignedAgentId?: string | null; assigneeUserId?: string | null; checkedOutBy?: string | null; checkedOutAt?: string | null; paused?: boolean; baseBranch?: string | null; branch?: string | null; baseCommitSha?: string | null; size?: "S" | "M" | "L"; reviewLevel?: number; executionMode?: import("./types.js").ExecutionMode | null; mergeRetries?: number; workflowStepRetries?: number; stuckKillCount?: number | null; postReviewFixCount?: number | null; recoveryRetryCount?: number | null; taskDoneRetryCount?: number | null; nextRecoveryAt?: string | null; enabledWorkflowSteps?: string[]; modelProvider?: string | null; modelId?: string | null; validatorModelProvider?: string | null; validatorModelId?: string | null; planningModelProvider?: string | null; planningModelId?: string | null; thinkingLevel?: string | null; error?: string | null; summary?: string | null; sessionFile?: string | null; workflowStepResults?: import("./types.js").WorkflowStepResult[] | null; mergeDetails?: import("./types.js").MergeDetails | null; modifiedFiles?: string[] | null; missionId?: string | null; sliceId?: string | null },
     runContext?: RunMutationContext,
   ): Promise<Task> {
     return this.withTaskLock(id, async () => {
@@ -2368,6 +2372,11 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         task.thinkingLevel = undefined;
       } else if (updates.thinkingLevel !== undefined) {
         task.thinkingLevel = updates.thinkingLevel as import("./types.js").ThinkingLevel;
+      }
+      if (updates.executionMode === null) {
+        task.executionMode = undefined;
+      } else if (updates.executionMode !== undefined) {
+        task.executionMode = updates.executionMode as import("./types.js").ExecutionMode;
       }
       if (updates.error === null) {
         task.error = undefined;

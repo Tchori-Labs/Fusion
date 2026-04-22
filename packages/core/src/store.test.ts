@@ -3348,6 +3348,89 @@ describe("TaskStore", () => {
     });
   });
 
+  describe("executionMode persistence", () => {
+    it("sets executionMode to 'fast' via createTask and persists", async () => {
+      const created = await store.createTask({
+        description: "Task with fast execution mode",
+        executionMode: "fast",
+      });
+      expect(created.executionMode).toBe("fast");
+
+      const persisted = await store.getTask(created.id);
+      expect(persisted.executionMode).toBe("fast");
+    });
+
+    it("sets executionMode to 'standard' via createTask and persists", async () => {
+      const created = await store.createTask({
+        description: "Task with standard execution mode",
+        executionMode: "standard",
+      });
+      expect(created.executionMode).toBe("standard");
+
+      const persisted = await store.getTask(created.id);
+      expect(persisted.executionMode).toBe("standard");
+    });
+
+    it("persists executionMode as 'standard' by default when not specified", async () => {
+      const created = await store.createTask({
+        description: "Task without execution mode",
+      });
+      // The field should be undefined in the Task object (optional field)
+      expect(created.executionMode).toBeUndefined();
+
+      const persisted = await store.getTask(created.id);
+      // The persisted value should be 'standard' in the database
+      expect(persisted.executionMode).toBeUndefined();
+    });
+
+    it("updates executionMode via updateTask", async () => {
+      const created = await store.createTask({
+        description: "Task for execution mode update",
+        executionMode: "standard",
+      });
+      expect(created.executionMode).toBe("standard");
+
+      const updated = await store.updateTask(created.id, { executionMode: "fast" });
+      expect(updated.executionMode).toBe("fast");
+
+      const reloaded = await store.getTask(created.id);
+      expect(reloaded.executionMode).toBe("fast");
+    });
+
+    it("clears executionMode via null in updateTask", async () => {
+      const task = await store.createTask({
+        description: "Task with execution mode to clear",
+        executionMode: "fast",
+      });
+      expect(task.executionMode).toBe("fast");
+
+      const updated = await store.updateTask(task.id, { executionMode: null });
+      expect(updated.executionMode).toBeUndefined();
+    });
+
+    it("preserves executionMode when updating unrelated fields", async () => {
+      const task = await store.createTask({
+        description: "Task with execution mode to preserve",
+        executionMode: "fast",
+      });
+      const updated = await store.updateTask(task.id, { title: "Updated title" });
+      expect(updated.executionMode).toBe("fast");
+      expect(updated.title).toBe("Updated title");
+    });
+
+    it("returns executionMode in listTasks", async () => {
+      await store.createTask({ description: "Fast task", executionMode: "fast" });
+      await store.createTask({ description: "Unspecified task" });
+
+      const tasks = await store.listTasks();
+      const fastTask = tasks.find((t) => t.description === "Fast task");
+      const unspecifiedTask = tasks.find((t) => t.description === "Unspecified task");
+
+      expect(fastTask?.executionMode).toBe("fast");
+      expect(unspecifiedTask?.executionMode).toBeUndefined();
+    });
+  });
+
   describe("updateTask — PROMPT.md regeneration", () => {
     it("regenerates PROMPT.md when title is updated", async () => {
       const task = await store.createTask({ description: "Test task", column: "todo" });

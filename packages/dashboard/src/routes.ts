@@ -3806,6 +3806,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         planningModelId,
         thinkingLevel,
         reviewLevel,
+        executionMode,
       } = req.body;
       if (!description || typeof description !== "string") {
         throw badRequest("description is required");
@@ -3832,6 +3833,12 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         if (typeof reviewLevel !== "number" || !Number.isInteger(reviewLevel) || reviewLevel < 0 || reviewLevel > 3) {
           throw badRequest("reviewLevel must be an integer between 0 and 3");
         }
+      }
+
+      // Validate executionMode if provided (must be "standard" or "fast")
+      const validExecutionModes = ["standard", "fast"];
+      if (executionMode !== undefined && executionMode !== null && !validExecutionModes.includes(executionMode)) {
+        throw badRequest(`executionMode must be one of: ${validExecutionModes.join(", ")}`);
       }
 
       const executorModel = normalizeModelSelectionPair(validatedModelProvider, validatedModelId);
@@ -3900,6 +3907,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
           thinkingLevel: thinkingLevel || undefined,
           summarize,
           reviewLevel: reviewLevel ?? undefined,
+          executionMode: executionMode || undefined,
         },
         { onSummarize, settings: { autoSummarizeTitles: settings.autoSummarizeTitles } }
       );
@@ -5095,7 +5103,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   router.patch("/tasks/:id", async (req, res) => {
     try {
       const { store: scopedStore } = await getProjectContext(req);
-      const { title, description, prompt, dependencies, enabledWorkflowSteps, modelProvider, modelId, validatorModelProvider, validatorModelId, planningModelProvider, planningModelId, thinkingLevel, assigneeUserId, reviewLevel } = req.body;
+      const { title, description, prompt, dependencies, enabledWorkflowSteps, modelProvider, modelId, validatorModelProvider, validatorModelId, planningModelProvider, planningModelId, thinkingLevel, assigneeUserId, reviewLevel, executionMode } = req.body;
       const hasBodyField = (field: string) => Object.prototype.hasOwnProperty.call(req.body, field);
 
       // Validate model fields are strings or undefined/null
@@ -5129,6 +5137,12 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
         }
       }
 
+      // Validate executionMode if provided (must be "standard" or "fast")
+      const validExecutionModes = ["standard", "fast"];
+      if (executionMode !== undefined && executionMode !== null && !validExecutionModes.includes(executionMode)) {
+        throw new Error(`executionMode must be one of: ${validExecutionModes.join(", ")}`);
+      }
+
       if (enabledWorkflowSteps !== undefined) {
         if (!Array.isArray(enabledWorkflowSteps) || !enabledWorkflowSteps.every((id: unknown) => typeof id === "string")) {
           throw new Error("enabledWorkflowSteps must be an array of strings");
@@ -5150,6 +5164,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
       if (hasBodyField("thinkingLevel")) updates.thinkingLevel = thinkingLevel === null ? null : thinkingLevel;
       if (hasBodyField("assigneeUserId")) updates.assigneeUserId = validatedAssigneeUserId;
       if (hasBodyField("reviewLevel")) updates.reviewLevel = reviewLevel;
+      if (hasBodyField("executionMode")) updates.executionMode = executionMode === null ? null : executionMode;
 
       const task = await scopedStore.updateTask(req.params.id, updates);
       res.json(task);
@@ -5157,7 +5172,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
       if (err instanceof ApiError) {
         throw err;
       }
-      const status = (err instanceof Error ? err.message : String(err)).includes("must be a string") || (err instanceof Error ? err.message : String(err)).includes("must be an array of strings") || (err instanceof Error ? err.message : String(err)).includes("thinkingLevel must be one of") || (err instanceof Error ? err.message : String(err)).includes("reviewLevel must be an integer") ? 400 : 500;
+      const status = (err instanceof Error ? err.message : String(err)).includes("must be a string") || (err instanceof Error ? err.message : String(err)).includes("must be an array of strings") || (err instanceof Error ? err.message : String(err)).includes("thinkingLevel must be one of") || (err instanceof Error ? err.message : String(err)).includes("reviewLevel must be an integer") || (err instanceof Error ? err.message : String(err)).includes("executionMode must be one of") ? 400 : 500;
       throw new ApiError(status, err instanceof Error ? err.message : String(err));
     }
   });

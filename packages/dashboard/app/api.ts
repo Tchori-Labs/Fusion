@@ -185,6 +185,7 @@ export function createTask(input: TaskCreateInput, projectId?: string): Promise<
     thinkingLevel,
     summarize,
     reviewLevel,
+    executionMode,
   } = input;
 
   return api<Task>(withProjectId("/tasks", projectId), {
@@ -207,11 +208,12 @@ export function createTask(input: TaskCreateInput, projectId?: string): Promise<
       thinkingLevel,
       summarize,
       reviewLevel,
+      executionMode,
     }),
   });
 }
 
-export function updateTask(id: string, updates: { title?: string; description?: string; prompt?: string; dependencies?: string[]; enabledWorkflowSteps?: string[]; modelProvider?: string | null; modelId?: string | null; validatorModelProvider?: string | null; validatorModelId?: string | null; planningModelProvider?: string | null; planningModelId?: string | null; thinkingLevel?: string | null; reviewLevel?: number | null }, projectId?: string): Promise<Task> {
+export function updateTask(id: string, updates: { title?: string; description?: string; prompt?: string; dependencies?: string[]; enabledWorkflowSteps?: string[]; modelProvider?: string | null; modelId?: string | null; validatorModelProvider?: string | null; validatorModelId?: string | null; planningModelProvider?: string | null; planningModelId?: string | null; thinkingLevel?: string | null; reviewLevel?: number | null; executionMode?: "standard" | "fast" | null }, projectId?: string): Promise<Task> {
   return api<Task>(withProjectId(`/tasks/${id}`, projectId), {
     method: "PATCH",
     body: JSON.stringify(updates),
