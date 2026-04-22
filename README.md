@@ -4,7 +4,9 @@ AI-orchestrated task board — specify, execute, and deliver tasks automatically
 
 Like Trello, but your tasks get specified, executed, and delivered by AI — powered by [pi](https://github.com/badlogic/pi-mono).
 
-![Fusion dashboard](demo/screenshot.png)
+![Fusion kanban dashboard](demo/screenshot.png)
+
+Fusion is built on the great work of [dustinbyrne/kb](https://github.com/dustinbyrne/kb).
 
 **Fusion** turns rough ideas into production code. Describe a task, and an AI agent writes the spec, plans the implementation, writes the code in an isolated git worktree, and merges it — with automatic code review at every step. Manage a single project or coordinate across multiple repositories from one dashboard.
 
