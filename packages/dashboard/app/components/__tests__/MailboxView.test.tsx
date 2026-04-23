@@ -103,6 +103,25 @@ const mockOutboxMessage: Message = {
   updatedAt: new Date().toISOString(),
 };
 
+const mockAgentToAgentMessage: Message = {
+  id: "msg-004",
+  fromId: "agent-001",
+  fromType: "agent",
+  toId: "agent-002",
+  toType: "agent",
+  content: "Agent to agent ping.",
+  type: "agent-to-agent",
+  read: false,
+  createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString(),
+};
+
+const mockUnknownAgentMessage: Message = {
+  ...mockMessage,
+  id: "msg-005",
+  fromId: "agent-999",
+};
+
 const defaultProps = {
   addToast: vi.fn(),
 };
@@ -187,6 +206,32 @@ describe("MailboxView", () => {
 
     await waitFor(() => {
       expect(screen.getByTestId("mailbox-conversations")).toBeDefined();
+    });
+  });
+
+  it("renders known agent senders by name in inbox conversation rows", async () => {
+    mockFetchInbox.mockResolvedValue({
+      messages: [mockMessage],
+      unreadCount: 1,
+    });
+
+    render(<MailboxView {...defaultProps} />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Agent: Test Agent 1 (agent-001)")).toBeDefined();
+    });
+  });
+
+  it("falls back to stable agent identifier when agent metadata is missing", async () => {
+    mockFetchInbox.mockResolvedValue({
+      messages: [mockUnknownAgentMessage],
+      unreadCount: 1,
+    });
+
+    render(<MailboxView {...defaultProps} />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Agent: agent-999")).toBeDefined();
     });
   });
 
@@ -292,6 +337,30 @@ describe("MailboxView", () => {
 
     await waitFor(() => {
       expect(screen.getByTestId("mailbox-message-detail")).toBeDefined();
+    });
+  });
+
+  it("shows agent names in message detail participant rows", async () => {
+    mockFetchInbox.mockResolvedValue({
+      messages: [mockAgentToAgentMessage],
+      unreadCount: 1,
+    });
+    mockFetchConversation.mockResolvedValue([mockAgentToAgentMessage]);
+    mockMarkMessageRead.mockResolvedValue(undefined);
+
+    render(<MailboxView {...defaultProps} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("mailbox-conversation-agent:agent-001")).toBeDefined();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("mailbox-conversation-agent:agent-001"));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Agent: Test Agent 1 (agent-001)")).toBeDefined();
+      expect(screen.getByText("Agent: Test Agent 2 (agent-002)")).toBeDefined();
     });
   });
 
@@ -558,6 +627,47 @@ describe("MailboxView", () => {
 
       const agentsComposeButton = screen.getByTestId("mailbox-compose-btn");
       expect(agentsComposeButton).toHaveClass("btn", "btn-sm", "btn-secondary", "mailbox-compose-btn");
+    });
+
+    it("shows agent sender names in agent inbox rows", async () => {
+      const agentInboxMessage: Message = {
+        id: "msg-agent-inbox",
+        fromId: "agent-002",
+        fromType: "agent",
+        toId: "agent-001",
+        toType: "agent",
+        content: "Hello from another agent",
+        type: "agent-to-agent",
+        read: false,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      mockFetchInbox.mockResolvedValue({
+        messages: [],
+        unreadCount: 0,
+      });
+      mockFetchAgentMailbox.mockResolvedValue({
+        ownerId: "agent-001",
+        ownerType: "agent",
+        unreadCount: 1,
+        messages: [agentInboxMessage],
+        inbox: [agentInboxMessage],
+        outbox: [],
+      });
+
+      render(<MailboxView {...defaultProps} />);
+
+      const agentsTab = screen.getByTestId("mailbox-tab-agents");
+      await act(async () => {
+        fireEvent.click(agentsTab);
+      });
+
+      fireEvent.change(screen.getByTestId("mailbox-agent-select"), { target: { value: "agent-001" } });
+
+      await waitFor(() => {
+        expect(screen.getByText("Agent: Test Agent 2 (agent-002)")).toBeDefined();
+      });
     });
 
     it("switches to outbox view when clicking outbox sub-tab", async () => {

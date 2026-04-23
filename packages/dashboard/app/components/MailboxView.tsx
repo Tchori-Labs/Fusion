@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Mail,
   Send,
@@ -73,9 +73,18 @@ function formatTimestamp(ts: string): string {
   return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
-function participantLabel(id: string, type: ParticipantType): string {
+function participantLabel(
+  id: string,
+  type: ParticipantType,
+  agentNamesById?: ReadonlyMap<string, string>,
+): string {
   if (type === "user") return id === "dashboard" ? "You" : `User: ${id}`;
-  if (type === "agent") return `Agent: ${id}`;
+  if (type === "agent") {
+    const name = agentNamesById?.get(id)?.trim();
+    if (!name) return `Agent: ${id}`;
+    if (name === id) return `Agent: ${id}`;
+    return `Agent: ${name} (${id})`;
+  }
   return "System";
 }
 
@@ -144,6 +153,15 @@ export function MailboxView({
   const [agentSubTab, setAgentSubTab] = useState<"inbox" | "outbox">("inbox");
   const [agentMailbox, setAgentMailbox] = useState<AgentMailboxResponse | null>(null);
   const [agents, setAgents] = useState<Agent[]>([]);
+
+  const agentNamesById = useMemo(
+    () => new Map(agents.map((agent) => [agent.id, agent.name ?? ""])),
+    [agents],
+  );
+  const getParticipantLabel = useCallback(
+    (id: string, type: ParticipantType) => participantLabel(id, type, agentNamesById),
+    [agentNamesById],
+  );
 
   // ── Data fetching ─────────────────────────────────────────────────────
 
@@ -488,14 +506,14 @@ export function MailboxView({
                 <span className="mailbox-participant-label">From:</span>
                 <span className="mailbox-participant-value">
                   {selectedMessage.fromType === "agent" ? <Bot size={14} /> : <User size={14} />}
-                  {participantLabel(selectedMessage.fromId, selectedMessage.fromType)}
+                  {getParticipantLabel(selectedMessage.fromId, selectedMessage.fromType)}
                 </span>
               </div>
               <div className="mailbox-participant">
                 <span className="mailbox-participant-label">To:</span>
                 <span className="mailbox-participant-value">
                   {selectedMessage.toType === "agent" ? <Bot size={14} /> : <User size={14} />}
-                  {participantLabel(selectedMessage.toId, selectedMessage.toType)}
+                  {getParticipantLabel(selectedMessage.toId, selectedMessage.toType)}
                 </span>
               </div>
             </div>
@@ -509,7 +527,7 @@ export function MailboxView({
                     className={`mailbox-conversation-msg ${msg.id === selectedMessage.id ? "current" : ""}`}
                   >
                     <div className="mailbox-conversation-msg-header">
-                      <span>{participantLabel(msg.fromId, msg.fromType)}</span>
+                      <span>{getParticipantLabel(msg.fromId, msg.fromType)}</span>
                       <span className="mailbox-message-time">{formatTimestamp(msg.createdAt)}</span>
                     </div>
                     <div className="mailbox-conversation-msg-body">{msg.content}</div>
@@ -566,7 +584,7 @@ export function MailboxView({
                         <div className="mailbox-item-content">
                           <div className="mailbox-item-header">
                             <span className="mailbox-item-from">
-                              {participantLabel(group.fromId, group.fromType)}
+                              {getParticipantLabel(group.fromId, group.fromType)}
                             </span>
                             <span className="mailbox-item-time">
                               {formatTimestamp(group.latestMessage.createdAt)}
@@ -612,7 +630,7 @@ export function MailboxView({
                     <div className="mailbox-item-content">
                       <div className="mailbox-item-header">
                         <span className="mailbox-item-to">
-                          To: {participantLabel(msg.toId, msg.toType)}
+                          To: {getParticipantLabel(msg.toId, msg.toType)}
                         </span>
                         <span className="mailbox-item-time">{formatTimestamp(msg.createdAt)}</span>
                       </div>
@@ -716,9 +734,7 @@ export function MailboxView({
                           <div className="mailbox-item-content">
                             <div className="mailbox-item-header">
                               <span className="mailbox-item-from">
-                                {msg.fromType === "agent"
-                                  ? participantLabel(msg.toId, msg.toType)
-                                  : participantLabel(msg.fromId, msg.fromType)}
+                                {getParticipantLabel(msg.fromId, msg.fromType)}
                               </span>
                               <span className="mailbox-item-time">{formatTimestamp(msg.createdAt)}</span>
                             </div>
@@ -739,7 +755,7 @@ export function MailboxView({
                           <div className="mailbox-item-content">
                             <div className="mailbox-item-header">
                               <span className="mailbox-item-to">
-                                To: {participantLabel(msg.toId, msg.toType)}
+                                To: {getParticipantLabel(msg.toId, msg.toType)}
                               </span>
                               <span className="mailbox-item-time">{formatTimestamp(msg.createdAt)}</span>
                             </div>
