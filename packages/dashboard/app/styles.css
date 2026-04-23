@@ -21405,6 +21405,8 @@ html .column.drag-over * {
 
 /* === Setup Wizard Modal (Onboarding) === */
 .setup-wizard-modal {
+  display: flex;
+  flex-direction: column;
   max-width: 540px;
   width: 100%;
   max-height: min(720px, calc(100dvh - (var(--space-2xl) * 2)));
@@ -21731,6 +21733,8 @@ html .column.drag-over * {
   }
 
   .setup-wizard-modal {
+    display: flex;
+    flex-direction: column;
     max-width: 100%;
     width: 100%;
     max-height: calc(100dvh - max(var(--space-2xl), env(safe-area-inset-top, 0px)) - max(var(--space-2xl), env(safe-area-inset-bottom, 0px)));
