@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { Plus, Play, Pause, Square, Activity, Heart, Trash2, RefreshCw, Bot, LayoutGrid, List, ChevronRight, ChevronDown, GitBranch, Filter, Upload, Network } from "lucide-react";
+import { Plus, Play, Pause, Activity, Trash2, RefreshCw, Bot, LayoutGrid, List, ChevronRight, ChevronDown, GitBranch, Filter, Upload, Network } from "lucide-react";
 import type { Agent, AgentCapability, AgentState, OrgTreeNode } from "../api";
 import { fetchAgents, updateAgent, updateAgentState, deleteAgent, startAgentRun, fetchOrgTree } from "../api";
 import { AgentDetailView } from "./AgentDetailView";
@@ -754,32 +754,16 @@ export function AgentsView({ addToast, projectId }: AgentsViewProps) {
                         >
                           <Pause size={14} />
                         </button>
-                        <button
-                          className="btn btn--sm btn--danger"
-                          onClick={() => void handleStateChange(agent.id, "terminated")}
-                          title="Stop"
-                        >
-                          <Square size={14} />
-                        </button>
                       </>
                     )}
                     {agent.state === "paused" && (
-                      <>
-                        <button
-                          className="btn btn--sm"
-                          onClick={() => void handleStateChange(agent.id, "active")}
-                          title="Resume"
-                        >
-                          <Play size={14} />
-                        </button>
-                        <button
-                          className="btn btn--sm btn--danger"
-                          onClick={() => void handleStateChange(agent.id, "terminated")}
-                          title="Stop"
-                        >
-                          <Square size={14} />
-                        </button>
-                      </>
+                      <button
+                        className="btn btn--sm"
+                        onClick={() => void handleStateChange(agent.id, "active")}
+                        title="Resume"
+                      >
+                        <Play size={14} />
+                      </button>
                     )}
                     {agent.state === "running" && (
                       <>
@@ -798,32 +782,16 @@ export function AgentsView({ addToast, projectId }: AgentsViewProps) {
                         >
                           <Pause size={14} />
                         </button>
-                        <button
-                          className="btn btn--sm btn--danger"
-                          onClick={() => void handleStateChange(agent.id, "terminated")}
-                          title="Stop"
-                        >
-                          <Square size={14} />
-                        </button>
                       </>
                     )}
                     {agent.state === "error" && (
-                      <>
-                        <button
-                          className="btn btn--sm"
-                          onClick={() => void handleStateChange(agent.id, "active")}
-                          title="Retry"
-                        >
-                          <Play size={14} />
-                        </button>
-                        <button
-                          className="btn btn--sm btn--danger"
-                          onClick={() => void handleStateChange(agent.id, "terminated")}
-                          title="Stop"
-                        >
-                          <Square size={14} />
-                        </button>
-                      </>
+                      <button
+                        className="btn btn--sm"
+                        onClick={() => void handleStateChange(agent.id, "active")}
+                        title="Retry"
+                      >
+                        <Play size={14} />
+                      </button>
                     )}
                     {agent.state === "terminated" && (
                       <>
@@ -947,7 +915,6 @@ export function AgentsView({ addToast, projectId }: AgentsViewProps) {
                     )}
                     <div className="agent-heartbeat-control">
                       <span className="text-secondary">Heartbeat:</span>
-                      <span className="badge text-secondary">{formatHeartbeatInterval(configuredIntervalMs)}</span>
                       <select
                         className="select agent-heartbeat-select"
                         value={configuredIntervalMs}
@@ -962,11 +929,23 @@ export function AgentsView({ addToast, projectId }: AgentsViewProps) {
                         ))}
                       </select>
                       {isUpdatingHeartbeat && <span className="agent-heartbeat-saving text-secondary">Saving…</span>}
-                      {agent.lastHeartbeatAt && (
-                        <span className="agent-heartbeat-last text-secondary" title={new Date(agent.lastHeartbeatAt).toLocaleString()}>
-                          Last: {new Date(agent.lastHeartbeatAt).toLocaleTimeString()}
-                        </span>
-                      )}
+                      {agent.lastHeartbeatAt && (() => {
+                        const lastAt = new Date(agent.lastHeartbeatAt);
+                        const nextAt = new Date(lastAt.getTime() + configuredIntervalMs);
+                        const isTicking = agent.state === "active" || agent.state === "running";
+                        return (
+                          <>
+                            <span className="agent-heartbeat-last text-secondary" title={lastAt.toLocaleString()}>
+                              Last: {lastAt.toLocaleTimeString()}
+                            </span>
+                            {isTicking && (
+                              <span className="agent-heartbeat-next text-secondary" title={nextAt.toLocaleString()}>
+                                Next: {nextAt.toLocaleTimeString()}
+                              </span>
+                            )}
+                          </>
+                        );
+                      })()}
                     </div>
                   </div>
 
@@ -1006,32 +985,16 @@ export function AgentsView({ addToast, projectId }: AgentsViewProps) {
                         >
                           <Pause size={14} /> Pause
                         </button>
-                        <button
-                          className="btn btn--sm btn--danger"
-                          onClick={() => void handleStateChange(agent.id, "terminated")}
-                          title="Stop"
-                        >
-                          <Square size={14} /> Stop
-                        </button>
                       </>
                     )}
                     {agent.state === "paused" && (
-                      <>
-                        <button
-                          className="btn btn--sm"
-                          onClick={() => void handleStateChange(agent.id, "active")}
-                          title="Resume"
-                        >
-                          <Play size={14} /> Resume
-                        </button>
-                        <button
-                          className="btn btn--sm btn--danger"
-                          onClick={() => void handleStateChange(agent.id, "terminated")}
-                          title="Stop"
-                        >
-                          <Square size={14} /> Stop
-                        </button>
-                      </>
+                      <button
+                        className="btn btn--sm"
+                        onClick={() => void handleStateChange(agent.id, "active")}
+                        title="Resume"
+                      >
+                        <Play size={14} /> Resume
+                      </button>
                     )}
                     {agent.state === "running" && (
                       <>
@@ -1050,32 +1013,16 @@ export function AgentsView({ addToast, projectId }: AgentsViewProps) {
                         >
                           <Pause size={14} /> Pause
                         </button>
-                        <button
-                          className="btn btn--sm btn--danger"
-                          onClick={() => void handleStateChange(agent.id, "terminated")}
-                          title="Stop"
-                        >
-                          <Square size={14} /> Stop
-                        </button>
                       </>
                     )}
                     {agent.state === "error" && (
-                      <>
-                        <button
-                          className="btn btn--sm"
-                          onClick={() => void handleStateChange(agent.id, "active")}
-                          title="Retry"
-                        >
-                          <Play size={14} /> Retry
-                        </button>
-                        <button
-                          className="btn btn--sm btn--danger"
-                          onClick={() => void handleStateChange(agent.id, "terminated")}
-                          title="Stop"
-                        >
-                          <Square size={14} /> Stop
-                        </button>
-                      </>
+                      <button
+                        className="btn btn--sm"
+                        onClick={() => void handleStateChange(agent.id, "active")}
+                        title="Retry"
+                      >
+                        <Play size={14} /> Retry
+                      </button>
                     )}
                     {agent.state === "terminated" && (
                       <>
