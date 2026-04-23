@@ -103,6 +103,7 @@
   --surface: #161b22;
   --card: #21262d;
   --card-hover: #282e36;
+  --surface-hover: color-mix(in srgb, var(--surface) 90%, var(--text) 10%);
   --bg-secondary: color-mix(in srgb, var(--surface) 70%, var(--card));
   --bg-tertiary: color-mix(in srgb, var(--surface) 40%, var(--card));
   --border: #30363d;
@@ -4633,13 +4634,13 @@ input[type="range"]:focus-visible {
 
 .detail-actions-menu-item:hover,
 .detail-move-menu-item:hover {
-  background: var(--surface-hover, rgba(0, 0, 0, 0.04));
+  background: var(--surface-hover);
 }
 
 .detail-actions-menu-item:focus,
 .detail-move-menu-item:focus {
   outline: none;
-  background: var(--surface-hover, rgba(0, 0, 0, 0.04));
+  background: var(--surface-hover);
 }
 
 .detail-actions-menu-item-danger {
@@ -6016,12 +6017,12 @@ input[type="range"]:focus-visible {
 }
 
 .card-send-back-menu-item:hover {
-  background: var(--surface-hover, rgba(0, 0, 0, 0.04));
+  background: var(--surface-hover);
 }
 
 .card-send-back-menu-item:focus {
   outline: none;
-  background: var(--surface-hover, rgba(0, 0, 0, 0.04));
+  background: var(--surface-hover);
 }
 
 /* Loading state during save */
@@ -8912,7 +8913,7 @@ input[type="range"]:focus-visible {
   align-items: center;
   gap: var(--space-md);
   padding: var(--space-sm) var(--space-md);
-  background: var(--surface-hover, rgba(0, 0, 0, 0.03));
+  background: var(--surface-hover);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   margin-left: auto;
@@ -11061,6 +11062,7 @@ html .column.drag-over * {
   --surface: #f6f8fa;
   --card: #ffffff;
   --card-hover: #f3f4f6;
+  --surface-hover: color-mix(in srgb, var(--surface) 92%, var(--text) 8%);
   --bg-secondary: #f6f8fa;
   --bg-tertiary: #eaeef2;
   --border: #d0d7de;
@@ -30494,7 +30496,7 @@ html .column.drag-over * {
 }
 
 .agent-import-description code {
-  background: var(--surface-hover, color-mix(in srgb, var(--surface) 85%, var(--text) 15%));
+  background: var(--surface-hover);
   padding: calc(var(--space-xs) * 0.25) var(--space-xs);
   border-radius: calc(var(--radius-sm) - var(--space-xs) * 0.25);
   font-size: calc(var(--space-sm) + var(--space-xs));
@@ -30936,12 +30938,12 @@ html .column.drag-over * {
 }
 
 .agent-import-browse-item:hover {
-  background: var(--surface-hover, color-mix(in srgb, var(--text-muted) 8%, transparent));
+  background: var(--surface-hover);
 }
 
 .agent-import-browse-item:focus-visible {
   outline: none;
-  background: var(--surface-hover, color-mix(in srgb, var(--text-muted) 8%, transparent));
+  background: var(--surface-hover);
   box-shadow: var(--focus-ring);
 }
 
@@ -32084,7 +32086,7 @@ html .column.drag-over * {
 }
 
 .settings-sync-log__header:hover {
-  background: var(--surface-hover, rgba(0,0,0,0.03));
+  background: var(--surface-hover);
 }
 
 .settings-sync-log__filters {
@@ -33868,7 +33870,7 @@ html .column.drag-over * {
 }
 
 .mobile-more-item:active {
-  background: var(--surface-hover, rgba(0, 0, 0, 0.05));
+  background: var(--surface-hover);
 }
 
 .mobile-more-item svg {
@@ -35040,7 +35042,7 @@ html .column.drag-over * {
 
 .reflection-card:hover {
   border-color: var(--border-active);
-  background: var(--surface-hover, var(--surface));
+  background: var(--surface-hover);
 }
 
 .reflection-card--expanded {
@@ -36731,11 +36733,11 @@ html .column.drag-over * {
 }
 
 .roadmaps-view__sidebar-item:hover {
-  background: var(--surface-hover, rgba(0, 0, 0, 0.03));
+  background: var(--surface-hover);
 }
 
 .roadmaps-view__sidebar-item--active {
-  background: var(--surface-hover, rgba(0, 0, 0, 0.05));
+  background: var(--surface-hover);
 }
 
 .roadmaps-view__sidebar-item-content {
@@ -36788,7 +36790,7 @@ html .column.drag-over * {
 }
 
 .roadmaps-view__icon-btn[role="button"]:hover {
-  background: var(--surface-hover, rgba(0, 0, 0, 0.05));
+  background: var(--surface-hover);
   color: var(--text-primary);
 }
 
@@ -36818,7 +36820,7 @@ html .column.drag-over * {
 }
 
 .roadmaps-view__icon-btn:hover {
-  background: var(--surface-hover, rgba(0, 0, 0, 0.05));
+  background: var(--surface-hover);
   color: var(--text-primary);
 }
 
@@ -36942,7 +36944,7 @@ html .column.drag-over * {
 
 .roadmaps-view__drag-handle:hover {
   color: var(--text-primary);
-  background: var(--surface-hover, rgba(0, 0, 0, 0.05));
+  background: var(--surface-hover);
 }
 
 .roadmaps-view__milestone-header {
@@ -36995,7 +36997,7 @@ html .column.drag-over * {
 }
 
 .roadmaps-view__add-feature-btn:hover {
-  background: var(--surface-hover, rgba(0, 0, 0, 0.03));
+  background: var(--surface-hover);
   color: var(--text-primary);
   border-color: var(--text-muted);
 }
@@ -37188,7 +37190,7 @@ html .column.drag-over * {
 }
 
 .roadmaps-view__btn:hover {
-  background: var(--surface-hover, rgba(0, 0, 0, 0.05));
+  background: var(--surface-hover);
 }
 
 .roadmaps-view__btn--primary {
@@ -37240,7 +37242,7 @@ html .column.drag-over * {
 
 .roadmaps-view__add-milestone-btn:hover,
 .roadmaps-view__add-milestone-fab:hover {
-  background: var(--surface-hover, rgba(0, 0, 0, 0.03));
+  background: var(--surface-hover);
   color: var(--text-primary);
   border-color: var(--text-muted);
 }
@@ -37503,7 +37505,7 @@ html .column.drag-over * {
 }
 
 .roadmap-suggestion-edit-btn:hover {
-  background: var(--surface-hover, rgba(0, 0, 0, 0.03));
+  background: var(--surface-hover);
   color: var(--text-primary);
 }
 
@@ -37588,7 +37590,7 @@ html .column.drag-over * {
 }
 
 .roadmap-suggestion-cancel-btn:hover {
-  background: var(--surface-hover, rgba(0, 0, 0, 0.03));
+  background: var(--surface-hover);
   color: var(--text-primary);
 }
 
@@ -37732,7 +37734,7 @@ html .column.drag-over * {
   }
 
   .roadmaps-view__mobile-item:hover {
-    background: var(--surface-hover, rgba(0, 0, 0, 0.03));
+    background: var(--surface-hover);
   }
 
   .roadmaps-view__mobile-item--active {
@@ -37785,7 +37787,7 @@ html .column.drag-over * {
   }
 
   .roadmaps-view__mobile-action-btn:hover {
-    background: var(--surface-hover, rgba(0, 0, 0, 0.05));
+    background: var(--surface-hover);
     color: var(--text);
   }
 
@@ -37840,7 +37842,7 @@ html .column.drag-over * {
   }
 
   .roadmaps-view__mobile-back-btn:hover {
-    background: var(--surface-hover, rgba(0, 0, 0, 0.05));
+    background: var(--surface-hover);
     color: var(--text);
   }
 

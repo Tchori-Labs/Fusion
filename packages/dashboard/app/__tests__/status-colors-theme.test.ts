@@ -61,6 +61,27 @@ describe("Status color CSS custom properties", () => {
     expect(rootBlock).toContain("color-mix(in srgb, var(--text-muted");
   });
 
+  it("defines --surface-hover in :root using semantic color-mix()", () => {
+    const rootBlock = extractRootBlock(css);
+    expect(rootBlock).toContain("--surface-hover");
+    expect(rootBlock).toContain(
+      "--surface-hover: color-mix(in srgb, var(--surface) 90%, var(--text) 10%)"
+    );
+  });
+
+  it("defines light theme override for --surface-hover", () => {
+    const lightBlock = extractLightThemeBlock(css);
+    expect(lightBlock).toContain("--surface-hover");
+    expect(lightBlock).toContain(
+      "--surface-hover: color-mix(in srgb, var(--surface) 92%, var(--text) 8%)"
+    );
+  });
+
+  it("uses --surface-hover without per-rule fallback overrides", () => {
+    expect(css).toContain("var(--surface-hover)");
+    expect(css).not.toContain("var(--surface-hover,");
+  });
+
   it("defines light theme override for --status-error-bg", () => {
     const lightBlock = extractLightThemeBlock(css);
     expect(lightBlock).toContain("--status-error-bg");
