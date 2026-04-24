@@ -77,10 +77,10 @@ export function rateLimit(options: RateLimitOptions = {}) {
 
 /** Default rate limit configs for different endpoint patterns */
 export const RATE_LIMITS = {
-  /** General API: 100 req/min */
-  api: { windowMs: 60_000, max: 100 },
-  /** Mutation endpoints (POST/PUT/PATCH/DELETE): 30 req/min */
-  mutation: { windowMs: 60_000, max: 30 },
-  /** SSE connections: 10 per minute */
-  sse: { windowMs: 60_000, max: 10 },
+  /** General API: 1000 req/min */
+  api: { windowMs: 60_000, max: 1000 },
+  /** Mutation endpoints (POST/PUT/PATCH/DELETE): 600 req/min */
+  mutation: { windowMs: 60_000, max: 600 },
+  /** SSE connections: 60 per minute */
+  sse: { windowMs: 60_000, max: 60 },
 } as const;

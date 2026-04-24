@@ -5,6 +5,7 @@ import http from "node:http";
 import { createHmac } from "node:crypto";
 import express from "express";
 import { createServer, setupTerminalWebSocket } from "./server.js";
+import { RATE_LIMITS } from "./rate-limit.js";
 import { toSessionTag } from "./terminal-websocket-diagnostics.js";
 import type { TaskStore } from "@fusion/core";
 import { get as performGet, request as performRequest } from "./test-request.js";
@@ -438,7 +439,7 @@ describe("API Error Handling Middleware", () => {
     it("still enforces the mutation rate-limit budget independently", async () => {
       const app = createServer(store);
 
-      for (let i = 0; i < 30; i++) {
+      for (let i = 0; i < RATE_LIMITS.mutation.max; i++) {
         const res = await REQUEST(
           app,
           "POST",
@@ -464,7 +465,7 @@ describe("API Error Handling Middleware", () => {
     it("allows project setup mutations after the general mutation budget is exhausted", async () => {
       const app = createServer(store);
 
-      for (let i = 0; i < 30; i++) {
+      for (let i = 0; i < RATE_LIMITS.mutation.max; i++) {
         const res = await REQUEST(
           app,
           "POST",

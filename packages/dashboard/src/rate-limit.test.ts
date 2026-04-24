@@ -29,15 +29,15 @@ function mockRes(): Partial<Response> & { _status: number; _json: any; _headers:
 
 describe("RATE_LIMITS constants", () => {
   it("has correct values for api limit", () => {
-    expect(RATE_LIMITS.api).toEqual({ windowMs: 60_000, max: 100 });
+    expect(RATE_LIMITS.api).toEqual({ windowMs: 60_000, max: 1000 });
   });
 
   it("has correct values for mutation limit", () => {
-    expect(RATE_LIMITS.mutation).toEqual({ windowMs: 60_000, max: 30 });
+    expect(RATE_LIMITS.mutation).toEqual({ windowMs: 60_000, max: 600 });
   });
 
   it("has correct values for sse limit", () => {
-    expect(RATE_LIMITS.sse).toEqual({ windowMs: 60_000, max: 10 });
+    expect(RATE_LIMITS.sse).toEqual({ windowMs: 60_000, max: 60 });
   });
 });
 
@@ -200,7 +200,7 @@ describe("rateLimit with RATE_LIMITS presets", () => {
     apiMiddleware(req as Request, res as unknown as Response, () => { called = true; });
 
     expect(called).toBe(true);
-    expect(res._headers["RateLimit-Limit"]).toBe("100");
+    expect(res._headers["RateLimit-Limit"]).toBe(String(RATE_LIMITS.api.max));
   });
 
   it("works with RATE_LIMITS.mutation preset", () => {
@@ -208,11 +208,11 @@ describe("rateLimit with RATE_LIMITS presets", () => {
     const req = mockReq();
 
     // Exhaust limit
-    for (let i = 0; i < 30; i++) {
+    for (let i = 0; i < RATE_LIMITS.mutation.max; i++) {
       mutationMiddleware(req as Request, mockRes() as unknown as Response, () => {});
     }
 
-    // 31st request should be blocked
+    // Next request should be blocked
     const res = mockRes();
     mutationMiddleware(req as Request, res as unknown as Response, () => {});
     expect(res._status).toBe(429);
@@ -221,14 +221,13 @@ describe("rateLimit with RATE_LIMITS presets", () => {
   it("works with RATE_LIMITS.sse preset", () => {
     const sseMiddleware = rateLimit(RATE_LIMITS.sse);
     const req = mockReq();
-    const res = mockRes();
 
     // Exhaust limit
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < RATE_LIMITS.sse.max; i++) {
       sseMiddleware(req as Request, mockRes() as unknown as Response, () => {});
     }
 
-    // 11th request should be blocked
+    // Next request should be blocked
     const blockedRes = mockRes();
     sseMiddleware(req as Request, blockedRes as unknown as Response, () => {});
     expect(blockedRes._status).toBe(429);
