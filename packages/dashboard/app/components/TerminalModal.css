@@ -696,6 +696,14 @@
   text-align: center;
 }
 
+.terminal-error-actions {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: var(--space-sm, 8px);
+}
+
 .terminal-retry-btn {
   display: flex;
   align-items: center;

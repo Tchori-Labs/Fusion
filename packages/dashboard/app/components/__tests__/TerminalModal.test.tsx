@@ -147,7 +147,7 @@ describe("TerminalModal", () => {
     });
   });
 
-  it("shows error with retry button when bootstrap fails instead of stuck loading", async () => {
+  it("shows error with retry and refresh buttons when bootstrap fails instead of stuck loading", async () => {
     const mockRetryBootstrap = vi.fn();
     mockUseTerminalSessions.mockReturnValue({
       ...defaultSessionState,
@@ -164,13 +164,17 @@ describe("TerminalModal", () => {
       expect(screen.queryByTestId("terminal-loading")).toBeNull();
     });
 
-    // Should show the bootstrap error state with retry button
+    // Should show the bootstrap error state with retry + refresh buttons
     expect(screen.getByTestId("terminal-bootstrap-error")).toBeTruthy();
     expect(screen.getByText(/Failed to start terminal: Server unreachable/)).toBeTruthy();
-    
+
     const retryBtn = screen.getByTestId("terminal-retry-btn");
     expect(retryBtn).toBeTruthy();
     expect(retryBtn.textContent).toContain("Retry");
+
+    const refreshBtn = screen.getByTestId("terminal-bootstrap-refresh-btn");
+    expect(refreshBtn).toBeTruthy();
+    expect(refreshBtn.textContent).toContain("Refresh page");
   });
 
   it("retry button calls retryBootstrap from the hook", async () => {
@@ -189,6 +193,42 @@ describe("TerminalModal", () => {
     fireEvent.click(retryBtn);
 
     expect(mockRetryBootstrap).toHaveBeenCalled();
+  });
+
+  it("bootstrap refresh button reloads the page", async () => {
+    const mockRetryBootstrap = vi.fn();
+    const reloadMock = vi.fn();
+    const originalWindow = globalThis.window;
+    const patchedWindow = Object.create(originalWindow) as Window & typeof globalThis;
+
+    Object.defineProperty(patchedWindow, "location", {
+      value: {
+        ...originalWindow.location,
+        reload: reloadMock,
+      },
+      configurable: true,
+    });
+
+    (globalThis as { window: Window & typeof globalThis }).window = patchedWindow;
+
+    try {
+      mockUseTerminalSessions.mockReturnValue({
+        ...defaultSessionState,
+        tabs: [],
+        activeTab: null,
+        bootstrapError: "Connection refused",
+        retryBootstrap: mockRetryBootstrap,
+      });
+
+      render(<TerminalModal isOpen={true} onClose={mockOnClose} />);
+
+      const refreshBtn = screen.getByTestId("terminal-bootstrap-refresh-btn");
+      fireEvent.click(refreshBtn);
+
+      expect(reloadMock).toHaveBeenCalledTimes(1);
+    } finally {
+      (globalThis as { window: Window & typeof globalThis }).window = originalWindow;
+    }
   });
 
   it("clears error state and shows terminal after successful retry", async () => {
@@ -703,7 +743,7 @@ describe("TerminalModal", () => {
 
   // --- xterm initialization watchdog tests ---
   describe("xterm initialization watchdog", () => {
-    it("shows xterm init error overlay when xterm constructor throws", async () => {
+    it("shows xterm init error overlay with reinitialize and refresh actions when xterm constructor throws", async () => {
       // Override the mock to throw on construction
       const { Terminal } = await import("@xterm/xterm");
       const OrigTerminal = Terminal;
@@ -722,10 +762,14 @@ describe("TerminalModal", () => {
         expect(screen.getByText(/Terminal UI failed to initialize/)).toBeTruthy();
       });
 
-      // Should have a reinitialize button
+      // Should have both reinitialize + refresh fallback actions
       const reinitBtn = screen.getByTestId("terminal-reinit-btn");
       expect(reinitBtn).toBeTruthy();
       expect(reinitBtn.textContent).toContain("Reinitialize");
+
+      const refreshBtn = screen.getByTestId("terminal-xterm-refresh-btn");
+      expect(refreshBtn).toBeTruthy();
+      expect(refreshBtn.textContent).toContain("Refresh page");
 
       // Restore original Terminal
       (throwingModule as any).Terminal = OrigTerminal;
@@ -766,6 +810,44 @@ describe("TerminalModal", () => {
 
       // Restore
       (throwingModule as any).Terminal = OrigTerminal;
+    });
+
+    it("xterm init refresh button reloads the page", async () => {
+      const reloadMock = vi.fn();
+      const originalWindow = globalThis.window;
+      const patchedWindow = Object.create(originalWindow) as Window & typeof globalThis;
+
+      Object.defineProperty(patchedWindow, "location", {
+        value: {
+          ...originalWindow.location,
+          reload: reloadMock,
+        },
+        configurable: true,
+      });
+
+      (globalThis as { window: Window & typeof globalThis }).window = patchedWindow;
+
+      try {
+        const xtermModule = await import("@xterm/xterm");
+        const OrigTerminal = xtermModule.Terminal;
+
+        (xtermModule as any).Terminal = vi.fn().mockImplementation(() => {
+          throw new Error("xterm constructor failed");
+        });
+
+        render(<TerminalModal isOpen={true} onClose={mockOnClose} />);
+
+        await waitFor(() => {
+          expect(screen.getByTestId("terminal-xterm-init-error")).toBeTruthy();
+        });
+
+        fireEvent.click(screen.getByTestId("terminal-xterm-refresh-btn"));
+        expect(reloadMock).toHaveBeenCalledTimes(1);
+
+        (xtermModule as any).Terminal = OrigTerminal;
+      } finally {
+        (globalThis as { window: Window & typeof globalThis }).window = originalWindow;
+      }
     });
 
     it("shows timeout error when xterm initialization exceeds XTERM_INIT_TIMEOUT_MS", async () => {

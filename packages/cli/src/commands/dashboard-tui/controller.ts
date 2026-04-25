@@ -1,5 +1,6 @@
 import os from "node:os";
 import v8 from "node:v8";
+import { execSync } from "node:child_process";
 import { LogRingBuffer } from "./log-ring-buffer.js";
 import type { LogEntry } from "./log-ring-buffer.js";
 import type {

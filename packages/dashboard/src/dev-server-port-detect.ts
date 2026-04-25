@@ -137,6 +137,12 @@ function detectGenericUrl(line: string): PortDetectionResult | null {
   return withSource("generic-url", genericUrlMatch[1]);
 }
 
+function isInspectorDiagnosticLine(line: string): boolean {
+  return /\b(?:inspector|debugger)\b/i.test(line)
+    || /\b(node:)?\s*--inspect(?:-brk)?\b/i.test(line)
+    || /\bws:\/\/(?:127\.0\.0\.1|localhost):\d{2,5}\b/i.test(line);
+}
+
 function detectGenericPortLine(line: string): PortDetectionResult | null {
   const keywordPortMatch = line.match(/\b(?:ready|listening|started|available|compiled|running|server)\b[^\d]{0,50}(?:on\s+)?(?:port\s*[:=]?\s*)?(\d{2,5})\b/i);
   if (!keywordPortMatch) {
@@ -168,7 +174,7 @@ export function detectPortFromLogLine(line: string): PortDetectionResult | null 
   }
 
   const cleanLine = stripAnsi(line).trim();
-  if (!cleanLine) {
+  if (!cleanLine || isInspectorDiagnosticLine(cleanLine)) {
     return null;
   }
 

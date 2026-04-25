@@ -808,6 +808,10 @@ export function TerminalModal({ isOpen, onClose, initialCommand, projectId }: Te
     setXtermReady(false);
   }, []);
 
+  const handleRefreshPage = useCallback(() => {
+    window.location.reload();
+  }, []);
+
   if (!isOpen) return null;
 
   const getStatusIndicator = () => {
@@ -967,14 +971,24 @@ export function TerminalModal({ isOpen, onClose, initialCommand, projectId }: Te
             <div className="terminal-loading" data-testid="terminal-bootstrap-error">
               <div className="terminal-error-content">
                 <span>Failed to start terminal: {bootstrapError}</span>
-                <button
-                  className="terminal-retry-btn"
-                  onClick={retryBootstrap}
-                  data-testid="terminal-retry-btn"
-                >
-                  <RefreshCw size={14} />
-                  Retry
-                </button>
+                <div className="terminal-error-actions">
+                  <button
+                    className="terminal-retry-btn"
+                    onClick={retryBootstrap}
+                    data-testid="terminal-retry-btn"
+                  >
+                    <RefreshCw size={14} />
+                    Retry
+                  </button>
+                  <button
+                    className="terminal-retry-btn"
+                    onClick={handleRefreshPage}
+                    data-testid="terminal-bootstrap-refresh-btn"
+                  >
+                    <RefreshCw size={14} />
+                    Refresh page
+                  </button>
+                </div>
               </div>
             </div>
           )}
@@ -982,14 +996,24 @@ export function TerminalModal({ isOpen, onClose, initialCommand, projectId }: Te
             <div className="terminal-loading" data-testid="terminal-xterm-init-error">
               <div className="terminal-error-content">
                 <span>Terminal UI failed to initialize: {xtermInitError}</span>
-                <button
-                  className="terminal-retry-btn"
-                  onClick={handleReinitialize}
-                  data-testid="terminal-reinit-btn"
-                >
-                  <RefreshCw size={14} />
-                  Reinitialize
-                </button>
+                <div className="terminal-error-actions">
+                  <button
+                    className="terminal-retry-btn"
+                    onClick={handleReinitialize}
+                    data-testid="terminal-reinit-btn"
+                  >
+                    <RefreshCw size={14} />
+                    Reinitialize
+                  </button>
+                  <button
+                    className="terminal-retry-btn"
+                    onClick={handleRefreshPage}
+                    data-testid="terminal-xterm-refresh-btn"
+                  >
+                    <RefreshCw size={14} />
+                    Refresh page
+                  </button>
+                </div>
               </div>
             </div>
           )}

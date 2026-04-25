@@ -46,7 +46,6 @@ import type {
   FileEntry,
   FileReadResult,
   TaskDetailData,
-  TaskLogEntry,
   TaskEvent,
 } from "./state.js";
 import { SECTION_ORDER } from "./state.js";
@@ -1175,7 +1174,6 @@ function TaskDetailScreen({
       cancelled = true;
       unsub();
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectPath, task.id]);
 
   // When auto-follow is on and new log entries arrive, reset scroll to bottom.

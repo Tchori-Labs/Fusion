@@ -107,6 +107,15 @@ describe("dev-server-port-detect", () => {
     });
   });
 
+  it("ignores node inspector diagnostic URLs", () => {
+    expect(
+      detectPortFromLogLine("Starting inspector on 127.0.0.1:9229 failed: address already in use"),
+    ).toBeNull();
+    expect(
+      detectPortFromLogLine("Debugger listening on ws://127.0.0.1:9229/abc"),
+    ).toBeNull();
+  });
+
   it("detectPortFromLogs searches from latest line to oldest", () => {
     const result = detectPortFromLogs([
       "old: http://localhost:3000/",

@@ -11,11 +11,37 @@
 
 // Set increased heap size (8GB) to prevent OOM during initial build/start
 const MEMORY_MB = process.env.FUSION_DEV_MEMORY_MB || "8192";
-process.env.NODE_OPTIONS = `--max-old-space-size=${MEMORY_MB} ${process.env.NODE_OPTIONS || ""}`.trim();
 
 // Spawn the actual dev command with all arguments passed through
 const { spawn } = await import("child_process");
-const args = process.argv.slice(2);
+const rawArgs = process.argv.slice(2);
+
+// --inspect / --inspect-brk / --inspect=PORT enables the Node inspector and
+// auto-dumps a heap snapshot just before the heap limit is hit. Strip these
+// from forwarded args so they don't reach the dashboard CLI parser; they go
+// into NODE_OPTIONS instead so tsx's child node process picks them up.
+const inspectFlags = [];
+const args = [];
+for (const a of rawArgs) {
+  if (a === "--inspect" || a === "--inspect-brk" || a.startsWith("--inspect=") || a.startsWith("--inspect-brk=")) {
+    inspectFlags.push(a);
+  } else {
+    args.push(a);
+  }
+}
+if (inspectFlags.length > 0) {
+  // 3 = take up to 3 snapshots as we approach the heap limit. Files land in
+  // CWD as Heap.YYYYMMDD.HHMMSS.PID.NNN.heapsnapshot
+  inspectFlags.push("--heapsnapshot-near-heap-limit=3");
+  console.log(`[dev-with-memory] inspector enabled: ${inspectFlags.join(" ")}`);
+}
+
+// Base NODE_OPTIONS applied to every spawned node process (build + run).
+// Inspector flags are NOT here — they go only on the final tsx run, otherwise
+// `pnpm build` would grab port 9229 first and tsx would fail to bind.
+const baseNodeOptions = `--max-old-space-size=${MEMORY_MB} ${process.env.NODE_OPTIONS || ""}`.trim();
+process.env.NODE_OPTIONS = baseNodeOptions;
+const runNodeOptions = `${baseNodeOptions} ${inspectFlags.join(" ")}`.trim();
 
 // In dev we bind the dashboard to 0.0.0.0 so the server is reachable from
 // mobile devices and other machines on the LAN for testing. Production
@@ -32,11 +58,23 @@ if (forwardedArgs.length === 0) {
   const pnpm = spawn("pnpm", ["build"], { stdio: "inherit", shell: true });
   pnpm.on("close", (code) => {
     if (code !== 0) process.exit(code ?? 1);
-    const tsx = spawn("pnpm", ["exec", "tsx", "packages/cli/src/bin.ts"], { stdio: "inherit", shell: true });
+    const tsx = spawn("node_modules/.bin/tsx", ["packages/cli/src/bin.ts"], {
+      stdio: "inherit",
+      shell: true,
+      env: { ...process.env, NODE_OPTIONS: runNodeOptions },
+    });
     tsx.on("close", (c) => process.exit(c ?? 1));
   });
 } else {
-  // Forward all arguments (e.g., "dashboard", "task list", etc.)
-  const cmd = spawn("pnpm", ["build", "&&", "pnpm", "exec", "tsx", "packages/cli/src/bin.ts", ...forwardedArgs], { stdio: "inherit", shell: true });
-  cmd.on("close", (c) => process.exit(c ?? 1));
+  // Build first (without inspector), then exec the CLI with inspector flags.
+  const build = spawn("pnpm", ["build"], { stdio: "inherit", shell: true });
+  build.on("close", (code) => {
+    if (code !== 0) process.exit(code ?? 1);
+    const tsx = spawn("node_modules/.bin/tsx", ["packages/cli/src/bin.ts", ...forwardedArgs], {
+      stdio: "inherit",
+      shell: true,
+      env: { ...process.env, NODE_OPTIONS: runNodeOptions },
+    });
+    tsx.on("close", (c) => process.exit(c ?? 1));
+  });
 }
