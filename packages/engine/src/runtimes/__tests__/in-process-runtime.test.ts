@@ -1042,7 +1042,52 @@ describe("InProcessRuntime", () => {
       }
     }, 30000);
 
-    it("warns on cleanup failure but does not throw", async () => {
+    it("does not warn when cleanup delete fails only because agent is already gone", async () => {
+      vi.useFakeTimers();
+      const warnSpy = vi.spyOn(runtimeLog, "warn");
+
+      try {
+        await runtime.start();
+
+        const store = getAgentStore(runtime);
+
+        // Create an ephemeral agent
+        const agent = await store.createAgent({
+          name: "executor-FN-BENIGN-1",
+          role: "executor",
+          metadata: {
+            agentKind: "task-worker",
+          },
+          runtimeConfig: { enabled: false },
+        });
+
+        const deleteAgentSpy = vi
+          .spyOn(store, "deleteAgent")
+          .mockRejectedValueOnce(new Error(`Agent ${agent.id} not found`));
+
+        // Emit termination event
+        store.emit("agent:stateChanged", agent.id, "running", "terminated");
+
+        // Wait for async handler, then fire delayed cleanup
+        await vi.advanceTimersByTimeAsync(0);
+        await vi.advanceTimersByTimeAsync(5000);
+
+        // Cleanup should still be attempted
+        expect(deleteAgentSpy).toHaveBeenCalledTimes(1);
+        expect(deleteAgentSpy).toHaveBeenCalledWith(agent.id);
+
+        // Benign not-found races should not produce warning-level noise
+        const emittedCleanupWarning = warnSpy.mock.calls.some(([msg]) =>
+          typeof msg === "string" && msg.includes("Failed to delete ephemeral agent"),
+        );
+        expect(emittedCleanupWarning).toBe(false);
+      } finally {
+        warnSpy.mockRestore();
+        vi.useRealTimers();
+      }
+    }, 30000);
+
+    it("warns on genuine cleanup failure but does not throw", async () => {
       vi.useFakeTimers();
       const warnSpy = vi.spyOn(runtimeLog, "warn");
 
@@ -1071,14 +1116,17 @@ describe("InProcessRuntime", () => {
         // Advance timers to trigger deletion
         await vi.advanceTimersByTimeAsync(5000);
 
-        // Should have logged a warning with concatenated message
-        expect(warnSpy).toHaveBeenCalledWith(
-          expect.stringContaining("Failed to delete ephemeral agent"),
-        );
-        // The warning message is a single concatenated string: "Failed to delete ephemeral agent {agentId} after termination: {error}"
-
         // Should have attempted deletion
         expect(deleteAgentSpy).toHaveBeenCalledTimes(1);
+        expect(deleteAgentSpy).toHaveBeenCalledWith(agent.id);
+
+        // Genuine failures still log warning-level context
+        const cleanupWarnings = warnSpy.mock.calls.filter(([msg]) =>
+          typeof msg === "string" && msg.includes("Failed to delete ephemeral agent"),
+        );
+        expect(cleanupWarnings).toHaveLength(1);
+        expect(cleanupWarnings[0]?.[0]).toContain(agent.id);
+        expect(cleanupWarnings[0]?.[0]).toContain("delete failed");
       } finally {
         warnSpy.mockRestore();
         vi.useRealTimers();

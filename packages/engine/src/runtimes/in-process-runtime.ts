@@ -553,6 +553,9 @@ export class InProcessRuntime
                 try {
                   await this.agentStore?.deleteAgent(agentId);
                 } catch (err: unknown) {
+                  if (this.isBenignEphemeralDeleteRaceError(agentId, err)) {
+                    return;
+                  }
                   const msg = err instanceof Error ? err.message : String(err);
                   runtimeLog.warn(`Failed to delete ephemeral agent ${agentId} after termination: ${msg}`);
                 }
@@ -1085,6 +1088,25 @@ export class InProcessRuntime
     });
 
     runtimeLog.log("Event forwarding setup complete");
+  }
+
+  /**
+   * Returns true when an ephemeral delete failure is expected due to cleanup races
+   * (for example the agent was already removed by a parallel cleanup path).
+   */
+  private isBenignEphemeralDeleteRaceError(agentId: string, err: unknown): boolean {
+    const msg = err instanceof Error ? err.message : String(err);
+    const normalized = msg.toLowerCase();
+
+    if (normalized.includes("already deleted") || normalized.includes("already removed")) {
+      return true;
+    }
+
+    if (normalized.includes(`agent ${agentId.toLowerCase()} not found`)) {
+      return true;
+    }
+
+    return /^agent\s+.+\s+not found$/i.test(msg.trim());
   }
 
   /**
