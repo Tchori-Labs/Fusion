@@ -343,15 +343,31 @@ function LogsPanel({
     ? state.logEntries
     : state.logEntries.filter((e) => e.level === logsSeverityFilter);
 
-  const visibleEntries = entries.slice(-availableRows);
-  const visibleStart = Math.max(0, entries.length - availableRows);
+  // Default cursor to the newest entry when the user hasn't navigated yet
+  // (selectedLogIndex of 0 on a long buffer would be offscreen at the top).
+  const cursor = entries.length === 0
+    ? 0
+    : Math.min(Math.max(selectedLogIndex, 0), entries.length - 1);
+
+  // Slide the viewport so the cursor is always visible. Newest entries sit at
+  // the bottom; oldest at the top — matching `tail`/`less` and how every
+  // human reads a log file.
+  const rowBudget = Math.max(1, availableRows);
+  const visibleStart = Math.max(0, Math.min(
+    cursor - Math.floor(rowBudget / 2),
+    entries.length - rowBudget,
+  ));
+  const visibleEnd = Math.min(entries.length, visibleStart + rowBudget);
+  const visibleEntries = entries.slice(visibleStart, visibleEnd);
+  const hiddenAbove = visibleStart;
+  const hiddenBelow = entries.length - visibleEnd;
 
   return (
     <Panel title={`Logs (${state.logEntries.length}/1000)`} isFocused={isFocused} flexGrow={1}>
-      {logsExpandedMode && entries[selectedLogIndex] ? (
+      {logsExpandedMode && entries[cursor] ? (
         <ExpandedLog
-          entry={entries[selectedLogIndex]}
-          index={selectedLogIndex}
+          entry={entries[cursor]}
+          index={cursor}
           total={entries.length}
         />
       ) : entries.length === 0 ? (
@@ -363,10 +379,12 @@ function LogsPanel({
           <Box flexDirection="row" gap={1} marginBottom={0}>
             <Text dimColor>[w] wrap {logsWrapEnabled ? "on" : "off"}</Text>
             <Text dimColor>[f] {logsSeverityFilter}</Text>
+            {hiddenAbove > 0 && <Text dimColor>↑ {hiddenAbove} more</Text>}
+            {hiddenBelow > 0 && <Text dimColor>↓ {hiddenBelow} more</Text>}
           </Box>
-          {[...visibleEntries].reverse().map((entry, displayIdx) => {
-            const absoluteIndex = visibleStart + visibleEntries.length - 1 - displayIdx;
-            const isSelected = absoluteIndex === selectedLogIndex;
+          {visibleEntries.map((entry, displayIdx) => {
+            const absoluteIndex = visibleStart + displayIdx;
+            const isSelected = absoluteIndex === cursor;
             // Selected row: blue background + bright arrow + bold text. The
             // background spans the whole row so the cursor is visible at a
             // glance even on a busy logs panel.

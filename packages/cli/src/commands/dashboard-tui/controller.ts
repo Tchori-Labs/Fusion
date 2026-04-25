@@ -139,8 +139,18 @@ export class DashboardTUI {
   }
 
   addLog(entry: Omit<LogEntry, "timestamp">): void {
+    // If the cursor was sitting on the most recent entry (or there were no
+    // entries yet), keep it pinned to the new tail so live logs follow the
+    // latest event — same behavior as `tail -f` or k9s.
+    const beforeCount = this.getFilteredLogEntries().length;
+    const wasAtTail = beforeCount === 0 || this.selectedLogIndex === beforeCount - 1;
     this.logBuffer.push({ ...entry, timestamp: new Date() });
-    this.clampSelectedLogIndex(this.getFilteredLogEntries());
+    const after = this.getFilteredLogEntries();
+    if (wasAtTail) {
+      this.selectedLogIndex = Math.max(0, after.length - 1);
+    } else {
+      this.clampSelectedLogIndex(after);
+    }
     this.notify();
   }
 
