@@ -2164,6 +2164,14 @@ input[type="range"]:focus-visible {
   margin-top: var(--space-md);
 }
 
+/* Comment textareas use --surface so they remain visible against the
+   task detail modal's --card / --bg panels (in light mode --bg and
+   --card are both #ffffff, which made the box blend in). */
+.comments-compose-form .spec-editor-feedback,
+.comments-edit-form .spec-editor-feedback {
+  background: var(--surface);
+}
+
 .comments-type-toggle {
   display: flex;
   gap: var(--space-sm);

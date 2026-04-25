@@ -1,4 +1,5 @@
-import "./ChatView.css";
+// ChatView.css is imported eagerly from App.tsx to avoid a flash of
+// unstyled content when the lazy chunk loads. Do not re-import here.
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   MessageSquare,

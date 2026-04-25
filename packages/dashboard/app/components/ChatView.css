@@ -637,3 +637,24 @@
   color: var(--text-muted);
 }
 
+/* === Mobile: one pane at a time =========================================
+   Sidebar (session list) and thread are siblings of .chat-view. On mobile
+   we show whichever one is "active" full-width: when the sidebar is
+   visible, the thread is hidden; when the sidebar is hidden (a session is
+   open), the sidebar is collapsed via .chat-sidebar--hidden and the
+   thread takes the full viewport. The thread already renders a back
+   button (ChevronLeft) on mobile to flip back to the session list. */
+@media (max-width: 768px) {
+  .chat-sidebar {
+    width: 100%;
+    min-width: 0;
+    border-right: none;
+  }
+
+  /* When the sidebar is shown, the thread is hidden so only the session
+     list is visible. When the sidebar is hidden, the thread fills the
+     viewport. Adjacent-sibling selector keeps logic in CSS only. */
+  .chat-sidebar:not(.chat-sidebar--hidden) + .chat-thread {
+    display: none;
+  }
+}
