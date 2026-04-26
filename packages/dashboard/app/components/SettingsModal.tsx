@@ -3531,7 +3531,12 @@ export function SettingsModal({
             <div className="form-group">
               <label>Tunnel lifecycle</label>
               <small>State: <strong>{tunnelState}</strong>{remoteStatus?.provider ? ` · Provider: ${remoteStatus.provider}` : ""}</small>
-              {remoteStatus?.url && <small>URL: <code>{remoteStatus.url}</code></small>}
+              {remoteStatus?.url && (
+                <small>
+                  URL:
+                  <code className="settings-url-output">{remoteStatus.url}</code>
+                </small>
+              )}
               {remoteStatus?.lastError && <small className="field-error">{remoteStatus.lastError}</small>}
               <div className="settings-button-row">
                 <button
@@ -3635,7 +3640,8 @@ export function SettingsModal({
               )}
               {remoteUrlPreview?.url && (
                 <small>
-                  Authenticated URL: <code>{remoteUrlPreview.url}</code>
+                  Authenticated URL:
+                  <code className="settings-url-output">{remoteUrlPreview.url}</code>
                 </small>
               )}
               {remoteQrSvg && (

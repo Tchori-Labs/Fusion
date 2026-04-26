@@ -20,6 +20,7 @@ import { aiMergeTask } from "./merger.js";
 import { PRIORITY_MERGE } from "./concurrency.js";
 import { runtimeLog } from "./logger.js";
 import type { HeartbeatTriggerScheduler } from "./agent-heartbeat.js";
+import { TunnelProcessManager } from "./remote-access/tunnel-process-manager.js";
 
 /**
  * Callback for processing pull-request merge strategy.
@@ -90,6 +91,7 @@ export class ProjectEngine {
   private notifier?: NtfyNotifier;
   private cronRunner?: CronRunner;
   private automationStore?: AutomationStoreType;
+  private remoteTunnelManager?: TunnelProcessManager;
 
   // ── Auto-merge state ──
   private mergeQueue: string[] = [];
@@ -139,6 +141,8 @@ export class ProjectEngine {
 
     const store = this.runtime.getTaskStore();
     const cwd = this.config.workingDirectory;
+
+    this.remoteTunnelManager = new TunnelProcessManager();
 
     // 2. Initialize PrMonitor + PrCommentHandler
     this.prMonitor = new PrMonitor();
@@ -281,6 +285,17 @@ export class ProjectEngine {
     this.notifier?.stop();
     this.cronRunner?.stop();
 
+    const tunnelManager = this.remoteTunnelManager;
+    this.remoteTunnelManager = undefined;
+    if (tunnelManager) {
+      try {
+        await tunnelManager.stop();
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        runtimeLog.warn(`Tunnel process manager stop failed (continuing shutdown): ${message}`);
+      }
+    }
+
     // Stop the core runtime (Triage, Scheduler, Executor, etc.)
     await this.runtime.stop();
 
@@ -337,6 +352,11 @@ export class ProjectEngine {
   /** Get the RoutineStore (if initialized). */
   getRoutineStore(): import("@fusion/core").RoutineStore | undefined {
     return this.runtime.getRoutineStore();
+  }
+
+  /** Get the remote tunnel manager (available after start()). */
+  getRemoteTunnelManager(): TunnelProcessManager | undefined {
+    return this.remoteTunnelManager;
   }
 
   /** Get the RoutineRunner (if initialized). */

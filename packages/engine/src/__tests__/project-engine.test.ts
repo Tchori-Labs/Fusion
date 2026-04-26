@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ProjectEngine } from "../project-engine.js";
 import { runtimeLog } from "../logger.js";
 import { aiMergeTask } from "../merger.js";
+import { TunnelProcessManager } from "../remote-access/tunnel-process-manager.js";
 
 const mocks = vi.hoisted(() => ({
   syncInsightExtractionAutomation: vi.fn(),
@@ -231,6 +232,55 @@ describe("ProjectEngine auto-summarize wiring", () => {
     expect(mocks.syncAutoSummarizeAutomation).toHaveBeenCalledTimes(2);
 
     await engine.stop();
+  });
+});
+
+describe("ProjectEngine remote tunnel manager wiring", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    const mockStore = createMockStore(baseSettings);
+    mocks.currentStore = mockStore.store;
+  });
+
+  it("is unavailable before start and available after start", async () => {
+    const engine = createEngine();
+
+    expect(engine.getRemoteTunnelManager()).toBeUndefined();
+
+    await engine.start();
+
+    expect(engine.getRemoteTunnelManager()).toBeInstanceOf(TunnelProcessManager);
+
+    await engine.stop();
+    expect(engine.getRemoteTunnelManager()).toBeUndefined();
+  });
+
+  it("calls tunnel manager stop once during shutdown", async () => {
+    const stopSpy = vi.spyOn(TunnelProcessManager.prototype, "stop").mockResolvedValueOnce(undefined);
+    const engine = createEngine();
+
+    await engine.start();
+    await engine.stop();
+
+    expect(stopSpy).toHaveBeenCalledTimes(1);
+    stopSpy.mockRestore();
+  });
+
+  it("warns when tunnel manager shutdown fails and clears manager reference", async () => {
+    const warnSpy = vi.spyOn(runtimeLog, "warn").mockImplementation(() => {});
+    const stopSpy = vi.spyOn(TunnelProcessManager.prototype, "stop").mockRejectedValueOnce(new Error("tunnel stop failed"));
+    const engine = createEngine();
+
+    await engine.start();
+    await engine.stop();
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Tunnel process manager stop failed"),
+    );
+    expect(engine.getRemoteTunnelManager()).toBeUndefined();
+
+    stopSpy.mockRestore();
+    warnSpy.mockRestore();
   });
 });
 

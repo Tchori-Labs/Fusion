@@ -200,6 +200,14 @@ Remote access settings are project-only (stored in `.fusion/config.json`), not g
 | `remoteWasRunningOnShutdown` | `boolean` | `false` | Internal state flag persisted on shutdown. |
 | `remoteLastStartedProvider` | `"tailscale" \| "cloudflare" \| null` | `null` | Internal last-known running provider for restore decisions. |
 
+Runtime provider config/credential contract (engine remote-access manager):
+- The tunnel manager consumes **resolved provider configs** (`TunnelProviderConfig`) from callers; it does not read dashboard form state directly.
+- Provider config must include executable + args and may include credential references:
+  - `tokenEnvVar` (env var name, value sourced from process/config env)
+  - `credentialsPath` (Cloudflare credentials file path)
+- Missing/invalid credential references fail fast with `invalid_config` status/error behavior.
+- Secret-bearing values are redacted in command previews and emitted tunnel logs before they are published to subscribers.
+
 Short-lived token bounds are enforced server-side:
 - Minimum TTL: `60_000` ms (60s)
 - Maximum TTL: `86_400_000` ms (24h)

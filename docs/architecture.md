@@ -351,13 +351,17 @@ Implemented in `agent-heartbeat.ts`:
 - `PeerExchangeService` (`peer-exchange-service.ts`) — peer sync orchestration
 
 ### Remote access runtime
-- `remote-access/remote-access-manager.ts` supervises tunnel lifecycle with non-blocking child processes
-- Provider adapters:
-  - `remote-access/providers/tailscale-adapter.ts` (`tailscale serve`, status probes)
-  - `remote-access/providers/cloudflare-adapter.ts` (`cloudflared tunnel run`, startup URL detection)
-- Crash-safe lifecycle: graceful stop (`SIGTERM`), bounded wait, forced kill fallback (`SIGKILL`)
-- Restore-on-start guardrails: only when remember-last-running is enabled and provider config/binaries are valid
-- Short-lived token registry is in-memory and intentionally ephemeral (clears on process restart)
+- `remote-access/tunnel-process-manager.ts` owns tunnel lifecycle orchestration with `spawn`-based, non-blocking process supervision.
+- `remote-access/types.ts` defines the runtime contract used by downstream API/TUI/headless layers:
+  - Providers: `"tailscale" | "cloudflare"`
+  - Lifecycle states: `"stopped" | "starting" | "running" | "stopping" | "failed"`
+  - Error codes: `invalid_config`, `start_failed`, `stop_failed`, `switch_failed`, `readiness_timeout`, `process_exit`, etc.
+- `remote-access/provider-adapters.ts` provides provider-specific command composition + readiness parsing while enforcing config validation.
+- Credential inputs are reference-based (`tokenEnvVar`, `credentialsPath`) and validated without logging raw secret values.
+- Redaction is applied to command previews and emitted log lines before publishing status/log events.
+- Deterministic stop semantics: graceful shutdown (`SIGTERM`) first, bounded wait, then force-kill fallback (`SIGKILL`).
+- Safe provider switching is stop-first: active provider fully stops before target start is attempted; failed starts emit `switch_failed` terminal status.
+- `ProjectEngine.start()` instantiates a per-project tunnel manager and exposes it through `getRemoteTunnelManager()` for API/UI consumers.
 
 ### Multi-runtime support + IPC
 - Runtime contracts: `project-runtime.ts`

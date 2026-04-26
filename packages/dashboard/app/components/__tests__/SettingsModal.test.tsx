@@ -702,7 +702,7 @@ describe("SettingsModal", () => {
         expect(mockFetchSettings).toHaveBeenCalled();
       });
 
-      expect(screen.getByText("Memory")).toBeDefined();
+      expect(await screen.findByText("Memory")).toBeDefined();
     });
 
     it("shows the memory toggle with default enabled", async () => {
@@ -713,7 +713,7 @@ describe("SettingsModal", () => {
       });
 
       // Click the Memory section in the sidebar
-      await userEvent.click(screen.getByText("Memory"));
+      await userEvent.click(await screen.findByText("Memory"));
 
       const checkbox = screen.getByRole("checkbox", { name: /enable memory tools/i });
       expect(checkbox).toBeDefined();
@@ -734,7 +734,7 @@ describe("SettingsModal", () => {
       });
 
       // Click the Memory section in the sidebar
-      await userEvent.click(screen.getByText("Memory"));
+      await userEvent.click(await screen.findByText("Memory"));
 
       const checkbox = screen.getByRole("checkbox", { name: /enable memory tools/i });
       expect(checkbox).toBeDefined();
@@ -749,7 +749,7 @@ describe("SettingsModal", () => {
       });
 
       // Click the Memory section in the sidebar
-      await userEvent.click(screen.getByText("Memory"));
+      await userEvent.click(await screen.findByText("Memory"));
 
       const checkbox = screen.getByRole("checkbox", { name: /enable memory tools/i });
       expect(checkbox).toBeChecked();
@@ -798,7 +798,7 @@ describe("SettingsModal", () => {
       await waitFor(() => {
         expect(mockFetchSettings).toHaveBeenCalled();
       });
-      await userEvent.click(screen.getByText("Memory"));
+      await userEvent.click(await screen.findByText("Memory"));
 
       expect(screen.getByText("Checking memory write access...")).toBeInTheDocument();
       expect(screen.queryByText(/qmd is not installed\. Search will use local files\./i)).not.toBeInTheDocument();
@@ -839,7 +839,7 @@ describe("SettingsModal", () => {
       await waitFor(() => {
         expect(mockFetchSettings).toHaveBeenCalled();
       });
-      await userEvent.click(screen.getByText("Memory"));
+      await userEvent.click(await screen.findByText("Memory"));
 
       expect(screen.getByText(/Memory is configured with a read-only backend\./i)).toBeInTheDocument();
     });
@@ -880,7 +880,7 @@ describe("SettingsModal", () => {
       await waitFor(() => {
         expect(mockFetchSettings).toHaveBeenCalled();
       });
-      await userEvent.click(screen.getByText("Memory"));
+      await userEvent.click(await screen.findByText("Memory"));
 
       await userEvent.click(await screen.findByRole("button", { name: "Install qmd" }));
 
@@ -900,7 +900,7 @@ describe("SettingsModal", () => {
 
       expect(mockFetchMemoryFiles).not.toHaveBeenCalled();
 
-      await userEvent.click(screen.getByText("Memory"));
+      await userEvent.click(await screen.findByText("Memory"));
 
       await waitFor(() => {
         expect(mockFetchMemoryFiles).toHaveBeenCalledWith(undefined);
@@ -925,7 +925,7 @@ describe("SettingsModal", () => {
         expect(mockFetchSettings).toHaveBeenCalled();
       });
 
-      await userEvent.click(screen.getByText("Memory"));
+      await userEvent.click(await screen.findByText("Memory"));
 
       expect(screen.getByText("Loading memory…")).toBeDefined();
 
@@ -944,7 +944,7 @@ describe("SettingsModal", () => {
         expect(mockFetchSettings).toHaveBeenCalled();
       });
 
-      await userEvent.click(screen.getByText("Memory"));
+      await userEvent.click(await screen.findByText("Memory"));
 
       await waitFor(() => {
         expect(mockFetchMemoryFile).toHaveBeenCalledWith(".fusion/memory/DREAMS.md", undefined);
@@ -977,7 +977,7 @@ describe("SettingsModal", () => {
         expect(mockFetchSettings).toHaveBeenCalled();
       });
 
-      await userEvent.click(screen.getByText("Memory"));
+      await userEvent.click(await screen.findByText("Memory"));
 
       const compactButton = await screen.findByRole("button", { name: "Compact Selected File" });
       await userEvent.click(compactButton);
@@ -999,7 +999,7 @@ describe("SettingsModal", () => {
         expect(mockFetchSettings).toHaveBeenCalled();
       });
 
-      await userEvent.click(screen.getByText("Memory"));
+      await userEvent.click(await screen.findByText("Memory"));
 
       const editor = await screen.findByLabelText("Editor for .fusion/memory/DREAMS.md") as HTMLTextAreaElement;
       expect(editor.value).toBe("");
@@ -1019,7 +1019,7 @@ describe("SettingsModal", () => {
         expect(mockFetchSettings).toHaveBeenCalled();
       });
 
-      await userEvent.click(screen.getByText("Memory"));
+      await userEvent.click(await screen.findByText("Memory"));
 
       const select = await screen.findByLabelText("Memory File");
       await userEvent.selectOptions(select, ".fusion/memory/DREAMS.md");

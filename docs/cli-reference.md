@@ -97,6 +97,13 @@ Remote action keys in Settings detail pane:
 - `K` request QR payload hand-off
 - `R` refresh remote status/snapshot
 
+Engine/runtime remote tunnel semantics used by dashboard + serve + TUI:
+- Lifecycle states: `stopped → starting → running → stopping` (or terminal `failed`)
+- Start/stop is process-supervised (`spawn`, `SIGTERM`, 5s default timeout, then `SIGKILL`)
+- Provider switch is stop-first: the current provider is fully stopped before target startup is attempted
+- Failed switch/start emits explicit failure status (`switch_failed` / `invalid_config` / `start_failed`) and never runs both providers concurrently
+- Status/log subscribers receive redacted events (token-bearing args/env/log text masked)
+
 QR hand-off behavior in TUI:
 - `format="text"`: renders the text payload directly
 - `format="image/svg"`: does not render raw SVG in terminal; shows the authenticated URL, expiry metadata, and a fallback instruction to open the URL on phone/browser
@@ -223,6 +230,11 @@ fn serve --interactive
 When remote access is enabled/configured, the headless server exposes `/api/remote/*`
 control/status endpoints and applies the same hybrid token validation rules for
 remote routes (persistent token + optional short-lived token registry).
+
+For programmatic consumers, these endpoints map to the engine tunnel manager contract:
+- `getStatus()` for current snapshot
+- `start(provider, config)` / `stop()` / `switchProvider(...)`
+- subscription hooks for live status and log updates (used by stream/poll clients)
 
 ---
 

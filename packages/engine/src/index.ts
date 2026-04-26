@@ -81,6 +81,30 @@ export { ProjectEngine, type ProjectEngineOptions } from "./project-engine.js";
 export { ProjectEngineManager, type EngineManagerOptions } from "./project-engine-manager.js";
 export { NodeHealthMonitor } from "./node-health-monitor.js";
 export { PeerExchangeService, type PeerExchangeServiceOptions, type SyncResult } from "./peer-exchange-service.js";
+export {
+  TunnelProcessManager,
+  getTunnelProviderAdapter,
+  redactTunnelText,
+  type TunnelProcessManagerOptions,
+  type CloudflareProviderConfig,
+  type ManagedTunnelProcess,
+  type PreparedTunnelCommand,
+  type TailscaleProviderConfig,
+  type TunnelError,
+  type TunnelErrorCode,
+  type TunnelLifecycleState,
+  type TunnelLogEntry,
+  type TunnelLogLevel,
+  type TunnelLogListener,
+  type TunnelManager,
+  type TunnelOutputStream,
+  type TunnelProvider,
+  type TunnelProviderAdapter,
+  type TunnelProviderConfig,
+  type TunnelReadinessEvent,
+  type TunnelStatusListener,
+  type TunnelStatusSnapshot,
+} from "./remote-access/index.js";
 export { RemoteNodeClient } from "./runtimes/remote-node-client.js";
 export { RemoteNodeRuntime, type RemoteNodeRuntimeConfig } from "./runtimes/remote-node-runtime.js";
 export { StepSessionExecutor } from "./step-session-executor.js";

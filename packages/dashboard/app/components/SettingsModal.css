@@ -272,10 +272,26 @@
   border-radius: var(--radius-sm);
   background: var(--surface);
   color: var(--text-muted);
-  max-height: 220px;
+  max-height: calc(var(--space-2xl) * 7);
   overflow: auto;
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: calc(var(--space-sm) + var(--space-xs));
+}
+
+.settings-url-output {
+  display: block;
+  margin-top: var(--space-xs);
+  padding: var(--space-sm);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: calc(var(--space-sm) + var(--space-xs));
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  overflow-x: auto;
+  max-width: 100%;
 }
 
 .settings-qr-preview {
@@ -287,12 +303,13 @@
 
 .settings-qr-preview-label {
   margin: 0;
-  font-size: 12px;
+  font-size: calc(var(--space-sm) + var(--space-xs));
   color: var(--text-muted);
 }
 
 .settings-qr-preview-image-wrap {
   width: fit-content;
+  max-width: 100%;
   padding: var(--space-sm);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -301,9 +318,9 @@
 
 .settings-qr-preview-image {
   display: block;
-  width: calc(var(--space-2xl) * 6);
-  height: calc(var(--space-2xl) * 6);
-  max-width: 100%;
+  width: min(calc(var(--space-2xl) * 6), 100%);
+  height: auto;
+  aspect-ratio: 1 / 1;
 }
 
 .settings-overlap-ignore-list {

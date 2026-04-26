@@ -1,0 +1,27 @@
+export {
+  getTunnelProviderAdapter,
+  redactTunnelText,
+} from "./provider-adapters.js";
+
+export { TunnelProcessManager, type TunnelProcessManagerOptions } from "./tunnel-process-manager.js";
+
+export type {
+  CloudflareProviderConfig,
+  ManagedTunnelProcess,
+  PreparedTunnelCommand,
+  TailscaleProviderConfig,
+  TunnelError,
+  TunnelErrorCode,
+  TunnelLifecycleState,
+  TunnelLogEntry,
+  TunnelLogLevel,
+  TunnelLogListener,
+  TunnelManager,
+  TunnelOutputStream,
+  TunnelProvider,
+  TunnelProviderAdapter,
+  TunnelProviderConfig,
+  TunnelReadinessEvent,
+  TunnelStatusListener,
+  TunnelStatusSnapshot,
+} from "./types.js";
