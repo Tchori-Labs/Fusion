@@ -30,7 +30,7 @@ import {
   resetDiagnosticsSink,
   nonfatal,
 } from "./ai-session-diagnostics.js";
-import { createFnAgent as engineCreateFnAgent } from "@fusion/engine";
+import * as engine from "@fusion/engine";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AgentResult = any;
@@ -58,7 +58,29 @@ interface PlanningNtfyHelpers {
   }) => Promise<void>;
 }
 
-let planningNtfyHelpers: PlanningNtfyHelpers | undefined;
+function buildDefaultPlanningNtfyHelpers(): PlanningNtfyHelpers {
+  const isNtfyEventEnabled =
+    "isNtfyEventEnabled" in engine
+      ? engine.isNtfyEventEnabled
+      : (events: NtfyNotificationEvent[] | undefined, event: NtfyNotificationEvent) =>
+          Array.isArray(events) ? events.includes(event) : false;
+
+  const buildNtfyClickUrl = "buildNtfyClickUrl" in engine
+    ? engine.buildNtfyClickUrl
+    : () => undefined;
+
+  const sendNtfyNotification = "sendNtfyNotification" in engine
+    ? engine.sendNtfyNotification
+    : async () => {};
+
+  return {
+    isNtfyEventEnabled,
+    buildNtfyClickUrl,
+    sendNtfyNotification,
+  };
+}
+
+let planningNtfyHelpers: PlanningNtfyHelpers | undefined = buildDefaultPlanningNtfyHelpers();
 
 /**
  * Shared diagnostics helper for the planning module.
@@ -1709,7 +1731,7 @@ export function __resetPlanningState(): void {
   _aiSessionDeletedListener = undefined;
   _aiSessionStore = undefined;
 
-  planningNtfyHelpers = undefined;
+  planningNtfyHelpers = buildDefaultPlanningNtfyHelpers();
 
   // Reset diagnostics sink to default
   resetDiagnosticsSink();
