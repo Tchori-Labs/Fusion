@@ -9,6 +9,8 @@ import {
   createTaskFromPlanning,
   connectPlanningStream,
   fetchAiSession,
+  fetchAiSessions,
+  deleteAiSession,
   parseConversationHistory,
   startPlanningBreakdown,
   createTasksFromPlanning,
@@ -19,13 +21,15 @@ import {
   type SubtaskItem,
   type ModelInfo,
   type ConversationHistoryEntry,
+  type AiSessionSummary,
 } from "../api";
+import { subscribeSse } from "../sse-bus";
 import {
   savePlanningDescription,
   getPlanningDescription,
   clearPlanningDescription,
 } from "../hooks/modalPersistence";
-import { Lightbulb, X, Loader2, CheckCircle, ArrowLeft, ArrowRight, Sparkles, ListTree, GripVertical, ArrowUp, ArrowDown, Plus, Trash2, Minimize2, RefreshCw, Lock } from "lucide-react";
+import { Lightbulb, X, Loader2, CheckCircle, ArrowLeft, ArrowRight, Sparkles, ListTree, GripVertical, ArrowUp, ArrowDown, Plus, Trash2, Minimize2, RefreshCw, Lock, ChevronLeft, MessageSquarePlus, AlertCircle, Clock, HelpCircle } from "lucide-react";
 import { CustomModelDropdown } from "./CustomModelDropdown";
 import { ConversationHistory } from "./ConversationHistory";
 import { useSessionLock } from "../hooks/useSessionLock";
@@ -127,6 +131,31 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
   const [favoriteProviders, setFavoriteProviders] = useState<string[]>([]);
   const [favoriteModels, setFavoriteModels] = useState<string[]>([]);
   const trackedLockSessionRef = useRef<string | null>(null);
+
+  // Sidebar list state
+  const [planningSessions, setPlanningSessions] = useState<AiSessionSummary[]>([]);
+  const [sessionsLoading, setSessionsLoading] = useState(false);
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(resumeSessionId ?? null);
+  // Mobile: when the modal is narrow, only one pane is visible at a time.
+  // `mobileShowDetail` toggles between list (false) and detail (true).
+  const [mobileShowDetail, setMobileShowDetail] = useState<boolean>(Boolean(resumeSessionId));
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+
+  const resetDetailState = useCallback(() => {
+    setInitialPlan("");
+    setView({ type: "initial" });
+    setError(null);
+    setResponseHistory([]);
+    setConversationHistory([]);
+    setEditedSummary(null);
+    setStreamingOutput("");
+    setIsReconnecting(false);
+    setIsRetrying(false);
+    setPlanningModelProvider(undefined);
+    setPlanningModelId(undefined);
+    currentSessionIdRef.current = null;
+    setLockSessionId(null);
+  }, []);
 
   const planningSelectionValue = getModelSelectionValue(planningModelProvider, planningModelId);
 
@@ -333,6 +362,7 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
       const { sessionId } = await startPlanningStreaming(plan.trim(), projectId, modelOverride);
       currentSessionIdRef.current = sessionId;
       setLockSessionId(sessionId);
+      setSelectedSessionId(sessionId);
 
       connectToPlanningStream(sessionId);
       setResponseHistory([]);
@@ -389,17 +419,30 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
     }
   }, [isOpen, initialPlanProp, view.type, handleStartPlanning, projectId]);
 
-  // Resume a persisted background session
-  useEffect(() => {
-    if (!isOpen || !resumeSessionId || view.type !== "initial") return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const session = await fetchAiSession(resumeSessionId);
-        if (cancelled || !session) return;
+  // Load a specific persisted session into the right pane.
+  const loadSession = useCallback(
+    async (sessionId: string) => {
+      streamConnectionRef.current?.close();
+      streamConnectionRef.current = null;
 
-        currentSessionIdRef.current = resumeSessionId;
-        setLockSessionId(resumeSessionId);
+      setError(null);
+      setStreamingOutput("");
+      setResponseHistory([]);
+      setConversationHistory([]);
+      setEditedSummary(null);
+      setIsRetrying(false);
+      setView({ type: "loading" });
+
+      try {
+        const session = await fetchAiSession(sessionId);
+        if (!session) {
+          setError("Session not found");
+          setView({ type: "initial" });
+          return;
+        }
+
+        currentSessionIdRef.current = sessionId;
+        setLockSessionId(sessionId);
         const parsedHistory = parseConversationHistory(session.conversationHistory);
         setConversationHistory(parsedHistory);
         setResponseHistory(
@@ -413,34 +456,163 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
         if (session.status === "awaiting_input" && session.currentQuestion) {
           clearPlanningDescription(projectId);
           const question = JSON.parse(session.currentQuestion);
-          setView({ type: "question", session: { sessionId: resumeSessionId, currentQuestion: question, summary: null } });
+          setView({ type: "question", session: { sessionId, currentQuestion: question, summary: null } });
           if (session.thinkingOutput) setStreamingOutput(session.thinkingOutput);
-          // Connect to stream for real-time updates (e.g., thinking output, next question)
-          // The server will emit a catch-up question event if the client missed it
-          connectToPlanningStream(resumeSessionId);
+          connectToPlanningStream(sessionId);
         } else if (session.status === "complete" && session.result) {
           clearPlanningDescription(projectId);
           const summary = JSON.parse(session.result);
-          setView({ type: "summary", session: { sessionId: resumeSessionId, currentQuestion: null, summary }, summary });
+          setView({ type: "summary", session: { sessionId, currentQuestion: null, summary }, summary });
           setEditedSummary(summary);
         } else if (session.status === "generating") {
           setView({ type: "loading" });
           if (session.thinkingOutput) setStreamingOutput(session.thinkingOutput);
-          connectToPlanningStream(resumeSessionId);
+          connectToPlanningStream(sessionId);
         } else if (session.status === "error") {
-          setError(null);
           setView({
             type: "error",
-            session: { sessionId: resumeSessionId, currentQuestion: null, summary: null },
+            session: { sessionId, currentQuestion: null, summary: null },
             errorMessage: session.error || "Session failed",
           });
         }
       } catch {
-        setError("Failed to resume session");
+        setError("Failed to load session");
+        setView({ type: "initial" });
       }
-    })();
-    return () => { cancelled = true; };
-  }, [connectToPlanningStream, isOpen, resumeSessionId, view.type, projectId]);
+    },
+    [connectToPlanningStream, projectId],
+  );
+
+  // Resume the externally-requested session when the modal first opens.
+  // (Selecting from the sidebar uses handleSelectSession instead.)
+  useEffect(() => {
+    if (!isOpen || !resumeSessionId) return;
+    if (currentSessionIdRef.current === resumeSessionId) return;
+    setSelectedSessionId(resumeSessionId);
+    setMobileShowDetail(true);
+    void loadSession(resumeSessionId);
+  }, [isOpen, resumeSessionId, loadSession]);
+
+  // Load + maintain the planning sessions list (sidebar).
+  const refreshSessionsList = useCallback(async () => {
+    setSessionsLoading(true);
+    try {
+      const all = await fetchAiSessions(projectId);
+      const planning = all
+        .filter((s) => s.type === "planning")
+        .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+      setPlanningSessions(planning);
+    } catch {
+      // Best-effort: list errors should not block the modal
+    } finally {
+      setSessionsLoading(false);
+    }
+  }, [projectId]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    void refreshSessionsList();
+  }, [isOpen, refreshSessionsList]);
+
+  // SSE subscription keeps the list live (mirrors useBackgroundSessions, but
+  // unfiltered by status so completed/errored sessions stay visible).
+  useEffect(() => {
+    if (!isOpen) return;
+    const params = projectId ? `?projectId=${encodeURIComponent(projectId)}` : "";
+
+    const handleUpdated = (e: MessageEvent) => {
+      try {
+        const updated = JSON.parse(e.data) as AiSessionSummary;
+        if (updated.type !== "planning") return;
+        setPlanningSessions((prev) => {
+          const idx = prev.findIndex((s) => s.id === updated.id);
+          const next = idx >= 0 ? [...prev.slice(0, idx), updated, ...prev.slice(idx + 1)] : [updated, ...prev];
+          return next.sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+        });
+      } catch {
+        // ignore malformed payload
+      }
+    };
+
+    const handleDeleted = (e: MessageEvent) => {
+      try {
+        const id = JSON.parse(e.data) as string;
+        setPlanningSessions((prev) => prev.filter((s) => s.id !== id));
+      } catch {
+        // ignore malformed payload
+      }
+    };
+
+    return subscribeSse(`/api/events${params}`, {
+      events: {
+        "ai_session:updated": handleUpdated,
+        "ai_session:deleted": handleDeleted,
+      },
+    });
+  }, [isOpen, projectId]);
+
+  // Sidebar handlers
+  const handleSelectSession = useCallback(
+    (sessionId: string) => {
+      if (selectedSessionId === sessionId) {
+        setMobileShowDetail(true);
+        return;
+      }
+      setSelectedSessionId(sessionId);
+      setMobileShowDetail(true);
+      void loadSession(sessionId);
+    },
+    [loadSession, selectedSessionId],
+  );
+
+  const handleNewSession = useCallback(() => {
+    streamConnectionRef.current?.close();
+    streamConnectionRef.current = null;
+    resetDetailState();
+    setSelectedSessionId(null);
+    setMobileShowDetail(true);
+  }, [resetDetailState]);
+
+  const handleBackToList = useCallback(() => {
+    setMobileShowDetail(false);
+  }, []);
+
+  const handleDeleteSession = useCallback(
+    async (sessionId: string) => {
+      const isActiveServerSession = (status: AiSessionSummary["status"]) =>
+        status === "generating" || status === "awaiting_input";
+
+      const target = planningSessions.find((s) => s.id === sessionId);
+
+      // Cancel an in-flight server session before deleting so the engine stops
+      // generating; for terminal sessions skip the cancel call.
+      if (target && isActiveServerSession(target.status)) {
+        try {
+          await cancelPlanning(sessionId, projectId, sessionTabId);
+        } catch {
+          // best-effort
+        }
+      }
+
+      try {
+        await deleteAiSession(sessionId);
+      } catch {
+        // best-effort: SSE will reconcile if the delete actually succeeded
+      }
+
+      setPlanningSessions((prev) => prev.filter((s) => s.id !== sessionId));
+
+      if (selectedSessionId === sessionId) {
+        streamConnectionRef.current?.close();
+        streamConnectionRef.current = null;
+        resetDetailState();
+        setSelectedSessionId(null);
+        setMobileShowDetail(false);
+      }
+      setPendingDeleteId(null);
+    },
+    [planningSessions, projectId, resetDetailState, selectedSessionId, sessionTabId],
+  );
 
   // Reset hasAutoStarted when modal closes
   useEffect(() => {
@@ -527,49 +699,21 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
     onClose();
   }, [onClose]);
 
-  const handleCancel = useCallback(() => {
-    // Determine the active session ID to abandon
-    let activeSessionId: string | null = null;
-    if (view.type === "question" || view.type === "summary" || view.type === "error") {
-      activeSessionId = view.session.sessionId;
-    } else if (view.type === "breakdown") {
-      activeSessionId = view.sessionId;
-    } else if (view.type === "loading") {
-      // During loading, the session ID is stored in the ref
-      activeSessionId = currentSessionIdRef.current;
-    }
-
-    // Save to localStorage BEFORE any cleanup (preserve for re-entry)
-    if (initialPlan) {
+  // Close the modal without abandoning the active server session. Sessions
+  // remain in the list and can be resumed later. Only an explicit Delete
+  // (from the sidebar) cancels and removes a session.
+  const handleClose = useCallback(() => {
+    // Save the in-progress draft so the next open restores it.
+    if (initialPlan && view.type === "initial") {
       savePlanningDescription(initialPlan, projectId);
     }
 
-    // Always close the stream connection
     streamConnectionRef.current?.close();
     streamConnectionRef.current = null;
-
-    // Explicitly abandon the session on the server to prevent zombie sessions
-    if (activeSessionId) {
-      void cancelPlanning(activeSessionId, projectId, sessionTabId).catch(() => {
-        // Best-effort: cancellation failures should not block UI reset
-      });
-    }
-
-    setInitialPlan("");
-    setView({ type: "initial" });
-    setError(null);
-    setResponseHistory([]);
-    setConversationHistory([]);
-    setEditedSummary(null);
-    setStreamingOutput("");
     setIsReconnecting(false);
     setIsRetrying(false);
-    setPlanningModelProvider(undefined);
-    setPlanningModelId(undefined);
-    currentSessionIdRef.current = null;
-    setLockSessionId(null);
     onClose();
-  }, [initialPlan, onClose, projectId, sessionTabId, view]);
+  }, [initialPlan, onClose, projectId, view.type]);
 
   // Handle escape key to close
   useEffect(() => {
@@ -577,13 +721,13 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        handleCancel();
+        handleClose();
       }
     };
 
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, handleCancel]);
+  }, [isOpen, handleClose]);
 
   const handleSubmitResponse = useCallback(
     async (responses: QuestionResponse) => {
@@ -724,12 +868,12 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
     try {
       const task = await createTaskFromPlanning(view.session.sessionId, editedSummary ?? undefined, projectId);
       onTaskCreated(task);
-      handleCancel();
+      handleClose();
     } catch (err) {
       setError(getErrorMessage(err) || "Failed to create task");
       setView({ type: "summary", session: view.session, summary: view.summary });
     }
-  }, [editedSummary, view, projectId, onTaskCreated, handleCancel]);
+  }, [editedSummary, view, projectId, onTaskCreated, handleClose]);
 
   const handleStartBreakdown = useCallback(async () => {
     if (view.type !== "summary") return;
@@ -809,10 +953,20 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
   if (!isOpen) return null;
 
   return (
-    <div className="modal-overlay open" onClick={(e) => e.target === e.currentTarget && handleCancel()} role="dialog" aria-modal="true">
+    <div className="modal-overlay open" onClick={(e) => e.target === e.currentTarget && handleClose()} role="dialog" aria-modal="true">
       <div className="modal modal-lg planning-modal">
         <div className="modal-header">
           <div className="detail-title-row">
+            {mobileShowDetail && (
+              <button
+                className="modal-back planning-mobile-back"
+                onClick={handleBackToList}
+                aria-label="Back to sessions"
+                title="Back to sessions"
+              >
+                <ChevronLeft size={18} />
+              </button>
+            )}
             <Lightbulb size={20} className="icon-triage" />
             <h3>Planning Mode</h3>
           </div>
@@ -827,13 +981,30 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
                 <Minimize2 size={16} />
               </button>
             )}
-            <button className="modal-close" onClick={handleCancel} aria-label="Close">
+            <button className="modal-close" onClick={handleClose} aria-label="Close">
               <X size={20} />
             </button>
           </div>
         </div>
 
-        <div className="planning-modal-body">
+        <div
+          className={`planning-modal-body planning-modal-body--split ${
+            mobileShowDetail ? "planning-modal-body--show-detail" : "planning-modal-body--show-list"
+          }`}
+        >
+          <PlanningSessionList
+            sessions={planningSessions}
+            loading={sessionsLoading}
+            selectedSessionId={selectedSessionId}
+            pendingDeleteId={pendingDeleteId}
+            onSelectSession={handleSelectSession}
+            onNewSession={handleNewSession}
+            onRequestDelete={setPendingDeleteId}
+            onConfirmDelete={(id) => void handleDeleteSession(id)}
+            onCancelDelete={() => setPendingDeleteId(null)}
+          />
+
+          <div className="planning-detail">
           {error && <div className="form-error planning-error">{error}</div>}
           {isReconnecting && <div className="form-hint text-muted">Reconnecting…</div>}
           {activeInAnotherTab && (
@@ -996,7 +1167,7 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
                       {isRetrying ? <Loader2 size={14} className="spin" /> : <RefreshCw size={14} />}
                       <span className="icon-ml-6">{isRetrying ? "Retrying..." : "Retry"}</span>
                     </button>
-                    <button className="btn" onClick={handleCancel} disabled={isRetrying}>Dismiss</button>
+                    <button className="btn" onClick={handleClose} disabled={isRetrying}>Dismiss</button>
                   </div>
                 </div>
               </div>
@@ -1061,6 +1232,7 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
               }}
             />
           )}
+          </div>
 
           {isLockedByOther && (
             <div className="session-lock-overlay" data-testid="session-lock-overlay">
@@ -1803,4 +1975,160 @@ function BreakdownView({
       </div>
     </div>
   );
+}
+
+// ── PlanningSessionList (sidebar) ──────────────────────────────────────────
+
+interface PlanningSessionListProps {
+  sessions: AiSessionSummary[];
+  loading: boolean;
+  selectedSessionId: string | null;
+  pendingDeleteId: string | null;
+  onSelectSession: (id: string) => void;
+  onNewSession: () => void;
+  onRequestDelete: (id: string) => void;
+  onConfirmDelete: (id: string) => void;
+  onCancelDelete: () => void;
+}
+
+function PlanningSessionList({
+  sessions,
+  loading,
+  selectedSessionId,
+  pendingDeleteId,
+  onSelectSession,
+  onNewSession,
+  onRequestDelete,
+  onConfirmDelete,
+  onCancelDelete,
+}: PlanningSessionListProps) {
+  return (
+    <aside className="planning-sidebar" aria-label="Planning sessions">
+      <div className="planning-sidebar-header">
+        <button
+          className={`planning-sidebar-new ${selectedSessionId === null ? "active" : ""}`}
+          onClick={onNewSession}
+          type="button"
+        >
+          <MessageSquarePlus size={16} />
+          <span>New session</span>
+        </button>
+      </div>
+
+      <div className="planning-sidebar-list">
+        {sessions.length === 0 && !loading && (
+          <div className="planning-sidebar-empty text-muted">
+            No saved sessions yet. Start one on the right to see it here.
+          </div>
+        )}
+
+        {sessions.map((session) => {
+          const isSelected = session.id === selectedSessionId;
+          const isPendingDelete = pendingDeleteId === session.id;
+          return (
+            <div
+              key={session.id}
+              className={`planning-sidebar-item ${isSelected ? "selected" : ""} ${isPendingDelete ? "pending-delete" : ""}`}
+            >
+              <button
+                type="button"
+                className="planning-sidebar-item-button"
+                onClick={() => onSelectSession(session.id)}
+              >
+                <PlanningSessionStatusIcon status={session.status} />
+                <span className="planning-sidebar-item-body">
+                  <span className="planning-sidebar-item-title">
+                    {session.title || "Untitled session"}
+                  </span>
+                  <span className="planning-sidebar-item-meta">
+                    <PlanningSessionStatusLabel status={session.status} />
+                    <span aria-hidden> · </span>
+                    <span>{formatRelativeTime(session.updatedAt)}</span>
+                  </span>
+                </span>
+              </button>
+
+              {isPendingDelete ? (
+                <div className="planning-sidebar-confirm">
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-danger"
+                    onClick={() => onConfirmDelete(session.id)}
+                  >
+                    Delete
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    onClick={onCancelDelete}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  className="planning-sidebar-item-delete"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onRequestDelete(session.id);
+                  }}
+                  aria-label="Delete session"
+                  title="Delete session"
+                >
+                  <Trash2 size={14} />
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </aside>
+  );
+}
+
+function PlanningSessionStatusIcon({ status }: { status: AiSessionSummary["status"] }) {
+  switch (status) {
+    case "generating":
+      return <Loader2 size={14} className="spin planning-sidebar-status-icon planning-sidebar-status-generating" />;
+    case "awaiting_input":
+      return <HelpCircle size={14} className="planning-sidebar-status-icon planning-sidebar-status-awaiting" />;
+    case "complete":
+      return <CheckCircle size={14} className="planning-sidebar-status-icon planning-sidebar-status-complete" />;
+    case "error":
+      return <AlertCircle size={14} className="planning-sidebar-status-icon planning-sidebar-status-error" />;
+    default:
+      return <Clock size={14} className="planning-sidebar-status-icon" />;
+  }
+}
+
+function PlanningSessionStatusLabel({ status }: { status: AiSessionSummary["status"] }) {
+  switch (status) {
+    case "generating":
+      return <span>Generating</span>;
+    case "awaiting_input":
+      return <span>Needs input</span>;
+    case "complete":
+      return <span>Complete</span>;
+    case "error":
+      return <span>Error</span>;
+    default:
+      return <span>{status}</span>;
+  }
+}
+
+function formatRelativeTime(iso: string): string {
+  const ms = Date.now() - Date.parse(iso);
+  if (!Number.isFinite(ms) || ms < 0) return "";
+  const sec = Math.floor(ms / 1000);
+  if (sec < 60) return "just now";
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const days = Math.floor(hr / 24);
+  if (days < 7) return `${days}d ago`;
+  const weeks = Math.floor(days / 7);
+  if (weeks < 4) return `${weeks}w ago`;
+  return new Date(iso).toLocaleDateString();
 }

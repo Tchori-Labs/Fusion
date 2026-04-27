@@ -140,6 +140,10 @@ export function TaskTokenStatsPanel({ tokenUsage, loading, task }: TaskTokenStat
             <span className="task-token-stats-panel__label">Workflow runtime</span>
             <span className="task-token-stats-panel__value">{formatDuration(workflowTiming.totalDurationMs)}</span>
           </div>
+          <div className="task-token-stats-panel__metric" role="listitem">
+            <span className="task-token-stats-panel__label">Total execution time</span>
+            <span className="task-token-stats-panel__value">{formatDuration(totalTimingDurationMs + workflowTiming.totalDurationMs)}</span>
+          </div>
         </div>
 
         <dl className="task-token-stats-panel__timestamps">

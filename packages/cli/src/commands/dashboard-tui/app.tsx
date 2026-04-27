@@ -166,8 +166,6 @@ function SplashScreen({ loadingStatus }: { loadingStatus: string }) {
 // ── Mini inline logo (header) ─────────────────────────────────────────────────
 
 function MiniLogo() {
-  // flexShrink={0} keeps FUSION from being squeezed (and wrapping) when the
-  // header row's other children push past the terminal width.
   return (
     <Box flexDirection="row" gap={0} flexShrink={0}>
       <Text color="cyanBright" bold wrap="truncate-end">FUSION</Text>
@@ -496,12 +494,12 @@ function LogsPanel({
       ) : entries.length !== state.logEntries.length && entries.length === 0 ? (
         <Text dimColor>No entries match filter {logsSeverityFilter.toUpperCase()}.</Text>
       ) : (
-        <Box flexDirection="column">
-          <Box flexDirection="row" gap={1} marginBottom={0}>
-            <Text dimColor>[w] wrap {logsWrapEnabled ? "on" : "off"}</Text>
-            <Text dimColor>[f] {logsSeverityFilter}</Text>
-            {hiddenAbove > 0 && <Text dimColor>↑ {hiddenAbove} more</Text>}
-            {hiddenBelow > 0 && <Text dimColor>↓ {hiddenBelow} more</Text>}
+        <Box flexDirection="column" flexGrow={1} flexShrink={1} overflow="hidden">
+          <Box height={1} flexDirection="row" gap={1} marginBottom={0} flexShrink={0} overflow="hidden">
+            <Text wrap="truncate-end" dimColor>[w] wrap {logsWrapEnabled ? "on" : "off"}</Text>
+            <Text wrap="truncate-end" dimColor>[f] {logsSeverityFilter}</Text>
+            {hiddenAbove > 0 && <Text wrap="truncate-end" dimColor>↑ {hiddenAbove} more</Text>}
+            {hiddenBelow > 0 && <Text wrap="truncate-end" dimColor>↓ {hiddenBelow} more</Text>}
           </Box>
           {visibleEntries.map((entry, displayIdx) => {
             const absoluteIndex = visibleStart + displayIdx;
@@ -512,43 +510,60 @@ function LogsPanel({
             const lvlColor = entry.level === "error" ? "red" : entry.level === "warn" ? "yellow" : "green";
             const marker = isSelected ? "▶ " : "  ";
 
+            // Wrap each entry in a height-pinned Box (when wrap is off) so a
+            // single entry can never grow beyond 1 row. Without this, certain
+            // narrow widths can cause Ink/Yoga to measure the nested-Text
+            // entry as taller than 1 row even with truncate-end set, which
+            // pushes the panel intrinsic height past the slot and scrolls
+            // the outer header off the top of the alt-screen.
+            const entryHeight = logsWrapEnabled ? undefined : 1;
+
             if (isNarrow) {
               const idx = narrowTimestamp(absoluteIndex);
               const pfx = narrowPrefix(entry.prefix, NARROW_PREFIX_WIDTH);
               return (
-                <Text
+                <Box
                   key={`${entry.timestamp.getTime()}-${displayIdx}`}
-                  backgroundColor={bg}
-                  wrap={logsWrapEnabled ? "wrap" : "truncate-end"}
+                  height={entryHeight}
+                  flexShrink={0}
+                  overflow="hidden"
                 >
-                  <Text color={isSelected ? "white" : "gray"} bold={isSelected}>{marker}</Text>
-                  <Text color={fg} dimColor={!isSelected}>{idx} </Text>
-                  <Text color={lvlColor}>{lvl}</Text>
-                  <Text color={fg} dimColor={!isSelected}>{` ${pfx} `}</Text>
-                  <Text color={fg} bold={isSelected}>{entry.message}</Text>
-                </Text>
+                  <Text
+                    backgroundColor={bg}
+                    wrap={logsWrapEnabled ? "wrap" : "truncate-end"}
+                  >
+                    <Text color={isSelected ? "white" : "gray"} bold={isSelected}>{marker}</Text>
+                    <Text color={fg} dimColor={!isSelected}>{idx} </Text>
+                    <Text color={lvlColor}>{lvl}</Text>
+                    <Text color={fg} dimColor={!isSelected}>{` ${pfx} `}</Text>
+                    <Text color={fg} bold={isSelected}>{entry.message}</Text>
+                  </Text>
+                </Box>
               );
             }
 
             const ts = formatTimestamp(entry.timestamp);
-            // Pad/truncate prefix to a fixed slot so message column aligns
-            // across rows (rows without a prefix get blank padding instead of
-            // collapsing).
             const prefixSlot = entry.prefix
               ? `[${entry.prefix}]`.slice(0, PREFIX_WIDTH).padEnd(PREFIX_WIDTH)
               : " ".repeat(PREFIX_WIDTH);
             return (
-              <Text
+              <Box
                 key={`${entry.timestamp.getTime()}-${displayIdx}`}
-                backgroundColor={bg}
-                wrap={logsWrapEnabled ? "wrap" : "truncate-end"}
+                height={entryHeight}
+                flexShrink={0}
+                overflow="hidden"
               >
-                <Text color={isSelected ? "white" : "gray"} bold={isSelected}>{marker}</Text>
-                <Text color={fg} dimColor={!isSelected}>{ts} </Text>
-                <Text color={lvlColor}>{lvl}</Text>
-                <Text color={fg} dimColor={!isSelected}>{` ${prefixSlot} `}</Text>
-                <Text color={fg} bold={isSelected}>{entry.message}</Text>
-              </Text>
+                <Text
+                  backgroundColor={bg}
+                  wrap={logsWrapEnabled ? "wrap" : "truncate-end"}
+                >
+                  <Text color={isSelected ? "white" : "gray"} bold={isSelected}>{marker}</Text>
+                  <Text color={fg} dimColor={!isSelected}>{ts} </Text>
+                  <Text color={lvlColor}>{lvl}</Text>
+                  <Text color={fg} dimColor={!isSelected}>{` ${prefixSlot} `}</Text>
+                  <Text color={fg} bold={isSelected}>{entry.message}</Text>
+                </Text>
+              </Box>
             );
           })}
         </Box>
@@ -599,11 +614,11 @@ function UtilitiesPanel({ state, isFocused }: { state: DashboardState; isFocused
   ];
   return (
     <Panel title="Utilities" isFocused={isFocused} flexGrow={1}>
-      <Box flexDirection="column">
+      <Box flexDirection="column" flexGrow={1} flexShrink={1} overflow="hidden">
         {actions.map((action) => (
-          <Box key={action.key} flexDirection="row" gap={1}>
+          <Box key={action.key} flexDirection="row" gap={1} flexShrink={0}>
             <Text color="yellow">[{action.key}]</Text>
-            <Text>{action.label}</Text>
+            <Text wrap="truncate-end">{action.label}</Text>
           </Box>
         ))}
       </Box>
@@ -620,7 +635,7 @@ function HelpOverlay() {
     ["[a]", "Agents view"],
     ["[g]", "Settings view"],
     ["[t]", "Git view"],
-    ["[e]", "Explorer (file browser)"],
+    ["[f]", "Files (when not on Logs); cycles log severity filter on Logs"],
     ["[Tab]", "Cycle focused panel / pane forward"],
     ["[Shift+Tab]", "Cycle focused panel / pane backward"],
     ["[1-5]", "Jump to panel (Main: System/Logs/Utilities/Stats/Settings)"],
@@ -637,7 +652,6 @@ function HelpOverlay() {
     ["[Enter/Space]", "Expand log entry (Logs)"],
     ["[c]", "Copy selected log entry to clipboard (Logs)"],
     ["[w]", "Toggle word wrap (Logs / Files)"],
-    ["[f]", "Cycle severity filter (Main, any panel)"],
     ["[Space]", "Toggle boolean (Settings)"],
     ["[+/-]", "Adjust number (Settings)"],
     ["[p]", "Project picker (Board, Files)"],
@@ -691,11 +705,10 @@ function StatusModeGrid({
   const { stdout } = useStdout();
   const rows = stdout?.rows ?? 24;
   const cols = stdout?.columns ?? 80;
-  // Top row: System (narrow) + Logs (wide).
-  // Bottom row: Stats + Utilities + Settings, all the same fixed height so
-  // they line up. ~8 rows fits Stats (4 stat rows + chrome 3) and a few
-  // utility/settings entries — anything more is clipped.
-  const middleHeight = Math.max(1, rows - 2);
+  // Middle area = rows - header(1) - body marginTop(1) - statusbar(1) = rows-3.
+  // Top of middle: System (short, intrinsic) + Logs (fills).
+  // Bottom of middle: Stats + Utilities + Settings, equal-width.
+  const middleHeight = Math.max(1, rows - 3);
   const bottomShare = Math.min(10, Math.max(6, Math.floor(middleHeight * 0.35)));
   const topShare = Math.max(1, middleHeight - bottomShare);
   // LogsPanel chrome: border 2 + title 1 + filter 1 = 4.
@@ -705,20 +718,23 @@ function StatusModeGrid({
   return (
     <Box flexDirection="column" flexGrow={1}>
       <Box flexDirection="column" flexGrow={1} overflow="hidden">
-        {/* System: full width, short height (border 2 + 1-2 wrapped content rows). */}
-        <Box flexShrink={0} overflow="hidden">
+        {/* System: full width, short height. flexShrink=2 so it collapses
+            faster than Logs when vertical space is tight. */}
+        <Box flexShrink={2} overflow="hidden">
           <SystemPanel state={state} isFocused={focused === "system"} />
         </Box>
-        {/* Logs: fills remaining vertical space. */}
-        <Box flexGrow={1} flexShrink={1} flexDirection="column" overflow="hidden">
+        {/* Logs: fills remaining vertical space. flexShrink=0 so System and
+            the bottom row collapse first — Logs keeps its space. */}
+        <Box flexGrow={1} flexShrink={0} flexDirection="column" overflow="hidden">
           <LogsPanel
             state={state}
             isFocused={focused === "logs"}
             availableRows={logsAvailableRows}
           />
         </Box>
-        {/* Bottom row: Stats + Utilities + Settings, equal-width. */}
-        <Box flexDirection="row" flexShrink={0} overflow="hidden">
+        {/* Bottom row: Stats + Utilities + Settings, equal-width. flexShrink=2
+            so when terminal height is small they collapse before Logs does. */}
+        <Box flexDirection="row" flexShrink={2} overflow="hidden">
           <Box flexDirection="column" flexGrow={1} flexBasis={0} overflow="hidden">
             <StatsPanel state={state} isFocused={focused === "stats"} />
           </Box>
@@ -749,10 +765,12 @@ function StatusModeSingle({
   const { stdout } = useStdout();
   const rows = stdout?.rows ?? 24;
   const cols = stdout?.columns ?? 80;
-  // LogsPanel's row budget needs an explicit cap so it doesn't try to render
-  // more entries than will fit. Header(1) + StatusBar(1) + Panel chrome(3)
-  // + filter row(1) = 6.
-  const logsAvailableRows = Math.max(1, rows - 6);
+  // LogsPanel's row budget — an explicit cap so it doesn't try to render
+  // more entries than will fit. Chrome accounting:
+  //   header(1) + body marginTop(1) + statusbar(1) +
+  //   panel border top(1) + panel title(1) + panel border bottom(1) +
+  //   filter row(1) = 7.
+  const logsAvailableRows = Math.max(1, rows - 7);
   tuiDebug("StatusModeSingle", { cols, rows, logsAvailableRows, focused });
 
   const activePanel = () => {
@@ -818,16 +836,6 @@ function MainHeader({ state }: { state: DashboardState }) {
   const interactiveView = state.interactiveView;
   const { stdout } = useStdout();
   const cols = stdout?.columns ?? 80;
-  const rows = stdout?.rows ?? 24;
-  tuiDebug("MainHeader", {
-    cols,
-    rows,
-    mode: state.mode,
-    view: state.interactiveView,
-    activeSection: state.activeSection,
-  });
-  // Single unified tab strip. "Main" is the status mode; the rest are
-  // interactive views. Active key matches the current mode/view.
   type Tab =
     | { key: string; label: string; kind: "main" }
     | { key: string; label: string; kind: "interactive"; view: InteractiveView };
@@ -837,18 +845,8 @@ function MainHeader({ state }: { state: DashboardState }) {
     { key: "a", label: "Agents", kind: "interactive", view: "agents" },
     { key: "g", label: "Settings", kind: "interactive", view: "settings" },
     { key: "t", label: "Git", kind: "interactive", view: "git" },
-    { key: "e", label: "Explorer", kind: "interactive", view: "files" },
+    { key: "f", label: "Files", kind: "interactive", view: "files" },
   ];
-  // Don't gate header rendering on stdout.rows — tmux pane switches and
-  // other resize events can briefly report stale or zero dimensions, and a
-  // transient `return null` orphans the header on the next layout pass.
-  // Always render; Yoga/overflow:hidden handles the extreme cases.
-  // Width tiers, measured against actual rendered content with 6 tabs:
-  //   * Full + help (cols >= 110): "[k] Label" tabs + help/quit hint.
-  //   * Full (90-109): "[k] Label" tabs, no help hint (~85 chars).
-  //   * Compact (50-89): "[k]" glyphs only — every shortcut still
-  //     visible, just no labels (~45 chars).
-  //   * Tiny (< 50): just FUSION + the active tab pill.
   const showHelpHint = cols >= 110;
   const fullLabels = cols >= 90;
   const tiny = cols < 50;
@@ -856,7 +854,6 @@ function MainHeader({ state }: { state: DashboardState }) {
   const isActive = (t: Tab) =>
     t.kind === "main" ? !inInteractive : inInteractive && t.view === interactiveView;
   if (tiny) {
-    // Just FUSION + the active tab pill. Inactive shortcuts dropped here.
     const active = tabs.find(isActive);
     return (
       <Box height={1} flexDirection="row" gap={1} paddingX={1} flexShrink={0} overflow="hidden">
@@ -869,13 +866,6 @@ function MainHeader({ state }: { state: DashboardState }) {
       </Box>
     );
   }
-  // height={1} hard-caps the header at a single row. Without this, at
-  // certain boundary widths the default Text wrap="wrap" on a tab whose
-  // content lands one column past the parent width would push a second
-  // row, making the header 2 rows tall — which in turn makes the whole
-  // frame exceed terminal rows, so Ink pushes the top of the layout
-  // off-screen. Combined with wrap="truncate-end" on every tab Text
-  // below, both axes are protected against single-column overflow.
   return (
     <Box height={1} flexDirection="row" gap={1} paddingX={1} paddingY={0} flexShrink={0} overflow="hidden">
       <MiniLogo />
@@ -3851,24 +3841,22 @@ export function DashboardApp({ controller }: DashboardAppProps) {
       controller.setInteractiveView("settings");
       return;
     }
-    // Logs severity filter — works any time the logs panel is visible
-    // (status mode). Cycles all → info → warn → error → all.
+    // 'f' is overloaded:
+    //   * status mode + Logs panel focused → cycle severity filter
+    //   * everywhere else → switch to Files view (interactive)
     if (input === "f" || input === "F") {
-      if (state.mode === "status") {
+      if (state.mode === "status" && state.activeSection === "logs") {
         controller.cycleSeverityFilter();
         return;
       }
+      controller.setMode("interactive");
+      controller.setInteractiveView("files");
+      return;
     }
 
     if (input === "t" || input === "T") {
       controller.setMode("interactive");
       controller.setInteractiveView("git");
-      return;
-    }
-
-    if (input === "e" || input === "E") {
-      controller.setMode("interactive");
-      controller.setInteractiveView("files");
       return;
     }
 
@@ -4066,30 +4054,29 @@ export function DashboardApp({ controller }: DashboardAppProps) {
     hasSystemInfo: Boolean(state.systemInfo),
   });
 
-  // Pin explicit heights on both children so the layout is fully deterministic
-  // and Yoga has no freedom to redistribute rows. Header always occupies row 0;
-  // the body fills rows 1..(rows-1). With overflow:hidden everywhere, content
-  // that exceeds its slot is clipped — the header can't be pushed off.
-  const headerHeight = 1;
-  const bodyHeight = Math.max(0, rows - headerHeight);
-
+  // Use flex-column natural placement (matches what Board/InteractiveMode
+  // does — that layout has always worked). Header takes its intrinsic 1
+  // row; body fills the rest via flexGrow=1.
+  //
+  // CRITICAL: marginTop={1} on the body. At narrow widths with Logs or
+  // Utilities active, Yoga's flex-column was placing the panel border at
+  // y=0 (same row as the header), causing the body to overdraw the header.
+  // The 1-row top margin guarantees panel content starts on row 1
+  // regardless of any Yoga edge-case at certain widths. Net cost: 1 row
+  // of vertical space (so the panel area is rows-2 instead of rows-1),
+  // but the header is always visible.
   return (
     <Box key={layoutKey} flexDirection="column" height={rows} width={cols} overflow="hidden">
-      <Box
-        height={headerHeight}
-        width={cols}
-        flexShrink={0}
-        flexGrow={0}
-        flexDirection="row"
-        overflow="hidden"
-      >
+      {/* Header: explicit height={1} so the wrapper always reserves row 0,
+          even at narrow widths where MainHeader's intrinsic height could
+          (in some Yoga edge cases) collapse to 0. */}
+      <Box height={1} width={cols} flexShrink={0} flexGrow={0} flexDirection="row" overflow="hidden">
         <MainHeader state={state} />
       </Box>
       <Box
-        height={bodyHeight}
-        width={cols}
-        flexShrink={0}
-        flexGrow={0}
+        flexGrow={1}
+        flexShrink={1}
+        marginTop={1}
         flexDirection="column"
         overflow="hidden"
       >

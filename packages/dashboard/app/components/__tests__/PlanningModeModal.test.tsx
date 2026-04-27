@@ -460,7 +460,6 @@ describe("PlanningModeModal", () => {
       expect(blockMatch).toBeTruthy();
 
       const maxHeightValue = blockMatch![1].trim();
-      expect(maxHeightValue).toContain("min(");
       expect(maxHeightValue).toContain("calc(");
       expect(maxHeightValue).toContain("100dvh");
       expect(maxHeightValue).toContain("--overlay-padding-top");
@@ -1765,7 +1764,7 @@ describe("PlanningModeModal", () => {
       expect(mockOnClose).toHaveBeenCalled();
     });
 
-    it("closes active question session and abandons server session", async () => {
+    it("closes active question session WITHOUT abandoning the server session", async () => {
             render(
         <PlanningModeModal
           isOpen={true}
@@ -1787,12 +1786,12 @@ describe("PlanningModeModal", () => {
       fireEvent.click(screen.getByLabelText("Close"));
 
       expect(mockConfirm).not.toHaveBeenCalled();
-      // Closing an active session should abandon it on the server
-      expect(mockCancelPlanning).toHaveBeenCalledTimes(1);
+      // Closing the modal should leave the server session intact so it stays in the sidebar list
+      expect(mockCancelPlanning).not.toHaveBeenCalled();
       expect(mockOnClose).toHaveBeenCalled();
     });
 
-    it("closes summary view and abandons server session", async () => {
+    it("closes summary view WITHOUT abandoning the server session", async () => {
             mockConnectPlanningStream.mockImplementationOnce((_sessionId: string, _projectId: string | undefined, handlers: any) => {
         setTimeout(() => {
           handlers.onSummary?.(mockSummary);
@@ -1825,12 +1824,12 @@ describe("PlanningModeModal", () => {
       fireEvent.click(screen.getByLabelText("Close"));
 
       expect(mockConfirm).not.toHaveBeenCalled();
-      // Closing an active session should abandon it on the server
-      expect(mockCancelPlanning).toHaveBeenCalledTimes(1);
+      // Completed sessions remain available to resume; closing must not cancel them
+      expect(mockCancelPlanning).not.toHaveBeenCalled();
       expect(mockOnClose).toHaveBeenCalled();
     });
 
-    it("closes via overlay and abandons server session", async () => {
+    it("closes via overlay WITHOUT abandoning the server session", async () => {
             const { container } = render(
         <PlanningModeModal
           isOpen={true}
@@ -1854,12 +1853,12 @@ describe("PlanningModeModal", () => {
       fireEvent.click(overlay!);
 
       expect(mockConfirm).not.toHaveBeenCalled();
-      // Closing an active session should abandon it on the server
-      expect(mockCancelPlanning).toHaveBeenCalledTimes(1);
+      // Sessions persist in the sidebar; overlay click should not cancel
+      expect(mockCancelPlanning).not.toHaveBeenCalled();
       expect(mockOnClose).toHaveBeenCalled();
     });
 
-    it("closes during loading state and abandons server session", async () => {
+    it("closes during loading state WITHOUT abandoning the server session", async () => {
             mockConnectPlanningStream.mockImplementationOnce(() => ({
         close: vi.fn(),
         isConnected: vi.fn().mockReturnValue(true),
@@ -1886,8 +1885,8 @@ describe("PlanningModeModal", () => {
       fireEvent.click(screen.getByLabelText("Close"));
 
       expect(mockConfirm).not.toHaveBeenCalled();
-      // Closing an active session should abandon it on the server
-      expect(mockCancelPlanning).toHaveBeenCalledTimes(1);
+      // Loading state means the session is still being generated server-side; preserve it
+      expect(mockCancelPlanning).not.toHaveBeenCalled();
       expect(mockOnClose).toHaveBeenCalled();
     });
 
@@ -1924,7 +1923,7 @@ describe("PlanningModeModal", () => {
       expect(mockOnClose).toHaveBeenCalledTimes(1);
     });
 
-    it("disconnects SSE stream and abandons session on close", async () => {
+    it("disconnects the SSE stream on close (but keeps the server session)", async () => {
       const closeSpy = vi.fn();
 
       mockConnectPlanningStream.mockImplementationOnce(() => ({
@@ -1953,8 +1952,9 @@ describe("PlanningModeModal", () => {
       fireEvent.click(screen.getByLabelText("Close"));
 
       expect(closeSpy).toHaveBeenCalledTimes(1);
-      // Closing an active session should abandon it on the server
-      expect(mockCancelPlanning).toHaveBeenCalledTimes(1);
+      // The local SSE stream closes on modal close, but the server session is preserved
+      // for later resume from the sidebar list.
+      expect(mockCancelPlanning).not.toHaveBeenCalled();
       expect(mockOnClose).toHaveBeenCalled();
     });
   });

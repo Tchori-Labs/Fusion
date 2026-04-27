@@ -455,17 +455,28 @@ describe("TaskCard", () => {
     expect(actionsContainer?.contains(archiveBtn)).toBe(true);
   });
 
-  it("shows timer chip for in-progress cards when timestamp fields exist", () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-04-25T12:30:00.000Z"));
-
+  it("shows timer chip for in-progress cards summing workflow runtime + timed events", () => {
     const { container } = render(
       <TaskCard
         task={makeTask({
           column: "in-progress",
-          columnMovedAt: "2026-04-25T12:18:00.000Z",
-          updatedAt: "2026-04-25T12:10:00.000Z",
-          createdAt: "2026-04-25T12:00:00.000Z",
+          workflowStepResults: [
+            {
+              workflowStepId: "step-1",
+              workflowStepName: "Plan",
+              phase: "pre-merge" as const,
+              status: "passed" as const,
+              startedAt: "2026-04-25T12:00:00.000Z",
+              completedAt: "2026-04-25T12:08:00.000Z",
+            },
+          ],
+          log: [
+            {
+              timestamp: "2026-04-25T12:09:00.000Z",
+              action: "[timing] llm_call in 240000ms",
+              outcome: "",
+            } as unknown as Task["log"][number],
+          ],
         })}
         onOpenDetail={noop}
         addToast={noop}
@@ -474,15 +485,12 @@ describe("TaskCard", () => {
 
     const timer = container.querySelector(".card-time-indicator");
     expect(timer).not.toBeNull();
+    // 8m workflow + 4m timed = 12m
     expect(timer?.textContent).toContain("12m");
-    expect(timer?.getAttribute("title")).toContain("In progress since");
-    expect(timer?.getAttribute("aria-label")).toContain("Elapsed time 12m");
+    expect(timer?.getAttribute("title")).toContain("Execution time 12m");
   });
 
-  it("shows fixed processing-duration timer chip for done cards", () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-04-25T18:00:00.000Z"));
-
+  it("shows timer chip for done cards summing workflow runtime + timed events", () => {
     const { container } = render(
       <TaskCard
         task={makeTask({
@@ -490,6 +498,23 @@ describe("TaskCard", () => {
           columnMovedAt: "2026-04-25T15:00:00.000Z",
           updatedAt: "2026-04-25T15:00:00.000Z",
           createdAt: "2026-04-25T13:00:00.000Z",
+          workflowStepResults: [
+            {
+              workflowStepId: "step-1",
+              workflowStepName: "Plan",
+              phase: "pre-merge" as const,
+              status: "passed" as const,
+              startedAt: "2026-04-25T13:00:00.000Z",
+              completedAt: "2026-04-25T14:00:00.000Z",
+            },
+          ],
+          log: [
+            {
+              timestamp: "2026-04-25T14:30:00.000Z",
+              action: "[timing] llm_call in 3600000ms",
+              outcome: "",
+            } as unknown as Task["log"][number],
+          ],
         })}
         onOpenDetail={noop}
         addToast={noop}
@@ -498,15 +523,13 @@ describe("TaskCard", () => {
 
     const timer = container.querySelector(".card-time-indicator");
     expect(timer).not.toBeNull();
+    // 1h workflow + 1h timed = 2h
     expect(timer?.textContent).toContain("2h");
-    expect(timer?.getAttribute("title")).toContain("Processing took 2h");
-    expect(timer?.getAttribute("aria-label")).toContain("Completed processing duration 2h");
+    expect(timer?.getAttribute("title")).toContain("Execution time 2h");
+    expect(timer?.getAttribute("title")).toContain("Completed");
   });
 
   it("renders files-changed metadata and timer chip in footer row", () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-04-25T18:00:00.000Z"));
-
     const { container } = render(
       <TaskCard
         task={makeTask({
@@ -514,6 +537,16 @@ describe("TaskCard", () => {
           columnMovedAt: "2026-04-25T15:00:00.000Z",
           updatedAt: "2026-04-25T15:00:00.000Z",
           createdAt: "2026-04-25T13:00:00.000Z",
+          workflowStepResults: [
+            {
+              workflowStepId: "step-1",
+              workflowStepName: "Plan",
+              phase: "pre-merge" as const,
+              status: "passed" as const,
+              startedAt: "2026-04-25T13:00:00.000Z",
+              completedAt: "2026-04-25T15:00:00.000Z",
+            },
+          ],
           mergeDetails: {
             commitSha: "abc123",
             filesChanged: 4,
@@ -543,19 +576,24 @@ describe("TaskCard", () => {
     expect(header?.contains(timer)).toBe(false);
     expect(Array.from(footerRow?.children ?? [])).toEqual([filesChanged, timer]);
   });
+
   it.each(["triage", "todo", "in-review", "archived"] as const)(
     "does not render timer chip for %s cards",
     (column) => {
-      vi.useFakeTimers();
-      vi.setSystemTime(new Date("2026-04-25T18:00:00.000Z"));
-
       const { container } = render(
         <TaskCard
           task={makeTask({
             column,
-            columnMovedAt: "2026-04-25T15:00:00.000Z",
-            updatedAt: "2026-04-25T14:00:00.000Z",
-            createdAt: "2026-04-25T13:00:00.000Z",
+            workflowStepResults: [
+              {
+                workflowStepId: "step-1",
+                workflowStepName: "Plan",
+                phase: "pre-merge" as const,
+                status: "passed" as const,
+                startedAt: "2026-04-25T13:00:00.000Z",
+                completedAt: "2026-04-25T15:00:00.000Z",
+              },
+            ],
           })}
           onOpenDetail={noop}
           addToast={noop}
@@ -566,17 +604,14 @@ describe("TaskCard", () => {
     },
   );
 
-  it("suppresses timer chip when all timestamp fallbacks are invalid or missing", () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-04-25T18:00:00.000Z"));
-
+  it("does not render timer chip when no instrumentation data is recorded", () => {
     const { container } = render(
       <TaskCard
         task={makeTask({
           column: "in-progress",
-          columnMovedAt: "not-a-date",
-          updatedAt: "also-not-a-date",
-          createdAt: undefined as unknown as string,
+          columnMovedAt: "2026-04-25T12:00:00.000Z",
+          updatedAt: "2026-04-25T12:00:00.000Z",
+          createdAt: "2026-04-25T11:58:00.000Z",
         })}
         onOpenDetail={noop}
         addToast={noop}
@@ -586,77 +621,7 @@ describe("TaskCard", () => {
     expect(container.querySelector(".card-time-indicator")).toBeNull();
   });
 
-  it.each([
-    {
-      createdAt: "2026-04-25T09:00:00.000Z",
-      columnMovedAt: "2026-04-25T09:00:59.000Z",
-      expected: "<1m",
-    },
-    {
-      createdAt: "2026-04-25T09:00:00.000Z",
-      columnMovedAt: "2026-04-25T10:00:00.000Z",
-      expected: "1h",
-    },
-    {
-      createdAt: "2026-04-25T09:00:00.000Z",
-      columnMovedAt: "2026-04-26T09:00:00.000Z",
-      expected: "1d",
-    },
-  ])(
-    "formats done processing-duration label as $expected at boundary",
-    ({ createdAt, columnMovedAt, expected }) => {
-      vi.useFakeTimers();
-      vi.setSystemTime(new Date("2026-04-26T12:00:00.000Z"));
-
-      const { container } = render(
-        <TaskCard
-          task={makeTask({
-            column: "done",
-            columnMovedAt,
-            updatedAt: columnMovedAt,
-            createdAt,
-          })}
-          onOpenDetail={noop}
-          addToast={noop}
-        />,
-      );
-
-      const timer = container.querySelector(".card-time-indicator");
-      expect(timer).not.toBeNull();
-      expect(timer?.textContent).toContain(expected);
-    },
-  );
-
-  it("keeps done processing-duration timer stable when clock advances", () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-04-25T18:00:00.000Z"));
-
-    const { container } = render(
-      <TaskCard
-        task={makeTask({
-          column: "done",
-          columnMovedAt: "2026-04-25T15:00:00.000Z",
-          updatedAt: "2026-04-25T15:00:00.000Z",
-          createdAt: "2026-04-25T13:00:00.000Z",
-        })}
-        onOpenDetail={noop}
-        addToast={noop}
-      />,
-    );
-
-    expect(container.querySelector(".card-time-indicator")?.textContent).toContain("2h");
-
-    act(() => {
-      vi.advanceTimersByTime(2 * 60 * 60_000);
-    });
-
-    expect(container.querySelector(".card-time-indicator")?.textContent).toContain("2h");
-  });
-
-  it("uses createdAt for done duration when updatedAt equals completion timestamp", () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-04-25T18:00:00.000Z"));
-
+  it("does not render timer chip on done card without instrumentation, even with old timestamps", () => {
     const { container } = render(
       <TaskCard
         task={makeTask({
@@ -670,14 +635,10 @@ describe("TaskCard", () => {
       />,
     );
 
-    const timer = container.querySelector(".card-time-indicator");
-    expect(timer).not.toBeNull();
-    expect(timer?.textContent).toContain("2h");
-    expect(timer?.textContent).not.toContain("<1m");
-    expect(timer?.getAttribute("title")).toContain("Processing took 2h");
+    expect(container.querySelector(".card-time-indicator")).toBeNull();
   });
 
-  it("refreshes in-progress timer chip on 30s cadence", () => {
+  it("live-ticks workflow runtime for in-progress steps", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-25T12:00:30.000Z"));
 
@@ -685,9 +646,15 @@ describe("TaskCard", () => {
       <TaskCard
         task={makeTask({
           column: "in-progress",
-          columnMovedAt: "2026-04-25T12:00:00.000Z",
-          updatedAt: "2026-04-25T11:59:00.000Z",
-          createdAt: "2026-04-25T11:58:00.000Z",
+          workflowStepResults: [
+            {
+              workflowStepId: "step-1",
+              workflowStepName: "Plan",
+              phase: "pre-merge" as const,
+              status: "pending" as const,
+              startedAt: "2026-04-25T12:00:00.000Z",
+            },
+          ],
         })}
         onOpenDetail={noop}
         addToast={noop}

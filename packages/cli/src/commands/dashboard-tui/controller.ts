@@ -402,8 +402,17 @@ export class DashboardTUI {
   // ── State helpers called from Ink App ────────────────────────────────────
 
   setActiveSection(section: SectionId): void {
+    const changed = this.activeSection !== section;
     this.activeSection = section;
     this.showHelp = false;
+    if (changed) {
+      // Brute-force: wipe alt-screen + reset Ink's log-update tracking before
+      // rendering the new section. Some sections (Logs, Utilities) appear to
+      // leave residual state in tmux that scrolls the header off the top on
+      // the first render after switching. A full recover here is overkill on
+      // every switch but eliminates the artifact.
+      this.recoverFrameNow();
+    }
     this.notify();
   }
 
@@ -442,6 +451,7 @@ export class DashboardTUI {
     const idx = SECTION_ORDER.indexOf(this.activeSection);
     this.activeSection = SECTION_ORDER[(idx + direction + SECTION_ORDER.length) % SECTION_ORDER.length];
     this.showHelp = false;
+    this.recoverFrameNow();
     this.notify();
   }
 
@@ -637,6 +647,16 @@ export class DashboardTUI {
   // visible at the bottom. \x1b[2J\x1b[H wipes the buffer first.
   // Order: wipe → reset Ink's tracking → record dims → notify so React
   // reads fresh dims and rerenders cleanly.
+  // Public version: callable from state-changing methods (e.g. switching
+  // panels). Reads current dims from process.stdout and runs the same
+  // wipe + ink-clear sequence as the resize-driven path.
+  recoverFrameNow(): void {
+    const cols = process.stdout?.columns ?? 0;
+    const rows = process.stdout?.rows ?? 0;
+    if (cols <= 0 || rows <= 0) return;
+    this.recoverFrame(cols, rows);
+  }
+
   private recoverFrame(cols: number, rows: number): void {
     tuiDebug("recoverFrame", {
       cols,

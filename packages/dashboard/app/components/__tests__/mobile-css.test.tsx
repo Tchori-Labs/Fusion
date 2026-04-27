@@ -116,7 +116,7 @@ describe("mobile CSS foundation", () => {
     const css = loadAllAppCss();
     const matches = [...css.matchAll(/@media\s*\(max-width:\s*(\d+)px\)/g)];
     const foundValues = new Set(matches.map((match) => Number(match[1])));
-    const allowedValues = new Set([480, 640, 768, 860]);
+    const allowedValues = new Set([480, 640, 720, 768, 860]);
 
     expect(foundValues.size).toBeGreaterThan(0);
     for (const value of foundValues) {

@@ -103,17 +103,6 @@ function parseTimestampToMs(value?: string): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function getInProgressTimeIndicatorStartMs(task: Task): number | null {
-  const timestamp = task.columnMovedAt ?? task.updatedAt ?? task.createdAt;
-  const parsed = parseTimestampToMs(timestamp);
-  if (parsed == null) return null;
-
-  const now = Date.now();
-  if (parsed > now) return null;
-
-  return parsed;
-}
-
 function getDoneCompletionMs(task: Task): number | null {
   const completionMs = parseTimestampToMs(task.columnMovedAt ?? task.updatedAt);
   if (completionMs == null) return null;
@@ -124,30 +113,38 @@ function getDoneCompletionMs(task: Task): number | null {
   return completionMs;
 }
 
-function getDoneProcessingStartMs(task: Task, completionMs: number): number | null {
-  const startCandidates = [task.createdAt]
-    .map(parseTimestampToMs)
-    .filter((value): value is number => value != null);
-
-  const validStart = startCandidates.find((startMs) => startMs <= completionMs);
-  return validStart ?? null;
-}
-
-function getDoneWorkflowRuntimeMs(task: Task): number | null {
+// Mirrors summarizeWorkflowTiming in TaskTokenStatsPanel: completed steps use
+// completedAt-startedAt; in-progress steps contribute live elapsed (now-startedAt).
+function getWorkflowRuntimeMs(task: Task, nowMs: number): number | null {
   const results = task.workflowStepResults;
   if (!results || results.length === 0) return null;
 
   let total = 0;
   let counted = 0;
   for (const step of results) {
-    if (!step.startedAt || !step.completedAt) continue;
+    if (!step.startedAt) continue;
     const startedMs = parseTimestampToMs(step.startedAt);
-    const completedMs = parseTimestampToMs(step.completedAt);
-    if (startedMs == null || completedMs == null || completedMs < startedMs) continue;
-    total += completedMs - startedMs;
+    if (startedMs == null) continue;
+
+    let endMs: number;
+    if (step.completedAt) {
+      const completedMs = parseTimestampToMs(step.completedAt);
+      if (completedMs == null || completedMs < startedMs) continue;
+      endMs = completedMs;
+    } else {
+      endMs = Math.max(startedMs, nowMs);
+    }
+    total += endMs - startedMs;
     counted += 1;
   }
   return counted > 0 ? total : null;
+}
+
+function getInstrumentedDurationMs(task: Task, nowMs: number): number | null {
+  const timed = getTimedDurationMs(task.log);
+  const workflow = getWorkflowRuntimeMs(task, nowMs);
+  if (timed == null && workflow == null) return null;
+  return (timed ?? 0) + (workflow ?? 0);
 }
 
 function formatElapsedDuration(elapsedMs: number): string {
@@ -659,8 +656,10 @@ function TaskCardComponent({
       return;
     }
 
-    const startMs = getInProgressTimeIndicatorStartMs(task);
-    if (startMs == null) {
+    const hasInProgressStep = (task.workflowStepResults ?? []).some(
+      (step) => step.startedAt && !step.completedAt,
+    );
+    if (!hasInProgressStep) {
       return;
     }
 
@@ -670,98 +669,47 @@ function TaskCardComponent({
     }, LIVE_TIME_INDICATOR_POLL_MS);
 
     return () => window.clearInterval(interval);
-  }, [task.column, task.columnMovedAt, task.updatedAt, task.createdAt]);
+  }, [task.column, task.workflowStepResults]);
 
   const timeIndicator = useMemo(() => {
     if (!TIME_INDICATOR_COLUMNS.has(task.column)) {
       return null;
     }
 
-    if (task.column === "in-progress") {
-      const timedDurationMs = getTimedDurationMs(task.log);
-      if (timedDurationMs != null) {
-        const elapsedLabel = formatElapsedDuration(timedDurationMs);
-        if (elapsedLabel) {
-          return {
-            label: elapsedLabel,
-            title: `Timed duration ${elapsedLabel}`,
-            ariaLabel: `Timed duration ${elapsedLabel}`,
-          };
-        }
-      }
-
-      const startMs = getInProgressTimeIndicatorStartMs(task);
-      if (startMs == null) {
-        return null;
-      }
-
-      const elapsedLabel = formatElapsedDuration(timeIndicatorNowMs - startMs);
-      if (!elapsedLabel) {
-        return null;
-      }
-
-      return {
-        label: elapsedLabel,
-        title: `In progress since ${new Date(startMs).toLocaleString()}`,
-        ariaLabel: `Elapsed time ${elapsedLabel}. In progress since ${new Date(startMs).toLocaleString()}`,
-      };
-    }
-
-    // Done cards report the same "Timed duration" metric shown in the stats tab
-    // (sum of [timing]-tagged log events). Fall back to workflow step runtime,
-    // then to wallclock processing duration when no instrumentation exists.
-    const completionMs = getDoneCompletionMs(task);
-    if (completionMs == null) {
+    const instrumentedMs = getInstrumentedDurationMs(task, timeIndicatorNowMs);
+    if (instrumentedMs == null) {
       return null;
     }
 
-    const timedDurationMs = getTimedDurationMs(task.log);
-    if (timedDurationMs != null) {
-      const elapsedLabel = formatElapsedDuration(timedDurationMs);
-      if (!elapsedLabel) {
-        return null;
-      }
-
-      const completedAt = new Date(completionMs).toLocaleString();
-      return {
-        label: elapsedLabel,
-        title: `Timed duration ${elapsedLabel}. Completed ${completedAt}`,
-        ariaLabel: `Timed duration ${elapsedLabel}. Completed ${completedAt}`,
-      };
-    }
-
-    const workflowRuntimeMs = getDoneWorkflowRuntimeMs(task);
-    if (workflowRuntimeMs != null) {
-      const elapsedLabel = formatElapsedDuration(workflowRuntimeMs);
-      if (!elapsedLabel) {
-        return null;
-      }
-
-      const completedAt = new Date(completionMs).toLocaleString();
-      return {
-        label: elapsedLabel,
-        title: `Workflow runtime ${elapsedLabel}. Completed ${completedAt}`,
-        ariaLabel: `Workflow runtime ${elapsedLabel}. Completed ${completedAt}`,
-      };
-    }
-
-    const startMs = getDoneProcessingStartMs(task, completionMs);
-    if (startMs == null) {
-      return null;
-    }
-
-    const elapsedLabel = formatElapsedDuration(completionMs - startMs);
+    const elapsedLabel = formatElapsedDuration(instrumentedMs);
     if (!elapsedLabel) {
       return null;
+    }
+
+    if (task.column === "in-progress") {
+      return {
+        label: elapsedLabel,
+        title: `Execution time ${elapsedLabel}`,
+        ariaLabel: `Execution time ${elapsedLabel}`,
+      };
+    }
+
+    const completionMs = getDoneCompletionMs(task);
+    if (completionMs == null) {
+      return {
+        label: elapsedLabel,
+        title: `Execution time ${elapsedLabel}`,
+        ariaLabel: `Execution time ${elapsedLabel}`,
+      };
     }
 
     const completedAt = new Date(completionMs).toLocaleString();
     return {
       label: elapsedLabel,
-      title: `Processing took ${elapsedLabel}. Completed ${completedAt}`,
-      ariaLabel: `Completed processing duration ${elapsedLabel}. Completed ${completedAt}`,
+      title: `Execution time ${elapsedLabel}. Completed ${completedAt}`,
+      ariaLabel: `Execution time ${elapsedLabel}. Completed ${completedAt}`,
     };
-  }, [task.column, task.columnMovedAt, task.updatedAt, task.createdAt, task.workflowStepResults, task.log, timeIndicatorNowMs]);
+  }, [task.column, task.columnMovedAt, task.updatedAt, task.workflowStepResults, task.log, timeIndicatorNowMs]);
 
   useEffect(() => {
     if (!hasGitHubBadge || !isInViewport) {
