@@ -355,9 +355,6 @@ function ProviderCard({
         <div className="usage-provider-info">
           <ProviderIcon provider={getProviderIconKey(provider.name)} size="md" />
           <span className="usage-provider-name">{provider.name}</span>
-        </div>
-        <div className="usage-provider-actions">
-          {getStatusBadge()}
           {hiddenCount > 0 && (
             <button
               className="btn btn-sm usage-show-hidden-btn"
@@ -367,6 +364,9 @@ function ProviderCard({
               Show hidden ({hiddenCount})
             </button>
           )}
+        </div>
+        <div className="usage-provider-actions">
+          {getStatusBadge()}
         </div>
       </div>
 

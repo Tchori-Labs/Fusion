@@ -225,9 +225,13 @@
 }
 
 .usage-show-hidden-btn {
+  margin-left: var(--space-sm);
+  padding: calc(var(--space-xs) / 2) calc(var(--space-sm) - var(--space-xs) / 2);
   font-size: calc(var(--space-sm) + var(--space-xs) * 0.75);
+  line-height: 1.2;
   color: var(--text-muted);
   white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .usage-show-hidden-btn:hover {
@@ -513,7 +517,6 @@
   }
 
   .usage-provider-actions {
-    width: 100%;
     justify-content: flex-end;
     flex-wrap: wrap;
   }

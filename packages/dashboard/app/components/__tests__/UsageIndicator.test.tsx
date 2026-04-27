@@ -730,6 +730,24 @@ describe("UsageIndicator", () => {
     expect(screen.getByTestId("usage-show-hidden-btn")).toHaveTextContent("Show hidden (1)");
   });
 
+  it("renders show hidden button inline within provider info", () => {
+    mockUseUsageData.mockReturnValue({
+      providers: mockProviders,
+      loading: false,
+      error: null,
+      lastUpdated: new Date(),
+      refresh: mockRefresh,
+    });
+
+    render(<UsageIndicator isOpen={true} onClose={mockOnClose} projectId={TEST_PROJECT_ID} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Hide Session (5h)" }));
+
+    const showHiddenButton = screen.getByTestId("usage-show-hidden-btn");
+    expect(showHiddenButton.closest(".usage-provider-info")).toBeTruthy();
+    expect(showHiddenButton.closest(".usage-provider-actions")).toBeNull();
+  });
+
   it("show hidden button reveals all hidden windows for a provider", () => {
     mockUseUsageData.mockReturnValue({
       providers: mockProviders,
