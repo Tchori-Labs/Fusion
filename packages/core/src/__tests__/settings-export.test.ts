@@ -58,7 +58,7 @@ describe("settings-export", () => {
   beforeEach(async () => {
     env = createTestEnv();
     const { TaskStore } = await import("../store.js");
-    store = new TaskStore(env.tempDir, env.globalSettingsDir);
+    store = new TaskStore(env.tempDir, env.globalSettingsDir, { inMemoryDb: true });
     await store.init();
   });
 

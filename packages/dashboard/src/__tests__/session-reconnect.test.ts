@@ -91,7 +91,7 @@ describe("session reconnect + replay", () => {
     __resetMissionInterviewState();
 
     tmpRoot = mkdtempSync(join(tmpdir(), "kb-session-reconnect-"));
-    store = new TaskStore(tmpRoot, join(tmpRoot, ".fusion-global-settings"));
+    store = new TaskStore(tmpRoot, join(tmpRoot, ".fusion-global-settings"), { inMemoryDb: true });
     await store.init();
     aiSessionStore = new AiSessionStore(store.getDatabase());
 

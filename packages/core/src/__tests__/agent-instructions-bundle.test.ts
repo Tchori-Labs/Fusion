@@ -11,7 +11,7 @@ describe("AgentStore — instructions bundle", () => {
 
   beforeEach(async () => {
     testDir = await mkdtemp(join(tmpdir(), "agent-instructions-bundle-test-"));
-    store = new AgentStore({ rootDir: testDir });
+    store = new AgentStore({ rootDir: testDir, inMemoryDb: true });
     await store.init();
   });
 

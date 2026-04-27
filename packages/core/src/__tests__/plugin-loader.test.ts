@@ -146,7 +146,7 @@ describe("PluginLoader", () => {
 
   beforeEach(() => {
     rootDir = makeTmpDir();
-    pluginStore = new PluginStore(rootDir);
+    pluginStore = new PluginStore(rootDir, { inMemoryDb: true });
   });
 
   afterEach(async () => {

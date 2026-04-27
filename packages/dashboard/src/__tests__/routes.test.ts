@@ -17172,7 +17172,7 @@ describe("Messaging Routes", () => {
     rootDir = mkdtempSync(join(tmpdir(), "kb-message-routes-"));
     const { TaskStore, MessageStore } = await import("@fusion/core");
 
-    store = new TaskStore(rootDir, join(rootDir, ".fusion-global-settings"));
+    store = new TaskStore(rootDir, join(rootDir, ".fusion-global-settings"), { inMemoryDb: true });
     await store.init();
     messageStore = new MessageStore(store.getDatabase());
 

@@ -455,7 +455,7 @@ describe("syncBackupRoutine", () => {
   beforeEach(async () => {
     vi.useRealTimers();
     tempDir = mkdtempSync(join(tmpdir(), "kb-backup-routine-test-"));
-    routineStore = new RoutineStore(tempDir);
+    routineStore = new RoutineStore(tempDir, { inMemoryDb: true });
     await routineStore.init();
   });
 

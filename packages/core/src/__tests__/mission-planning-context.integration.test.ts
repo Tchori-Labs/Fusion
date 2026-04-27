@@ -28,7 +28,7 @@ describe("MissionStore planning context integration", () => {
     vi.setSystemTime(new Date("2026-04-01T00:00:00.000Z"));
 
     rootDir = makeTmpDir();
-    taskStore = new TaskStore(rootDir, join(rootDir, ".fusion-global-settings"));
+    taskStore = new TaskStore(rootDir, join(rootDir, ".fusion-global-settings"), { inMemoryDb: true });
     await taskStore.init();
   });
 

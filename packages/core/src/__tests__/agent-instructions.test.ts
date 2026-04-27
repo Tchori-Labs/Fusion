@@ -11,7 +11,7 @@ describe("AgentStore — instructions fields", () => {
 
   beforeEach(async () => {
     testDir = await mkdtemp(join(tmpdir(), "agent-instructions-test-"));
-    store = new AgentStore({ rootDir: testDir });
+    store = new AgentStore({ rootDir: testDir, inMemoryDb: true });
     await store.init();
   });
 

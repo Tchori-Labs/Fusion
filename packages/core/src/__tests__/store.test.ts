@@ -8990,7 +8990,7 @@ Task with acceptance criteria
       let localStore: TaskStore | undefined;
 
       try {
-        localStore = new TaskStore(localRoot, localGlobal);
+        localStore = new TaskStore(localRoot, localGlobal, { inMemoryDb: true });
         (localStore as any).configPath = join(localRoot, ".fusion", "missing-dir", "config.json");
 
         await expect(localStore.init()).resolves.toBeUndefined();
@@ -9085,7 +9085,7 @@ Task with acceptance criteria
       let localStore: TaskStore | undefined;
 
       try {
-        localStore = new TaskStore(localRoot, localGlobal);
+        localStore = new TaskStore(localRoot, localGlobal, { inMemoryDb: true });
         await expect(localStore.init()).resolves.toBeUndefined();
 
         const warningCall = warnSpy.mock.calls.find(
@@ -9540,7 +9540,7 @@ Task with acceptance criteria
       const localGlobal = makeTmpDir();
       let localStore: TaskStore | undefined;
       try {
-        localStore = new TaskStore(localRoot, localGlobal);
+        localStore = new TaskStore(localRoot, localGlobal, { inMemoryDb: true });
         await localStore.init();
 
         await localStore.updateSettings({ memoryEnabled: false } as any);
@@ -9568,7 +9568,7 @@ Task with acceptance criteria
       const localGlobal = makeTmpDir();
       let localStore: TaskStore | undefined;
       try {
-        localStore = new TaskStore(localRoot, localGlobal);
+        localStore = new TaskStore(localRoot, localGlobal, { inMemoryDb: true });
         await localStore.init();
         const memoryPath = join(localRoot, ".fusion", "memory", "MEMORY.md");
 
@@ -9765,7 +9765,7 @@ describe("RunMutationContext", () => {
     const localRoot = makeTmpDir();
     const localGlobal = makeTmpDir();
     try {
-      const localStore = new TaskStore(localRoot, localGlobal);
+      const localStore = new TaskStore(localRoot, localGlobal, { inMemoryDb: true });
       await localStore.init();
 
       const task = await localStore.createTask({ description: "Test task" });
@@ -9793,7 +9793,7 @@ describe("RunMutationContext", () => {
     const localRoot = makeTmpDir();
     const localGlobal = makeTmpDir();
     try {
-      const localStore = new TaskStore(localRoot, localGlobal);
+      const localStore = new TaskStore(localRoot, localGlobal, { inMemoryDb: true });
       await localStore.init();
 
       const task = await localStore.createTask({ description: "Test task" });
@@ -9847,7 +9847,7 @@ describe("RunMutationContext", () => {
     const localRoot = makeTmpDir();
     const localGlobal = makeTmpDir();
     try {
-      const localStore = new TaskStore(localRoot, localGlobal);
+      const localStore = new TaskStore(localRoot, localGlobal, { inMemoryDb: true });
       await localStore.init();
 
       const task = await localStore.createTask({ description: "Test task" });
@@ -9875,7 +9875,7 @@ describe("RunMutationContext", () => {
     const localRoot = makeTmpDir();
     const localGlobal = makeTmpDir();
     try {
-      const localStore = new TaskStore(localRoot, localGlobal);
+      const localStore = new TaskStore(localRoot, localGlobal, { inMemoryDb: true });
       await localStore.init();
 
       const task = await localStore.createTask({ description: "Test task" });
@@ -9903,7 +9903,7 @@ describe("RunMutationContext", () => {
     const localRoot = makeTmpDir();
     const localGlobal = makeTmpDir();
     try {
-      const localStore = new TaskStore(localRoot, localGlobal);
+      const localStore = new TaskStore(localRoot, localGlobal, { inMemoryDb: true });
       await localStore.init();
 
       const task1 = await localStore.createTask({ description: "Task 1" });
@@ -9934,7 +9934,7 @@ describe("RunMutationContext", () => {
     const localRoot = makeTmpDir();
     const localGlobal = makeTmpDir();
     try {
-      const localStore = new TaskStore(localRoot, localGlobal);
+      const localStore = new TaskStore(localRoot, localGlobal, { inMemoryDb: true });
       await localStore.init();
 
       const task = await localStore.createTask({ description: "Test task" });
@@ -9955,7 +9955,7 @@ describe("RunMutationContext", () => {
     const localRoot = makeTmpDir();
     const localGlobal = makeTmpDir();
     try {
-      const localStore = new TaskStore(localRoot, localGlobal);
+      const localStore = new TaskStore(localRoot, localGlobal, { inMemoryDb: true });
       await localStore.init();
 
       const task1 = await localStore.createTask({ description: "Task 1" });
