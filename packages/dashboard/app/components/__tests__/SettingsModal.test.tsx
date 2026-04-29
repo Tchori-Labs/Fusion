@@ -415,7 +415,9 @@ describe("SettingsModal", () => {
 
       await userEvent.click(screen.getByRole("button", { name: "Project Models" }));
 
-      const defaultSection = screen.getByLabelText("Default Model").closest(".form-group");
+      expect(screen.getByText(/The Project Default Model is the fallback for this project/i)).toBeInTheDocument();
+
+      const defaultSection = screen.getByLabelText("Project Default Model").closest(".form-group");
       expect(defaultSection).toBeTruthy();
       expect(within(defaultSection as HTMLElement).getByText("Inherited (Global)")).toBeInTheDocument();
     });
@@ -444,7 +446,7 @@ describe("SettingsModal", () => {
       await waitForSettingsModalReady();
 
       await userEvent.click(screen.getByRole("button", { name: "Project Models" }));
-      await userEvent.click(screen.getByLabelText("Default Model"));
+      await userEvent.click(screen.getByLabelText("Project Default Model"));
       await userEvent.click(screen.getByText("GPT-4o"));
       await userEvent.click(screen.getByText("Save"));
 

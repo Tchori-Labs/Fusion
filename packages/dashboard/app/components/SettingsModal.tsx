@@ -1882,6 +1882,11 @@ export function SettingsModal({
         const resolvedPlanningModel = resolvePlanningSettingsModel(form);
         const resolvedDefaultModel = resolveProjectDefaultModel(form);
         const resolvedTitleSummarizerModel = resolveTitleSummarizerSettingsModel(form);
+        const getProjectLaneLabel = (lane: ModelLane) => lane.laneId === "default" ? "Project Default Model" : lane.label;
+        const getProjectLaneHelperText = (lane: ModelLane) =>
+          lane.laneId === "default"
+            ? "Project-wide default AI model used when no more specific task or project lane override is set."
+            : lane.helperText;
 
         return (
           <>
@@ -1922,6 +1927,7 @@ export function SettingsModal({
             <p className="settings-description">
               Override global model settings at the project level. Each lane controls a specific AI usage context.
               Unset lanes inherit from the corresponding global lane.
+              The Project Default Model is the fallback for this project when a more specific lane is unset.
             </p>
             {modelsLoading ? (
               <div className="settings-empty-state">Loading available models…</div>
@@ -1935,11 +1941,12 @@ export function SettingsModal({
                   const status = getLaneStatus(lane);
                   const value = getLaneValue(lane);
                   const isOverridden = status === "overridden";
+                  const laneLabel = getProjectLaneLabel(lane);
 
                   return (
                     <div className="form-group" key={lane.laneId}>
                       <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginBottom: "0.25rem" }}>
-                        <label htmlFor={`${lane.laneId}Model`}>{lane.label}</label>
+                        <label htmlFor={`${lane.laneId}Model`}>{laneLabel}</label>
                         <span
                           className={`settings-lane-badge ${isOverridden ? "settings-lane-badge--override" : "settings-lane-badge--inherited"}`}
                           title={isOverridden ? "Explicitly set for this project" : "Inherited from global settings"}
@@ -1951,11 +1958,11 @@ export function SettingsModal({
                         <div style={{ flex: 1 }}>
                           <CustomModelDropdown
                             id={`${lane.laneId}Model`}
-                            label={lane.label}
+                            label={laneLabel}
                             models={availableModels}
                             value={value}
                             onChange={(val) => updateLaneValue(lane, val)}
-                            placeholder="Use global"
+                            placeholder={lane.laneId === "default" ? "Use global default" : "Use global"}
                             favoriteProviders={favoriteProviders}
                             onToggleFavorite={handleToggleFavorite}
                             favoriteModels={favoriteModels}
@@ -1975,7 +1982,7 @@ export function SettingsModal({
                         )}
                       </div>
                       <small>
-                        {lane.helperText} Falls back to: {lane.fallbackOrder}.
+                        {getProjectLaneHelperText(lane)} Falls back to: {lane.fallbackOrder}.
                       </small>
                     </div>
                   );
