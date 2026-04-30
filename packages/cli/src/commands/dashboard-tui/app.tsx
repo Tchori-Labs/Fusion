@@ -958,21 +958,16 @@ function MainHeader({ state }: { state: DashboardState }) {
           </Box>
         );
       })}
-      <Box flexGrow={1} />
-      {state.remoteStatus?.state === "running" && (
-        <Box flexShrink={0} marginRight={1}>
-          <Text wrap="truncate-end" color="green" bold>● tunnel</Text>
-          {state.remoteStatus.url && cols >= 100 && (
-            <Text wrap="truncate-end" color="green"> {state.remoteStatus.url}</Text>
-          )}
-          {cols >= 80 && <Text wrap="truncate-end" dimColor>  [^Q] QR</Text>}
-        </Box>
-      )}
-      {state.remoteStatus?.state === "starting" && (
-        <Box flexShrink={0} marginRight={1}>
+      <Box flexGrow={1} flexShrink={1} justifyContent="flex-end" overflow="hidden" marginRight={1}>
+        {state.remoteStatus?.state === "running" && (
+          <Text wrap="truncate-end" color="green" bold>
+            ● tunnel{state.remoteStatus.url ? ` ${state.remoteStatus.url}` : ""}{cols >= 80 ? "  [^Q] QR" : ""}
+          </Text>
+        )}
+        {state.remoteStatus?.state === "starting" && (
           <Text wrap="truncate-end" color="yellow">● tunnel starting…</Text>
-        </Box>
-      )}
+        )}
+      </Box>
       {showHelpHint && <Box flexShrink={0}><Text wrap="truncate-end" dimColor>[?] help  [q] quit</Text></Box>}
     </Box>
   );
@@ -4209,7 +4204,7 @@ export function DashboardApp({ controller }: DashboardAppProps) {
         </Box>
       )}
       {qrOverlay && (
-        <Box position="absolute" marginTop={2} marginLeft={2} flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={1}>
+        <Box position="absolute" marginTop={2} marginLeft={2} flexDirection="column" borderStyle="round" borderColor="cyan" backgroundColor="black" paddingX={1}>
           <Text bold color="cyanBright">Remote Access — Scan to connect</Text>
           {qrOverlay.state === "loading" && <Text dimColor>Generating QR…</Text>}
           {qrOverlay.state === "error" && <Text color="red">{qrOverlay.message}</Text>}
