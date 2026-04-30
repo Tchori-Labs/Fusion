@@ -2634,7 +2634,28 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     });
   }
 
-  async moveTask(id: string, toColumn: Column): Promise<Task> {
+  async moveTask(
+    id: string,
+    toColumn: Column,
+    options?: {
+      /**
+       * Mark this transition as an internal bounce/pause hop rather than a
+       * user-initiated reset. On in-progress/done/in-review → todo/triage,
+       * skip the destructive cleanup that would otherwise discard resume
+       * state: leave step statuses intact (no resetAllStepsToPending), do
+       * not rewrite PROMPT.md checkboxes, and keep `worktree` +
+       * `executionStartedAt` so the resumed run reattaches to the same
+       * checkout and preserves wall-clock execution time. `status`,
+       * `error`, and `blockedBy` are still cleared because those are
+       * per-run failure state that the next run will rebuild.
+       *
+       * Used by the workflow-rerun bounce, the pause→todo paths, and
+       * other executor-internal requeues. NOT used by user-initiated
+       * "move back to todo" actions, which still want a clean slate.
+       */
+      preserveResumeState?: boolean;
+    },
+  ): Promise<Task> {
     return this.withTaskLock(id, async () => {
       const dir = this.taskDir(id);
       let task: Task;
@@ -2704,13 +2725,19 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       if (isReopenToTodoOrTriage) {
         task.status = undefined;
         task.error = undefined;
-        task.worktree = undefined;
         task.blockedBy = undefined;
-        // Reset wall-clock runtime so the next run gets a fresh timer.
-        task.executionStartedAt = undefined;
-        task.executionCompletedAt = undefined;
-        this.resetAllStepsToPending(task);
-        await this.resetPromptCheckboxes(dir);
+        if (!options?.preserveResumeState) {
+          task.worktree = undefined;
+          // Reset wall-clock runtime so the next run gets a fresh timer.
+          task.executionStartedAt = undefined;
+          task.executionCompletedAt = undefined;
+          this.resetAllStepsToPending(task);
+          await this.resetPromptCheckboxes(dir);
+        } else {
+          // executionCompletedAt is never set on an in-progress task; clear
+          // it defensively in case we are bouncing from done/in-review.
+          task.executionCompletedAt = undefined;
+        }
       }
 
       // Clear recovery metadata when task reaches in-review (successful completion)
@@ -3172,6 +3199,27 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         throw new Error(
           `Step ${stepIndex} out of range (task has ${task.steps.length} steps)`,
         );
+      }
+
+      // Guard against agents (or stale tool calls) regressing completed work
+      // by re-marking a done/skipped step as "in-progress". Overwriting the
+      // step status would silently undo progress, and the currentStep
+      // rewind below would discard the task's place in the plan.
+      const currentStatus = task.steps[stepIndex].status;
+      if (
+        status === "in-progress" &&
+        (currentStatus === "done" || currentStatus === "skipped")
+      ) {
+        const ts = new Date().toISOString();
+        task.updatedAt = ts;
+        task.log.push({
+          timestamp: ts,
+          action: `Ignored ${currentStatus}→in-progress regression for step ${stepIndex} (${task.steps[stepIndex].name})`,
+        });
+        await this.atomicWriteTaskJson(dir, task);
+        if (this.isWatching) this.taskCache.set(id, { ...task });
+        this.emit("task:updated", task);
+        return task;
       }
 
       task.steps[stepIndex].status = status;

@@ -2085,6 +2085,41 @@ describe("QuickChatFAB", () => {
       });
     });
 
+    it("applies --vv-height when keyboard opens with zero overlap (iOS last-resort signal)", async () => {
+      const { listeners, mockVV } = mockMobileVisualViewport({
+        innerHeight: 800,
+        vvHeight: 800,
+      });
+
+      render(<QuickChatFAB addToast={addToast} open={true} onOpenChange={vi.fn()} />);
+
+      const panel = await screen.findByTestId("quick-chat-panel");
+      expect(panel.style.getPropertyValue("--vv-height")).toBe("");
+
+      // Focus the input so the hook treats the active element as
+      // keyboard-focusable — this is what unlocks the iOS last-resort branch
+      // where viewport shrinks but offsetTop+height closes the gap.
+      const input = await screen.findByTestId("quick-chat-input") as HTMLTextAreaElement;
+      input.focus();
+
+      // chromeOverlap and gap both collapse to 0 (offsetTop + height ==
+      // innerHeight == baseline), but baselineHeight - vv.height = 16 trips
+      // the "viewport shrank" branch with overlap=0, keyboardOpen=true.
+      Object.defineProperty(mockVV, "height", { value: 784, writable: true, configurable: true });
+      Object.defineProperty(mockVV, "offsetTop", { value: 16, writable: true, configurable: true });
+
+      act(() => {
+        for (const cb of listeners.resize) cb();
+      });
+
+      // Panel style is gated on keyboardOpen, not keyboardOverlap > 0.
+      // Regression guard for the gating change in QuickChatFAB.tsx:805.
+      await waitFor(() => {
+        expect(panel.style.getPropertyValue("--keyboard-overlap")).toBe("0px");
+        expect(panel.style.getPropertyValue("--vv-height")).toBe("784px");
+      });
+    });
+
     it("clears keyboard overlap CSS variable when keyboard closes", async () => {
       const { listeners, mockVV } = mockMobileVisualViewport({
         innerHeight: 800,

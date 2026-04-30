@@ -800,10 +800,10 @@ export function QuickChatFAB({
       }
     : setInternalOpen;
 
-  const { keyboardOverlap, viewportHeight } = useMobileKeyboard({ enabled: isOpen });
+  const { keyboardOverlap, viewportHeight, keyboardOpen } = useMobileKeyboard({ enabled: isOpen });
 
   const keyboardPanelStyle: CSSProperties =
-    keyboardOverlap > 0
+    keyboardOpen
       ? ({
           "--keyboard-overlap": `${keyboardOverlap}px`,
           ...(viewportHeight !== null ? { "--vv-height": `${viewportHeight}px` } : {}),

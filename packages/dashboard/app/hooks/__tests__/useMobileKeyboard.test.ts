@@ -281,6 +281,43 @@ describe("useMobileKeyboard", () => {
     await waitFor(() => {
       expect(result.current.keyboardOverlap).toBe(24);
       expect(result.current.viewportHeight).toBe(820);
+      expect(result.current.keyboardOpen).toBe(true);
+    });
+
+    input.remove();
+  });
+
+  it("treats focused input + viewport shrink as keyboard-open even when overlap is 0", async () => {
+    const { listeners, mockVV } = setupMobileVisualViewport({
+      innerHeight: 844,
+      vvHeight: 844,
+    });
+
+    const input = document.createElement("input");
+    input.type = "text";
+    document.body.appendChild(input);
+
+    const { result } = renderHook(() => useMobileKeyboard());
+
+    await waitFor(() => {
+      expect(result.current.keyboardOpen).toBe(false);
+    });
+
+    input.focus();
+    Object.defineProperty(mockVV, "height", {
+      value: 826,
+      writable: true,
+      configurable: true,
+    });
+
+    act(() => {
+      for (const cb of listeners.resize) cb();
+    });
+
+    await waitFor(() => {
+      expect(result.current.keyboardOverlap).toBe(0);
+      expect(result.current.viewportHeight).toBe(826);
+      expect(result.current.keyboardOpen).toBe(true);
     });
 
     input.remove();

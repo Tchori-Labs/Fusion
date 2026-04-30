@@ -759,12 +759,12 @@ export function ChatView({ projectId, addToast }: ChatViewProps) {
   const mentionCursorPosRef = useRef(0);
   const mode = useViewportMode();
   const isMobile = mode === "mobile";
-  const { keyboardOverlap, viewportHeight } = useMobileKeyboard({
+  const { keyboardOverlap, viewportHeight, keyboardOpen } = useMobileKeyboard({
     enabled: isMobile && !!activeSession,
   });
 
   const threadKeyboardStyle: CSSProperties =
-    keyboardOverlap > 0
+    keyboardOpen
       ? ({
           "--keyboard-overlap": `${keyboardOverlap}px`,
           ...(viewportHeight !== null ? { "--vv-height": `${viewportHeight}px` } : {}),

@@ -1135,7 +1135,11 @@ export class TaskExecutor {
 
       if (latestTask.column === "in-progress") {
         const originalExecutionStartedAt = latestTask.executionStartedAt;
-        await this.store.moveTask(taskId, "todo");
+        // Preserve step progress across the in-progress → todo hop:
+        // moveTask's default reopen-to-todo path resets every step to
+        // pending and rewrites PROMPT.md checkboxes, which would discard
+        // the partial progress this bounce is supposed to retry on top of.
+        await this.store.moveTask(taskId, "todo", { preserveResumeState: true });
         await this.store.updateTask(taskId, {
           worktree: worktreePath,
           executionStartedAt: originalExecutionStartedAt ?? null,
@@ -2058,7 +2062,7 @@ export class TaskExecutor {
           if (this.pausedAborted.has(task.id)) {
             this.pausedAborted.delete(task.id);
             await this.store.logEntry(task.id, "Execution paused — step sessions terminated, moved to todo", undefined, this.currentRunContext);
-            await this.store.moveTask(task.id, "todo");
+            await this.store.moveTask(task.id, "todo", { preserveResumeState: true });
             return;
           }
           if (this.stuckAborted.has(task.id)) {
@@ -2158,7 +2162,7 @@ export class TaskExecutor {
           } else if (this.pausedAborted.has(task.id)) {
             this.pausedAborted.delete(task.id);
             await this.store.logEntry(task.id, "Execution paused during step-session", undefined, this.currentRunContext);
-            await this.store.moveTask(task.id, "todo");
+            await this.store.moveTask(task.id, "todo", { preserveResumeState: true });
           } else if (this.stuckAborted.has(task.id)) {
             stuckRequeue = this.stuckAborted.get(task.id) ?? true;
             this.stuckAborted.delete(task.id);
@@ -2563,7 +2567,7 @@ export class TaskExecutor {
             } else {
               executorLog.log(`${task.id} paused (graceful session exit) — moving to todo`);
               await this.store.logEntry(task.id, "Execution paused — session preserved for resume, moved to todo");
-              await this.store.moveTask(task.id, "todo");
+              await this.store.moveTask(task.id, "todo", { preserveResumeState: true });
             }
             return;
           }
@@ -2997,13 +3001,21 @@ export class TaskExecutor {
             const delay = formatDelay(decision.delayMs);
             executorLog.warn(`⚡ ${task.id} context-overflow fresh-session requeue ${attempt}/${MAX_RECOVERY_RETRIES} in ${delay}`);
             await this.store.logEntry(task.id, `Context-overflow fresh-session requeue (${attempt}/${MAX_RECOVERY_RETRIES} in ${delay}): ${errorMessage}`, undefined, this.currentRunContext);
-            // Retain the worktree so the fresh session sees prior progress;
-            // only clear the in-memory session pointer so a new one is built.
+            // Retain the worktree and accumulated step progress so the fresh
+            // session resumes where the saturated one left off, but clear
+            // sessionFile synchronously here so the next dispatch is forced
+            // to spawn a brand-new session instead of reopening the
+            // over-context one. The session-end finally block also clears
+            // sessionFile, but it runs as fire-and-forget — if moveTask
+            // wins the task lock first, the next executor pass would
+            // observe a stale sessionFile and resume into the saturated
+            // session, looping on the same context-limit failure.
             await this.store.updateTask(task.id, {
               recoveryRetryCount: decision.nextState.recoveryRetryCount,
               nextRecoveryAt: decision.nextState.nextRecoveryAt,
+              sessionFile: null,
             });
-            await this.store.moveTask(task.id, "todo");
+            await this.store.moveTask(task.id, "todo", { preserveResumeState: true });
             return;
           }
 
@@ -3185,21 +3197,45 @@ export class TaskExecutor {
           };
         }
 
-        // Capture session checkpoint when a step starts, so RETHINK can rewind to it
-        if (status === "in-progress" && sessionRef.current) {
+        const task = await store.updateStep(taskId, step, status as StepStatus);
+        const stepInfo = task.steps[step];
+        const persistedStatus = stepInfo.status;
+        const progress = task.steps.filter((s) => s.status === "done").length;
+
+        // Capture session checkpoint only when the store actually moved the
+        // step to in-progress, so RETHINK can rewind to it. Doing this AFTER
+        // updateStep means a regression that updateStep ignores (e.g. the
+        // agent re-marking an already-done step) cannot replace the
+        // pre-step leaf with a later one.
+        if (
+          status === "in-progress" &&
+          persistedStatus === "in-progress" &&
+          sessionRef.current
+        ) {
           const leafId = sessionRef.current.sessionManager.getLeafId();
           if (leafId) {
             stepCheckpoints.set(step, leafId);
           }
         }
 
-        const task = await store.updateStep(taskId, step, status as StepStatus);
-        const stepInfo = task.steps[step];
-        const progress = task.steps.filter((s) => s.status === "done").length;
+        // If the persisted status doesn't match the requested status, the
+        // store rejected the transition (currently: in-progress regression
+        // on a done/skipped step). Tell the agent honestly so it doesn't
+        // assume the step reopened.
+        if (persistedStatus !== status) {
+          return {
+            content: [{
+              type: "text" as const,
+              text: `Step ${step} (${stepInfo.name}) is already ${persistedStatus} — ${status} request ignored to preserve completed work. Progress: ${progress}/${task.steps.length} done.`,
+            }],
+            details: {},
+          };
+        }
+
         return {
           content: [{
             type: "text" as const,
-            text: `Step ${step} (${stepInfo.name}) → ${status}. Progress: ${progress}/${task.steps.length} done.`,
+            text: `Step ${step} (${stepInfo.name}) → ${persistedStatus}. Progress: ${progress}/${task.steps.length} done.`,
           }],
           details: {},
         };

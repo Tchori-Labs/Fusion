@@ -3499,6 +3499,25 @@ describe("TaskStore", () => {
       expect(fetched.steps[0].status).toBe("in-progress");
     });
 
+    it("preserves done/skipped steps when updateStep is called with in-progress", async () => {
+      const task = await createTaskWithSteps();
+      await store.updateStep(task.id, 0, "done");
+      await store.updateStep(task.id, 1, "done");
+      const beforeRegression = await store.getTask(task.id);
+      const currentStepBefore = beforeRegression.currentStep;
+
+      // Agent erroneously re-marks an already-done step as in-progress.
+      const result = await store.updateStep(task.id, 0, "in-progress");
+
+      expect(result.steps[0].status).toBe("done");
+      expect(result.steps[1].status).toBe("done");
+      expect(result.currentStep).toBe(currentStepBefore);
+
+      const fetched = await store.getTask(task.id);
+      expect(fetched.steps[0].status).toBe("done");
+      expect(fetched.currentStep).toBe(currentStepBefore);
+    });
+
     it("addComment recreates missing task directory before persisting metadata", async () => {
       const task = await createTestTask();
       const dir = await deleteTaskDir(task.id);
@@ -5786,6 +5805,21 @@ Task with acceptance criteria
       const moved = await store.moveTask(task.id, "triage");
       expect(moved.steps.every((step) => step.status === "pending")).toBe(true);
       expect(moved.currentStep).toBe(0);
+    });
+
+    it("preserves step progress when moving in-progress → todo with preserveResumeState option", async () => {
+      const task = await createTaskWithSteps();
+      await store.moveTask(task.id, "todo");
+      await store.moveTask(task.id, "in-progress");
+      await setMixedStepStatuses(task.id);
+      await store.updateTask(task.id, { currentStep: 2 });
+
+      const moved = await store.moveTask(task.id, "todo", { preserveResumeState: true });
+
+      expect(moved.steps[0].status).toBe("done");
+      expect(moved.steps[1].status).toBe("in-progress");
+      expect(moved.steps[2].status).toBe("pending");
+      expect(moved.currentStep).toBe(2);
     });
 
     it("resets steps when moving from in-review to todo", async () => {
