@@ -2489,12 +2489,14 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     if (this.db.fts5Available) {
       // For FTS5 MATCH, quote tokens that contain special characters like hyphens
       // to prevent them from being interpreted as operators
+      // Append `*` to each token for FTS5 prefix matching so partial input
+      // (e.g., "frob") matches indexed terms like "frobnicator".
       const ftsQuery = sanitizedTokens
         .map((token) => {
           if (/[":(){}*^+-]/.test(token)) {
-            return `"${token.replace(/"/g, '\\"')}"`;
+            return `"${token.replace(/"/g, '\\"')}"*`;
           }
-          return token;
+          return `${token}*`;
         })
         .join(" OR ");
       const whereClause = includeArchived ? "" : ` AND t."column" != 'archived'`;

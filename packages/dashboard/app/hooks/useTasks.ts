@@ -161,8 +161,13 @@ export function useTasks(options?: UseTasksOptions) {
   }, []);
 
   // Debounced search effect - separate from refreshTasks to avoid dependency cycle
+  const prevSearchQueryRef = useRef<string | undefined>(searchQuery);
   useEffect(() => {
-    if (searchQuery === undefined) return;
+    // Skip only the initial mount when query has never been set; the visibility
+    // effect handles the first fetch. Going from a defined value back to
+    // undefined/"" must still trigger a refetch so the filter is cleared.
+    if (searchQuery === undefined && prevSearchQueryRef.current === undefined) return;
+    prevSearchQueryRef.current = searchQuery;
     const timer = setTimeout(() => {
       void refreshTasks({ searchQueryOverride: searchQuery });
     }, 300);
