@@ -440,8 +440,9 @@ describe("TodoView", () => {
   });
 
   it("clicking Create Task button calls createTask with item text", async () => {
+    const onTaskCreated = vi.fn();
     mockCreateTask.mockResolvedValueOnce({ id: "FN-123" });
-    render(<TodoView addToast={addToast} projectId="project-1" />);
+    render(<TodoView addToast={addToast} projectId="project-1" onTaskCreated={onTaskCreated} />);
 
     fireEvent.click(screen.getByTestId("create-task-from-item-1"));
 
@@ -451,6 +452,7 @@ describe("TodoView", () => {
         "project-1",
       );
     });
+    expect(onTaskCreated).toHaveBeenCalledWith({ id: "FN-123" });
     expect(addToast).toHaveBeenCalledWith("Created FN-123 from todo", "success");
   });
 
@@ -467,8 +469,9 @@ describe("TodoView", () => {
   });
 
   it("selecting an agent creates task assigned to that agent", async () => {
+    const onTaskCreated = vi.fn();
     mockCreateTask.mockResolvedValueOnce({ id: "FN-234" });
-    render(<TodoView addToast={addToast} projectId="project-1" />);
+    render(<TodoView addToast={addToast} projectId="project-1" onTaskCreated={onTaskCreated} />);
 
     fireEvent.click(screen.getByTestId("assign-agent-for-item-1"));
 
@@ -481,6 +484,7 @@ describe("TodoView", () => {
         "project-1",
       );
     });
+    expect(onTaskCreated).toHaveBeenCalledWith({ id: "FN-234" });
     expect(addToast).toHaveBeenCalledWith("Created FN-234 and assigned to Builder", "success");
   });
 
@@ -524,13 +528,15 @@ describe("TodoView", () => {
   });
 
   it("error handling shows error toast", async () => {
+    const onTaskCreated = vi.fn();
     mockCreateTask.mockRejectedValueOnce(new Error("boom"));
-    render(<TodoView addToast={addToast} />);
+    render(<TodoView addToast={addToast} onTaskCreated={onTaskCreated} />);
 
     fireEvent.click(screen.getByTestId("create-task-from-item-1"));
 
     await waitFor(() => {
       expect(addToast).toHaveBeenCalledWith("Failed to create task: boom", "error");
     });
+    expect(onTaskCreated).not.toHaveBeenCalled();
   });
 });

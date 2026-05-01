@@ -117,6 +117,12 @@ and passes it into `useTasks({ sseEnabled })`.
 
 This disables board-task SSE in non-task views to reduce unnecessary background connections.
 
+### Non-board task creators must ingest created tasks locally
+
+When a feature creates tasks outside board/list surfaces (for example `TodoView`), it must feed each successful create response back into app task state via the canonical ingest path (`ingestCreatedTasks(...)` in `useTasks`, typically wired from `App.tsx`).
+
+Do **not** rely on eventual `task:created` SSE delivery or manual refresh to reveal newly created tasks. Local ingestion keeps board/list views coherent immediately and avoids user-visible stale UI in the gap before SSE fan-out.
+
 ### Project-switch stale guards
 
 `useTasks.ts` protects against stale cross-project callbacks via:

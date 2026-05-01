@@ -776,6 +776,7 @@ function AppInner() {
               addToast={addToast}
               projectId={currentProject?.id}
               onPlanningMode={modalManager.openPlanningWithInitialPlan}
+              onTaskCreated={(task) => ingestCreatedTasks([task])}
             />
           </Suspense>
         </PageErrorBoundary>

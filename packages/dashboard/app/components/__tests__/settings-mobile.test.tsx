@@ -264,9 +264,9 @@ describe("SettingsModal mobile adaptations", () => {
     const { container, getByText, getAllByText } = render(<SettingsModal onClose={vi.fn()} addToast={vi.fn()} />);
     await waitFor(() => expect(fetchSettings).toHaveBeenCalled());
 
-    // Authentication is first with no scope banner by default - click General to see project scope
+    // Authentication is first with no scope banner by default - click the Project-scoped General section
     expect(container.querySelectorAll(".settings-scope-icon").length).toBeGreaterThan(0);
-    await user.click(getAllByText("General")[0]);
+    await user.click(getAllByText("General")[1]);
 
     // Verify project scope banner contains icon elements (SVG from Lucide, not emoji)
     const projectBanner = container.querySelector(".settings-scope-project");

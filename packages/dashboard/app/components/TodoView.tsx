@@ -24,13 +24,14 @@ interface TodoViewProps {
   projectId?: string;
   addToast: (message: string, type?: "success" | "error" | "info") => void;
   onPlanningMode?: (initialPlan: string) => void;
+  onTaskCreated?: (task: Task) => void;
 }
 
 function sortItems(items: TodoItem[]): TodoItem[] {
   return [...items].sort((a, b) => a.sortOrder - b.sortOrder);
 }
 
-export function TodoView({ projectId, addToast, onPlanningMode }: TodoViewProps) {
+export function TodoView({ projectId, addToast, onPlanningMode, onTaskCreated }: TodoViewProps) {
   const {
     lists,
     items,
@@ -266,11 +267,12 @@ export function TodoView({ projectId, addToast, onPlanningMode }: TodoViewProps)
         source: { sourceType: "dashboard_ui" },
       };
       const task: Task = await createTask(input, projectId);
+      onTaskCreated?.(task);
       addToast(`Created ${task.id} from todo`, "success");
     } catch (err) {
       addToast(`Failed to create task: ${getErrorMessage(err)}`, "error");
     }
-  }, [projectId, addToast]);
+  }, [projectId, addToast, onTaskCreated]);
 
   const handleCreateTaskAndAssign = useCallback(async (item: TodoItem, agentId: string) => {
     try {
@@ -281,6 +283,7 @@ export function TodoView({ projectId, addToast, onPlanningMode }: TodoViewProps)
         source: { sourceType: "dashboard_ui" },
       };
       const task: Task = await createTask(input, projectId);
+      onTaskCreated?.(task);
       const assignedAgent = agents.find((agent) => agent.id === agentId);
       const agentLabel = assignedAgent?.name ?? agentId;
       addToast(`Created ${task.id} and assigned to ${agentLabel}`, "success");
@@ -289,7 +292,7 @@ export function TodoView({ projectId, addToast, onPlanningMode }: TodoViewProps)
     } catch (err) {
       addToast(`Failed to create and assign task: ${getErrorMessage(err)}`, "error");
     }
-  }, [projectId, addToast, agents]);
+  }, [projectId, addToast, agents, onTaskCreated]);
 
   if (loading) {
     return (
