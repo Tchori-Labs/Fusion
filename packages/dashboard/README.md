@@ -481,8 +481,10 @@ To add a new color theme:
 1. Add the theme to `COLOR_THEMES` in `packages/core/src/types.ts`
 2. Add CSS variables in `packages/dashboard/app/public/theme-data.css` under `[data-color-theme="your-theme"]` (dark variant) and `[data-color-theme="your-theme"][data-theme="light"]` (light variant)
 3. Add the swatch class for the theme picker in `packages/dashboard/app/components/CustomModelDropdown.css`
-   - Each `.theme-swatch-<name>` class should define `--bg` and `--surface` for dark mode.
-   - Add matching `[data-theme="light"] .theme-swatch-<name>` overrides for light mode.
+   - Each `.theme-swatch-<name>` dark block must define four explicit variables: `--swatch-sample-1`, `--swatch-sample-2`, `--swatch-sample-3`, and `--swatch-sample-4`.
+   - Use this preview contract: sample 1 = background/base, sample 2 = surface/elevated, sample 3 = primary accent/status, sample 4 = secondary accent/status.
+   - Add matching `[data-theme="light"] .theme-swatch-<name>` override blocks with all four explicit sample variables.
+   - Do not generate samples 3/4 from `color-mix()` in the shared `.theme-option-swatch` block.
    - The theme picker now renders **4 explicit sample tiles** per option; samples 3 and 4 are generated from `--bg`/`--surface` via `color-mix`, so no extra preview metadata in `theme-data.css` is required.
 4. Update `ThemeSelector.tsx` with the new theme option
 

@@ -168,7 +168,7 @@ export function AgentOnboardingModal({ isOpen, onClose, onCreated, addToast, pro
         },
         projectId,
       );
-      addToast(`Agent \"${summary.name}\" created`, "success");
+      addToast(`Agent "${summary.name}" created`, "success");
       onCreated();
     } catch (err) {
       setError((err as Error).message);

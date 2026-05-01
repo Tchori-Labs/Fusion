@@ -177,4 +177,11 @@ export const PROMPT_KEY_CATALOG: Record<PromptKey, PromptKeyMetadata> = {
     description: "System prompt for AI-powered text refinement",
     defaultContent: "You are a text refinement assistant...",
   },
+  "agent-onboarding-system": {
+    key: "agent-onboarding-system",
+    name: "Agent Onboarding System",
+    roles: ["executor"],
+    description: "System prompt for AI-guided agent onboarding interview",
+    defaultContent: "You are an agent onboarding assistant for the fn task board system...",
+  },
 };
