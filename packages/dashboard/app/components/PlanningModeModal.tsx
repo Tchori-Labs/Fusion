@@ -2196,16 +2196,6 @@ function PlanningSessionList({
           <MessageSquarePlus size={16} />
           <span>New session</span>
         </button>
-        <button
-          type="button"
-          className={`planning-sidebar-toggle-archived ${showArchived ? "active" : ""}`}
-          onClick={onToggleShowArchived}
-          aria-pressed={showArchived}
-          title={showArchived ? "Hide archived sessions" : "Show archived sessions"}
-        >
-          <Archive size={14} />
-          <span>{showArchived ? "Hide archived" : "Show archived"}</span>
-        </button>
       </div>
 
       <div className="planning-sidebar-list">
@@ -2293,6 +2283,19 @@ function PlanningSessionList({
             </div>
           );
         })}
+      </div>
+      <div className="planning-sidebar-footer">
+        <a
+          href="#"
+          className="planning-sidebar-toggle-archived-link"
+          onClick={(e) => {
+            e.preventDefault();
+            onToggleShowArchived();
+          }}
+          aria-pressed={showArchived}
+        >
+          {showArchived ? "Hide archived" : "Show archived"}
+        </a>
       </div>
     </aside>
   );

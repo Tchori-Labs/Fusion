@@ -101,31 +101,22 @@
   gap: 8px;
 }
 
-.planning-sidebar-toggle-archived {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 6px 8px;
-  background: none;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  color: var(--text-muted);
+.planning-sidebar-footer {
+  padding: 6px 12px 10px;
+  text-align: center;
+}
+
+.planning-sidebar-toggle-archived-link {
   font-size: 11px;
-  font-weight: 500;
+  color: var(--text-muted);
+  text-decoration: none;
   cursor: pointer;
-  transition: background var(--transition-fast), color var(--transition-fast);
+  transition: color var(--transition-fast);
 }
 
-.planning-sidebar-toggle-archived:hover {
-  background: var(--card-hover);
+.planning-sidebar-toggle-archived-link:hover {
   color: var(--text);
-}
-
-.planning-sidebar-toggle-archived.active {
-  background: color-mix(in srgb, var(--todo) 12%, transparent);
-  border-color: var(--todo);
-  color: var(--todo);
+  text-decoration: underline;
 }
 
 .planning-sidebar-new {
