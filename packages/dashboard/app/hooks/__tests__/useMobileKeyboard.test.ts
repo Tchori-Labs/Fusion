@@ -288,6 +288,9 @@ describe("useMobileKeyboard", () => {
   });
 
   it("treats focused input + viewport shrink as keyboard-open even when overlap is 0", async () => {
+    // iOS last-resort path: chromeOverlap = 0 (innerHeight tracks offsetTop+vv.height),
+    // gap < 16 (focused-fallback doesn't fire), and viewportShrink >= 16 from the
+    // baseline so the focused-input shrink heuristic is the only signal left.
     const { listeners, mockVV } = setupMobileVisualViewport({
       innerHeight: 844,
       vvHeight: 844,
@@ -305,7 +308,17 @@ describe("useMobileKeyboard", () => {
 
     input.focus();
     Object.defineProperty(mockVV, "height", {
-      value: 826,
+      value: 824,
+      writable: true,
+      configurable: true,
+    });
+    Object.defineProperty(mockVV, "offsetTop", {
+      value: 5,
+      writable: true,
+      configurable: true,
+    });
+    Object.defineProperty(window, "innerHeight", {
+      value: 829,
       writable: true,
       configurable: true,
     });
@@ -316,7 +329,7 @@ describe("useMobileKeyboard", () => {
 
     await waitFor(() => {
       expect(result.current.keyboardOverlap).toBe(0);
-      expect(result.current.viewportHeight).toBe(826);
+      expect(result.current.viewportHeight).toBe(824);
       expect(result.current.keyboardOpen).toBe(true);
     });
 

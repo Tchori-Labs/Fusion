@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { EventEmitter } from "node:events";
 import { request, get } from "../test-request.js";
+import { createServer } from "../server.js";
 import { resetRuntimeLogSink, setRuntimeLogSink, type RuntimeLogContext } from "../runtime-logger.js";
 
 // Mock node:fs for auth.json reading
@@ -157,7 +158,7 @@ interface RuntimeEvent {
 
 describe("Node settings sync routes", () => {
   let store: MockStore;
-  let app: ReturnType<typeof import("../server.js").createServer>;
+  let app: ReturnType<typeof createServer>;
   let mockFetch: ReturnType<typeof vi.fn>;
   let runtimeEvents: RuntimeEvent[];
 
@@ -185,7 +186,6 @@ describe("Node settings sync routes", () => {
     });
 
     store = new MockStore();
-    const { createServer } = await import("../server.js");
     app = createServer(store as any);
   });
 

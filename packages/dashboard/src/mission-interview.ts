@@ -1263,6 +1263,25 @@ export function cleanupMissionInterviewSession(sessionId: string): void {
 /**
  * Reset all mission interview state. Used for testing only.
  */
+/**
+ * Test-only: register a stub session so SSE/buffer tests can drive the stream
+ * manager directly without spinning up the real AI agent (which is
+ * deliberately blocked in the vitest harness).
+ */
+export function __registerMissionInterviewSessionForTest(sessionId: string, missionTitle = "Test Mission"): void {
+  sessions.set(sessionId, {
+    id: sessionId,
+    ip: "127.0.0.1",
+    missionId: "",
+    missionTitle,
+    history: [],
+    thinkingOutput: "",
+    lastGeneratedThinking: "",
+    createdAt: new Date(),
+    updatedAt: new Date(),
+  });
+}
+
 export function __resetMissionInterviewState(): void {
   for (const [id] of sessions) {
     cleanupInMemoryMissionSession(id);

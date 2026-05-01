@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { EventEmitter } from "node:events";
 import { request } from "../test-request.js";
+import { createServer } from "../server.js";
 
 // ── Mock @fusion/core for agent ratings ─────────────────────────────────
 
@@ -83,14 +84,13 @@ function createMockSummary(overrides: Record<string, unknown> = {}) {
 
 describe("Agent ratings routes", () => {
   let store: MockStore;
-  let app: ReturnType<typeof import("../server.js").createServer>;
+  let app: ReturnType<typeof createServer>;
 
   beforeEach(async () => {
     vi.clearAllMocks();
     mockInit.mockResolvedValue(undefined);
 
     store = new MockStore();
-    const { createServer } = await import("../server.js");
     app = createServer(store as any);
   });
 

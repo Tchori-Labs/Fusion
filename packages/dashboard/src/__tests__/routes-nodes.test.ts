@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { EventEmitter } from "node:events";
 import { request, get } from "../test-request.js";
+import { createServer } from "../server.js";
 
 // ── Mock @fusion/core for node routes ─────────────────────────────────
 
@@ -85,7 +86,7 @@ function createMockNode(overrides: Record<string, unknown> = {}) {
 
 describe("Node routes", () => {
   let store: MockStore;
-  let app: ReturnType<typeof import("../server.js").createServer>;
+  let app: ReturnType<typeof createServer>;
 
   beforeEach(async () => {
     vi.clearAllMocks();
@@ -101,7 +102,6 @@ describe("Node routes", () => {
     mockGetDiscoveryConfig.mockReturnValue(null);
 
     store = new MockStore();
-    const { createServer } = await import("../server.js");
     app = createServer(store as any);
   });
 

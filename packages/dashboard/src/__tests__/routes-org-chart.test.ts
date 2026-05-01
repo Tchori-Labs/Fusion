@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { EventEmitter } from "node:events";
 import { request } from "../test-request.js";
+import { createServer } from "../server.js";
 
 const mockInit = vi.fn().mockResolvedValue(undefined);
 const mockGetAgent = vi.fn();
@@ -62,7 +63,7 @@ function createMockAgent(id: string, name: string, reportsTo?: string) {
 
 describe("Agent org chart routes", () => {
   let store: MockStore;
-  let app: ReturnType<typeof import("../server.js").createServer>;
+  let app: ReturnType<typeof createServer>;
 
   beforeEach(async () => {
     vi.clearAllMocks();
@@ -70,7 +71,6 @@ describe("Agent org chart routes", () => {
     mockListAgents.mockResolvedValue([]);
 
     store = new MockStore();
-    const { createServer } = await import("../server.js");
     app = createServer(store as any);
   });
 

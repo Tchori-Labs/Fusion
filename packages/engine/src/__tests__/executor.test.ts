@@ -4406,12 +4406,21 @@ const mockedReviewStep = vi.mocked(mockedReviewStepFn);
  */
 async function captureTools(): Promise<Record<string, (id: string, params: any) => Promise<any>>> {
   const store = createMockStore();
-  store.updateStep.mockResolvedValue({
-    steps: [
-      { name: "Preflight", status: "done" },
-      { name: "Implement", status: "in-progress" },
-      { name: "Testing", status: "pending" },
-    ],
+  // Simulate the real TaskStore: forward transitions persist, but in-progress
+  // regressions on done/skipped steps are rejected so executor.ts can surface
+  // the "already <status>" diagnostic.
+  const stepStates: Array<{ name: string; status: string }> = [
+    { name: "Preflight", status: "done" },
+    { name: "Implement", status: "in-progress" },
+    { name: "Testing", status: "pending" },
+  ];
+  store.updateStep.mockImplementation(async (_taskId: string, stepIndex: number, status: string) => {
+    const current = stepStates[stepIndex];
+    const isRegression = status === "in-progress" && (current.status === "done" || current.status === "skipped");
+    if (!isRegression) {
+      current.status = status;
+    }
+    return { steps: stepStates.map((s) => ({ ...s })) };
   });
   mockedExistsSync.mockReturnValue(true);
 
@@ -4675,10 +4684,13 @@ describe("Code review verdict enforcement - fn_task_update blocking", () => {
     mockedReviewStep.mockResolvedValue({ verdict: "REVISE", review: "Fix", summary: "Bad" });
 
     const tools = await captureTools();
-    await tools.fn_review_step("c1", { step: 1, type: "code", step_name: "Step1", baseline: "a" });
+    // Target step 3 (Testing, currently pending) so the in-progress transition is
+    // a valid forward move — the assertion below only verifies that a REVISE on
+    // the same step does not produce the "Cannot mark … as done" block.
+    await tools.fn_review_step("c1", { step: 3, type: "code", step_name: "Testing", baseline: "a" });
 
-    // "in-progress" should still work even with REVISE
-    const result = await tools.fn_task_update("c2", { step: 1, status: "in-progress" });
+    const result = await tools.fn_task_update("c2", { step: 3, status: "in-progress" });
+    expect(result.content[0].text).not.toContain("Cannot mark");
     expect(result.content[0].text).toContain("→ in-progress");
   });
 });

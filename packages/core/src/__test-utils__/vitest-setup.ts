@@ -16,6 +16,7 @@ import { afterEach, expect } from "vitest";
 import { createRequire, syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { promisify } from "node:util";
 import { isMainThread } from "node:worker_threads";
 import { assertOutsideRealFusionPath } from "../test-safety.js";
 
@@ -402,11 +403,36 @@ function currentTestName(): string | null {
   return expect.getState().currentTestName ?? null;
 }
 
+// Cheap, no-network introspection invocations are safe to run in tests — they
+// don't open an AI session, don't hit a paid API, and the dashboard's CLI
+// availability probe needs them to tell the truth about the local system.
+//
+// This must stay strict: only exact "is this binary installed / what version is
+// it?" probes are allowed. Do not match `--help` / `--version` substrings
+// inside arbitrary prompt text, or the test guard can be bypassed.
+const SAFE_INTROSPECTION_LOOKUP_PATTERN =
+  /^\s*(?:which|where|type)\s+(?:-[a-zA-Z]+\s+)*(?:"[^"]+"|'[^']+'|\S+)\s*$/i;
+const SAFE_INTROSPECTION_COMMAND_V_PATTERN =
+  /^\s*command\s+-v\s+(?:"[^"]+"|'[^']+'|\S+)\s*$/i;
+const SAFE_INTROSPECTION_BLOCKED_CLI_PATTERN =
+  /^\s*(?:"[^"]*(?:claude|droid|paperclipai|hermes|openclaw)(?:\.(?:cmd|bat|ps1|exe))?[^"]*"|'[^']*(?:claude|droid|paperclipai|hermes|openclaw)(?:\.(?:cmd|bat|ps1|exe))?[^']*'|(?:\S+[\\/])?(?:claude|droid|paperclipai|hermes|openclaw)(?:\.(?:cmd|bat|ps1|exe))?)\s+(?:--version|--help|-V|-h)\s*$/i;
+
+function isSafeIntrospectionCommand(commandLine: string): boolean {
+  return (
+    SAFE_INTROSPECTION_LOOKUP_PATTERN.test(commandLine) ||
+    SAFE_INTROSPECTION_COMMAND_V_PATTERN.test(commandLine) ||
+    SAFE_INTROSPECTION_BLOCKED_CLI_PATTERN.test(commandLine)
+  );
+}
+
 function shouldBlockRealTestCli(commandLine: string): boolean {
   if (process.env.FUSION_TEST_ALLOW_REAL_AI_CLI === "1") {
     return false;
   }
-  return BLOCKED_TEST_CLI_PATTERN.test(commandLine);
+  if (!BLOCKED_TEST_CLI_PATTERN.test(commandLine)) {
+    return false;
+  }
+  return !isSafeIntrospectionCommand(commandLine);
 }
 
 function blockedCliError(commandLine: string): Error {
@@ -509,7 +535,10 @@ function installChildProcessGuards(): void {
     return originalChildProcess.execFileSync(file, args, options);
   }) as ChildProcessModule["execFileSync"];
 
-  mutableChildProcess.exec = ((command: string, optionsOrCallback?: ExecOptions | ((error: Error | null, stdout: string, stderr: string) => void), maybeCallback?: (error: Error | null, stdout: string, stderr: string) => void) => {
+  // Preserve util.promisify(exec) → { stdout, stderr } semantics. Function.prototype.bind
+  // and our wrapper drop the original [util.promisify.custom] symbol, which would otherwise
+  // make awaited execAsync resolve to a raw stdout string and break destructuring.
+  const execWrapper = ((command: string, optionsOrCallback?: ExecOptions | ((error: Error | null, stdout: string, stderr: string) => void), maybeCallback?: (error: Error | null, stdout: string, stderr: string) => void) => {
     if (shouldBlockRealTestCli(command)) {
       throw blockedCliError(command);
     }
@@ -518,9 +547,22 @@ function installChildProcessGuards(): void {
     const proc = originalChildProcess.exec(command, withDefaultTimeout(options), callback);
     registerTrackedSubprocess(proc, command);
     return proc;
-  }) as ChildProcessModule["exec"];
+  }) as unknown as ChildProcessModule["exec"];
+  (execWrapper as unknown as Record<symbol, unknown>)[promisify.custom] = (command: string, options?: ExecOptions) =>
+    new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
+      execWrapper(command, options ?? {}, (error: Error | null, stdout: string, stderr: string) => {
+        if (error) {
+          (error as Error & { stdout?: string; stderr?: string }).stdout = stdout;
+          (error as Error & { stdout?: string; stderr?: string }).stderr = stderr;
+          reject(error);
+          return;
+        }
+        resolve({ stdout, stderr });
+      });
+    });
+  mutableChildProcess.exec = execWrapper;
 
-  mutableChildProcess.execFile = ((file: string, argsOrOptions?: readonly string[] | ExecFileOptions | ((error: Error | null, stdout: string, stderr: string) => void), optionsOrCallback?: ExecFileOptions | ((error: Error | null, stdout: string, stderr: string) => void), maybeCallback?: (error: Error | null, stdout: string, stderr: string) => void) => {
+  const execFileWrapper = ((file: string, argsOrOptions?: readonly string[] | ExecFileOptions | ((error: Error | null, stdout: string, stderr: string) => void), optionsOrCallback?: ExecFileOptions | ((error: Error | null, stdout: string, stderr: string) => void), maybeCallback?: (error: Error | null, stdout: string, stderr: string) => void) => {
     const args = Array.isArray(argsOrOptions) ? [...argsOrOptions] : [];
     const commandLine = describeTestSubprocessCommand(file, args);
     if (shouldBlockRealTestCli(commandLine)) {
@@ -535,7 +577,20 @@ function installChildProcessGuards(): void {
     const proc = originalChildProcess.execFile(file, args, withDefaultTimeout(options), callback);
     registerTrackedSubprocess(proc, commandLine);
     return proc;
-  }) as ChildProcessModule["execFile"];
+  }) as unknown as ChildProcessModule["execFile"];
+  (execFileWrapper as unknown as Record<symbol, unknown>)[promisify.custom] = (file: string, args?: readonly string[], options?: ExecFileOptions) =>
+    new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
+      execFileWrapper(file, args ?? [], options ?? {}, (error: Error | null, stdout: string, stderr: string) => {
+        if (error) {
+          (error as Error & { stdout?: string; stderr?: string }).stdout = stdout;
+          (error as Error & { stdout?: string; stderr?: string }).stderr = stderr;
+          reject(error);
+          return;
+        }
+        resolve({ stdout, stderr });
+      });
+    });
+  mutableChildProcess.execFile = execFileWrapper;
 
   mutableChildProcess.fork = ((modulePath: string, argsOrOptions?: readonly string[] | ForkOptions, maybeOptions?: ForkOptions) => {
     const args = Array.isArray(argsOrOptions) ? [...argsOrOptions] : [];
@@ -554,9 +609,47 @@ function installChildProcessGuards(): void {
 
 installChildProcessGuards();
 
-afterEach(() => {
+afterEach(async () => {
   const failures = [...completedSubprocessFailures];
   completedSubprocessFailures.length = 0;
+
+  // Give SIGTERM'd processes a brief grace period to exit before declaring
+  // them "left running" — tests like dev-server-process.cleanup() send SIGTERM
+  // and immediately drop their reference, so the OS exit lags the test by a
+  // few ms even when the production code did the right thing.
+  const SUBPROCESS_GRACE_MS = 200;
+  if (trackedSubprocesses.size > 0) {
+    const stillRunningProcs: ChildProcess[] = [];
+    for (const [proc] of trackedSubprocesses) {
+      if (proc.exitCode === null && proc.signalCode === null) {
+        stillRunningProcs.push(proc);
+      }
+    }
+    if (stillRunningProcs.length > 0) {
+      await new Promise<void>((resolve) => {
+        let remaining = stillRunningProcs.length;
+        const done = () => {
+          remaining -= 1;
+          if (remaining <= 0) resolve();
+        };
+        const timer = setTimeout(() => resolve(), SUBPROCESS_GRACE_MS);
+        for (const proc of stillRunningProcs) {
+          if (proc.exitCode !== null || proc.signalCode !== null) {
+            done();
+            continue;
+          }
+          const finish = () => {
+            proc.removeListener("exit", finish);
+            proc.removeListener("close", finish);
+            done();
+          };
+          proc.once("exit", finish);
+          proc.once("close", finish);
+        }
+        timer.unref?.();
+      });
+    }
+  }
 
   for (const [proc, tracked] of trackedSubprocesses) {
     const stillRunning = proc.exitCode === null && proc.signalCode === null;

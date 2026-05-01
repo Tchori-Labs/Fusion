@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import { request } from "../test-request.js";
+import { createServer } from "../server.js";
 
 const mockInit = vi.fn().mockResolvedValue(undefined);
 const mockListAgents = vi.fn().mockResolvedValue([]);
@@ -53,7 +54,7 @@ async function postExport(app: Parameters<typeof request>[0], body: unknown) {
 
 describe("POST /api/agents/export", () => {
   let store: MockStore;
-  let app: ReturnType<typeof import("../server.js").createServer>;
+  let app: ReturnType<typeof createServer>;
   let testDir: string;
 
   beforeEach(async () => {
@@ -91,7 +92,6 @@ describe("POST /api/agents/export", () => {
     });
 
     store = new MockStore();
-    const { createServer } = await import("../server.js");
     app = createServer(store as any);
   });
 

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { EventEmitter } from "node:events";
 import { get } from "../test-request.js";
+import { createServer } from "../server.js";
 
 // ── Mock @fusion/core for project routes ─────────────────────────────────
 
@@ -109,10 +110,9 @@ describe("GET /api/projects/across-nodes", () => {
   let store: MockStore;
   let app: (req: import("node:http").IncomingMessage, res: import("node:http").ServerResponse) => void;
 
-  beforeEach(async () => {
+  beforeEach(() => {
     vi.clearAllMocks();
     store = new MockStore();
-    const { createServer } = await import("../server.js");
     app = createServer(store as unknown as Parameters<typeof createServer>[0] extends { store: infer S } ? S : never);
   });
 

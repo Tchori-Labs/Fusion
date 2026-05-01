@@ -2212,7 +2212,8 @@ describe("Mission API", () => {
 
     it("replays buffered interview events when Last-Event-ID is provided", async () => {
       const { app } = buildApp();
-      const sessionId = await createMissionInterviewSession("127.0.0.1", "Replay Mission", "/tmp/project");
+      const sessionId = "replay-test-session";
+      missionInterviewModule.__registerMissionInterviewSessionForTest(sessionId, "Replay Mission");
 
       missionInterviewStreamManager.broadcast(sessionId, { type: "thinking", data: "first" });
       missionInterviewStreamManager.broadcast(sessionId, { type: "thinking", data: "second" });
@@ -2239,7 +2240,8 @@ describe("Mission API", () => {
 
     it("does not replay buffered interview events when Last-Event-ID is missing", async () => {
       const { app } = buildApp();
-      const sessionId = await createMissionInterviewSession("127.0.0.1", "No Replay Mission", "/tmp/project");
+      const sessionId = "no-replay-test-session";
+      missionInterviewModule.__registerMissionInterviewSessionForTest(sessionId, "No Replay Mission");
 
       missionInterviewStreamManager.broadcast(sessionId, { type: "thinking", data: "first" });
 
@@ -2261,7 +2263,8 @@ describe("Mission API", () => {
 
     it("gracefully ignores invalid Last-Event-ID values for interview streams", async () => {
       const { app } = buildApp();
-      const sessionId = await createMissionInterviewSession("127.0.0.1", "Invalid Replay Mission", "/tmp/project");
+      const sessionId = "invalid-replay-test-session";
+      missionInterviewModule.__registerMissionInterviewSessionForTest(sessionId, "Invalid Replay Mission");
 
       missionInterviewStreamManager.broadcast(sessionId, { type: "thinking", data: "first" });
 

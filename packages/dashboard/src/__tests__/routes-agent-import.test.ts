@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { request } from "../test-request.js";
+import { createServer } from "../server.js";
 
 const mockInit = vi.fn().mockResolvedValue(undefined);
 const mockListAgents = vi.fn().mockResolvedValue([]);
@@ -16,12 +17,21 @@ const mockParseSingleAgentManifest = vi.fn();
 const mockPrepareAgentCompaniesImport = vi.fn();
 
 // Use vi.hoisted to ensure mocks are available when vi.mock runs
-const { mockFsAccess, mockFsMkdir, mockFsWriteFile, mockExecFile } = vi.hoisted(() => ({
-  mockFsAccess: vi.fn(),
-  mockFsMkdir: vi.fn(),
-  mockFsWriteFile: vi.fn(),
-  mockExecFile: vi.fn(),
-}));
+const { mockFsAccess, mockFsMkdir, mockFsWriteFile, mockExecFile, MockAgentCompaniesParseError } = vi.hoisted(() => {
+  class MockAgentCompaniesParseError extends Error {
+    constructor(message: string) {
+      super(message);
+      this.name = "AgentCompaniesParseError";
+    }
+  }
+  return {
+    mockFsAccess: vi.fn(),
+    mockFsMkdir: vi.fn(),
+    mockFsWriteFile: vi.fn(),
+    mockExecFile: vi.fn(),
+    MockAgentCompaniesParseError,
+  };
+});
 
 vi.mock("node:fs/promises", async (importOriginal) => {
   const actual = await importOriginal() as Record<string, unknown>;
@@ -46,13 +56,6 @@ vi.mock("node:child_process", async (importOriginal) => {
     execFile: mockExecFile,
   };
 });
-
-class MockAgentCompaniesParseError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "AgentCompaniesParseError";
-  }
-}
 
 vi.mock("@fusion/core", () => {
   return {
@@ -107,7 +110,7 @@ const originalFetch = globalThis.fetch;
 
 describe("POST /api/agents/import", () => {
   let store: MockStore;
-  let app: ReturnType<typeof import("../server.js").createServer>;
+  let app: ReturnType<typeof createServer>;
   let testDir: string;
 
   beforeEach(async () => {
@@ -175,7 +178,6 @@ describe("POST /api/agents/import", () => {
     });
 
     store = new MockStore();
-    const { createServer } = await import("../server.js");
     app = createServer(store as any);
   });
 
@@ -869,7 +871,7 @@ describe("POST /api/agents/import", () => {
 
 describe("GET /api/agents/companies", () => {
   let store: MockStore;
-  let app: ReturnType<typeof import("../server.js").createServer>;
+  let app: ReturnType<typeof createServer>;
   const originalFetch = globalThis.fetch;
 
   beforeEach(async () => {
@@ -882,7 +884,6 @@ describe("GET /api/agents/companies", () => {
     mockInit.mockResolvedValue(undefined);
 
     store = new MockStore();
-    const { createServer } = await import("../server.js");
     app = createServer(store as any);
   });
 

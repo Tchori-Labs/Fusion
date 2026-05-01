@@ -86,10 +86,34 @@ describe("test isolation setup", () => {
   });
 
   it("blocks real AI CLI subprocesses from running in tests", () => {
-    expect(() => spawnSync("droid", ["--version"])).toThrow(
+    // Interactive / session-launching invocations stay blocked.
+    expect(() => spawnSync("droid", ["chat"])).toThrow(
       "Real AI CLI launch blocked during tests",
     );
-    expect(() => execSync("claude --version", { encoding: "utf-8" })).toThrow(
+    expect(() => execSync("claude -p 'hello world'", { encoding: "utf-8" })).toThrow(
+      "Real AI CLI launch blocked during tests",
+    );
+  });
+
+  it("permits cheap introspection invocations (--version, --help)", () => {
+    // These probe whether the binary is installed without opening an AI
+    // session, and the dashboard CLI-availability probe needs them. We use
+    // binaries from the blocklist that are not installed on test runners
+    // (`openclaw`, `paperclipai`) so the spawn returns ENOENT quickly rather
+    // than actually launching a real CLI on a developer machine.
+    expect(() => spawnSync("openclaw", ["--version"])).not.toThrow(
+      "Real AI CLI launch blocked during tests",
+    );
+    expect(() => spawnSync("paperclipai", ["--help"])).not.toThrow(
+      "Real AI CLI launch blocked during tests",
+    );
+  });
+
+  it("keeps blocking prompt invocations that merely mention --version/--help", () => {
+    expect(() => execSync('claude -p "please print --version literally"', { encoding: "utf-8" })).toThrow(
+      "Real AI CLI launch blocked during tests",
+    );
+    expect(() => spawnSync("openclaw", ["-p", "say --help literally"])).toThrow(
       "Real AI CLI launch blocked during tests",
     );
   });

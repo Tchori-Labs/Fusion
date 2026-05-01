@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { EventEmitter } from "node:events";
 import { request } from "../test-request.js";
+import { createServer } from "../server.js";
 
 const mockInit = vi.fn().mockResolvedValue(undefined);
 const mockGetAgent = vi.fn();
@@ -49,7 +50,7 @@ class MockStore extends EventEmitter {
 
 describe("Agent API key routes", () => {
   let store: MockStore;
-  let app: ReturnType<typeof import("../server.js").createServer>;
+  let app: ReturnType<typeof createServer>;
 
   beforeEach(async () => {
     vi.clearAllMocks();
@@ -57,7 +58,6 @@ describe("Agent API key routes", () => {
     mockListAgents.mockResolvedValue([]);
 
     store = new MockStore();
-    const { createServer } = await import("../server.js");
     app = createServer(store as any);
   });
 

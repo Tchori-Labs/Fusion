@@ -5,6 +5,7 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { request } from "../test-request.js";
+import { createServer } from "../server.js";
 
 type AgentRecord = {
   id: string;
@@ -84,7 +85,7 @@ function createAgent(overrides: Partial<AgentRecord> = {}): AgentRecord {
 
 describe("Agent soul/memory routes", () => {
   let store: MockStore;
-  let app: ReturnType<typeof import("../server.js").createServer>;
+  let app: ReturnType<typeof createServer>;
   let agents: Map<string, AgentRecord>;
   let tempDir: string;
 
@@ -123,7 +124,6 @@ describe("Agent soul/memory routes", () => {
     await mkdir(join(tempDir, ".fusion"), { recursive: true });
 
     store = new MockStore(tempDir);
-    const { createServer } = await import("../server.js");
     app = createServer(store as any);
   });
 
