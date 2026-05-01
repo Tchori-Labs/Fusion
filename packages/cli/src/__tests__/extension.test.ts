@@ -162,6 +162,11 @@ describe.skip("fn pi extension", () => {
         "fn_task_unarchive",
         "fn_task_delete",
         "fn_task_plan",
+        // Insight tools
+        "fn_insight_list",
+        "fn_insight_show",
+        "fn_insight_run_list",
+        "fn_insight_run_show",
         // Mission tools
         "fn_mission_create",
         "fn_mission_list",

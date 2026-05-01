@@ -283,6 +283,47 @@ Install an agent skill from skills.sh into the current project. Downloads skill 
 | `source` | string | ✓ | GitHub source in owner/repo format (e.g., 'firebase/agent-skills') |
 | `skill` | string | — | Specific skill name to install (e.g., 'firebase-basics'). Omit to install all skills from the source. |
 
+## Insight Tools
+
+### fn_insight_list
+
+List persisted project insights with optional category/status filters.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `category` | string(enum) | — | Filter by insight category |
+| `status` | string(enum) | — | Filter by insight status |
+| `runId` | string | — | Filter to insights linked to a specific run ID |
+| `limit` | number | — | Max insights to return |
+| `offset` | number | — | Number of rows to skip |
+
+### fn_insight_show
+
+Show a single persisted insight by ID.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `id` | string | ✓ | Insight ID (e.g. INS-XXXXX) |
+
+### fn_insight_run_list
+
+List recent insight-generation runs with optional status/trigger filters.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `status` | string(enum) | — | Filter by run status |
+| `trigger` | string(enum) | — | Filter by run trigger |
+| `limit` | number | — | Max runs to return |
+| `offset` | number | — | Number of runs to skip |
+
+### fn_insight_run_show
+
+Show a single insight-generation run by ID.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `id` | string | ✓ | Insight run ID (e.g. INSR-XXXXX) |
+
 <!-- END: extension-tools -->
 ## Dashboard Command
 

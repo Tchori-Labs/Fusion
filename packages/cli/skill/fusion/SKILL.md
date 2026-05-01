@@ -32,6 +32,7 @@ Mission → Milestone → Slice → Feature → Task
 - **Mission tools** — `fn_mission_create`, `fn_mission_list`, `fn_mission_show`, `fn_mission_delete`, `fn_milestone_add`, `fn_slice_add`, `fn_feature_add`, `fn_slice_activate`, `fn_feature_link_task`
 - **Agent tools** — `fn_agent_stop`, `fn_agent_start`
 - **Skills tools** — `fn_skills_search`, `fn_skills_install`
+- **Insight tools** — `fn_insight_list`, `fn_insight_show`, `fn_insight_run_list`, `fn_insight_run_show`
 <!-- END: tool-categories -->
 - **Dashboard** — Use `/fn` command to start/stop the dashboard
 

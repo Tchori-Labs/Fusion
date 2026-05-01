@@ -7,6 +7,10 @@ import {
   COLUMN_LABELS,
   validateNodeOverrideChange,
   type Task,
+  type InsightCategory,
+  type InsightStatus,
+  type InsightRunStatus,
+  type InsightRunTrigger,
 } from "@fusion/core";
 import {
   getGhErrorMessage,
@@ -93,6 +97,28 @@ async function validateAssignableAgentId(
   }
   return null;
 }
+
+const INSIGHT_CATEGORIES: InsightCategory[] = [
+  "quality",
+  "performance",
+  "architecture",
+  "security",
+  "reliability",
+  "ux",
+  "testability",
+  "documentation",
+  "dependency",
+  "workflow",
+  "other",
+  "features",
+  "competitive_analysis",
+  "research",
+  "trends",
+];
+
+const INSIGHT_STATUSES: InsightStatus[] = ["generated", "confirmed", "stale", "dismissed"];
+const INSIGHT_RUN_STATUSES: InsightRunStatus[] = ["pending", "running", "completed", "failed", "cancelled"];
+const INSIGHT_RUN_TRIGGERS: InsightRunTrigger[] = ["schedule", "manual", "task_completion", "merge_event", "api"];
 
 function formatTaskLine(t: Task): string {
   const label =
@@ -1152,6 +1178,232 @@ export default function kbExtension(pi: ExtensionAPI) {
           },
         ],
         details: { taskId, logs },
+      };
+    },
+  });
+
+  // ── Insights Tools ──────────────────────────────────────────────
+
+  pi.registerTool({
+    name: "fn_insight_list",
+    label: "fn: List Insights",
+    description: "List persisted project insights with optional category/status filters.",
+    promptSnippet: "List persisted project insights",
+    parameters: Type.Object({
+      category: Type.Optional(
+        StringEnum([...INSIGHT_CATEGORIES], {
+          description: "Filter by insight category",
+        }) as unknown as TSchema,
+      ),
+      status: Type.Optional(
+        StringEnum([...INSIGHT_STATUSES], {
+          description: "Filter by insight status",
+        }) as unknown as TSchema,
+      ),
+      runId: Type.Optional(Type.String({ description: "Filter to insights linked to a specific run ID" })),
+      limit: Type.Optional(Type.Number({ description: "Max insights to return" })),
+      offset: Type.Optional(Type.Number({ description: "Number of rows to skip" })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      if (params.limit !== undefined && (!Number.isInteger(params.limit) || params.limit < 1)) {
+        return {
+          content: [{ type: "text", text: "Invalid limit. Provide an integer >= 1." }],
+          isError: true,
+          details: { error: "Invalid limit" },
+        };
+      }
+      if (params.offset !== undefined && (!Number.isInteger(params.offset) || params.offset < 0)) {
+        return {
+          content: [{ type: "text", text: "Invalid offset. Provide an integer >= 0." }],
+          isError: true,
+          details: { error: "Invalid offset" },
+        };
+      }
+
+      const store = await getStore(ctx.cwd);
+      const insightStore = store.getInsightStore();
+      const category = params.category as InsightCategory | undefined;
+      const status = params.status as InsightStatus | undefined;
+      const options = {
+        category,
+        status,
+        runId: params.runId,
+        limit: params.limit,
+        offset: params.offset,
+      };
+      const insights = insightStore.listInsights(options);
+      const count = insightStore.countInsights({
+        category,
+        status,
+        runId: params.runId,
+      });
+
+      if (insights.length === 0) {
+        return {
+          content: [{ type: "text", text: "No insights found for the provided filters." }],
+          details: { count, insights: [] },
+        };
+      }
+
+      const lines = [`Insights (${insights.length}/${count} shown):`];
+      for (const insight of insights) {
+        const title = insight.title.length > 80 ? `${insight.title.slice(0, 80)}…` : insight.title;
+        lines.push(`  ${insight.id} [${insight.category}] [${insight.status}] ${title}`);
+      }
+
+      return {
+        content: [{ type: "text", text: lines.join("\n") }],
+        details: { count, insights },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "fn_insight_show",
+    label: "fn: Show Insight",
+    description: "Show a single persisted insight by ID.",
+    promptSnippet: "Show full details for a persisted insight",
+    parameters: Type.Object({
+      id: Type.String({ description: "Insight ID (e.g. INS-XXXXX)" }),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const store = await getStore(ctx.cwd);
+      const insightStore = store.getInsightStore();
+      const insight = insightStore.getInsight(params.id);
+
+      if (!insight) {
+        return {
+          content: [{ type: "text", text: `Insight ${params.id} not found.` }],
+          isError: true,
+          details: { error: "Insight not found", id: params.id },
+        };
+      }
+
+      const lines = [
+        `${insight.id}: ${insight.title}`,
+        `Category: ${insight.category}`,
+        `Status: ${insight.status}`,
+        `Last run: ${insight.lastRunId ?? "none"}`,
+        `Created: ${insight.createdAt}`,
+        `Updated: ${insight.updatedAt}`,
+      ];
+
+      if (insight.content) {
+        lines.push("", "Content:", insight.content.length > 500 ? `${insight.content.slice(0, 500)}\n... (truncated)` : insight.content);
+      }
+
+      return {
+        content: [{ type: "text", text: lines.join("\n") }],
+        details: { insight },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "fn_insight_run_list",
+    label: "fn: List Insight Runs",
+    description: "List recent insight-generation runs with optional status/trigger filters.",
+    promptSnippet: "List recent insight-generation runs",
+    parameters: Type.Object({
+      status: Type.Optional(
+        StringEnum([...INSIGHT_RUN_STATUSES], {
+          description: "Filter by run status",
+        }) as unknown as TSchema,
+      ),
+      trigger: Type.Optional(
+        StringEnum([...INSIGHT_RUN_TRIGGERS], {
+          description: "Filter by run trigger",
+        }) as unknown as TSchema,
+      ),
+      limit: Type.Optional(Type.Number({ description: "Max runs to return" })),
+      offset: Type.Optional(Type.Number({ description: "Number of runs to skip" })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      if (params.limit !== undefined && (!Number.isInteger(params.limit) || params.limit < 1)) {
+        return {
+          content: [{ type: "text", text: "Invalid limit. Provide an integer >= 1." }],
+          isError: true,
+          details: { error: "Invalid limit" },
+        };
+      }
+      if (params.offset !== undefined && (!Number.isInteger(params.offset) || params.offset < 0)) {
+        return {
+          content: [{ type: "text", text: "Invalid offset. Provide an integer >= 0." }],
+          isError: true,
+          details: { error: "Invalid offset" },
+        };
+      }
+
+      const store = await getStore(ctx.cwd);
+      const insightStore = store.getInsightStore();
+      const status = params.status as InsightRunStatus | undefined;
+      const trigger = params.trigger as InsightRunTrigger | undefined;
+      const options = {
+        status,
+        trigger,
+        limit: params.limit,
+        offset: params.offset,
+      };
+      const runs = insightStore.listRuns(options);
+      const count = insightStore.countRuns({ status, trigger });
+
+      if (runs.length === 0) {
+        return {
+          content: [{ type: "text", text: "No insight runs found for the provided filters." }],
+          details: { count, runs: [] },
+        };
+      }
+
+      const lines = [`Insight runs (${runs.length}/${count} shown):`];
+      for (const run of runs) {
+        lines.push(
+          `  ${run.id} [${run.status}] [${run.trigger}] created=${run.insightsCreated} updated=${run.insightsUpdated}`,
+        );
+      }
+
+      return {
+        content: [{ type: "text", text: lines.join("\n") }],
+        details: { count, runs },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "fn_insight_run_show",
+    label: "fn: Show Insight Run",
+    description: "Show a single insight-generation run by ID.",
+    promptSnippet: "Show full details for an insight-generation run",
+    parameters: Type.Object({
+      id: Type.String({ description: "Insight run ID (e.g. INSR-XXXXX)" }),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const store = await getStore(ctx.cwd);
+      const insightStore = store.getInsightStore();
+      const run = insightStore.getRun(params.id);
+
+      if (!run) {
+        return {
+          content: [{ type: "text", text: `Insight run ${params.id} not found.` }],
+          isError: true,
+          details: { error: "Insight run not found", id: params.id },
+        };
+      }
+
+      const lines = [
+        `${run.id}`,
+        `Trigger: ${run.trigger}`,
+        `Status: ${run.status}`,
+        `Insights: created ${run.insightsCreated}, updated ${run.insightsUpdated}`,
+        `Created: ${run.createdAt}`,
+        `Started: ${run.startedAt ?? "not started"}`,
+        `Completed: ${run.completedAt ?? "not completed"}`,
+      ];
+      if (run.summary) lines.push(`Summary: ${run.summary}`);
+      if (run.error) lines.push(`Error: ${run.error}`);
+
+      return {
+        content: [{ type: "text", text: lines.join("\n") }],
+        details: { run },
       };
     },
   });
