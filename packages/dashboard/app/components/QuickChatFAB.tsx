@@ -14,7 +14,8 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Components } from "react-markdown";
 import { Eye, EyeOff, MessageSquare, Paperclip, Plus, Send, Square, Wrench, X } from "lucide-react";
-import { fetchModels, type Agent, type ModelInfo } from "../api";
+import { fetchDiscoveredSkills, fetchModels, type Agent, type ModelInfo } from "../api";
+import type { DiscoveredSkill } from "@fusion/dashboard";
 import { CustomModelDropdown } from "./CustomModelDropdown";
 import { ProviderIcon } from "./ProviderIcon";
 import { AgentMentionPopup } from "./AgentMentionPopup";
@@ -226,6 +227,22 @@ const quickChatMarkdownComponents: Components = {
     </table>
   ),
 };
+
+function getSkillTriggerMatch(value: string): { filter: string; start: number; end: number } | null {
+  const triggerMatch = /(^|[\s])\/([^\s]*)$/.exec(value);
+  if (!triggerMatch) {
+    return null;
+  }
+
+  const prefix = triggerMatch[1] ?? "";
+  const filter = triggerMatch[2] ?? "";
+  const start = triggerMatch.index + prefix.length;
+  return {
+    filter,
+    start,
+    end: value.length,
+  };
+}
 
 function getMentionTriggerMatch(
   value: string,
@@ -821,11 +838,17 @@ export function QuickChatFAB({
   const [selectedModel, setSelectedModel] = useState<string>("");
   const [configuredDefaultModelSelection, setConfiguredDefaultModelSelection] = useState<string>("");
   const [messageInput, setMessageInput] = useState("");
+  const [discoveredSkills, setDiscoveredSkills] = useState<DiscoveredSkill[]>([]);
+  const [skillsLoading, setSkillsLoading] = useState(false);
+  const [showSkillMenu, setShowSkillMenu] = useState(false);
+  const [skillFilter, setSkillFilter] = useState("");
+  const [highlightedSkillIndex, setHighlightedSkillIndex] = useState(0);
   const [mentionFilter, setMentionFilter] = useState("");
   const [mentionPopupVisible, setMentionPopupVisible] = useState(false);
   const [mentionHighlightIndex, setMentionHighlightIndex] = useState(0);
   const [mentionStartPos, setMentionStartPos] = useState(-1);
   const [plainTextMessageIds, setPlainTextMessageIds] = useState<Set<string>>(() => new Set());
+  const [helpMessageVisible, setHelpMessageVisible] = useState(false);
   /** Pending attachments staged in the composer before being sent. */
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
   const [isAttachmentDragOver, setIsAttachmentDragOver] = useState(false);
@@ -856,6 +879,7 @@ export function QuickChatFAB({
   const prevSessionTargetRef = useRef("");
   const mentionCursorPosRef = useRef(0);
   const hideMentionPopupTimeoutRef = useRef<number | null>(null);
+  const hideSkillMenuTimeoutRef = useRef<number | null>(null);
   const dragDepthRef = useRef(0);
 
   // Draggable hook for FAB positioning
@@ -1086,6 +1110,24 @@ export function QuickChatFAB({
   }, [isOpen, agents.length, selectedModel]);
 
   useEffect(() => {
+    if (!isOpen || !projectId) {
+      return;
+    }
+
+    setSkillsLoading(true);
+    fetchDiscoveredSkills(projectId)
+      .then((skills) => {
+        setDiscoveredSkills(skills);
+      })
+      .catch(() => {
+        setDiscoveredSkills([]);
+      })
+      .finally(() => {
+        setSkillsLoading(false);
+      });
+  }, [isOpen, projectId]);
+
+  useEffect(() => {
     if (!isOpen) return;
     void refreshSessions();
   }, [isOpen, refreshSessions]);
@@ -1140,6 +1182,9 @@ export function QuickChatFAB({
     setMentionPopupVisible(false);
     setMentionFilter("");
     setMentionStartPos(-1);
+    setShowSkillMenu(false);
+    setSkillFilter("");
+    setHighlightedSkillIndex(0);
     pendingAttachmentsRef.current.forEach((attachment) => {
       if (attachment.previewUrl) {
         URL.revokeObjectURL(attachment.previewUrl);
@@ -1225,6 +1270,14 @@ export function QuickChatFAB({
     [agents, selectedAgentId],
   );
 
+  const filteredSkills = useMemo(() => {
+    const normalizedFilter = skillFilter.trim().toLowerCase();
+    const matchingSkills = normalizedFilter
+      ? discoveredSkills.filter((skill) => skill.name.toLowerCase().includes(normalizedFilter))
+      : discoveredSkills;
+    return matchingSkills.slice(0, 10);
+  }, [discoveredSkills, skillFilter]);
+
   const filteredMentionAgents = useMemo(() => {
     const normalizedFilter = mentionFilter.trim().toLowerCase();
     if (!normalizedFilter) {
@@ -1243,6 +1296,10 @@ export function QuickChatFAB({
   }, [agents]);
 
   useEffect(() => {
+    setHighlightedSkillIndex(0);
+  }, [filteredSkills]);
+
+  useEffect(() => {
     setMentionHighlightIndex(0);
   }, [mentionFilter, mentionPopupVisible]);
 
@@ -1251,6 +1308,10 @@ export function QuickChatFAB({
       if (hideMentionPopupTimeoutRef.current !== null) {
         window.clearTimeout(hideMentionPopupTimeoutRef.current);
         hideMentionPopupTimeoutRef.current = null;
+      }
+      if (hideSkillMenuTimeoutRef.current !== null) {
+        window.clearTimeout(hideSkillMenuTimeoutRef.current);
+        hideSkillMenuTimeoutRef.current = null;
       }
     };
   }, []);
@@ -1446,6 +1507,13 @@ export function QuickChatFAB({
     setMentionFilter("");
     setMentionStartPos(-1);
 
+    if (trimmed === "/help") {
+      setHelpMessageVisible(true);
+      focusComposerInput();
+      preserveComposerFocusRef.current = false;
+      return;
+    }
+
     if (trimmed === "/clear") {
       stopStreaming();
       clearPendingMessage();
@@ -1476,6 +1544,7 @@ export function QuickChatFAB({
     }
 
     try {
+      setHelpMessageVisible(false);
       await sendMessage(trimmed, attachmentsToSend.map((attachment) => attachment.file));
       attachmentsToSend.forEach((attachment) => {
         if (attachment.previewUrl) {
@@ -1544,6 +1613,29 @@ export function QuickChatFAB({
     setMentionStartPos(-1);
   }, []);
 
+  const handleSkillSelect = useCallback((skill: DiscoveredSkill) => {
+    setMessageInput((currentInput) => {
+      const triggerMatch = getSkillTriggerMatch(currentInput);
+      if (!triggerMatch) {
+        return currentInput;
+      }
+
+      const replacement = `/skill:${skill.name} `;
+      const nextInput = currentInput.slice(0, triggerMatch.start) + replacement + currentInput.slice(triggerMatch.end);
+
+      window.requestAnimationFrame(() => {
+        if (!inputRef.current) return;
+        inputRef.current.focus();
+      });
+
+      return nextInput;
+    });
+
+    setShowSkillMenu(false);
+    setSkillFilter("");
+    setHighlightedSkillIndex(0);
+  }, []);
+
   const handleMentionSelect = useCallback(
     (agent: Agent) => {
       const input = inputRef.current;
@@ -1581,7 +1673,19 @@ export function QuickChatFAB({
       const cursorPos = event.target.selectionStart ?? nextValue.length;
       mentionCursorPosRef.current = cursorPos;
       setMessageInput(nextValue);
+      if (helpMessageVisible && nextValue.trim().length > 0) {
+        setHelpMessageVisible(false);
+      }
       updateMentionState(nextValue, cursorPos);
+
+      const skillTriggerMatch = getSkillTriggerMatch(nextValue);
+      if (skillTriggerMatch) {
+        setShowSkillMenu(true);
+        setSkillFilter(skillTriggerMatch.filter);
+      } else {
+        setShowSkillMenu(false);
+        setSkillFilter("");
+      }
 
       // Detect file mentions
       fileMention.detectMention(nextValue, cursorPos);
@@ -1590,7 +1694,7 @@ export function QuickChatFAB({
         updateFileMentionPosition(event.target);
       }
     },
-    [updateMentionState, fileMention, updateFileMentionPosition],
+    [helpMessageVisible, updateMentionState, fileMention, updateFileMentionPosition],
   );
 
   const handleInputBlur = useCallback(() => {
@@ -1631,6 +1735,15 @@ export function QuickChatFAB({
       fileMention.dismissMention();
       hideMentionPopupTimeoutRef.current = null;
     }, 120);
+
+    if (hideSkillMenuTimeoutRef.current !== null) {
+      window.clearTimeout(hideSkillMenuTimeoutRef.current);
+    }
+
+    hideSkillMenuTimeoutRef.current = window.setTimeout(() => {
+      setShowSkillMenu(false);
+      hideSkillMenuTimeoutRef.current = null;
+    }, 120);
   }, [fileMention, focusComposerInput]);
 
   const handleInputFocus = useCallback(() => {
@@ -1641,6 +1754,10 @@ export function QuickChatFAB({
     if (hideMentionPopupTimeoutRef.current !== null) {
       window.clearTimeout(hideMentionPopupTimeoutRef.current);
       hideMentionPopupTimeoutRef.current = null;
+    }
+    if (hideSkillMenuTimeoutRef.current !== null) {
+      window.clearTimeout(hideSkillMenuTimeoutRef.current);
+      hideSkillMenuTimeoutRef.current = null;
     }
   }, []);
 
@@ -1756,6 +1873,34 @@ export function QuickChatFAB({
         return;
       }
 
+      if (showSkillMenu && filteredSkills.length > 0 && event.key === "ArrowDown") {
+        event.preventDefault();
+        setHighlightedSkillIndex((prev) => (prev + 1) % filteredSkills.length);
+        return;
+      }
+
+      if (showSkillMenu && filteredSkills.length > 0 && event.key === "ArrowUp") {
+        event.preventDefault();
+        setHighlightedSkillIndex((prev) => (prev === 0 ? filteredSkills.length - 1 : prev - 1));
+        return;
+      }
+
+      if (showSkillMenu && (event.key === "Enter" || event.key === "Tab")) {
+        event.preventDefault();
+        const selectedSkill = filteredSkills[highlightedSkillIndex] ?? filteredSkills[0];
+        if (selectedSkill) {
+          handleSkillSelect(selectedSkill);
+        }
+        return;
+      }
+
+      if (showSkillMenu && event.key === "Escape") {
+        event.preventDefault();
+        setShowSkillMenu(false);
+        setSkillFilter("");
+        return;
+      }
+
       if (event.key !== "Enter" || event.shiftKey) return;
       event.preventDefault();
       void handleSendMessage();
@@ -1768,6 +1913,10 @@ export function QuickChatFAB({
       handleSendMessage,
       fileMention,
       messageInput,
+      showSkillMenu,
+      filteredSkills,
+      highlightedSkillIndex,
+      handleSkillSelect,
     ],
   );
 
@@ -2073,6 +2222,11 @@ export function QuickChatFAB({
                     onToggleRender={toggleMessageRenderMode}
                   />
                 ))}
+                {helpMessageVisible && (
+                  <div className="quick-chat-panel-message quick-chat-panel-message--received" data-testid="quick-chat-help-message">
+                    {renderAssistantMessageContent("Available commands:\n- `/clear` — Clear conversation and start fresh\n- `/skill:{name}` — Use a specific skill\n- `/help` — Show this help")}
+                  </div>
+                )}
                 <div
                   className="quick-chat-panel-message quick-chat-panel-message--received quick-chat-panel-message--streaming"
                   data-testid="quick-chat-streaming-message"
@@ -2108,7 +2262,7 @@ export function QuickChatFAB({
               </>
             ) : messagesLoading ? (
               <div className="quick-chat-panel-empty">Loading conversation…</div>
-            ) : messages.length === 0 && !streamingText && !streamingThinking && !isStreaming ? (
+            ) : messages.length === 0 && !streamingText && !streamingThinking && !isStreaming && !helpMessageVisible ? (
               <div className="quick-chat-panel-empty">No messages yet. Start the conversation!</div>
             ) : (
               <>
@@ -2121,6 +2275,11 @@ export function QuickChatFAB({
                     onToggleRender={toggleMessageRenderMode}
                   />
                 ))}
+                {helpMessageVisible && (
+                  <div className="quick-chat-panel-message quick-chat-panel-message--received" data-testid="quick-chat-help-message">
+                    {renderAssistantMessageContent("Available commands:\n- `/clear` — Clear conversation and start fresh\n- `/skill:{name}` — Use a specific skill\n- `/help` — Show this help")}
+                  </div>
+                )}
               </>
             )}
           </div>
@@ -2307,6 +2466,35 @@ export function QuickChatFAB({
                 }}
                 loading={fileMention.loading}
               />
+              {showSkillMenu && (
+                <div className="chat-skill-menu" data-testid="quick-chat-skill-menu" role="listbox" aria-label="Skill suggestions">
+                  {skillsLoading ? (
+                    <div className="chat-skill-menu-empty">Loading skills…</div>
+                  ) : filteredSkills.length === 0 ? (
+                    <div className="chat-skill-menu-empty">
+                      {skillFilter ? "No skills found" : "No skills available"}
+                    </div>
+                  ) : (
+                    filteredSkills.map((skill, index) => (
+                      <button
+                        key={skill.id}
+                        type="button"
+                        role="option"
+                        aria-selected={index === highlightedSkillIndex}
+                        className={`chat-skill-menu-item${index === highlightedSkillIndex ? " chat-skill-menu-item--highlighted" : ""}`}
+                        onMouseDown={(event) => event.preventDefault()}
+                        onMouseEnter={() => setHighlightedSkillIndex(index)}
+                        onClick={() => handleSkillSelect(skill)}
+                      >
+                        <span className="chat-skill-menu-item-name">{skill.name}</span>
+                        <span className="chat-skill-menu-item-description" title={skill.relativePath}>
+                          {skill.relativePath}
+                        </span>
+                      </button>
+                    ))
+                  )}
+                </div>
+              )}
               {pendingMessage && (
                 <div className="chat-pending-message" data-testid="chat-pending-indicator">
                   <span>{`Queued: ${pendingPreview}`}</span>

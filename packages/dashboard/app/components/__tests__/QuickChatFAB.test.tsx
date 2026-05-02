@@ -14,6 +14,7 @@ vi.mock("../../api", () => ({
   streamChatResponse: vi.fn(),
   cancelChatResponse: vi.fn(),
   fetchModels: vi.fn(),
+  fetchDiscoveredSkills: vi.fn(),
   searchFiles: vi.fn().mockResolvedValue({ files: [] }),
 }));
 
@@ -24,6 +25,7 @@ const mockFetchChatSessions = vi.mocked(apiModule.fetchChatSessions);
 const mockCreateChatSession = vi.mocked(apiModule.createChatSession);
 const mockFetchChatMessages = vi.mocked(apiModule.fetchChatMessages);
 const mockFetchModels = vi.mocked(apiModule.fetchModels);
+const mockFetchDiscoveredSkills = vi.mocked(apiModule.fetchDiscoveredSkills);
 const mockStreamChatResponse = vi.mocked(apiModule.streamChatResponse);
 const mockCancelChatResponse = vi.mocked(apiModule.cancelChatResponse);
 const mockUseAgents = vi.mocked(useAgents);
@@ -87,6 +89,10 @@ describe("QuickChatFAB session-first UX", () => {
       defaultProvider: "openai",
       defaultModelId: "gpt-4o",
     });
+    mockFetchDiscoveredSkills.mockResolvedValue([
+      { id: "sk-1", name: "fusion-basics", relativePath: "skills/fusion-basics", source: "acme/skills" },
+      { id: "sk-2", name: "deploy-helper", relativePath: "skills/deploy-helper", source: "acme/skills" },
+    ]);
   });
 
   it("removes header mode toggle and renders session dropdown", async () => {
@@ -209,6 +215,91 @@ describe("QuickChatFAB session-first UX", () => {
         [],
         "proj-1",
       );
+    });
+  });
+
+  it("shows skill menu when typing slash", async () => {
+    render(<QuickChatFAB addToast={vi.fn()} projectId="proj-1" />);
+    fireEvent.click(screen.getByTestId("quick-chat-fab"));
+
+    const input = await screen.findByTestId("quick-chat-input");
+    await waitFor(() => expect(input).not.toBeDisabled());
+    fireEvent.change(input, { target: { value: "/" } });
+
+    expect(await screen.findByTestId("quick-chat-skill-menu")).toBeInTheDocument();
+    expect(screen.getByText("fusion-basics")).toBeInTheDocument();
+  });
+
+  it("filters skills from slash input", async () => {
+    render(<QuickChatFAB addToast={vi.fn()} projectId="proj-1" />);
+    fireEvent.click(screen.getByTestId("quick-chat-fab"));
+
+    const input = await screen.findByTestId("quick-chat-input");
+    await waitFor(() => expect(input).not.toBeDisabled());
+    fireEvent.change(input, { target: { value: "/fusion" } });
+
+    expect(await screen.findByText("fusion-basics")).toBeInTheDocument();
+    expect(screen.queryByText("deploy-helper")).toBeNull();
+  });
+
+  it("supports keyboard navigation and enter selection for skills", async () => {
+    render(<QuickChatFAB addToast={vi.fn()} projectId="proj-1" />);
+    fireEvent.click(screen.getByTestId("quick-chat-fab"));
+
+    const input = await screen.findByTestId("quick-chat-input");
+    await waitFor(() => expect(input).not.toBeDisabled());
+    fireEvent.change(input, { target: { value: "/" } });
+
+    await screen.findByTestId("quick-chat-skill-menu");
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(input).toHaveValue("/skill:deploy-helper ");
+  });
+
+  it("selects skill from menu click and replaces slash trigger", async () => {
+    render(<QuickChatFAB addToast={vi.fn()} projectId="proj-1" />);
+    fireEvent.click(screen.getByTestId("quick-chat-fab"));
+
+    const input = await screen.findByTestId("quick-chat-input");
+    await waitFor(() => expect(input).not.toBeDisabled());
+    fireEvent.change(input, { target: { value: "/" } });
+
+    const skillName = await screen.findByText("fusion-basics");
+    fireEvent.click(skillName.closest("button") as HTMLButtonElement);
+    expect(input).toHaveValue("/skill:fusion-basics ");
+  });
+
+  it("shows help message for exact /help command", async () => {
+    render(<QuickChatFAB addToast={vi.fn()} projectId="proj-1" />);
+    fireEvent.click(screen.getByTestId("quick-chat-fab"));
+
+    const input = await screen.findByTestId("quick-chat-input");
+    await waitFor(() => expect(input).not.toBeDisabled());
+    fireEvent.change(input, { target: { value: "/help" } });
+    fireEvent.click(screen.getByTestId("quick-chat-send"));
+
+    expect(await screen.findByTestId("quick-chat-help-message")).toBeInTheDocument();
+    expect(mockStreamChatResponse).not.toHaveBeenCalled();
+  });
+
+  it("clears help message on next user message", async () => {
+    render(<QuickChatFAB addToast={vi.fn()} projectId="proj-1" />);
+    fireEvent.click(screen.getByTestId("quick-chat-fab"));
+
+    const input = await screen.findByTestId("quick-chat-input");
+    await waitFor(() => expect(input).not.toBeDisabled());
+
+    fireEvent.change(input, { target: { value: "/help" } });
+    fireEvent.click(screen.getByTestId("quick-chat-send"));
+    expect(await screen.findByTestId("quick-chat-help-message")).toBeInTheDocument();
+
+    fireEvent.change(input, { target: { value: "hello" } });
+    fireEvent.click(screen.getByTestId("quick-chat-send"));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("quick-chat-help-message")).toBeNull();
+      expect(mockStreamChatResponse).toHaveBeenCalledWith("session-model", "hello", expect.any(Object), [], "proj-1");
     });
   });
 
