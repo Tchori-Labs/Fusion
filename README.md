@@ -446,7 +446,8 @@ fn skills install firebase/agent-skills               # Install agent skills
 
 ```bash
 pnpm install                  # Install dependencies
-pnpm build                    # Build all packages
+pnpm build                    # Build default workspace packages (excludes desktop/mobile)
+pnpm build:all                # Build all packages (including desktop/mobile)
 pnpm dev dashboard            # Run dashboard + AI engine
 pnpm dev:ui                   # Dashboard only (no AI engine)
 pnpm lint                     # Lint all packages

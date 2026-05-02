@@ -1,15 +1,8 @@
 import { defineConfig } from "vitest/config";
 import { resolve } from "node:path";
-import { cpus } from "node:os";
+import { computeMaxWorkers } from "../core/src/__test-utils__/vitest-workers";
 
-// Cap fan-out to 4 so high-core dev machines don't spawn 27+ workers per
-// package — that saturates the box when multiple workspace packages test
-// concurrently or when the dashboard has agents running tests in parallel.
-// Override with VITEST_MAX_WORKERS for explicit fast/serial runs.
-const defaultMaxWorkers = Math.min(4, Math.max(1, cpus().length - 1));
-const requestedMaxWorkers = Number.parseInt(process.env.VITEST_MAX_WORKERS ?? String(defaultMaxWorkers), 10);
-const maxWorkers = Math.max(1, Number.isFinite(requestedMaxWorkers) ? requestedMaxWorkers : defaultMaxWorkers);
-process.env.VITEST_MAX_WORKERS = String(maxWorkers);
+const maxWorkers = computeMaxWorkers();
 
 export default defineConfig({
   resolve: {

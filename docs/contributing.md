@@ -19,10 +19,11 @@ Thanks for contributing to Fusion.
 pnpm install --frozen-lockfile
 ```
 
-### Build all packages
+### Build workspace packages
 
 ```bash
-pnpm build
+pnpm build      # default build (excludes desktop/mobile)
+pnpm build:all  # full recursive build including desktop/mobile
 ```
 
 ## Workspace Package Overview
@@ -44,7 +45,8 @@ pnpm dev               # build + run CLI entrypoint in dev mode
 pnpm dev:ui            # dashboard dev server only
 pnpm lint              # lint all packages
 pnpm test              # workspace test suite (clean-worktree compatible)
-pnpm build             # workspace builds
+pnpm build             # workspace builds (excludes desktop/mobile)
+pnpm build:all         # full workspace build (includes desktop/mobile)
 pnpm verify:workspace  # canonical lint -> test -> build verification gate
 pnpm typecheck         # workspace typechecks
 ```
