@@ -5141,7 +5141,7 @@ describe("TaskDetailModal", () => {
       });
     });
 
-    it("renders normalized priority in detail metadata", () => {
+    it("renders normalized priority in detail metadata", async () => {
       render(
         <TaskDetailModal
           task={makeTask({ id: "FN-001", column: "triage", description: "Priority metadata", priority: undefined })}
@@ -5154,7 +5154,95 @@ describe("TaskDetailModal", () => {
         />,
       );
 
-      expect(screen.getByText("Priority: normal")).toBeTruthy();
+      const prioritySelect = screen.getByRole("combobox", { name: "Task priority" }) as HTMLSelectElement;
+      expect(prioritySelect.value).toBe("normal");
+    });
+
+    it("updates priority inline and propagates successful save", async () => {
+      const { updateTask } = await import("../../api");
+      const mockUpdate = vi.mocked(updateTask);
+      const onTaskUpdated = vi.fn();
+      const addToast = vi.fn();
+      const updatedTask = makeTask({ id: "FN-001", column: "triage", priority: "urgent" });
+      mockUpdate.mockResolvedValueOnce(updatedTask as Task);
+
+      render(
+        <TaskDetailModal
+          task={makeTask({ id: "FN-001", column: "triage", description: "Priority metadata", priority: "normal" })}
+          onClose={noop}
+          onMoveTask={noopMove}
+          onDeleteTask={noopDelete}
+          onMergeTask={noopMerge}
+          onOpenDetail={noopOpenDetail}
+          onTaskUpdated={onTaskUpdated}
+          addToast={addToast}
+        />,
+      );
+
+      fireEvent.change(screen.getByRole("combobox", { name: "Task priority" }), {
+        target: { value: "urgent" },
+      });
+
+      await waitFor(() => {
+        expect(mockUpdate).toHaveBeenCalledWith("FN-001", { priority: "urgent" }, undefined);
+      });
+      expect(onTaskUpdated).toHaveBeenCalledWith(updatedTask);
+      expect(addToast).toHaveBeenCalledWith("Priority updated to urgent", "success");
+    });
+
+    it("does not call updateTask when inline priority is unchanged", async () => {
+      const { updateTask } = await import("../../api");
+      const mockUpdate = vi.mocked(updateTask);
+
+      render(
+        <TaskDetailModal
+          task={makeTask({ id: "FN-001", column: "triage", description: "Priority metadata", priority: "high" })}
+          onClose={noop}
+          onMoveTask={noopMove}
+          onDeleteTask={noopDelete}
+          onMergeTask={noopMerge}
+          onOpenDetail={noopOpenDetail}
+          addToast={noop}
+        />,
+      );
+
+      fireEvent.change(screen.getByRole("combobox", { name: "Task priority" }), {
+        target: { value: "high" },
+      });
+
+      await waitFor(() => {
+        expect(mockUpdate).not.toHaveBeenCalled();
+      });
+    });
+
+    it("reverts inline priority when save fails", async () => {
+      const { updateTask } = await import("../../api");
+      const mockUpdate = vi.mocked(updateTask);
+      const addToast = vi.fn();
+      mockUpdate.mockRejectedValueOnce(new Error("Request failed"));
+
+      render(
+        <TaskDetailModal
+          task={makeTask({ id: "FN-001", column: "triage", description: "Priority metadata", priority: "low" })}
+          onClose={noop}
+          onMoveTask={noopMove}
+          onDeleteTask={noopDelete}
+          onMergeTask={noopMerge}
+          onOpenDetail={noopOpenDetail}
+          addToast={addToast}
+        />,
+      );
+
+      const prioritySelect = screen.getByRole("combobox", { name: "Task priority" }) as HTMLSelectElement;
+      fireEvent.change(prioritySelect, { target: { value: "urgent" } });
+
+      await waitFor(() => {
+        expect(mockUpdate).toHaveBeenCalledWith("FN-001", { priority: "urgent" }, undefined);
+      });
+      await waitFor(() => {
+        expect(prioritySelect.value).toBe("low");
+      });
+      expect(addToast).toHaveBeenCalledWith("Failed to update FN-001: Request failed", "error");
     });
 
     it("pre-populates form with existing task values", () => {

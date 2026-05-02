@@ -145,6 +145,8 @@ Memory view provides a multi-file editor for project and daily memory files.
 
 Inspect task definition, logs, comments, documents, workflow outcomes, model overrides, and task routing from a single modal.
 
+- The priority chip in task metadata is now an inline picker: you can change priority directly from the chip without entering full edit mode.
+
 ### Logs → Agent Log view
 
 The **Logs** tab includes an **Agent Log** subview designed for debugging long-running and tool-heavy sessions:

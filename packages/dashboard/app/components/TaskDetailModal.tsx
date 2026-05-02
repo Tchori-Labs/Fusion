@@ -429,6 +429,8 @@ export function TaskDetailModal({
   const [editSourceIssueUrl, setEditSourceIssueUrl] = useState(task.sourceIssue?.url ?? "");
   const [editPendingImages, setEditPendingImages] = useState<PendingImage[]>([]);
   const [isSaving, setIsSaving] = useState(false);
+  const [inlinePriority, setInlinePriority] = useState<TaskPriority>(normalizeTaskPriorityValue(task.priority));
+  const [isSavingInlinePriority, setIsSavingInlinePriority] = useState(false);
   const mountedRef = useRef(false);
 
   // Split-menu dropdown state for footer actions
@@ -486,6 +488,10 @@ export function TaskDetailModal({
   useEffect(() => {
     setWorkflowEnabledSteps(task.enabledWorkflowSteps || []);
   }, [task.id, task.enabledWorkflowSteps]);
+
+  useEffect(() => {
+    setInlinePriority(normalizeTaskPriorityValue(task.priority));
+  }, [task.id, task.priority]);
 
   // Load merged settings for effective model resolution
   useEffect(() => {
@@ -861,6 +867,34 @@ export function TaskDetailModal({
       addToast(`Failed to save: ${getErrorMessage(err)}`, "error");
     }
   }, [task.id, addToast, projectId, onTaskUpdated]);
+
+  const handleInlinePriorityChange = useCallback(async (nextValue: string) => {
+    const normalizedNextPriority = normalizeTaskPriorityValue(nextValue as Task["priority"]);
+    const currentPriority = normalizeTaskPriorityValue(task.priority);
+
+    if (normalizedNextPriority === currentPriority) {
+      setInlinePriority(currentPriority);
+      return;
+    }
+
+    const previousPriority = inlinePriority;
+    setInlinePriority(normalizedNextPriority);
+    setIsSavingInlinePriority(true);
+
+    try {
+      const updatedTask = await updateTask(task.id, { priority: normalizedNextPriority }, projectId);
+      setInlinePriority(normalizeTaskPriorityValue(updatedTask.priority));
+      onTaskUpdated?.(updatedTask);
+      addToast(`Priority updated to ${normalizeTaskPriorityValue(updatedTask.priority)}`, "success");
+    } catch (err) {
+      setInlinePriority(previousPriority);
+      addToast(`Failed to update ${task.id}: ${getErrorMessage(err)}`, "error");
+    } finally {
+      if (mountedRef.current) {
+        setIsSavingInlinePriority(false);
+      }
+    }
+  }, [task.id, task.priority, projectId, inlinePriority, onTaskUpdated, addToast]);
 
   // Handle keyboard shortcuts for edit mode
   const handleEditKeyDown = useCallback((e: KeyboardEvent) => {
@@ -1608,9 +1642,26 @@ export function TaskDetailModal({
               <div className="detail-meta">
                 Created {new Date(task.createdAt).toLocaleDateString()} · Updated{" "}
                 {new Date(task.updatedAt).toLocaleDateString()} ·
-                <span className={`detail-priority-chip detail-priority-chip--${normalizeTaskPriorityValue(task.priority)}`}>
-                  Priority: {normalizeTaskPriorityValue(task.priority)}
-                </span>
+                <label
+                  className={`card-priority-badge card-priority-badge--${inlinePriority} detail-priority-chip ${isSavingInlinePriority ? "detail-priority-chip--saving" : ""}`}
+                >
+                  <span>Priority:</span>
+                  <select
+                    className="detail-priority-select"
+                    value={inlinePriority}
+                    onChange={(event) => {
+                      void handleInlinePriorityChange(event.target.value);
+                    }}
+                    disabled={isSavingInlinePriority}
+                    aria-label="Task priority"
+                  >
+                    {TASK_PRIORITIES.map((priorityOption) => (
+                      <option key={priorityOption} value={priorityOption}>
+                        {priorityOption}
+                      </option>
+                    ))}
+                  </select>
+                </label>
                 {provenanceDisplay && (
                   <div className="detail-provenance">
                     <GitBranch aria-hidden="true" />
