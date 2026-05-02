@@ -178,6 +178,89 @@ describe("createEventBridge", () => {
       expect(textEnd1.contentIndex).toBe(1);
       expect(textEnd1.content).toBe("Second");
     });
+
+    it("repairs a missing sentence boundary between consecutive text blocks", () => {
+      const bridge = createBridgeWithStart();
+
+      bridge.handleEvent({
+        type: "content_block_start",
+        index: 0,
+        content_block: { type: "text", text: "" },
+      });
+      bridge.handleEvent({
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "text_delta", text: "compare them." },
+      });
+      bridge.handleEvent({
+        type: "content_block_stop",
+        index: 0,
+      });
+
+      bridge.handleEvent({
+        type: "content_block_start",
+        index: 1,
+        content_block: { type: "text", text: "" },
+      });
+      bridge.handleEvent({
+        type: "content_block_delta",
+        index: 1,
+        delta: { type: "text_delta", text: "Good overview." },
+      });
+
+      const output = bridge.getOutput();
+      const combinedText = output.content
+        .filter((content): content is any => content.type === "text")
+        .map((content: any) => content.text)
+        .join("");
+
+      expect(combinedText).toBe("compare them. Good overview.");
+      expect(stream.events[4]).toEqual(
+        expect.objectContaining({
+          type: "text_delta",
+          contentIndex: 1,
+          delta: " Good overview.",
+        }),
+      );
+    });
+
+    it("does not insert spaces into lowercase continuations like property access", () => {
+      const bridge = createBridgeWithStart();
+
+      bridge.handleEvent({
+        type: "content_block_start",
+        index: 0,
+        content_block: { type: "text", text: "" },
+      });
+      bridge.handleEvent({
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "text_delta", text: "console." },
+      });
+      bridge.handleEvent({
+        type: "content_block_stop",
+        index: 0,
+      });
+
+      bridge.handleEvent({
+        type: "content_block_start",
+        index: 1,
+        content_block: { type: "text", text: "" },
+      });
+      bridge.handleEvent({
+        type: "content_block_delta",
+        index: 1,
+        delta: { type: "text_delta", text: "log('hi')" },
+      });
+
+      const output = bridge.getOutput();
+      const combinedText = output.content
+        .filter((content): content is any => content.type === "text")
+        .map((content: any) => content.text)
+        .join("");
+
+      expect(combinedText).toBe("console.log('hi')");
+    });
   });
 
   describe("message_start usage tracking", () => {
@@ -793,6 +876,30 @@ describe("createEventBridge", () => {
       const output = bridge.getOutput();
       const thinkingBlock = output.content[0] as any;
       expect(thinkingBlock.thinking).toBe("First thought. Second thought.");
+    });
+
+    it("repairs a missing sentence boundary between thinking deltas", () => {
+      const bridge = createBridgeWithStart();
+
+      bridge.handleEvent({
+        type: "content_block_start",
+        index: 0,
+        content_block: { type: "thinking" },
+      });
+      bridge.handleEvent({
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "thinking_delta", thinking: "I will inspect the hook." },
+      });
+      bridge.handleEvent({
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "thinking_delta", thinking: "Good, now the component." },
+      });
+
+      const output = bridge.getOutput();
+      const thinkingBlock = output.content[0] as any;
+      expect(thinkingBlock.thinking).toBe("I will inspect the hook. Good, now the component.");
     });
 
     it("emits thinking_end for thinking block stop", () => {

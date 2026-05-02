@@ -1512,6 +1512,24 @@ describe("ChatView", () => {
   });
 
   describe("streaming states", () => {
+    it("keeps the streaming indicator visible while message history is still loading", () => {
+      setupMockChat({
+        activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" },
+        messages: [],
+        messagesLoading: true,
+        isStreaming: true,
+        streamingText: "",
+        streamingThinking: "",
+      });
+
+      render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+
+      const streamingMessage = document.querySelector(".chat-message--streaming") as HTMLElement | null;
+      expect(streamingMessage).toBeInTheDocument();
+      expect(streamingMessage?.textContent).toContain("Connecting");
+      expect(screen.queryByText("Loading messages...")).not.toBeInTheDocument();
+    });
+
     it("shows waiting indicator when streaming starts before text arrives", () => {
       setupMockChat({
         activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" },

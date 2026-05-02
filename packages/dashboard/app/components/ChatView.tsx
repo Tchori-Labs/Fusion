@@ -823,7 +823,7 @@ export function ChatView({ projectId, addToast }: ChatViewProps) {
     const messagesContainer = messagesContainerRef.current;
     if (!messagesContainer) return;
     messagesContainer.scrollTop = messagesContainer.scrollHeight;
-  }, [messages, streamingText]);
+  }, [messages, streamingText, streamingThinking, isStreaming]);
 
   useEffect(() => {
     if (keyboardOverlap <= 0) {
@@ -1587,7 +1587,58 @@ export function ChatView({ projectId, addToast }: ChatViewProps) {
 
         {/* Messages */}
         <div className="chat-messages" ref={messagesContainerRef}>
-          {messagesLoading ? (
+          {isStreaming ? (
+            <>
+              {messages.map((message) => (
+                <ChatMessageItem
+                  key={message.id}
+                  message={message}
+                  forcePlain={plainTextMessageIds.has(message.id)}
+                  agentName={agentName}
+                  showAssistantModelTag={showAssistantModelTag}
+                  activeModelTag={activeModelTag}
+                  activeSessionId={activeSession?.id ?? null}
+                  mentionAgentsByName={mentionAgentsByName}
+                  onToggleRender={toggleMessageRenderMode}
+                />
+              ))}
+              <div className="chat-message chat-message--assistant chat-message--streaming">
+                <div className="chat-message-avatar">
+                  <Bot size={14} />
+                  <span>{agentName}</span>
+                  {showAssistantModelTag && <span className="chat-model-tag">{activeModelTag}</span>}
+                  <button
+                    type="button"
+                    className={`chat-message-render-toggle${plainTextMessageIds.has("__streaming__") ? " chat-message-render-toggle--plain" : ""}`}
+                    data-testid="chat-message-render-toggle"
+                    aria-label={plainTextMessageIds.has("__streaming__") ? "Show rendered markdown" : "Show plain text"}
+                    onClick={() => toggleMessageRenderMode("__streaming__")}
+                  >
+                    {plainTextMessageIds.has("__streaming__") ? <EyeOff size={14} /> : <Eye size={14} />}
+                  </button>
+                </div>
+                {streamingText ? (
+                  renderAssistantContent(streamingText, plainTextMessageIds.has("__streaming__"))
+                ) : (
+                  <div className="chat-message-content chat-message-content--waiting">
+                    {streamingThinking ? "Thinking…" : "Connecting…"}
+                  </div>
+                )}
+                {renderToolCalls(streamingToolCalls)}
+                {streamingThinking && (
+                  <details className="chat-message-thinking">
+                    <summary>Thinking</summary>
+                    <pre className="chat-message-thinking-content">{streamingThinking}</pre>
+                  </details>
+                )}
+                <div className="chat-typing-indicator">
+                  <span />
+                  <span />
+                  <span />
+                </div>
+              </div>
+            </>
+          ) : messagesLoading ? (
             <div style={{ color: "var(--text-secondary)", fontSize: "13px" }}>Loading messages...</div>
           ) : messages.length === 0 && !activeSession ? (
             renderEmptyState()
@@ -1610,43 +1661,6 @@ export function ChatView({ projectId, addToast }: ChatViewProps) {
                   onToggleRender={toggleMessageRenderMode}
                 />
               ))}
-              {isStreaming && (
-                <div className="chat-message chat-message--assistant chat-message--streaming">
-                  <div className="chat-message-avatar">
-                    <Bot size={14} />
-                    <span>{agentName}</span>
-                    {showAssistantModelTag && <span className="chat-model-tag">{activeModelTag}</span>}
-                    <button
-                      type="button"
-                      className={`chat-message-render-toggle${plainTextMessageIds.has("__streaming__") ? " chat-message-render-toggle--plain" : ""}`}
-                      data-testid="chat-message-render-toggle"
-                      aria-label={plainTextMessageIds.has("__streaming__") ? "Show rendered markdown" : "Show plain text"}
-                      onClick={() => toggleMessageRenderMode("__streaming__")}
-                    >
-                      {plainTextMessageIds.has("__streaming__") ? <EyeOff size={14} /> : <Eye size={14} />}
-                    </button>
-                  </div>
-                  {streamingText ? (
-                    renderAssistantContent(streamingText, plainTextMessageIds.has("__streaming__"))
-                  ) : (
-                    <div className="chat-message-content chat-message-content--waiting">
-                      {streamingThinking ? "Thinking…" : "Connecting…"}
-                    </div>
-                  )}
-                  {renderToolCalls(streamingToolCalls)}
-                  {streamingThinking && (
-                    <details className="chat-message-thinking">
-                      <summary>Thinking</summary>
-                      <pre className="chat-message-thinking-content">{streamingThinking}</pre>
-                    </details>
-                  )}
-                  <div className="chat-typing-indicator">
-                    <span />
-                    <span />
-                    <span />
-                  </div>
-                </div>
-              )}
             </>
           )}
           <div ref={messagesEndRef} />

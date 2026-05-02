@@ -57,6 +57,16 @@ const agentSession: ChatSession = {
   updatedAt: new Date().toISOString(),
 };
 
+function createDeferredPromise<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
 describe("QuickChatFAB session-first UX", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -182,5 +192,24 @@ describe("QuickChatFAB session-first UX", () => {
       expect(mockFetchChatMessages).toHaveBeenCalledWith("session-agent", { limit: 50 }, "proj-1");
     });
     expect(mockCreateChatSession).not.toHaveBeenCalled();
+  });
+
+  it("shows the streaming indicator instead of the loading placeholder while waiting for a long reply", async () => {
+    const deferredMessages = createDeferredPromise<{ messages: never[] }>();
+    mockFetchChatMessages.mockImplementation(() => deferredMessages.promise);
+    mockStreamChatResponse.mockImplementation(() => ({ close: vi.fn(), isConnected: () => false }));
+
+    render(<QuickChatFAB addToast={vi.fn()} projectId="proj-1" />);
+    fireEvent.click(screen.getByTestId("quick-chat-fab"));
+
+    const input = await screen.findByTestId("quick-chat-input");
+    await waitFor(() => expect(input).not.toBeDisabled());
+
+    fireEvent.change(input, { target: { value: "Explain the current architecture" } });
+    fireEvent.click(screen.getByTestId("quick-chat-send"));
+
+    expect(await screen.findByTestId("quick-chat-streaming-message")).toBeInTheDocument();
+    expect(screen.getByTestId("quick-chat-waiting")).toHaveTextContent("Connecting…");
+    expect(screen.queryByText("Loading conversation…")).not.toBeInTheDocument();
   });
 });

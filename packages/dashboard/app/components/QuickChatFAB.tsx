@@ -1289,7 +1289,7 @@ export function QuickChatFAB({
     const messagesEl = messagesRef.current;
     if (!messagesEl) return;
     messagesEl.scrollTop = messagesEl.scrollHeight;
-  }, [messages, streamingText, streamingThinking, isOpen]);
+  }, [messages, streamingText, streamingThinking, isStreaming, isOpen]);
 
   const sessionOptions = useMemo(
     () => sessions.map((session, index) => ({
@@ -2043,7 +2043,53 @@ export function QuickChatFAB({
           )}
 
           <div className="quick-chat-panel-messages" ref={messagesRef} data-testid="quick-chat-messages">
-            {sessionsLoading || messagesLoading ? (
+            {sessionsLoading ? (
+              <div className="quick-chat-panel-empty">Loading conversation…</div>
+            ) : isStreaming ? (
+              <>
+                {messages.map((message: ChatMessageInfo) => (
+                  <QuickChatMessageItem
+                    key={message.id}
+                    message={message}
+                    forcePlain={message.role !== "user" && plainTextMessageIds.has(message.id)}
+                    mentionAgentsByName={mentionAgentsByName}
+                    onToggleRender={toggleMessageRenderMode}
+                  />
+                ))}
+                <div
+                  className="quick-chat-panel-message quick-chat-panel-message--received quick-chat-panel-message--streaming"
+                  data-testid="quick-chat-streaming-message"
+                >
+                  {streamingText ? (
+                    <>
+                      <div data-testid="quick-chat-streaming-text">
+                        {renderAssistantMessageContent(streamingText, plainTextMessageIds.has("__streaming__"))}
+                      </div>
+                      <button
+                        type="button"
+                        className={`quick-chat-message-render-toggle${plainTextMessageIds.has("__streaming__") ? " quick-chat-message-render-toggle--plain" : ""}`}
+                        data-testid="quick-chat-message-render-toggle"
+                        aria-label={plainTextMessageIds.has("__streaming__") ? "Show rendered markdown" : "Show plain text"}
+                        onClick={() => toggleMessageRenderMode("__streaming__")}
+                      >
+                        {plainTextMessageIds.has("__streaming__") ? <EyeOff size={14} /> : <Eye size={14} />}
+                      </button>
+                    </>
+                  ) : (
+                    <p className="quick-chat-panel-waiting" data-testid="quick-chat-waiting">
+                      {streamingThinking ? "Thinking…" : "Connecting…"}
+                    </p>
+                  )}
+                  {renderToolCalls(streamingToolCalls, true)}
+                  {streamingThinking && (
+                    <details className="chat-message-thinking" data-testid="quick-chat-streaming-thinking">
+                      <summary>Thinking</summary>
+                      <pre className="chat-message-thinking-content">{streamingThinking}</pre>
+                    </details>
+                  )}
+                </div>
+              </>
+            ) : messagesLoading ? (
               <div className="quick-chat-panel-empty">Loading conversation…</div>
             ) : messages.length === 0 && !streamingText && !streamingThinking && !isStreaming ? (
               <div className="quick-chat-panel-empty">No messages yet. Start the conversation!</div>
@@ -2058,41 +2104,6 @@ export function QuickChatFAB({
                     onToggleRender={toggleMessageRenderMode}
                   />
                 ))}
-                {/* Streaming message bubble */}
-                {isStreaming && (
-                  <div
-                    className="quick-chat-panel-message quick-chat-panel-message--received quick-chat-panel-message--streaming"
-                    data-testid="quick-chat-streaming-message"
-                  >
-                    {streamingText ? (
-                      <>
-                        <div data-testid="quick-chat-streaming-text">
-                          {renderAssistantMessageContent(streamingText, plainTextMessageIds.has("__streaming__"))}
-                        </div>
-                        <button
-                          type="button"
-                          className={`quick-chat-message-render-toggle${plainTextMessageIds.has("__streaming__") ? " quick-chat-message-render-toggle--plain" : ""}`}
-                          data-testid="quick-chat-message-render-toggle"
-                          aria-label={plainTextMessageIds.has("__streaming__") ? "Show rendered markdown" : "Show plain text"}
-                          onClick={() => toggleMessageRenderMode("__streaming__")}
-                        >
-                          {plainTextMessageIds.has("__streaming__") ? <EyeOff size={14} /> : <Eye size={14} />}
-                        </button>
-                      </>
-                    ) : (
-                      <p className="quick-chat-panel-waiting" data-testid="quick-chat-waiting">
-                        Thinking…
-                      </p>
-                    )}
-                    {renderToolCalls(streamingToolCalls, true)}
-                    {streamingThinking && (
-                      <details className="chat-message-thinking" data-testid="quick-chat-streaming-thinking">
-                        <summary>Thinking</summary>
-                        <pre className="chat-message-thinking-content">{streamingThinking}</pre>
-                      </details>
-                    )}
-                  </div>
-                )}
               </>
             )}
           </div>
