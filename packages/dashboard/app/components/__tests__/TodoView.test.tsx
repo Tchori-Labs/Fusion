@@ -78,11 +78,6 @@ describe("TodoView", () => {
     mockUseTodoLists.mockReturnValue(createMockTodoLists());
   });
 
-  it("renders header with Todos heading", () => {
-    render(<TodoView addToast={addToast} />);
-    expect(screen.getByRole("heading", { name: "Todos" })).toBeInTheDocument();
-  });
-
   it("renders sidebar with list names", () => {
     render(<TodoView addToast={addToast} />);
     expect(screen.getByTestId("todo-list-list-1")).toHaveTextContent("My List");

@@ -192,6 +192,9 @@ export interface HeaderProps {
   /** Opens the top-level workspace-aware file browser modal. */
   onOpenFiles?: () => void;
   filesOpen?: boolean;
+  onOpenTodos?: () => void;
+  todosOpen?: boolean;
+  todosEnabled?: boolean;
   globalPaused?: boolean;
   enginePaused?: boolean;
   onToggleGlobalPause?: () => void;
@@ -222,7 +225,7 @@ export interface HeaderProps {
   /** Whether the current view is a remote node */
   isRemote?: boolean;
   /** Experimental feature flags controlling visibility of nav items. */
-  experimentalFeatures?: { insights?: boolean; roadmap?: boolean; memoryView?: boolean; devServer?: boolean; devServerView?: boolean; todoView?: boolean; researchView?: boolean };
+  experimentalFeatures?: { insights?: boolean; roadmap?: boolean; memoryView?: boolean; devServer?: boolean; devServerView?: boolean; researchView?: boolean };
   pluginDashboardViews?: PluginDashboardViewEntry[];
 }
 
@@ -247,6 +250,9 @@ export function Header({
   onToggleTerminal,
   onOpenFiles,
   filesOpen,
+  onOpenTodos,
+  todosOpen,
+  todosEnabled,
   globalPaused,
   enginePaused,
   onToggleGlobalPause,
@@ -334,7 +340,7 @@ export function Header({
   const hasViewOverflowItems = useMemo(() => {
     return !!(
       experimentalFeatures?.researchView ||
-      experimentalFeatures?.todoView ||
+      todosEnabled ||
       experimentalFeatures?.insights ||
       experimentalFeatures?.roadmap ||
       showSkillsTab ||
@@ -343,7 +349,7 @@ export function Header({
       !hideFullNav ||
       pluginDashboardViews.some((entry) => entry.view.placement !== "primary")
     );
-  }, [experimentalFeatures, showSkillsTab, hideFullNav, pluginDashboardViews]);
+  }, [experimentalFeatures, todosEnabled, showSkillsTab, hideFullNav, pluginDashboardViews]);
 
   const getEffectiveViewport = useCallback(() => {
     const vv = window.visualViewport;
@@ -1117,7 +1123,7 @@ export function Header({
               <>
                 <button
                   ref={viewOverflowTriggerRef}
-                  className={`view-toggle-btn${["research", "skills", "roadmaps", "insights", "memory", "dev-server", "devserver"].includes(view) || (experimentalFeatures?.todoView && view === "todos") || view.startsWith("plugin:") ? " active" : ""}`}
+                  className={`view-toggle-btn${["research", "skills", "roadmaps", "insights", "memory", "dev-server", "devserver"].includes(view) || (todosEnabled && todosOpen) || view.startsWith("plugin:") ? " active" : ""}`}
                   onClick={() => setIsViewOverflowOpen((prev) => !prev)}
                   title="More views"
                   aria-label="More views"
@@ -1219,11 +1225,11 @@ export function Header({
                         <span className="visually-hidden" data-testid="view-toggle-dev-server" />
                       </button>
                     )}
-                    {experimentalFeatures?.todoView && (
+                    {todosEnabled && onOpenTodos && (
                       <button
-                        className={`view-toggle-overflow-item${view === "todos" ? " active" : ""}`}
+                        className={`view-toggle-overflow-item${todosOpen ? " active" : ""}`}
                         onClick={() => {
-                          onChangeView("todos");
+                          onOpenTodos();
                           setIsViewOverflowOpen(false);
                         }}
                         role="menuitem"
@@ -1435,6 +1441,17 @@ export function Header({
             data-testid="files-toggle-btn"
           >
             <Folder size={16} />
+          </button>
+        )}
+
+        {!isCompact && todosEnabled && onOpenTodos && (
+          <button
+            className={`btn-icon${todosOpen ? " btn-icon--active" : ""}`}
+            onClick={onOpenTodos}
+            title="Open todos"
+            data-testid="todos-toggle-btn"
+          >
+            <CheckSquare size={16} />
           </button>
         )}
 

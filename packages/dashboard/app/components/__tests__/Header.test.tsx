@@ -146,13 +146,13 @@ describe("Header", () => {
       expect(listBtn.getAttribute("aria-pressed")).toBe("false");
     });
 
-    it("renders view overflow trigger when todoView experimental flag is enabled", () => {
-      renderHeader({ onChangeView: noop, experimentalFeatures: { todoView: true } });
+    it("renders view overflow trigger when todos are enabled", () => {
+      renderHeader({ onChangeView: noop, todosEnabled: true });
       expect(screen.getByTestId("view-toggle-overflow-trigger")).toBeDefined();
     });
 
-    it("shows the Todos entry in view overflow when todoView is enabled", () => {
-      renderHeader({ onChangeView: noop, experimentalFeatures: { todoView: true } });
+    it("shows the Todos entry in view overflow when todos are enabled", () => {
+      renderHeader({ onChangeView: noop, onOpenTodos: vi.fn(), todosEnabled: true });
       fireEvent.click(screen.getByTestId("view-toggle-overflow-trigger"));
       expect(screen.getByTestId("view-overflow-todos")).toBeInTheDocument();
     });
@@ -190,7 +190,7 @@ describe("Header", () => {
       renderHeader({
         onChangeView: noop,
         showSkillsTab: false,
-        experimentalFeatures: { insights: false, roadmap: false, memoryView: false, devServerView: false, todoView: false },
+        experimentalFeatures: { insights: false, roadmap: false, memoryView: false, devServerView: false },
       });
       expect(screen.getByTestId("view-toggle-overflow-trigger")).toBeDefined();
     });
@@ -337,6 +337,25 @@ describe("Header", () => {
       fireEvent.click(screen.getByTitle("More header actions"));
       fireEvent.click(screen.getByTestId("overflow-files-btn"));
       expect(onOpenFiles).toHaveBeenCalled();
+    });
+  });
+
+  describe("todos button", () => {
+    it("renders todos button on desktop when enabled", () => {
+      renderHeader({ onOpenTodos: vi.fn(), todosEnabled: true }, "desktop");
+      expect(screen.getByTitle("Open todos")).toBeDefined();
+    });
+
+    it("does not render todos button when disabled", () => {
+      renderHeader({ onOpenTodos: vi.fn(), todosEnabled: false }, "desktop");
+      expect(screen.queryByTitle("Open todos")).toBeNull();
+    });
+
+    it("calls onOpenTodos when clicked", () => {
+      const onOpenTodos = vi.fn();
+      renderHeader({ onOpenTodos, todosEnabled: true }, "desktop");
+      fireEvent.click(screen.getByTitle("Open todos"));
+      expect(onOpenTodos).toHaveBeenCalled();
     });
   });
 

@@ -1,0 +1,56 @@
+import "./TodoModal.css";
+import { useEffect } from "react";
+import { ListChecks, X } from "lucide-react";
+import { useOverlayDismiss } from "../hooks/useOverlayDismiss";
+import { TodoView } from "./TodoView";
+
+interface TodoModalProps {
+  isOpen?: boolean;
+  onClose: () => void;
+  projectId?: string;
+  addToast: (message: string, type?: "success" | "error" | "info") => void;
+  onPlanningMode?: (initialPlan: string) => void;
+}
+
+export function TodoModal({ onClose, projectId, addToast, onPlanningMode }: TodoModalProps) {
+  const overlayDismissProps = useOverlayDismiss(onClose);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
+  return (
+    <div className="modal-overlay open" {...overlayDismissProps} role="dialog" aria-modal="true">
+      <div className="modal todo-modal">
+        <div className="modal-header todo-modal-header">
+          <div className="todo-modal-header-title">
+            <ListChecks size={18} />
+            <div>
+              <h2>Todos</h2>
+              <p>Manage reusable todo lists for your project.</p>
+            </div>
+          </div>
+          <button className="modal-close" onClick={onClose} aria-label="Close">
+            <X size={20} />
+          </button>
+        </div>
+
+        <div className="todo-modal-body">
+          <TodoView
+            projectId={projectId}
+            addToast={addToast}
+            onPlanningMode={onPlanningMode}
+            onClose={onClose}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}

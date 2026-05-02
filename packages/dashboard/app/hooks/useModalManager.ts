@@ -41,6 +41,7 @@ export interface ModalManager {
   terminalOpen: boolean;
   terminalInitialCommand: string | undefined;
   filesOpen: boolean;
+  todosOpen: boolean;
   fileBrowserWorkspace: string;
   activityLogOpen: boolean;
   gitManagerOpen: boolean;
@@ -90,6 +91,8 @@ export interface ModalManager {
 
   openFiles: () => void;
   closeFiles: () => void;
+  openTodos: () => void;
+  closeTodos: () => void;
   setFileWorkspace: (workspace: string) => void;
 
   openActivityLog: () => void;
@@ -148,6 +151,7 @@ export function useModalManager(options: UseModalManagerOptions): ModalManager {
   const [terminalOpen, setTerminalOpen] = useState(false);
   const [terminalInitialCommand, setTerminalInitialCommand] = useState<string | undefined>(undefined);
   const [filesOpen, setFilesOpen] = useState(false);
+  const [todosOpen, setTodosOpen] = useState(false);
   const [fileBrowserWorkspace, setFileBrowserWorkspace] = useState("project");
   const [activityLogOpen, setActivityLogOpen] = useState(false);
   const [gitManagerOpen, setGitManagerOpen] = useState(false);
@@ -165,6 +169,7 @@ export function useModalManager(options: UseModalManagerOptions): ModalManager {
       isSubtaskOpen ||
       terminalOpen ||
       filesOpen ||
+      todosOpen ||
       activityLogOpen ||
       gitManagerOpen ||
       workflowStepsOpen ||
@@ -268,6 +273,8 @@ export function useModalManager(options: UseModalManagerOptions): ModalManager {
 
   const openFiles = useCallback(() => setFilesOpen(true), []);
   const closeFiles = useCallback(() => setFilesOpen(false), []);
+  const openTodos = useCallback(() => setTodosOpen(true), []);
+  const closeTodos = useCallback(() => setTodosOpen(false), []);
   const setFileWorkspace = useCallback((workspace: string) => {
     setFileBrowserWorkspace(workspace);
   }, []);
@@ -338,6 +345,7 @@ export function useModalManager(options: UseModalManagerOptions): ModalManager {
     terminalOpen,
     terminalInitialCommand,
     filesOpen,
+    todosOpen,
     fileBrowserWorkspace,
     activityLogOpen,
     gitManagerOpen,
@@ -375,6 +383,8 @@ export function useModalManager(options: UseModalManagerOptions): ModalManager {
     closeTerminal,
     openFiles,
     closeFiles,
+    openTodos,
+    closeTodos,
     setFileWorkspace,
     openActivityLog,
     closeActivityLog,

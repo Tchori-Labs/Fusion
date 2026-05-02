@@ -13,6 +13,7 @@ import { SubtaskBreakdownModal } from "./SubtaskBreakdownModal";
 import { TerminalModal } from "./TerminalModal";
 import { ScriptsModal } from "./ScriptsModal";
 import { FileBrowserModal } from "./FileBrowserModal";
+import { TodoModal } from "./TodoModal";
 import { UsageIndicator } from "./UsageIndicator";
 import { ScheduledTasksModal } from "./ScheduledTasksModal";
 import { NewTaskModal } from "./NewTaskModal";
@@ -251,6 +252,16 @@ export function AppModals({
           onClose={modalManager.closeFiles}
           onWorkspaceChange={modalManager.setFileWorkspace}
           projectId={projectId}
+        />
+      )}
+
+      {modalManager.todosOpen && (
+        <TodoModal
+          isOpen={true}
+          onClose={modalManager.closeTodos}
+          addToast={addToast}
+          projectId={projectId}
+          onPlanningMode={modalManager.openPlanningWithInitialPlan}
         />
       )}
 

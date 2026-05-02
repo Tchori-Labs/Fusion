@@ -58,6 +58,8 @@ export interface MobileNavBarProps {
   onOpenScripts?: () => void;
   onToggleTerminal?: () => void;
   onOpenFiles?: () => void;
+  onOpenTodos?: () => void;
+  todosOpen?: boolean;
   onOpenGitHubImport?: () => void;
   onOpenPlanning?: () => void;
   onResumePlanning?: () => void;
@@ -108,6 +110,8 @@ export function MobileNavBar({
   onOpenScripts,
   onToggleTerminal,
   onOpenFiles,
+  onOpenTodos,
+  todosOpen = false,
   onOpenGitHubImport,
   onOpenPlanning,
   onResumePlanning,
@@ -200,7 +204,7 @@ export function MobileNavBar({
     || view === "memory"
     || view === "devserver"
     || view === "dev-server"
-    || (view === "todos" && todoViewEnabled)
+    || (todosOpen && todoViewEnabled)
     || (view === "roadmaps" && !showRoadmapsTopLevel)
     || (view === "skills" && !showSkillsTopLevel)
     || view.startsWith("plugin:");
@@ -625,7 +629,7 @@ export function MobileNavBar({
                 type="button"
                 className="mobile-more-item"
                 data-testid="mobile-more-item-todos"
-                onClick={() => handleMoreAction(() => onChangeView("todos"))}
+                onClick={() => handleMoreAction(() => onOpenTodos?.())}
               >
                 <CheckSquare />
                 <span>Todos</span>

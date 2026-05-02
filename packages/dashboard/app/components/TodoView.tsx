@@ -25,6 +25,7 @@ interface TodoViewProps {
   addToast: (message: string, type?: "success" | "error" | "info") => void;
   onPlanningMode?: (initialPlan: string) => void;
   onTaskCreated?: (task: Task) => void;
+  onClose?: () => void;
 }
 
 function sortItems(items: TodoItem[]): TodoItem[] {
@@ -307,13 +308,6 @@ export function TodoView({ projectId, addToast, onPlanningMode, onTaskCreated }:
 
   return (
     <div className="todo-view">
-      <div className="todo-view-header">
-        <div>
-          <h2>Todos</h2>
-          <p className="todo-view-description">Manage reusable todo lists for your project.</p>
-        </div>
-      </div>
-
       <div className="todo-view-layout">
         <aside className="todo-view-sidebar" aria-label="Todo lists sidebar">
           <div className="todo-sidebar-header">

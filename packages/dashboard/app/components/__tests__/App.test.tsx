@@ -1504,7 +1504,6 @@ describe("App view switching", () => {
 
   it("opens planning mode when TodoView triggers planning from todo item", async () => {
     localStorage.setItem("kb-dashboard-view-mode", "project");
-    localStorage.setItem(taskViewStorageKey(), "todos");
     (fetchSettings as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       ...defaultSettings,
       experimentalFeatures: {
@@ -1514,6 +1513,12 @@ describe("App view switching", () => {
     });
 
     render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("todos-toggle-btn")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId("todos-toggle-btn"));
 
     await waitFor(() => {
       expect(screen.getByTestId("todo-view")).toBeInTheDocument();

@@ -78,7 +78,7 @@ const RoadmapsView = lazy(() => import("./components/RoadmapsView").then((m) => 
 const SkillsView = lazy(() => import("./components/SkillsView").then((m) => ({ default: m.SkillsView })));
 const MemoryView = lazy(() => import("./components/MemoryView").then((m) => ({ default: m.MemoryView })));
 const DevServerView = lazy(() => import("./components/DevServerView").then((m) => ({ default: m.DevServerView })));
-const TodoView = lazy(() => import("./components/TodoView").then((m) => ({ default: m.TodoView })));
+const _TodoView = lazy(() => import("./components/TodoView").then((m) => ({ default: m.TodoView })));
 
 // Warm lazy chunks during browser idle so first navigation to each view is
 // instant. Each chunk is ~10–80 kB; total prefetch finishes well under a
@@ -405,13 +405,10 @@ function AppInner() {
     if ((taskView === "devserver" || taskView === "dev-server") && !devServerEnabled) {
       handleChangeTaskView("board");
     }
-    if (taskView === "todos" && !todosEnabled) {
-      handleChangeTaskView("board");
-    }
     if (taskView === "research" && !researchEnabled) {
       handleChangeTaskView("board");
     }
-  }, [taskView, settingsLoaded, skillsEnabled, insightsEnabled, roadmapEnabled, handleChangeTaskView, agentsEnabled, memoryEnabled, devServerEnabled, todosEnabled, researchEnabled]);
+  }, [taskView, settingsLoaded, skillsEnabled, insightsEnabled, roadmapEnabled, handleChangeTaskView, agentsEnabled, memoryEnabled, devServerEnabled, researchEnabled]);
 
   // Auto-close nodes overlay if feature flag is toggled off while overlay is open
   useEffect(() => {
@@ -822,24 +819,6 @@ function AppInner() {
       );
     }
 
-    if (taskView === "todos") {
-      if (!settingsLoaded || !todosEnabled) {
-        return null;
-      }
-      return (
-        <PageErrorBoundary>
-          <Suspense fallback={null}>
-            <TodoView
-              addToast={addToast}
-              projectId={currentProject?.id}
-              onPlanningMode={modalManager.openPlanningWithInitialPlan}
-              onTaskCreated={(task) => ingestCreatedTasks([task])}
-            />
-          </Suspense>
-        </PageErrorBoundary>
-      );
-    }
-
     if (taskView === "devserver" || taskView === "dev-server") {
       if (!settingsLoaded || !devServerEnabled) {
         return null;
@@ -961,6 +940,9 @@ function AppInner() {
         onToggleTerminal={modalManager.toggleTerminal}
         onOpenFiles={modalManager.openFiles}
         filesOpen={modalManager.filesOpen}
+        onOpenTodos={modalManager.openTodos}
+        todosOpen={modalManager.todosOpen}
+        todosEnabled={todosEnabled}
         globalPaused={globalPaused}
         enginePaused={enginePaused}
         onToggleGlobalPause={toggleGlobalPause}
@@ -994,7 +976,6 @@ function AppInner() {
           memoryView: memoryEnabled,
           devServer: devServerEnabled,
           devServerView: devServerEnabled,
-          todoView: todosEnabled,
           researchView: researchEnabled,
         }}
         pluginDashboardViews={pluginDashboardViews}
@@ -1072,6 +1053,8 @@ function AppInner() {
         onOpenScripts={modalManager.openScripts}
         onToggleTerminal={modalManager.toggleTerminal}
         onOpenFiles={modalManager.openFiles}
+        onOpenTodos={modalManager.openTodos}
+        todosOpen={modalManager.todosOpen}
         onOpenGitHubImport={modalManager.openGitHubImport}
         onOpenPlanning={modalManager.openPlanning}
         onResumePlanning={modalManager.resumePlanning}
