@@ -827,6 +827,27 @@ describe("SettingsModal", () => {
       expect(screen.getByTestId("auth-status-openai")).toHaveTextContent("✗ Not connected");
     });
 
+    it("hides deprecated Google CLI and antigravity auth providers", async () => {
+      mockFetchAuthStatus.mockResolvedValueOnce({
+        providers: [
+          { id: "google", name: "Google", authenticated: false, type: "api_key" },
+          { id: "gemini", name: "Gemini", authenticated: false, type: "api_key" },
+          { id: "google-antigravity", name: "Google Antigravity", authenticated: false, type: "oauth" },
+          { id: "antigravity", name: "Antigravity", authenticated: false, type: "oauth" },
+          { id: "google-gemini-cli", name: "Google Gemini CLI", authenticated: false, type: "cli" },
+        ],
+      });
+
+      renderModal();
+      await waitForSettingsModalReady();
+
+      expect(screen.getByTestId("auth-provider-icon-google")).toBeInTheDocument();
+      expect(screen.getByTestId("auth-provider-icon-gemini")).toBeInTheDocument();
+      expect(screen.queryByTestId("auth-provider-icon-google-antigravity")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("auth-provider-icon-antigravity")).not.toBeInTheDocument();
+      expect(screen.queryByText("Google Gemini CLI")).not.toBeInTheDocument();
+    });
+
     it("scrolls settings content to top after OAuth login succeeds", async () => {
       const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
       mockLoginProvider.mockResolvedValue({ url: "https://example.com/auth", instructions: "" });

@@ -2886,8 +2886,8 @@ describe("HeartbeatMonitor", () => {
         expect(callArgs.systemPrompt).toContain("fn_task_document_write");
         expect(callArgs.tools).toBe("readonly");
         // Tools: fn_task_create, fn_task_log, fn_task_document_write, fn_task_document_read, fn_list_agents, fn_delegate_task,
-        // fn_memory_search, fn_memory_get, fn_memory_append, fn_identity, fn_heartbeat_done
-        expect(callArgs.customTools).toHaveLength(11);
+        // fn_memory_search, fn_memory_get, fn_memory_append, fn_heartbeat_done
+        expect(callArgs.customTools).toHaveLength(10);
         expect(callArgs.customTools![0]!.name).toBe("fn_task_create");
         expect(callArgs.customTools![1]!.name).toBe("fn_task_log");
         expect(callArgs.customTools![2]!.name).toBe("fn_task_document_write");
@@ -2897,10 +2897,8 @@ describe("HeartbeatMonitor", () => {
         expect(callArgs.customTools![6]!.name).toBe("fn_memory_search");
         expect(callArgs.customTools![7]!.name).toBe("fn_memory_get");
         expect(callArgs.customTools![8]!.name).toBe("fn_memory_append");
-        // fn_identity appears before fn_heartbeat_done
-        expect(callArgs.customTools![9]!.name).toBe("fn_identity");
         // fn_heartbeat_done is last (terminal tool)
-        expect(callArgs.customTools![10]!.name).toBe("fn_heartbeat_done");
+        expect(callArgs.customTools![9]!.name).toBe("fn_heartbeat_done");
       });
 
       it("includes memory instructions even when agent has no custom instructions", async () => {
@@ -6053,7 +6051,7 @@ describe("HeartbeatMonitor observability — prompt persistence + run-scoped log
     expect(savedRun.heartbeatProcedureSource).toBe("default");
 
     // The execution prompt should contain the procedure text before the no-task action menu
-    expect(savedRun.executionPrompt).toContain("fn_identity");
+    expect(savedRun.executionPrompt).toContain("Identity Snapshot");
     expect(savedRun.executionPrompt).toContain("Heartbeat Procedure");
     // The wake delta header should appear before the action menu items
     const procedureIdx = savedRun.executionPrompt!.indexOf("Heartbeat Procedure");
@@ -6114,34 +6112,26 @@ describe("HeartbeatMonitor observability — prompt persistence + run-scoped log
     expect(taskDescIdx).toBeGreaterThanOrEqual(0);
     expect(procedureIdx).toBeLessThan(taskDescIdx);
 
-    // fn_identity instruction should appear in the execution prompt
-    expect(savedRun.executionPrompt).toContain("fn_identity");
+    // Identity Snapshot should appear in the execution prompt
+    expect(savedRun.executionPrompt).toContain("## Identity Snapshot");
 
     expect(result.status).toBe("completed");
   });
 
-  it("fn_identity tool returns correct agent identity information", async () => {
+  it("does not register a fn_identity tool (removed in favor of inline snapshot)", async () => {
     const store = createStoreWithAgent({ soul: "I am a senior executor.", memory: "Always log blockers." });
-    let capturedIdentityTool: any;
+    let capturedTools: any[] | undefined;
     const mockSession = createMockAgentSession();
     mockedCreateFnAgent.mockImplementation(async (opts: any) => {
-      capturedIdentityTool = opts.customTools?.find((t: any) => t.name === "fn_identity");
+      capturedTools = opts.customTools;
       return { session: mockSession as any };
     });
 
     const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: "/tmp" });
     await monitor.executeHeartbeat({ agentId: "agent-001", source: "on_demand" });
 
-    expect(capturedIdentityTool).toBeDefined();
-    expect(capturedIdentityTool.name).toBe("fn_identity");
-
-    // Call the tool and verify output structure
-    const toolResult = await capturedIdentityTool.execute("call-1", {});
-    expect(toolResult.content[0].text).toContain("agentId: agent-001");
-    expect(toolResult.content[0].text).toContain("name: Test Agent");
-    expect(toolResult.details.soulPresent).toBe(true);
-    expect(toolResult.details.memoryPresent).toBe(true);
-    expect(toolResult.details.soulPreview).toContain("I am a senior executor.");
+    expect(capturedTools).toBeDefined();
+    expect(capturedTools!.find((t) => t.name === "fn_identity")).toBeUndefined();
   });
 
   it("inlines the Identity Snapshot block into the execution prompt for runtime-agnostic delivery", async () => {
@@ -6167,12 +6157,15 @@ describe("HeartbeatMonitor observability — prompt persistence + run-scoped log
 
     // Snapshot header + identity fields appear in the execution prompt body itself,
     // so non-pi runtimes (openclaw/hermes/paperclip) that may not propagate
-    // customTools still see the agent's identity every tick.
+    // customTools still see the agent's identity every tick. Snapshot carries
+    // presence flags + content hashes only — full content lives in the system
+    // prompt's Custom Instructions section.
     expect(exec).toContain("## Identity Snapshot");
     expect(exec).toContain("- agentId: agent-001");
-    expect(exec).toContain("- soul: loaded");
-    expect(exec).toContain("- memory: loaded");
-    expect(exec).toContain("I keep momentum across stalled tasks.");
+    expect(exec).toMatch(/- soul: loaded \(\d+ chars, sha256:[0-9a-f]{8}\)/);
+    expect(exec).toMatch(/- memory: loaded \(\d+ chars, sha256:[0-9a-f]{8}\)/);
+    // Snapshot must NOT contain full preview content (that lives in the system prompt)
+    expect(exec).not.toContain("I keep momentum across stalled tasks.");
 
     // Snapshot must precede the Wake Delta and the Heartbeat Procedure
     const snapIdx = exec.indexOf("## Identity Snapshot");

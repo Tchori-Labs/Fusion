@@ -249,6 +249,26 @@ describe("ModelOnboardingModal", () => {
       });
     });
 
+    it("hides deprecated google CLI and antigravity providers while keeping supported Google/Gemini entries", async () => {
+      mockFetchAuthStatus.mockResolvedValueOnce({
+        providers: [
+          { id: "google", name: "Google", authenticated: false, type: "api_key" },
+          { id: "gemini", name: "Gemini", authenticated: false, type: "api_key" },
+          { id: "google-antigravity", name: "Google Antigravity", authenticated: false, type: "oauth" },
+          { id: "antigravity", name: "Antigravity", authenticated: false, type: "oauth" },
+          { id: "google-gemini-cli", name: "Google Gemini CLI", authenticated: false, type: "cli" },
+        ],
+      });
+
+      render(<ModelOnboardingModal onComplete={vi.fn()} addToast={vi.fn()} projectId="proj_123" />);
+
+      expect(await screen.findByTestId("onboarding-provider-card-google")).toBeInTheDocument();
+      expect(screen.getByTestId("onboarding-provider-card-gemini")).toBeInTheDocument();
+      expect(screen.queryByTestId("onboarding-provider-card-google-antigravity")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("onboarding-provider-card-antigravity")).not.toBeInTheDocument();
+      expect(screen.queryByText("Google Gemini CLI")).not.toBeInTheDocument();
+    });
+
     it("shows Back and Next buttons on middle steps", async () => {
       mockFetchAuthStatus.mockResolvedValueOnce({
         providers: [

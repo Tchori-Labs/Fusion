@@ -26,6 +26,7 @@ import { DroidCliProviderCard } from "./DroidCliProviderCard";
 import { LoginInstructions } from "./LoginInstructions";
 import { CustomProviderForm } from "./CustomProviderForm";
 import { appendTokenQuery } from "../auth";
+import { filterVisibleOnboardingAndSettingsProviders } from "./providerVisibility";
 
 const mapLegacyCustomProviderToConfig = (
   provider: CustomProvider | CustomProviderConfig,
@@ -736,12 +737,13 @@ export function ModelOnboardingModal({
   const loadAuthStatus = useCallback(async () => {
     try {
       const { providers, ghCli } = await fetchAuthStatus();
-      setAuthProviders(providers);
+      const visibleProviders = filterVisibleOnboardingAndSettingsProviders(providers);
+      setAuthProviders(visibleProviders);
       setGhCliStatus(ghCli);
       setLoginInstructions((prev) => {
         const next: Record<string, string> = {};
         for (const [providerId, instructions] of Object.entries(prev)) {
-          const provider = providers.find((candidate) => candidate.id === providerId);
+          const provider = visibleProviders.find((candidate) => candidate.id === providerId);
           if (provider && !provider.authenticated && provider.loginInProgress) {
             next[providerId] = instructions;
           }
@@ -755,7 +757,7 @@ export function ModelOnboardingModal({
           if (outcome !== "pending") {
             continue;
           }
-          const provider = providers.find((candidate) => candidate.id === providerId);
+          const provider = visibleProviders.find((candidate) => candidate.id === providerId);
           if (!provider?.loginInProgress) {
             delete next[providerId];
             changed = true;
@@ -766,7 +768,7 @@ export function ModelOnboardingModal({
       // Remove from skippedProviders when a provider becomes authenticated
       setSkippedProviders((prev) => {
         const updated = { ...prev };
-        for (const p of providers) {
+        for (const p of visibleProviders) {
           if (p.authenticated && updated[p.id]) {
             delete updated[p.id];
           }
@@ -1129,9 +1131,10 @@ export function ModelOnboardingModal({
 
           try {
             const { providers, ghCli } = await fetchAuthStatus();
-            setAuthProviders(providers);
+            const visibleProviders = filterVisibleOnboardingAndSettingsProviders(providers);
+            setAuthProviders(visibleProviders);
             setGhCliStatus(ghCli);
-            const provider = providers.find((p) => p.id === providerId);
+            const provider = visibleProviders.find((p) => p.id === providerId);
             if (provider?.authenticated) {
               if (pollIntervalRef.current) {
                 clearInterval(pollIntervalRef.current);

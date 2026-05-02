@@ -280,7 +280,7 @@ for full precedence and reset/revocation options.
 
 On first launch, Fusion opens the **onboarding wizard** with three guided steps:
 
-1. **AI Setup** — Use a simplified quick-start provider list (recommended providers plus any already-connected providers), then expand **Advanced provider settings** only if you need additional providers or setup details. You only need one provider to get started.
+1. **AI Setup** — Use a simplified quick-start provider list (recommended providers plus any already-connected providers), then expand **Advanced provider settings** only if you need additional providers or setup details. You only need one provider to get started. Deprecated Google Gemini CLI / Antigravity provider entries are intentionally hidden; Google/Gemini API key, Google Generative AI, Vertex, and Cloud Code paths remain supported.
 2. **GitHub (Optional)** — Connect GitHub for issue import and PR management
 3. **First Task** — Create your first task or import from GitHub (if no project is active, onboarding first prompts you to register/select a project directory)
 
@@ -327,7 +327,7 @@ Fusion supports OAuth-based authentication for AI providers configured via **Set
 
 - **OpenAI Codex** — Authenticates via Settings OAuth flow with secure state validation
 - **Factory AI — via Droid CLI** *(optional)* — requires local `droid` install + `droid auth login`, then enable the provider in **Settings → Authentication** and restart Fusion
-- **Other providers** — Authenticate via API key entry in Settings
+- **Other providers** — Authenticate via API key entry in Settings (including Google/Gemini API key, Google Generative AI, Vertex, and Cloud Code aliases)
 - **pi authentication** — Handled separately via the `pi` CLI (`/login`) or `ANTHROPIC_API_KEY` environment variable
 
 ### Model system

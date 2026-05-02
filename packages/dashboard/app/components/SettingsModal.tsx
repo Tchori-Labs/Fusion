@@ -41,6 +41,7 @@ import { appendTokenQuery } from "../auth";
 import { useConfirm } from "../hooks/useConfirm";
 import { useNodes } from "../hooks/useNodes";
 import { NodeHealthDot } from "./NodeHealthDot";
+import { filterVisibleOnboardingAndSettingsProviders } from "./providerVisibility";
 
 // ---------------------------------------------------------------------------
 // GitHub star count — fetched once per session, cached in localStorage (1 h).
@@ -654,11 +655,12 @@ export function SettingsModal({
   const loadAuthStatus = useCallback(async () => {
     try {
       const { providers } = await fetchAuthStatus();
-      setAuthProviders(providers);
+      const visibleProviders = filterVisibleOnboardingAndSettingsProviders(providers);
+      setAuthProviders(visibleProviders);
       setLoginInstructions((prev) => {
         const next: Record<string, string> = {};
         for (const [providerId, instructions] of Object.entries(prev)) {
-          const provider = providers.find((candidate) => candidate.id === providerId);
+          const provider = visibleProviders.find((candidate) => candidate.id === providerId);
           if (provider && !provider.authenticated) {
             next[providerId] = instructions;
           }
@@ -910,8 +912,9 @@ export function SettingsModal({
       pollIntervalRef.current = setInterval(async () => {
         try {
           const { providers } = await fetchAuthStatus();
-          setAuthProviders(providers);
-          const provider = providers.find((p) => p.id === providerId);
+          const visibleProviders = filterVisibleOnboardingAndSettingsProviders(providers);
+          setAuthProviders(visibleProviders);
+          const provider = visibleProviders.find((p) => p.id === providerId);
           if (provider?.authenticated) {
             if (pollIntervalRef.current) {
               clearInterval(pollIntervalRef.current);

@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import type { CustomProviderConfig, CustomProviderModelInput } from "../api";
 import "./CustomProviderForm.css";
 
-// Keep in sync with BUILT_IN_PROVIDER_IDS in register-custom-provider-routes.ts
+// Reserved built-in IDs (including hidden/deprecated aliases) to prevent custom-provider collisions.
 export const BUILT_IN_PROVIDER_IDS = new Set<string>([
   "anthropic", "claude-cli", "pi-claude-cli", "openai", "openai-codex", "google", "gemini", "google-antigravity",
   "antigravity", "google-vertex", "vertex", "google-cloud-code", "cloud-code", "google-gemini-cli", "google-generative-ai",

@@ -659,12 +659,14 @@ const providerConfig: Record<
 
   google: { component: GeminiIcon, color: "var(--provider-gemini)" },
   gemini: { component: GeminiIcon, color: "var(--provider-gemini)" }, // Gemini alias family
+  // Deprecated upstream in pi-coding-agent 0.71+, retained for legacy usage/auth history rendering.
   "google-antigravity": { component: GeminiIcon, color: "var(--provider-gemini)", label: "Google Gemini" },
   antigravity: { component: GeminiIcon, color: "var(--provider-gemini)", label: "Google Gemini" },
   "google-vertex": { component: GeminiIcon, color: "var(--provider-gemini)", label: "Google Vertex AI" },
   vertex: { component: GeminiIcon, color: "var(--provider-gemini)", label: "Google Vertex AI" },
   "google-cloud-code": { component: GeminiIcon, color: "var(--provider-gemini)", label: "Google Cloud Code" },
   "cloud-code": { component: GeminiIcon, color: "var(--provider-gemini)", label: "Google Cloud Code" },
+  // Deprecated upstream in pi-coding-agent 0.71+, retained for legacy usage/auth history rendering.
   "google-gemini-cli": { component: GeminiIcon, color: "var(--provider-gemini)", label: "Google Gemini CLI" },
   "google-generative-ai": { component: GeminiIcon, color: "var(--provider-gemini)", label: "Google Generative AI" },
 
