@@ -648,11 +648,13 @@ Your ONLY job is to summarize what landed — using the branch's step commit sub
 export const MAX_COMMIT_SUBJECT_LENGTH = 60;
 
 /**
- * Default timeout for commit subject summarization, in milliseconds. Tighter
- * than the body timeout because the subject is short and we don't want it
- * meaningfully slowing down merges.
+ * Default timeout for commit subject summarization, in milliseconds. Generous
+ * enough that slow first-token providers still produce a real subject — the
+ * deterministic fallback (`merge <branch>`) is the user-visible regression we
+ * are trying to avoid, so favoring AI completion over latency is the right
+ * trade here.
  */
-export const DEFAULT_COMMIT_SUBJECT_TIMEOUT_MS = 15_000;
+export const DEFAULT_COMMIT_SUBJECT_TIMEOUT_MS = 30_000;
 
 /**
  * Summarize a `git diff --stat` (and optional commit log) into a short commit

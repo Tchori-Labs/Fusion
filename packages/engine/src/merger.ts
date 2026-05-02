@@ -1110,9 +1110,38 @@ async function generateAiMergeSubject(
 }
 
 /**
+ * Derive a non-AI subject summary from the branch's step commit log. The log
+ * is `- subj1\n- subj2\n…` (most recent first). We use the first subject with
+ * its conventional-commit prefix stripped (to avoid `feat: feat(...): …`),
+ * and tack on `(+N more)` when the branch has multiple step commits. This is
+ * the fallback used when `summarizeCommitSubject` returns null — it conveys
+ * what landed instead of the bare `merge <branch>` template.
+ */
+function deriveDeterministicSubjectSummary(commitLog: string): string | null {
+  const lines = commitLog
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0);
+  if (lines.length === 0) return null;
+
+  const stripBullet = (l: string) => l.replace(/^[-*]\s+/, "").trim();
+  const stripConventional = (l: string) =>
+    l.replace(/^[a-z]+(?:\([^)]+\))?!?:\s*/i, "").trim();
+
+  const first = stripConventional(stripBullet(lines[0]));
+  if (!first) return null;
+
+  const extras = lines.length - 1;
+  const summary = extras > 0 ? `${first} (+${extras} more)` : first;
+  return summary;
+}
+
+/**
  * Build the canonical merge commit message from the branch's step commits.
- * Subject is `feat[(taskId)]: <aiSubject>` when the AI subject summarizer
- * produced one, else falls back to `feat[(taskId)]: merge <branch>`.
+ * Subject preference order:
+ *   1. AI summarizer (`summarizeCommitSubject`) when it succeeded
+ *   2. First step commit subject (with conventional prefix stripped) + `(+N more)`
+ *   3. `merge <branch>` (last-resort, only when no step commits exist)
  */
 async function buildDeterministicMergeMessage(params: {
   taskId: string;
@@ -1125,7 +1154,13 @@ async function buildDeterministicMergeMessage(params: {
 }): Promise<{ subjectArg: string; bodyArg: string }> {
   const { taskId, branch, commitLog, diffStat, includeTaskId, aiSummary, aiSubject } = params;
   const prefix = includeTaskId ? `feat(${taskId})` : "feat";
-  const subjectSummary = aiSubject?.trim().length ? aiSubject.trim() : `merge ${branch}`;
+  const trimmedAiSubject = aiSubject?.trim() ?? "";
+  const derived = trimmedAiSubject.length === 0
+    ? deriveDeterministicSubjectSummary(commitLog ?? "")
+    : null;
+  const subjectSummary = trimmedAiSubject.length > 0
+    ? trimmedAiSubject
+    : (derived ?? `merge ${branch}`);
   const subject = `${prefix}: ${subjectSummary}`;
 
   const trimmedCommitLog = commitLog?.trim() ?? "";
@@ -4258,12 +4293,19 @@ async function executeMergeAttempt(
               settings: settings as Settings,
               signal: options.signal,
             });
-            const escapedLog = safeBody.replace(/"/g, '\\"');
-            const fallbackPrefix = includeTaskId ? `feat(${taskId})` : "feat";
             const authorArg = getCommitAuthorArg(settings);
             const trailerArg = buildTaskIdTrailerArg(taskId);
+            const { subjectArg, bodyArg } = await buildDeterministicMergeMessage({
+              taskId,
+              branch,
+              commitLog,
+              diffStat,
+              includeTaskId,
+              aiSummary: safeBody,
+              aiSubject,
+            });
             await execAsync(
-              `git commit -m "${fallbackPrefix}: merge ${branch}" -m "${escapedLog}"${trailerArg}${authorArg}`,
+              `git commit ${subjectArg} ${bodyArg}${trailerArg}${authorArg}`,
               { cwd: rootDir },
             );
             mergerLog.log(`${taskId}: committed after auto-resolving all conflicts`);
@@ -4391,6 +4433,8 @@ async function executeMergeAttempt(
       branch,
       commitLog,
       diffStat,
+      aiSummary,
+      aiSubject,
       includeTaskId,
       hasConflicts,
       simplifiedContext: attemptNum === 2,
@@ -4521,7 +4565,7 @@ async function attemptWithSideStrategy(
   side: "theirs" | "ours" = "theirs",
   aiTracker?: AiInvocationTracker,
 ): Promise<boolean> {
-  const { rootDir, branch, commitLog, diffStat, includeTaskId, sourceIssueRef, taskId, store, settings, testCommand, buildCommand, testSource, buildSource } = params;
+  const { rootDir, branch, commitLog, diffStat, aiSummary, aiSubject, includeTaskId, sourceIssueRef, taskId, store, settings, testCommand, buildCommand, testSource, buildSource } = params;
 
   mergerLog.log(`${taskId}: attempting merge with -X ${side} strategy`);
 
@@ -4583,13 +4627,20 @@ async function attemptWithSideStrategy(
       settings: settings as Settings,
       signal: params.options.signal,
     });
-    const escapedLog = safeBody.replace(/"/g, '\\"');
-    const fallbackPrefix = includeTaskId ? `feat(${taskId})` : "feat";
     const authorArg = getCommitAuthorArg(settings);
     const trailerArg = buildTaskIdTrailerArg(taskId);
     const issueRefBodyArg = sourceIssueRef ? ` -m "Ref: ${sourceIssueRef}"` : "";
+    const { subjectArg, bodyArg } = await buildDeterministicMergeMessage({
+      taskId,
+      branch,
+      commitLog,
+      diffStat,
+      includeTaskId,
+      aiSummary: aiSummary?.trim().length ? aiSummary : safeBody,
+      aiSubject,
+    });
     await execAsync(
-      `git commit -m "${fallbackPrefix}: merge ${branch} (auto-resolved)" -m "${escapedLog}"${issueRefBodyArg}${trailerArg}${authorArg}`,
+      `git commit ${subjectArg} ${bodyArg}${issueRefBodyArg}${trailerArg}${authorArg}`,
       { cwd: rootDir },
     );
     mergerLog.log(`${taskId}: committed with -X ${side} auto-resolution`);
@@ -4626,6 +4677,8 @@ interface AiAgentParams {
   branch: string;
   commitLog: string;
   diffStat: string;
+  aiSummary?: string | null;
+  aiSubject?: string | null;
   includeTaskId: boolean;
   hasConflicts: boolean;
   simplifiedContext: boolean;
@@ -4668,6 +4721,8 @@ async function runAiAgentForCommit(params: AiAgentParams): Promise<{ success: bo
     branch,
     commitLog,
     diffStat,
+    aiSummary,
+    aiSubject,
     includeTaskId,
     hasConflicts,
     simplifiedContext,
@@ -4912,13 +4967,20 @@ async function runAiAgentForCommit(params: AiAgentParams): Promise<{ success: bo
           settings: settings as Settings,
           signal: options.signal,
         });
-        const escapedLog = safeBody.replace(/"/g, '\\"');
-        const fallbackPrefix = includeTaskId ? `feat(${taskId})` : "feat";
         const authorArg = getCommitAuthorArg(settings);
         const trailerArg = buildTaskIdTrailerArg(taskId);
         const issueRefBodyArg = sourceIssueRef ? ` -m "Ref: ${sourceIssueRef}"` : "";
+        const { subjectArg, bodyArg } = await buildDeterministicMergeMessage({
+          taskId,
+          branch,
+          commitLog,
+          diffStat,
+          includeTaskId,
+          aiSummary: aiSummary?.trim().length ? aiSummary : safeBody,
+          aiSubject,
+        });
         await execAsync(
-          `git commit -m "${fallbackPrefix}: merge ${branch}" -m "${escapedLog}"${issueRefBodyArg}${trailerArg}${authorArg}`,
+          `git commit ${subjectArg} ${bodyArg}${issueRefBodyArg}${trailerArg}${authorArg}`,
           { cwd: rootDir },
         );
       } else {
