@@ -1,14 +1,9 @@
 import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import { resolve } from "node:path";
-import { cpus } from "node:os";
+import { computeMaxWorkers } from "../core/src/__test-utils__/vitest-workers";
 
-// Cap fan-out to 4 so high-core dev machines don't spawn 27+ workers per
-// package — that saturates the box when workspace packages test concurrently.
-const defaultMaxWorkers = Math.min(4, Math.max(1, cpus().length - 1));
-const requestedMaxWorkers = Number.parseInt(process.env.VITEST_MAX_WORKERS ?? String(defaultMaxWorkers), 10);
-const maxWorkers = Math.max(1, Number.isFinite(requestedMaxWorkers) ? requestedMaxWorkers : defaultMaxWorkers);
-process.env.VITEST_MAX_WORKERS = String(maxWorkers);
+const maxWorkers = computeMaxWorkers({ defaultCap: 1 });
 
 export default defineConfig({
   plugins: [react()],
@@ -33,9 +28,11 @@ export default defineConfig({
       "./vitest.setup.ts",
     ],
     globalSetup: [resolve(__dirname, "../core/src/__test-utils__/vitest-teardown.ts")],
-    pool: "forks",
+    // Threads share a V8 heap so they're much lighter than forks for jsdom +
+    // React suites; forks duplicated the entire renderer per worker (~500MB).
+    pool: "threads",
     maxWorkers,
-    poolOptions: { forks: { minForks: 1, maxForks: maxWorkers } },
+    poolOptions: { threads: { minThreads: 1, maxThreads: maxWorkers } },
     fileParallelism: true,
     isolate: true,
     // Dashboard route and integration-heavy suites can exceed the Vitest

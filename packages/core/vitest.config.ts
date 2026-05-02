@@ -1,14 +1,8 @@
 import { defineConfig } from "vitest/config";
 import { resolve } from "node:path";
-import { cpus } from "node:os";
+import { computeMaxWorkers } from "./src/__test-utils__/vitest-workers";
 
-// Keep worker fan-out conservative by default. Over-subscribing threads can
-// starve Vitest's worker RPC channel and trigger flaky "onTaskUpdate" timeouts
-// under heavy SQLite test load.
-const defaultMaxWorkers = Math.min(4, Math.max(1, cpus().length - 1));
-const requestedMaxWorkers = Number.parseInt(process.env.VITEST_MAX_WORKERS ?? String(defaultMaxWorkers), 10);
-const maxWorkers = Math.max(1, Number.isFinite(requestedMaxWorkers) ? requestedMaxWorkers : defaultMaxWorkers);
-process.env.VITEST_MAX_WORKERS = String(maxWorkers);
+const maxWorkers = computeMaxWorkers();
 
 export default defineConfig({
   resolve: {

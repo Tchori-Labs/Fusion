@@ -1,9 +1,8 @@
 import { defineConfig } from "vitest/config";
 import { fileURLToPath } from "node:url";
+import { computeMaxWorkers } from "../../packages/core/src/__test-utils__/vitest-workers";
 
-const requestedMaxWorkers = Number.parseInt(process.env.VITEST_MAX_WORKERS ?? "2", 10);
-const maxWorkers = Math.max(1, Math.min(4, Number.isFinite(requestedMaxWorkers) ? requestedMaxWorkers : 2));
-process.env.VITEST_MAX_WORKERS = String(maxWorkers);
+const maxWorkers = computeMaxWorkers();
 
 export default defineConfig({
   resolve: {
