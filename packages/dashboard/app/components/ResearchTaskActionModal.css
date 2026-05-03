@@ -1,0 +1,37 @@
+.research-task-action-modal__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.research-task-action-modal__preview {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  padding: var(--space-md);
+}
+
+.research-task-action-modal__preview p {
+  margin: 0;
+}
+
+.research-task-action-modal__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.research-task-action-modal__textarea {
+  min-height: calc(var(--space-2xl) * 2);
+  resize: vertical;
+}
+
+@media (max-width: 768px) {
+  .research-task-action-modal {
+    width: min(100%, calc(100vw - (var(--space-md) * 2)));
+  }
+}

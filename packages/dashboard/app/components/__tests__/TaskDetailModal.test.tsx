@@ -203,6 +203,47 @@ describe("TaskDetailModal", () => {
       expect(screen.getByText("Created via GitHub Import (https://github.com/owner/repo/issues/42)")).toBeInTheDocument();
     });
 
+    it("renders finding label for research provenance", () => {
+      render(
+        <TaskDetailModal
+          task={makeTask({
+            sourceType: "research",
+            sourceMetadata: {
+              runId: "RR-123",
+              findingLabel: "Pricing pressure in EU segment",
+            },
+          })}
+          onClose={noop}
+          onMoveTask={noopMove}
+          onDeleteTask={noopDelete}
+          onMergeTask={noopMerge}
+          onOpenDetail={noopOpenDetail}
+          addToast={noop}
+        />,
+      );
+
+      expect(screen.getByText("Created via Research (Pricing pressure in EU segment)")).toBeInTheDocument();
+    });
+
+    it("falls back to run id for research provenance context", () => {
+      render(
+        <TaskDetailModal
+          task={makeTask({
+            sourceType: "research",
+            sourceMetadata: { runId: "RR-456" },
+          })}
+          onClose={noop}
+          onMoveTask={noopMove}
+          onDeleteTask={noopDelete}
+          onMergeTask={noopMerge}
+          onOpenDetail={noopOpenDetail}
+          addToast={noop}
+        />,
+      );
+
+      expect(screen.getByText("Created via Research (RR-456)")).toBeInTheDocument();
+    });
+
     it.each(["unknown", undefined] as const)("omits provenance for %s source", (sourceType) => {
       render(
         <TaskDetailModal

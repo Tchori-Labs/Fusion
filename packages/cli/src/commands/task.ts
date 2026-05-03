@@ -24,6 +24,18 @@ function getGitHubIssueUrl(sourceMetadata: unknown): string | undefined {
   return typeof issueUrl === "string" && issueUrl.length > 0 ? issueUrl : undefined;
 }
 
+function getResearchSourceContext(sourceMetadata: unknown): string | undefined {
+  if (!sourceMetadata || typeof sourceMetadata !== "object") return undefined;
+
+  const findingLabel = (sourceMetadata as { findingLabel?: unknown }).findingLabel;
+  if (typeof findingLabel === "string" && findingLabel.length > 0) {
+    return findingLabel;
+  }
+
+  const runId = (sourceMetadata as { runId?: unknown }).runId;
+  return typeof runId === "string" && runId.length > 0 ? runId : undefined;
+}
+
 function formatTaskSource(task: {
   sourceType?: string;
   sourceAgentId?: string;
@@ -48,6 +60,10 @@ function formatTaskSource(task: {
     case "github_import": {
       const issueUrl = getGitHubIssueUrl(task.sourceMetadata);
       return issueUrl ? `GitHub Import (${issueUrl})` : "GitHub Import";
+    }
+    case "research": {
+      const context = getResearchSourceContext(task.sourceMetadata);
+      return context ? `Research (${context})` : "Research";
     }
     case "task_refine":
       return task.sourceParentTaskId

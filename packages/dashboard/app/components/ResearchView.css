@@ -5,7 +5,7 @@
   height: 100%;
   min-height: 0;
   padding: var(--space-lg);
-  padding-bottom: calc(var(--space-lg) + var(--mobile-nav-height) + env(safe-area-inset-bottom, 0px) + var(--standalone-bottom-gap));
+  padding-bottom: var(--space-lg);
 }
 
 .research-view__header {
@@ -77,10 +77,17 @@
   gap: var(--space-xs);
 }
 
+.research-view__history-search-row .input {
+  flex: 1;
+  min-width: 0;
+}
+
 .research-view__history {
   display: flex;
   flex-direction: column;
   gap: var(--space-xs);
+  flex: 1;
+  min-height: 0;
   overflow: auto;
 }
 
@@ -173,6 +180,10 @@
 .research-view__finding h4,
 .research-view__finding p {
   margin: 0;
+}
+
+.research-view__finding-actions {
+  margin-top: var(--space-sm);
 }
 
 .research-view__events {

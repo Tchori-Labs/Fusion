@@ -741,6 +741,17 @@ export function validateDocumentKey(key: string): void {
   }
 }
 
+/** Build canonical research enrichment document key from a run id. */
+export function buildResearchDocumentKey(runId: string): string {
+  const sanitizedRunId = runId.replace(/[^A-Za-z0-9_-]/g, "");
+  if (!sanitizedRunId) {
+    throw new Error("Invalid research run id: sanitized run id is empty");
+  }
+  const key = `research-${sanitizedRunId}`;
+  validateDocumentKey(key);
+  return key;
+}
+
 export interface MergeDetails {
   commitSha?: string;
   filesChanged?: number;
@@ -813,6 +824,7 @@ export type SourceType =
   | "cli"
   | "api"
   | "recovery"
+  | "research"
   | "unknown";
 
 /** Provenance metadata for how a task was created. */

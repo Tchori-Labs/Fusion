@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { Header } from "../Header";
 import { ResearchView } from "../ResearchView";
 
@@ -21,11 +21,13 @@ const configuredResearchSettings = {
 
 const mockFetchSettings = vi.fn().mockResolvedValue(configuredResearchSettings);
 const mockFetchAuthStatus = vi.fn().mockResolvedValue({ providers: [{ id: "openrouter", type: "api_key", authenticated: false }] });
+const mockFetchTasks = vi.fn().mockResolvedValue([{ id: "FN-1", title: "Existing task", column: "todo" }]);
 
 vi.mock("../../api", () => ({
   fetchScripts: vi.fn().mockResolvedValue({}),
   fetchSettings: (...args: unknown[]) => mockFetchSettings(...args),
   fetchAuthStatus: (...args: unknown[]) => mockFetchAuthStatus(...args),
+  fetchTasks: (...args: unknown[]) => mockFetchTasks(...args),
 }));
 
 vi.mock("lucide-react", async (importOriginal) => {
@@ -142,7 +144,14 @@ describe("ResearchView", () => {
     mockUseResearch.mockReturnValue({
       ...baseHookValue,
       runs: [{ id: "RR-1", title: "t", query: "q", status: "pending" }],
-      selectedRun: { id: "RR-1", title: "t", query: "q", status: "pending", events: [{ id: "E-1", message: "queued" }], results: { summary: "Summary", findings: [], citations: [] } },
+      selectedRun: {
+        id: "RR-1",
+        title: "t",
+        query: "q",
+        status: "pending",
+        events: [{ id: "E-1", message: "queued" }],
+        results: { summary: "Summary", findings: [{ id: "finding-1", heading: "Finding", content: "Impact." }], citations: [] },
+      },
       selectedRunId: "RR-1",
       cancelRun,
       retryRun,
@@ -157,16 +166,16 @@ describe("ResearchView", () => {
 
     fireEvent.click(screen.getByText("Cancel"));
     fireEvent.click(screen.getByText("Retry"));
-    fireEvent.click(screen.getByText("Create Task"));
-    fireEvent.change(screen.getByPlaceholderText("Task ID"), { target: { value: "FN-1" } });
-    fireEvent.click(screen.getByText("Attach to Task"));
     fireEvent.click(screen.getByText("Export MD"));
+
+    fireEvent.click(screen.getAllByText("Create Task")[0]);
+    const createDialog = await screen.findByRole("dialog");
+    fireEvent.click(within(createDialog).getByRole("button", { name: "Create Task" }));
 
     await waitFor(() => {
       expect(cancelRun).toHaveBeenCalled();
       expect(retryRun).toHaveBeenCalled();
       expect(createTaskFromRun).toHaveBeenCalled();
-      expect(attachRunToTask).toHaveBeenCalled();
       expect(exportRun).toHaveBeenCalled();
     });
   });

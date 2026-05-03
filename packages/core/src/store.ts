@@ -4406,6 +4406,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     "image/gif",
     "image/webp",
     "text/plain",
+    "text/markdown",
     "application/json",
     "text/yaml",
     "text/x-toml",

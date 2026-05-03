@@ -63,6 +63,15 @@ fn task plan "Implement role-based access control"
 fn task create "Bug" --attach screenshot.png --depends FN-002
 ```
 
+### 7) Create/Enrich from Research findings
+
+From the standalone **Research** view, each finding supports two task actions:
+
+- **Create Task** — creates a new task with `sourceType: "research"`
+- **Enrich Task** — appends/updates research content on an existing task
+
+Research actions persist detailed output in task documents (and optional attachments), not in long task descriptions.
+
 ## Task Lifecycle
 
 Fusion task columns:
@@ -151,6 +160,20 @@ Example API payload:
   "executionMode": "fast"
 }
 ```
+
+## Task provenance and research enrichment
+
+Research-created tasks show provenance as **Created via Research** in the task detail header and `Source: Research` in `fn task show` output.
+
+When `sourceMetadata.findingLabel` is present, the UI/CLI include it as context; otherwise they fall back to `runId` when available.
+
+Research enrichment uses a canonical per-run document key:
+
+- `research-{sanitizedRunId}`
+
+Repeated enrichment from the same run writes new revisions to that same key (no sibling keys for the same run). Optional exported artifacts can also be attached to the task; duplicate attachment records are skipped unless an explicit replacement path is used.
+
+Research document content appears in the existing **Documents** tab in Task Detail. Optional artifacts appear in existing task attachments.
 
 ## Task Detail Modal (Dashboard)
 

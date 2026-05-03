@@ -8128,28 +8128,40 @@ export function exportResearchRun(
 
 export function createTaskFromResearchRun(
   id: string,
-  input: { title?: string; includeSummary?: boolean; includeCitations?: boolean },
+  input: { findingId?: string; title?: string; description?: string; priority?: "low" | "normal" | "high" | "urgent"; attachExport?: boolean },
   projectId?: string,
-): Promise<{ task: { id: string; title: string } }> {
-  return api<{ task: { id: string; title: string } }>(
-    withProjectId(`/research/runs/${encodeURIComponent(id)}/create-task`, projectId),
+): Promise<{ task: Task; documentKey: string; attachmentFilename?: string }> {
+  const findingId = input.findingId ?? "finding-1";
+  return api<{ task: Task; documentKey: string; attachmentFilename?: string }>(
+    withProjectId(`/research/runs/${encodeURIComponent(id)}/findings/${encodeURIComponent(findingId)}/task`, projectId),
     {
       method: "POST",
-      body: JSON.stringify(input),
+      body: JSON.stringify({
+        title: input.title,
+        description: input.description,
+        priority: input.priority,
+        attachExport: input.attachExport,
+      }),
     },
   );
 }
 
 export function attachResearchRunToTask(
   id: string,
-  input: { taskId: string; mode: "document" | "attachment"; includeSummary?: boolean; includeCitations?: boolean },
+  input: { findingId?: string; taskId: string; attachExport?: boolean },
   projectId?: string,
-): Promise<{ task: { id: string }; documentKey?: string; attachmentName?: string }> {
-  return api<{ task: { id: string }; documentKey?: string; attachmentName?: string }>(
-    withProjectId(`/research/runs/${encodeURIComponent(id)}/attach-task`, projectId),
+): Promise<{ taskId: string; documentKey: string; revision: number; attachmentFilename?: string }> {
+  const findingId = input.findingId ?? "finding-1";
+  return api<{ taskId: string; documentKey: string; revision: number; attachmentFilename?: string }>(
+    withProjectId(
+      `/research/runs/${encodeURIComponent(id)}/findings/${encodeURIComponent(findingId)}/tasks/${encodeURIComponent(input.taskId)}/enrich`,
+      projectId,
+    ),
     {
       method: "POST",
-      body: JSON.stringify(input),
+      body: JSON.stringify({
+        attachExport: input.attachExport,
+      }),
     },
   );
 }

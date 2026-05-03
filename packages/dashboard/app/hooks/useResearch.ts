@@ -148,9 +148,16 @@ export function useResearch(options?: { projectId?: string }) {
       return response;
     },
     exportRun: (runId: string, format: "markdown" | "json" | "html") => exportResearchRun(runId, format, projectId),
-    createTaskFromRun: (runId: string, title?: string) => createTaskFromResearchRun(runId, { title }, projectId),
-    attachRunToTask: (runId: string, taskId: string, mode: "document" | "attachment") =>
-      attachResearchRunToTask(runId, { taskId, mode }, projectId),
+    createTaskFromRun: (
+      runId: string,
+      title?: string,
+      findingId?: string,
+      description?: string,
+      priority?: "low" | "normal" | "high" | "urgent",
+      attachExport?: boolean,
+    ) => createTaskFromResearchRun(runId, { title, findingId, description, priority, attachExport }, projectId),
+    attachRunToTask: (runId: string, taskId: string, findingId?: string, attachExport?: boolean) =>
+      attachResearchRunToTask(runId, { taskId, findingId, attachExport }, projectId),
     statusCounts: runs.reduce<Record<ResearchRunStatus, number>>(
       (acc, run) => {
         acc[run.status] += 1;

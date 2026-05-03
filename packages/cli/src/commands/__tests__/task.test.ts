@@ -173,6 +173,11 @@ describe("runTaskShow", () => {
       { sourceType: "github_import", sourceMetadata: { issueUrl: "https://github.com/owner/repo/issues/42" } },
       "Source: GitHub Import (https://github.com/owner/repo/issues/42)",
     ],
+    [
+      { sourceType: "research", sourceMetadata: { runId: "RR-001", findingLabel: "Latency hotspot" } },
+      "Source: Research (Latency hotspot)",
+    ],
+    [{ sourceType: "research", sourceMetadata: { runId: "RR-002" } }, "Source: Research (RR-002)"],
   ] as const)("prints provenance line for %o", async (overrides, expectedLine) => {
     mockTaskStoreGetTask(makeTask(overrides));
 

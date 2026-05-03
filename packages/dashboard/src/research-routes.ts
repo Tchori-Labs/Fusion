@@ -7,6 +7,7 @@ import {
   RESEARCH_SOURCE_TYPES,
   RESEARCH_SOURCE_STATUSES,
   RESEARCH_EVENT_TYPES,
+  buildResearchDocumentKey,
   type ResearchRunListOptions,
   type ResearchRunStatus,
 } from "@fusion/core";
@@ -17,17 +18,6 @@ const DEFAULT_AVAILABILITY = {
   supportedProviders: ["web-search", "page-fetch", "github", "local-docs", "llm-synthesis"],
   supportedExportFormats: ["markdown", "json", "html"],
 } as const;
-
-function unavailableResponse(reason: string, code: "unavailable" | "not-configured" | "feature-disabled" = "unavailable") {
-  return {
-    availability: {
-      available: false,
-      code,
-      reason,
-      setupInstructions: "Enable the research subsystem and provider integrations to use this endpoint.",
-    },
-  };
-}
 
 function rethrowAsApiError(error: unknown, fallback = "Internal server error"): never {
   if (error instanceof ApiError) throw error;
@@ -58,6 +48,79 @@ function toRunDetail(run: ResearchRun) {
     ...run,
     title: run.topic || run.query,
   };
+}
+
+function getFindingId(finding: NonNullable<ResearchRun["results"]>["findings"][number], index: number): string {
+  const maybeFinding = finding as { id?: unknown };
+  const explicitId = typeof maybeFinding.id === "string" ? maybeFinding.id.trim() : "";
+  return explicitId || `finding-${index + 1}`;
+}
+
+function getFindingById(run: ResearchRun, findingId: string) {
+  const findings = run.results?.findings ?? [];
+  for (const [index, finding] of findings.entries()) {
+    if (getFindingId(finding, index) === findingId) {
+      return { finding, findingId };
+    }
+  }
+  return null;
+}
+
+function buildFindingTaskSummary(run: ResearchRun, finding: NonNullable<ResearchRun["results"]>["findings"][number]): string {
+  const heading = finding.heading?.trim() || "Research finding";
+  const content = finding.content?.trim() || "";
+  const firstSentence = content.split(/(?<=[.!?])\s+/)[0]?.trim() || content;
+  const scope = run.topic || run.query;
+  return `${heading} — ${firstSentence || "Review cited research details."}\n\nContext: ${scope}`;
+}
+
+function buildFindingMarkdown(run: ResearchRun, findingId: string, finding: NonNullable<ResearchRun["results"]>["findings"][number]): string {
+  const citations = (finding.sources ?? []).map((source) => `- ${source}`).join("\n");
+  const runSummary = run.results?.summary?.trim();
+  return [
+    `# Research Finding`,
+    ``,
+    `- Run ID: ${run.id}`,
+    `- Finding ID: ${findingId}`,
+    `- Query: ${run.query}`,
+    ``,
+    `## ${finding.heading || "Finding"}`,
+    finding.content || "",
+    runSummary ? `\n## Run Summary\n${runSummary}` : "",
+    citations ? `\n## Citations\n${citations}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function validateAttachExport(value: unknown): boolean {
+  if (value === undefined) return false;
+  if (typeof value !== "boolean") {
+    throw badRequest("attachExport must be a boolean");
+  }
+  return value;
+}
+
+function isAttachmentValidationError(error: unknown): error is Error {
+  return error instanceof Error
+    && (error.message.startsWith("Invalid mime type") || error.message.startsWith("File too large"));
+}
+
+async function addFindingAttachment(
+  scopedStore: TaskStore,
+  taskId: string,
+  filename: string,
+  markdown: string,
+): Promise<string> {
+  try {
+    const attachment = await scopedStore.addAttachment(taskId, filename, Buffer.from(markdown, "utf8"), "text/markdown");
+    return attachment.filename;
+  } catch (error) {
+    if (isAttachmentValidationError(error)) {
+      throw badRequest(error.message);
+    }
+    throw error;
+  }
 }
 
 export function createResearchRouter(store: TaskStore): Router {
@@ -184,58 +247,153 @@ export function createResearchRouter(store: TaskStore): Router {
     }
   });
 
-  router.post("/runs/:id/create-task", async (req, res) => {
+  router.post("/runs/:runId/findings/:findingId/task", async (req, res) => {
     try {
-      const run = getStore().getRun(req.params.id);
-      if (!run) throw notFound(`Run not found: ${req.params.id}`);
-      const includeSummary = req.body?.includeSummary !== false;
-      const includeCitations = req.body?.includeCitations !== false;
-      const summary = includeSummary ? run.results?.summary ?? "" : "";
-      const citations = includeCitations ? (run.results?.citations ?? []).map((c) => `- ${c}`).join("\n") : "";
-      const description = [summary, citations].filter(Boolean).join("\n\n");
+      const scopedStore = requestContext.getStore();
+      if (!scopedStore) throw new ApiError(500, "Task store context unavailable");
+
+      const run = getStore().getRun(req.params.runId);
+      if (!run) throw notFound(`Run not found: ${req.params.runId}`);
+      const found = getFindingById(run, req.params.findingId);
+      if (!found) throw notFound(`Finding not found: ${req.params.findingId}`);
+
+      let documentKey: string;
+      try {
+        documentKey = buildResearchDocumentKey(req.params.runId);
+      } catch {
+        throw badRequest("Invalid run id for research document key");
+      }
+
+      const title = typeof req.body?.title === "string" && req.body.title.trim()
+        ? req.body.title.trim()
+        : `Research: ${found.finding.heading || run.topic || run.query}`;
+      const description = typeof req.body?.description === "string" && req.body.description.trim()
+        ? req.body.description.trim()
+        : buildFindingTaskSummary(run, found.finding);
+      const priority = req.body?.priority;
+      if (priority !== undefined && !["low", "normal", "high", "urgent"].includes(priority)) {
+        throw badRequest("priority must be one of: low, normal, high, urgent");
+      }
+      const attachExport = validateAttachExport(req.body?.attachExport);
+
       const taskInput: TaskCreateInput = {
-        title: req.body?.title || `Research: ${run.topic || run.query}`,
+        title,
         description,
+        priority,
+        source: {
+          sourceType: "research",
+          sourceRunId: run.id,
+          sourceMetadata: {
+            runId: run.id,
+            findingId: found.findingId,
+            findingLabel: found.finding.heading,
+            documentKey,
+          },
+        },
       };
-      const task = await requestContext.getStore()!.createTask(taskInput);
-      res.json({ task: { id: task.id, title: task.title } });
+
+      const task = await scopedStore.createTask(taskInput);
+      const markdown = buildFindingMarkdown(run, found.findingId, found.finding);
+      await scopedStore.upsertTaskDocument(task.id, {
+        key: documentKey,
+        content: markdown,
+        author: "research",
+        metadata: {
+          runId: run.id,
+          findingId: found.findingId,
+          findingLabel: found.finding.heading,
+        },
+      });
+      if (typeof scopedStore.appendAgentLog === "function") {
+        await scopedStore.appendAgentLog(
+          task.id,
+          `Task created from research finding ${found.findingId} in run ${run.id}`,
+          "text",
+          "research-task-integration",
+          "executor",
+        );
+      }
+
+      let attachmentFilename: string | undefined;
+      if (attachExport) {
+        const filename = `${run.id}-${found.findingId}.md`;
+        const existing = await scopedStore.getTask(task.id);
+        if (!existing.attachments?.some((attachment) => attachment.originalName === filename)) {
+          attachmentFilename = await addFindingAttachment(scopedStore, task.id, filename, markdown);
+        }
+      }
+
+      const responseTask = await scopedStore.getTask(task.id);
+      res.status(201).json({ task: responseTask, documentKey, attachmentFilename });
     } catch (error) {
-      rethrowAsApiError(error, "Failed to create task from research run");
+      if (error instanceof ApiError) {
+        res.status(error.statusCode).json({ error: error.message });
+        return;
+      }
+      const message = error instanceof Error ? error.message : "Failed to create task from research finding";
+      res.status(500).json({ error: message });
     }
   });
 
-  router.post("/runs/:id/attach-task", async (req, res) => {
+  router.post("/runs/:runId/findings/:findingId/tasks/:taskId/enrich", async (req, res) => {
     try {
       const scopedStore = requestContext.getStore();
-      if (!scopedStore) {
-        res.status(501).json(unavailableResponse("Task store context unavailable"));
-        return;
+      if (!scopedStore) throw new ApiError(500, "Task store context unavailable");
+
+      const run = getStore().getRun(req.params.runId);
+      if (!run) throw notFound(`Run not found: ${req.params.runId}`);
+      const found = getFindingById(run, req.params.findingId);
+      if (!found) throw notFound(`Finding not found: ${req.params.findingId}`);
+
+      const task = await scopedStore.getTask(req.params.taskId);
+      if (!task) throw notFound(`Task not found: ${req.params.taskId}`);
+      if (task.column === "archived") throw new ApiError(409, "Cannot enrich archived task");
+
+      let documentKey: string;
+      try {
+        documentKey = buildResearchDocumentKey(req.params.runId);
+      } catch {
+        throw badRequest("Invalid run id for research document key");
       }
 
-      const run = getStore().getRun(req.params.id);
-      if (!run) throw notFound(`Run not found: ${req.params.id}`);
-      const taskId = String(req.body?.taskId ?? "").trim();
-      const mode = req.body?.mode;
-      if (!taskId) throw badRequest("taskId is required");
-      if (mode !== "document" && mode !== "attachment") throw badRequest("mode must be 'document' or 'attachment'");
+      const markdown = buildFindingMarkdown(run, found.findingId, found.finding);
+      const document = await scopedStore.upsertTaskDocument(task.id, {
+        key: documentKey,
+        content: markdown,
+        author: "research",
+        metadata: {
+          runId: run.id,
+          findingId: found.findingId,
+          findingLabel: found.finding.heading,
+        },
+      });
 
-      const markdown = `# Research Findings\n\n## Query\n${run.query}\n\n## Summary\n${run.results?.summary ?? ""}\n\n## Citations\n${(run.results?.citations ?? []).map((c) => `- ${c}`).join("\n")}`;
-
-      if (mode === "document") {
-        const document = await scopedStore.upsertTaskDocument(taskId, { key: `research-${run.id.toLowerCase()}`, content: markdown });
-        res.json({ task: { id: taskId }, documentKey: document.key });
-        return;
+      const attachExport = validateAttachExport(req.body?.attachExport);
+      let attachmentFilename: string | undefined;
+      if (attachExport) {
+        const filename = `${run.id}-${found.findingId}.md`;
+        if (!task.attachments?.some((attachment) => attachment.originalName === filename)) {
+          attachmentFilename = await addFindingAttachment(scopedStore, task.id, filename, markdown);
+        }
       }
 
-      const attachment = await scopedStore.addAttachment(
-        taskId,
-        `${run.id}.txt`,
-        Buffer.from(markdown, "utf8"),
-        "text/plain",
-      );
-      res.json({ task: { id: taskId }, attachmentName: attachment.filename });
+      if (typeof scopedStore.appendAgentLog === "function") {
+        await scopedStore.appendAgentLog(
+          task.id,
+          `Task enriched from research finding ${found.findingId} in run ${run.id}`,
+          "text",
+          "research-task-integration",
+          "executor",
+        );
+      }
+      res.json({ taskId: task.id, documentKey, revision: document.revision, attachmentFilename });
     } catch (error) {
-      rethrowAsApiError(error, "Failed to attach research findings to task");
+      if (error instanceof ApiError) {
+        res.status(error.statusCode).json({ error: error.message });
+        return;
+      }
+      const message = error instanceof Error ? error.message : "Failed to enrich task from research finding";
+      res.status(500).json({ error: message });
     }
   });
 

@@ -239,6 +239,16 @@ function getIssueUrlFromMetadata(metadata: Task["sourceMetadata"]): string | und
   return typeof issueUrl === "string" && issueUrl.length > 0 ? issueUrl : undefined;
 }
 
+function getResearchContextInfo(metadata: Task["sourceMetadata"]): string | undefined {
+  const findingLabel = metadata?.findingLabel;
+  if (typeof findingLabel === "string" && findingLabel.length > 0) {
+    return findingLabel;
+  }
+
+  const runId = metadata?.runId;
+  return typeof runId === "string" && runId.length > 0 ? runId : undefined;
+}
+
 const AgentDetailView = lazy(() => import("./AgentDetailView").then((m) => ({ default: m.AgentDetailView })));
 
 function getProvenanceLabel(task: Task | TaskDetail, options: ProvenanceLabelOptions = {}): ProvenanceDisplay | null {
@@ -267,6 +277,13 @@ function getProvenanceLabel(task: Task | TaskDetail, options: ProvenanceLabelOpt
       return {
         label: "GitHub Import",
         contextInfo: issueUrl,
+      };
+    }
+    case "research": {
+      const contextInfo = getResearchContextInfo(task.sourceMetadata);
+      return {
+        label: "Research",
+        contextInfo,
       };
     }
     case "task_refine":

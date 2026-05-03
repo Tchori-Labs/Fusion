@@ -30,7 +30,7 @@ import { join } from "node:path";
 import { mkdtempSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import * as projectMemory from "../project-memory.js";
-import type { Task } from "../types.js";
+import { buildResearchDocumentKey, type Task } from "../types.js";
 
 function makeTmpDir(): string {
   return mkdtempSync(join(tmpdir(), "kb-store-test-"));
@@ -7401,6 +7401,41 @@ Task with acceptance criteria
       expect(fetched.sourceType).toBe("automation");
       expect(fetched.sourceAgentId).toBe("agent-auto");
       expect(fetched.sourceMetadata).toEqual({ trigger: "nightly" });
+    });
+
+    it("persists research provenance metadata", async () => {
+      const task = await store.createTask({
+        description: "Research finding follow-up",
+        source: {
+          sourceType: "research",
+          sourceMetadata: {
+            runId: "RR-42",
+            findingId: "finding-1",
+            findingLabel: "Key risk",
+            documentKey: "research-RR-42",
+          },
+        },
+      });
+
+      const fetched = await store.getTask(task.id);
+      expect(fetched.sourceType).toBe("research");
+      expect(fetched.sourceMetadata).toEqual({
+        runId: "RR-42",
+        findingId: "finding-1",
+        findingLabel: "Key risk",
+        documentKey: "research-RR-42",
+      });
+    });
+  });
+
+  describe("research document key helper", () => {
+    it("builds canonical research document keys", () => {
+      expect(buildResearchDocumentKey("RR-1")).toBe("research-RR-1");
+      expect(buildResearchDocumentKey("RR/1")).toBe("research-RR1");
+    });
+
+    it("rejects run IDs that sanitize to an empty string", () => {
+      expect(() => buildResearchDocumentKey("!!!")).toThrow("Invalid research run id");
     });
   });
 

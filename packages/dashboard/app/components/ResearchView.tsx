@@ -4,6 +4,7 @@ import { Loader2, Search } from "lucide-react";
 import { fetchAuthStatus, fetchSettings } from "../api";
 import { useResearch } from "../hooks/useResearch";
 import type { ResearchProviderOption } from "../research-types";
+import { ResearchTaskActionModal } from "./ResearchTaskActionModal";
 import type { SectionId } from "./SettingsModal";
 import "./ResearchView.css";
 
@@ -57,8 +58,8 @@ export function ResearchView({ projectId, addToast, onOpenSettings, readinessVer
   const [authProviders, setAuthProviders] = useState<Array<{ id: string; authenticated: boolean }>>([]);
   const [submitting, setSubmitting] = useState(false);
   const [selectedProviders, setSelectedProviders] = useState<ResearchProviderOption[]>([]);
-  const [taskIdToAttach, setTaskIdToAttach] = useState("");
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [modalState, setModalState] = useState<null | { mode: "create" | "enrich"; findingId: string }>(null);
 
   const providerOptions = availability.supportedProviders ?? DEFAULT_PROVIDERS;
   const isProviderEnabled = (provider: ResearchProviderOption) => effectiveSettings.enabledSources[PROVIDER_TO_SOURCE_KEY[provider]];
@@ -339,33 +340,35 @@ export function ResearchView({ projectId, addToast, onOpenSettings, readinessVer
                 {supportedExportFormats.includes("json") && <button className="btn" type="button" disabled={actionLoading === "export-json"} onClick={() => void handleExport("json")}>Export JSON</button>}
                 {supportedExportFormats.includes("html") && <button className="btn" type="button" disabled={actionLoading === "export-html"} onClick={() => void handleExport("html")}>Export HTML</button>}
               </div>
-              <div className="research-view__actions">
-                <button className="btn btn-primary" type="button" disabled={actionLoading === "create-task"} onClick={() => void runAction("create-task", () => createTaskFromRun(selectedRun.id, `Research: ${selectedRun.title}`), "Task created from research") }>
-                  Create Task
-                </button>
-                <div className="form-group">
-                  <label htmlFor="research-task-id">Task ID</label>
-                  <input
-                    id="research-task-id"
-                    className="input"
-                    placeholder="Task ID"
-                    value={taskIdToAttach}
-                    onChange={(event) => setTaskIdToAttach(event.target.value)}
-                  />
-                </div>
-                <button className="btn" type="button" disabled={!taskIdToAttach.trim() || actionLoading === "attach-task"} onClick={() => void runAction("attach-task", () => attachRunToTask(selectedRun.id, taskIdToAttach.trim(), "document"), "Attached to task")}>
-                  Attach to Task
-                </button>
-              </div>
               {selectedRun.error && <p className="research-view__error">{selectedRun.error}</p>}
               {Array.isArray(selectedRun.results?.findings) && selectedRun.results.findings.length > 0 && (
                 <div className="research-view__findings">
-                  {selectedRun.results.findings.map((finding) => (
-                    <article key={finding.heading} className="research-view__finding card">
-                      <h4>{finding.heading}</h4>
-                      <p>{finding.content}</p>
-                    </article>
-                  ))}
+                  {selectedRun.results.findings.map((finding, index) => {
+                    const findingRecord = finding as { id?: string };
+                    const findingId = findingRecord.id?.trim() || `finding-${index + 1}`;
+                    return (
+                      <article key={findingId} className="research-view__finding card">
+                        <h4>{finding.heading}</h4>
+                        <p>{finding.content}</p>
+                        <div className="research-view__actions research-view__finding-actions">
+                          <button
+                            className="btn btn-primary btn-sm"
+                            type="button"
+                            onClick={() => setModalState({ mode: "create", findingId })}
+                          >
+                            Create Task
+                          </button>
+                          <button
+                            className="btn btn-sm"
+                            type="button"
+                            onClick={() => setModalState({ mode: "enrich", findingId })}
+                          >
+                            Enrich Task
+                          </button>
+                        </div>
+                      </article>
+                    );
+                  })}
                 </div>
               )}
               {Array.isArray(selectedRun.results?.citations) && selectedRun.results!.citations!.length > 0 && (
@@ -397,6 +400,42 @@ export function ResearchView({ projectId, addToast, onOpenSettings, readinessVer
         </div>
       </div>
       )}
+      {selectedRun && modalState && (() => {
+        const findingIndex = selectedRun.results?.findings?.findIndex((entry, idx) => {
+          const findingRecord = entry as { id?: string };
+          const id = findingRecord.id?.trim() || `finding-${idx + 1}`;
+          return id === modalState.findingId;
+        }) ?? -1;
+        const finding = findingIndex >= 0 ? selectedRun.results!.findings[findingIndex] : null;
+        if (!finding) return null;
+
+        return (
+          <ResearchTaskActionModal
+            open
+            mode={modalState.mode}
+            run={selectedRun}
+            finding={{ id: modalState.findingId, heading: finding.heading, content: finding.content }}
+            projectId={projectId}
+            onClose={() => setModalState(null)}
+            onConfirm={async ({ taskId, title, description, priority, attachExport }) => {
+              if (modalState.mode === "create") {
+                await runAction(
+                  "create-task",
+                  () => createTaskFromRun(selectedRun.id, title, modalState.findingId, description, priority, attachExport),
+                  "Task created from research",
+                );
+              } else if (taskId) {
+                await runAction(
+                  "attach-task",
+                  () => attachRunToTask(selectedRun.id, taskId, modalState.findingId, attachExport),
+                  "Task enriched from research",
+                );
+              }
+              setModalState(null);
+            }}
+          />
+        );
+      })()}
     </section>
   );
 }
