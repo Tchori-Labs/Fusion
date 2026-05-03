@@ -57,4 +57,18 @@ describe("MissionManager mobile styles", () => {
     expect(section).toContain(".mission-manager__body--stacked {");
     expect(section).toContain("display: block;");
   });
+
+  it("keeps desktop defaults and mobile overrides for header title spans", () => {
+    const css = loadAllAppCss();
+    const desktopMobileSpanBlock = css.match(/\.mission-manager__title-text--mobile\s*\{[^}]*\}/)?.[0];
+    const desktopDesktopSpanBlock = css.match(/\.mission-manager__title-text--desktop\s*\{[^}]*\}/)?.[0];
+    expect(desktopMobileSpanBlock).toContain("display: none");
+    expect(desktopDesktopSpanBlock).toContain("display: inline");
+
+    const section = getMissionMobileSection(css);
+    const mobileBlock = section.match(/\.mission-manager__title-text--mobile\s*\{[^}]*\}/)?.[0];
+    const desktopBlock = section.match(/\.mission-manager__title-text--desktop\s*\{[^}]*\}/)?.[0];
+    expect(mobileBlock).toContain("display: inline");
+    expect(desktopBlock).toContain("display: none");
+  });
 });

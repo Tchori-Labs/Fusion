@@ -719,7 +719,57 @@ describe("MissionManager", () => {
     render(<MissionManager isOpen={true} onClose={vi.fn()} addToast={vi.fn()} />);
 
     await waitFor(() => {
-      expect(screen.getByRole("heading", { name: "Missions" })).toBeDefined();
+      expect(screen.getByTestId("mission-header-title")).toBeDefined();
+      expect(screen.getByTestId("mission-header-title").textContent).toContain("Missions");
+    });
+  });
+
+  describe("desktop header behavior", () => {
+    it("shows static Missions title on desktop when no mission is selected", async () => {
+      globalThis.fetch = createFetchMock();
+      render(<MissionManager isOpen={true} onClose={vi.fn()} addToast={vi.fn()} />);
+
+      await waitFor(() => {
+        const header = screen.getByTestId("mission-header-title");
+        const desktopSpan = header.querySelector(".mission-manager__title-text--desktop");
+        const mobileSpan = header.querySelector(".mission-manager__title-text--mobile");
+        expect(desktopSpan?.textContent).toBe("Missions");
+        expect(mobileSpan?.textContent).toBe("Missions");
+      });
+    });
+
+    it("shows static Missions title on desktop when a mission is selected", async () => {
+      globalThis.fetch = createDetailFetchMock();
+      render(<MissionManager isOpen={true} onClose={vi.fn()} addToast={vi.fn()} />);
+
+      await waitFor(() => {
+        expect(screen.getByText("Build Auth System")).toBeDefined();
+      });
+      fireEvent.click(screen.getByText("Build Auth System"));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("mission-tab-structure")).toBeDefined();
+      });
+
+      const header = screen.getByTestId("mission-header-title");
+      const desktopSpan = header.querySelector(".mission-manager__title-text--desktop");
+      const mobileSpan = header.querySelector(".mission-manager__title-text--mobile");
+      expect(desktopSpan?.textContent).toBe("Missions");
+      expect(mobileSpan?.textContent).toBe("Build Auth System");
+    });
+
+    it("sidebar header hides title and shows only action buttons", async () => {
+      globalThis.fetch = createFetchMock();
+      render(<MissionManager isOpen={true} onClose={vi.fn()} addToast={vi.fn()} />);
+
+      await waitFor(() => {
+        const sidebarTitle = document.querySelector(".mission-manager__sidebar-title");
+        const sidebarActions = document.querySelector(".mission-manager__sidebar-actions");
+        expect(sidebarTitle).toBeInTheDocument();
+        expect(sidebarActions).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "Plan with AI" })).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: "New Mission" })).toBeInTheDocument();
+      });
     });
   });
 
@@ -1603,7 +1653,7 @@ describe("MissionManager", () => {
       );
     });
 
-    expect(screen.getByRole("heading", { name: "Missions" })).toBeInTheDocument();
+    expect(screen.getByTestId("mission-header-title")).toBeInTheDocument();
     warnSpy.mockRestore();
   });
 

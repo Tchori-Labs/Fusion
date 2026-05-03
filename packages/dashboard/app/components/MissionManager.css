@@ -17,18 +17,18 @@
   position: fixed;
   inset: 0;
   background: color-mix(in srgb, var(--bg) 60%, transparent);
-  backdrop-filter: blur(4px);
+  backdrop-filter: blur(var(--space-xs));
   z-index: 100;
   display: flex;
   justify-content: center;
   align-items: flex-start;
-  padding-top: 8vh;
+  padding-top: var(--overlay-padding-top);
 }
 
 /* ── Shell ── */
 .mission-manager {
-  width: min(860px, 94vw);
-  max-height: min(88vh, 800px);
+  width: min(calc(var(--space-lg) * 54), calc(100vw - (var(--space-lg) * 2)));
+  max-height: calc(100dvh - var(--overlay-padding-top) - var(--space-lg));
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -84,6 +84,15 @@
   font-weight: 600;
   margin: 0;
   color: var(--text);
+}
+
+/* Header title keeps a static desktop label while preserving mobile dynamic text. */
+.mission-manager__title-text--mobile {
+  display: none;
+}
+
+.mission-manager__title-text--desktop {
+  display: inline;
 }
 
 .mission-manager__header-icon {
@@ -162,17 +171,19 @@
 .mission-manager__sidebar-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: var(--space-sm);
   padding: var(--space-md);
   border-bottom: var(--btn-border-width) solid var(--border);
 }
 
+/* Hide duplicate sidebar title; the shared header already labels this view. */
 .mission-manager__sidebar-title {
+  display: none;
   color: var(--text-muted);
-  font-size: 0.75rem;
+  font-size: calc(var(--space-xs) * 3);
   font-weight: 600;
-  letter-spacing: 0.04em;
+  letter-spacing: var(--btn-border-width);
   text-transform: uppercase;
 }
 
@@ -1599,7 +1610,7 @@
 }
 
 .mission-assertion__feature-picker-item:hover:not(:disabled) {
-  background: var(--surface-hover);
+  background: var(--surface-hover, var(--card-hover));
 }
 
 .mission-assertion__feature-picker-item:disabled {
@@ -2184,6 +2195,15 @@
 
   .mission-manager__header--inline {
     padding: var(--space-md);
+  }
+
+  /* Restore dynamic header title text on mobile. */
+  .mission-manager__title-text--mobile {
+    display: inline;
+  }
+
+  .mission-manager__title-text--desktop {
+    display: none;
   }
 
   .mission-manager__body {
