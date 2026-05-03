@@ -75,6 +75,7 @@ Every task shows its plan, its reviews, its diffs, and its file changes in real 
 | 🏢 **Agent companies** | Import pre-built teams — 440+ agents across 16 companies — and run them autonomously for weeks. |
 | 📬 **Inter-agent messaging** | Built-in mailbox between agents. Delegate, clarify, coordinate. |
 | 🗺️ **Missions** | Hierarchical planning (Mission → Milestone → Slice → Feature → Task) with autopilot and validation contracts. |
+| 🔬 **Research** | Bounded research runs with web search, GitHub, local docs, and LLM synthesis. Turn findings into tasks. ([Docs](./docs/research.md)) |
 | 🧪 **Self-improvement** | Agents reflect on their own output and update their prompts as they learn your codebase. |
 | 🔓 **Open source. MIT.** | No vendor lock-in. Run it on your own hardware. Shipping weekly. |
 

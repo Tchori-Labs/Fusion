@@ -206,6 +206,9 @@ Additional backend notes:
 | `mission_validator_runs` *(migration-created)* | Validator run records for mission feature loop execution. |
 | `mission_validator_failures` *(migration-created)* | Assertion failure records captured during validator runs. |
 | `mission_fix_feature_lineage` *(migration-created)* | Source↔fix feature lineage for auto-generated mission fix features. |
+| `research_runs` | Research run state (query, topic, status, lifecycle, sources, results, citations, events, exports, token usage). Supports project-scoped active-run uniqueness via `(projectId, trigger, status)` index. Terminal runs are immutable. |
+| `research_exports` | Persisted export records for research runs (`runId` FK cascade). Stores format, content, and optional file path. |
+| `research_run_events` | Append-only event log for research run lifecycle tracking (`runId` FK cascade, ordered by `seq`). Records status transitions, phase changes, step lifecycle, and failure classifications. |
 
 ---
 

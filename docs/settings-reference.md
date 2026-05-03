@@ -78,6 +78,22 @@ Defaults from `DEFAULT_GLOBAL_SETTINGS`; key scope from `GLOBAL_SETTINGS_KEYS`.
 | `dashboardCurrentProjectIdByNode` | `Record<string, string>` | `undefined` | Map of node ID to last-selected project ID. Use key `"local"` for the local node. Persists project context across browser restarts and PWA sessions. |
 | `persistAgentToolOutput` | `boolean` | `true` | Controls whether detailed `detail` payloads are persisted for `tool`, `tool_result`, and `tool_error` agent log entries. When disabled, tool timeline rows are still recorded, but verbose payloads are omitted. |
 | `researchGlobalDefaults` | `ResearchGlobalDefaults` | `{ searchProvider: undefined, synthesisProvider: undefined, synthesisModelId: undefined, enabledSources: { webSearch: true, pageFetch: true, github: false, localDocs: true, llmSynthesis: true }, maxSourcesPerRun: 20, defaultExportFormat: "markdown" }` | Global Research defaults shared by all projects. Project overrides come from `researchSettings`. |
+| `researchGlobalEnabled` | `boolean` | `true` | Enable or disable the research subsystem globally. When false, dashboard/API/CLI/agent entrypoints reject new runs. |
+| `researchGlobalMaxConcurrentRuns` | `number` | `3` | Maximum concurrent research runs across all projects. |
+| `researchGlobalDefaultTimeout` | `number` | `300000` | Default timeout for end-to-end research runs in milliseconds (5 minutes). |
+| `researchGlobalMaxSourcesPerRun` | `number` | `20` | Maximum number of sources per research run. |
+| `researchGlobalMaxSynthesisRounds` | `number` | `2` | Maximum synthesis rounds per research run. |
+| `researchWebSearchProvider` | `"searxng" \| "brave" \| "google" \| "tavily" \| "none"` | `"none"` | Web search backend for research. Default: `"none"` (disabled). |
+| `researchSearxngUrl` | `string` | `undefined` | SearXNG instance URL (required when provider is `"searxng"`). |
+| `researchBraveApiKey` | `string` | `undefined` | Brave Search API key (required when provider is `"brave"`). |
+| `researchGoogleSearchApiKey` | `string` | `undefined` | Google Custom Search API key (required when provider is `"google"`). |
+| `researchGoogleSearchCx` | `string` | `undefined` | Google Custom Search engine ID (required when provider is `"google"`). |
+| `researchTavilyApiKey` | `string` | `undefined` | Tavily API key (required when provider is `"tavily"`). |
+| `researchGitHubEnabled` | `boolean` | `undefined` | Enable GitHub as a research source. |
+| `researchLocalDocsEnabled` | `boolean` | `undefined` | Enable local docs as a research source. |
+| `researchMaxSearchResults` | `number` | `undefined` | Maximum search results per provider query. |
+| `researchFetchTimeoutMs` | `number` | `30000` | Timeout for individual HTTP fetches in milliseconds. |
+| `researchUserAgent` | `string` | `"FusionResearchBot/1.0"` | User-Agent header for HTTP requests made by research providers. |
 | `experimentalFeatures` | `Record<string, boolean>` | `{}` | Global-scoped experimental feature flags. Includes `experimentalFeatures.researchView` for standalone Research route visibility. |
 | `remoteAccess` | `RemoteAccessSettings` | `{ activeProvider: null, providers: {...}, tokenStrategy: {...}, lifecycle: {...} }` | Global-scoped remote access provider + token strategy configuration used by Remote Access routes and tunnel lifecycle controls. |
 
@@ -246,6 +262,11 @@ Defaults from `DEFAULT_PROJECT_SETTINGS`; key scope from `PROJECT_SETTINGS_KEYS`
 | `reviewHandoffPolicy` | `"disabled" \| "comment-triggered" \| "always"` | `"disabled"` | Policy for agent-to-user review handoff detection. |
 | `showQuickChatFAB` | `boolean` | `false` | Show floating quick-chat button (chat remains available via More menu). |
 | `researchSettings` | `ResearchProjectSettings` | `{ enabled: true, searchProvider: undefined, synthesisProvider: undefined, synthesisModelId: undefined, enabledSources: { webSearch: true, pageFetch: true, github: false, localDocs: true, llmSynthesis: true }, limits: { maxConcurrentRuns: 3, maxSourcesPerRun: 20, maxDurationMs: 300000, requestTimeoutMs: 30000 } }` | Project-specific Research enablement/overrides. Resolved together with `researchGlobalDefaults` via `resolveResearchSettings()`. |
+| `researchEnabled` | `boolean` | `undefined` | Enable or disable research for this project. **Deprecated:** prefer `researchSettings.enabled`. |
+| `researchMaxConcurrentRuns` | `number` | `undefined` | Project-level max concurrent research runs. |
+| `researchDefaultTimeout` | `number` | `undefined` | Project-level default run timeout in milliseconds. |
+| `researchMaxSourcesPerRun` | `number` | `undefined` | Project-level max sources per run. |
+| `researchMaxSynthesisRounds` | `number` | `undefined` | Project-level max synthesis rounds. |
 
 ### Research settings hierarchy and credentials
 

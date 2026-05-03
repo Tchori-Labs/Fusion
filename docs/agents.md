@@ -163,6 +163,9 @@ Expected behavior and boundaries:
 - Queries should stay narrow and task-scoped; avoid open-ended exploration
 - If research is disabled or provider setup is incomplete, tools return actionable `setup` responses instead of crashing
 - Durable conclusions should be persisted with `fn_task_document_write` (for example, `key="research"`)
+- Research runs require the project engine to be running for processing; `fn_research_run` creates the run but does not block for completion unless `wait_for_completion` is set
+
+For the full research workflow, provider setup, CLI commands, and API reference, see the [Research guide](./research.md).
 
 ## Built-In Agent Prompt Templates
 

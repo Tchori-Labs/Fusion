@@ -135,6 +135,8 @@ Navigation:
 - Mobile: **More** sheet in `MobileNavBar`
 - Research is intentionally not shown in the primary board/list/agents/missions/chat toggle row
 
+For the full research workflow, provider setup, CLI commands, API reference, and agent integration, see the canonical [Research guide](./research.md).
+
 ## Memory View
 
 Memory view provides a multi-file editor for project and daily memory files.
