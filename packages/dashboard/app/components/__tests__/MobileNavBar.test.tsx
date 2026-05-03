@@ -105,7 +105,7 @@ describe("MobileNavBar", () => {
     expect(screen.queryByTestId("mobile-nav-tab-skills")).toBeNull();
   });
 
-  it("renders primary plugin dashboard views as top-level tabs and keeps overflow views in More", () => {
+  it("renders dependency graph as a top-level tab and keeps additional plugin views in More", () => {
     const props = createDefaultProps();
     render(
       <MobileNavBar
@@ -113,7 +113,7 @@ describe("MobileNavBar", () => {
         pluginDashboardViews={[
           {
             pluginId: "fusion-plugin-dependency-graph",
-            view: { viewId: "graph", label: "Graph", componentPath: "./GraphView", icon: "Map", placement: "primary" },
+            view: { viewId: "graph", label: "Graph", componentPath: "./GraphView", icon: "Map", placement: "more" },
           },
           {
             pluginId: "fusion-plugin-dependency-graph",
@@ -129,6 +129,8 @@ describe("MobileNavBar", () => {
     expect(props.onChangeView).toHaveBeenCalledWith("plugin:fusion-plugin-dependency-graph:graph");
 
     fireEvent.click(screen.getByTestId("mobile-nav-tab-more"));
+    expect(screen.queryByTestId("mobile-more-item-plugin-fusion-plugin-dependency-graph-graph")).toBeNull();
+
     const overflowItem = screen.getByTestId("mobile-more-item-plugin-fusion-plugin-dependency-graph-queue");
     expect(overflowItem.querySelector(".lucide-workflow")).toBeTruthy();
     fireEvent.click(overflowItem);

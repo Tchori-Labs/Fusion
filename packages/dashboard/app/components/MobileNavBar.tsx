@@ -210,18 +210,28 @@ export function MobileNavBar({
   const showRoadmapsTopLevel = roadmapEnabled && (!skillsEnabled || view === "roadmaps");
   const showSkillsTopLevel = skillsEnabled && (!roadmapEnabled || view !== "roadmaps");
   const showSkillsInMore = skillsEnabled && !showSkillsTopLevel;
-  const primaryPluginViews = pluginDashboardViews
+  const isDependencyGraphView = (entry: PluginDashboardViewEntry): boolean => (
+    entry.pluginId === "fusion-plugin-dependency-graph" && entry.view.viewId === "graph"
+  );
+  const sortedPrimaryPluginViews = pluginDashboardViews
     .filter((entry) => entry.view.placement === "primary")
     .sort((a, b) => (a.view.order ?? Number.MAX_SAFE_INTEGER) - (b.view.order ?? Number.MAX_SAFE_INTEGER));
+  const dependencyGraphPluginView = pluginDashboardViews.find(isDependencyGraphView) ?? null;
   // Keep plugin-provided top-level tabs constrained on mobile so fixed tabs retain
   // reasonable touch-target width. Additional primary plugin destinations overflow into More.
+  // FN-3235: Always surface the dependency graph destination as the first plugin top-level tab
+  // on mobile so task graph navigation has a clear entry point.
+  const prioritizedPrimaryPluginViews = dependencyGraphPluginView
+    ? [dependencyGraphPluginView, ...sortedPrimaryPluginViews.filter((entry) => !isDependencyGraphView(entry))]
+    : sortedPrimaryPluginViews;
   const MAX_PRIMARY_PLUGIN_TOP_LEVEL_TABS = 1;
-  const topLevelPrimaryPluginViews = primaryPluginViews.slice(0, MAX_PRIMARY_PLUGIN_TOP_LEVEL_TABS);
-  const overflowPrimaryPluginViews = primaryPluginViews.slice(MAX_PRIMARY_PLUGIN_TOP_LEVEL_TABS);
-  const overflowPluginViews = [
-    ...overflowPrimaryPluginViews,
-    ...pluginDashboardViews.filter((entry) => entry.view.placement !== "primary"),
-  ].sort((a, b) => (a.view.order ?? Number.MAX_SAFE_INTEGER) - (b.view.order ?? Number.MAX_SAFE_INTEGER));
+  const topLevelPrimaryPluginViews = prioritizedPrimaryPluginViews.slice(0, MAX_PRIMARY_PLUGIN_TOP_LEVEL_TABS);
+  const topLevelPluginViewKeys = new Set(
+    topLevelPrimaryPluginViews.map((entry) => `${entry.pluginId}:${entry.view.viewId}`),
+  );
+  const overflowPluginViews = pluginDashboardViews
+    .filter((entry) => !topLevelPluginViewKeys.has(`${entry.pluginId}:${entry.view.viewId}`))
+    .sort((a, b) => (a.view.order ?? Number.MAX_SAFE_INTEGER) - (b.view.order ?? Number.MAX_SAFE_INTEGER));
 
   const isMoreActive =
     view === "documents"
