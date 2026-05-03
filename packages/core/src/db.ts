@@ -88,7 +88,7 @@ export function probeFts5(db: DatabaseSync): boolean {
 
 // ── Schema Definition ────────────────────────────────────────────────
 
-const SCHEMA_VERSION = 58;
+const SCHEMA_VERSION = 59;
 
 function normalizeTaskComments(
   steeringComments: SteeringComment[] | undefined,
@@ -2243,6 +2243,17 @@ export class Database {
             )
             .run(newCommand, new Date().toISOString());
         }
+      });
+    }
+
+    // Dashboard load performance for projects with 100+ tasks.
+    // listTasks() filters by "column" and the SSE/refresh paths sort by
+    // updatedAt; neither column had an index, so each board load did a
+    // full table scan + temp B-tree sort.
+    if (version < 59) {
+      this.applyMigration(59, () => {
+        this.db.exec(`CREATE INDEX IF NOT EXISTS idxTasksColumn ON tasks("column")`);
+        this.db.exec(`CREATE INDEX IF NOT EXISTS idxTasksUpdatedAt ON tasks(updatedAt DESC)`);
       });
     }
 

@@ -765,26 +765,59 @@ export function ListView({
     [isMobile, onOpenDetail]
   );
 
+  // Debounce detail fetches so rapid keyboard/mouse navigation through a
+  // long task list doesn't issue a heavy /tasks/:id request (with log +
+  // comments) per row. Only the task the user lands on triggers a fetch.
+  const detailFetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const detailFetchTargetRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (detailFetchTimerRef.current) {
+        clearTimeout(detailFetchTimerRef.current);
+      }
+    };
+  }, []);
+
   const handleEmbeddedOpenDetail = useCallback((nextTask: Task | TaskDetail) => {
     setSelectedTaskId(nextTask.id);
     setSelectedTaskSnapshot(nextTask);
 
     if ("prompt" in nextTask) {
+      detailFetchTargetRef.current = null;
+      if (detailFetchTimerRef.current) {
+        clearTimeout(detailFetchTimerRef.current);
+        detailFetchTimerRef.current = null;
+      }
       return;
     }
 
-    fetchTaskDetail(nextTask.id, projectId)
-      .then((detail) => {
-        setSelectedTaskSnapshot((previous) => {
-          if (!previous || previous.id !== detail.id) {
-            return previous;
+    detailFetchTargetRef.current = nextTask.id;
+    if (detailFetchTimerRef.current) {
+      clearTimeout(detailFetchTimerRef.current);
+    }
+    detailFetchTimerRef.current = setTimeout(() => {
+      detailFetchTimerRef.current = null;
+      const targetId = detailFetchTargetRef.current;
+      if (targetId !== nextTask.id) {
+        return;
+      }
+      fetchTaskDetail(nextTask.id, projectId)
+        .then((detail) => {
+          if (detailFetchTargetRef.current !== detail.id) {
+            return;
           }
-          return { ...previous, ...detail };
+          setSelectedTaskSnapshot((previous) => {
+            if (!previous || previous.id !== detail.id) {
+              return previous;
+            }
+            return { ...previous, ...detail };
+          });
+        })
+        .catch(() => {
+          // Keep optimistic inline selection when detail fetch fails.
         });
-      })
-      .catch(() => {
-        // Keep optimistic inline selection when detail fetch fails.
-      });
+    }, 200);
   }, [projectId]);
 
   const handleDragStart = useCallback(
