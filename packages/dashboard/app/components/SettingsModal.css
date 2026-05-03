@@ -894,6 +894,11 @@
 
   .remote-status-bar {
     flex-wrap: wrap;
+    margin: 0 var(--space-lg) var(--space-md);
+  }
+
+  .remote-share-block {
+    margin: 0 var(--space-lg) var(--space-md);
   }
 
   .remote-status-url {

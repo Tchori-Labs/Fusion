@@ -326,6 +326,14 @@ describe("SettingsModal mobile adaptations", () => {
     expectMobileRule(css, ".auth-apikey-input-row .btn", "margin-left: auto;");
     expectMobileRule(css, ".notification-provider-header", "padding: var(--space-sm) var(--space-md);");
     expectMobileRule(css, ".notification-provider-body", "padding: var(--space-md);");
+
+    // Remote Access header elements must use the same mobile gutter as other remote blocks
+    expectMobileRule(css, ".remote-status-bar", "margin: 0 var(--space-lg) var(--space-md);");
+    expectMobileRule(css, ".remote-share-block", "margin: 0 var(--space-lg) var(--space-md);");
+
+    // Base rules: desktop uses --space-xl horizontal margin for remote header elements
+    expectBaseRule(css, ".remote-status-bar", "margin: 0 var(--space-xl) var(--space-md);");
+    expectBaseRule(css, ".remote-share-block", "margin: 0 var(--space-xl) var(--space-md);");
   });
 
   it("styles settings scrollbar rules for sidebar and content", () => {

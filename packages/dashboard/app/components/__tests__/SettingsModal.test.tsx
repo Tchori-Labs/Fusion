@@ -1995,6 +1995,30 @@ describe("SettingsModal", () => {
       await userEvent.click(summary);
     };
 
+    it("renders remote-status-bar with stopped state and omits share block when not running", async () => {
+      mockFetchRemoteStatus.mockResolvedValue({ provider: null, state: "stopped", url: null, lastError: null });
+      const { container } = renderModal();
+      await waitForSettingsModalReady();
+      await openRemoteSection();
+
+      const statusBar = container.querySelector(".remote-status-bar");
+      expect(statusBar).toBeInTheDocument();
+      expect(statusBar?.className).toContain("remote-status-bar--stopped");
+      expect(container.querySelector(".remote-share-block")).not.toBeInTheDocument();
+    });
+
+    it("renders remote-share-block when tunnel is running with a URL", async () => {
+      mockFetchRemoteStatus.mockResolvedValue({ provider: "tailscale", state: "running", url: "https://machine.ts.net/", lastError: null });
+      const { container } = renderModal();
+      await waitForSettingsModalReady();
+      await openRemoteSection();
+
+      const statusBar = container.querySelector(".remote-status-bar");
+      expect(statusBar).toBeInTheDocument();
+      expect(statusBar?.className).toContain("remote-status-bar--running");
+      expect(container.querySelector(".remote-share-block")).toBeInTheDocument();
+    });
+
     it("shows provider-specific settings when provider selected and auto-saves on Start Tunnel", async () => {
       renderModal();
       await waitForSettingsModalReady();
