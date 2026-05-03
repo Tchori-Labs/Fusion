@@ -1,5 +1,6 @@
 import { type NextFunction, type Request, type Response } from "express";
 import { isAbsolute } from "node:path";
+import { spawn } from "node:child_process";
 import type { BatchStatusEntry, BatchStatusResponse, BatchStatusResult, IssueInfo, PrInfo, TaskStore } from "@fusion/core";
 import { getCurrentRepo, isGhAuthenticated } from "@fusion/core";
 import {
@@ -790,16 +791,30 @@ export function isValidGitFilePath(filePath: string): boolean {
   return true;
 }
 
+// `git diff --no-index` exits 1 when files differ — that's the success case
+// for synthetic untracked-file diffs, not an error. Use spawn directly so we
+// can accept exit code 1 with stdout, independent of how callers (or test
+// mocks) wrap execFile / promisify.
 async function runNoIndexDiff(args: string[], cwd?: string): Promise<string> {
-  try {
-    return await runGitCommand(args, cwd, 10000);
-  } catch (error) {
-    const commandError = error as NodeJS.ErrnoException & { stdout?: string };
-    if (typeof commandError.stdout === "string") {
-      return commandError.stdout;
-    }
-    throw error;
-  }
+  return await new Promise<string>((resolve, reject) => {
+    const child = spawn("git", args, { cwd, timeout: 10_000 });
+    let stdout = "";
+    let stderr = "";
+    child.stdout?.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.stderr?.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code === 0 || code === 1) {
+        resolve(stdout);
+      } else {
+        reject(new Error(`git ${args.join(" ")} exited ${code}: ${stderr}`));
+      }
+    });
+  });
 }
 
 export async function getGitFileDiff(filePath: string, staged: boolean, cwd?: string): Promise<{ stat: string; patch: string }> {
