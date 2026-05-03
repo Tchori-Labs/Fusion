@@ -188,6 +188,20 @@ function resolveCreationRuntimeConfig(
 }
 
 /**
+ * Process-wide cache of initialized Database connections, keyed by absolute
+ * rootDir. Without this, callers that re-instantiate AgentStore per request
+ * (the dashboard does this in ~65 places) reopen the SQLite file, re-run the
+ * full schema migration, and re-execute `PRAGMA integrity_check` (a full table
+ * scan) every time — on a multi-hundred-MB DB that's seconds per request and
+ * leaks file handles. Sharing one Database object reduces all of that to a
+ * one-time cost per process.
+ *
+ * In-memory DBs are intentionally *not* cached: they're test-only and each
+ * test wants its own isolated `:memory:` connection.
+ */
+const agentStoreDbCache = new Map<string, Database>();
+
+/**
  * AgentStore manages agent lifecycle with SQLite-backed persistence.
  * Follows the same patterns as TaskStore for consistency.
  */
@@ -215,11 +229,25 @@ export class AgentStore extends EventEmitter {
   }
 
   private get db(): Database {
-    if (!this._db) {
-      this._db = new Database(this.rootDir, { inMemory: this.inMemoryDb });
+    if (this._db) return this._db;
+
+    if (this.inMemoryDb) {
+      this._db = new Database(this.rootDir, { inMemory: true });
       this._db.init();
+      return this._db;
     }
-    return this._db;
+
+    const cached = agentStoreDbCache.get(this.rootDir);
+    if (cached) {
+      this._db = cached;
+      return cached;
+    }
+
+    const fresh = new Database(this.rootDir, { inMemory: false });
+    fresh.init();
+    agentStoreDbCache.set(this.rootDir, fresh);
+    this._db = fresh;
+    return fresh;
   }
 
   /**
