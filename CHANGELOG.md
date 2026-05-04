@@ -2,6 +2,74 @@
 
 User-facing release notes aggregated across all packages. This file is auto-synced from each `packages/*/CHANGELOG.md` by `scripts/release.mjs` — do not edit by hand.
 
+## 0.19.0
+
+### @fusion/dashboard
+
+#### Patch Changes
+
+- 082c62a: Fix a cross-agent overwrite bug in the Agents split view. The Config tab's form state was initialized once at mount and never resynced on `agent` change, while the master-detail layout reused the same `<AgentDetailView>` / `<ConfigTab>` instance across selections (no `key`). Switching agents while sitting on the Config tab made `hasChanges` evaluate true (stale form values vs. the newly loaded agent), and the 700ms autosave then wrote the previously-viewed agent's name/role/title/icon/model/skills onto the newly-selected agent's row. Adds `key={selectedAgentId}` to `<AgentDetailView>` and `key={agent.id}` to `<ConfigTab>` so both remount with fresh state on every agent transition.
+- Updated dependencies [54f2832]
+  - @fusion/engine@0.19.0
+  - @fusion/core@0.19.0
+  - @fusion-plugin-examples/dependency-graph@0.1.8
+  - @fusion-plugin-examples/droid-runtime@0.1.3
+  - @fusion-plugin-examples/hermes-runtime@0.2.27
+  - @fusion-plugin-examples/openclaw-runtime@0.2.27
+  - @fusion-plugin-examples/paperclip-runtime@0.2.27
+
+### @fusion/engine
+
+#### Patch Changes
+
+- 54f2832: Restrict merger staging to squash + fix-agent files; refuse to commit unrelated working-tree changes
+
+  Replaces the blanket `git add -A` in `commitOrAmendMergeWithFixes` with an explicit allowlist: only files that were squash-staged or explicitly modified by the in-merge verification fix agent are staged. Any other dirty files in the working tree are left untouched and a warning is logged naming each excluded path. Fixes a production bug where ~13 unrelated user-edited files were bundled into a task's squash commit.
+
+  Hardened by code review: replaced all shell-interpolated `git add` calls in `commitOrAmendMergeWithFixes` and the conflict-resolution helpers (`resolveWithOurs`, `resolveWithTheirs`, `resolveTrivialWhitespace`) with `execFile` array form to eliminate path-injection surface; adopted `git -z` NUL-delimited output for all dirty-file path queries in both `snapshotDirtyFiles` and `commitOrAmendMergeWithFixes` so paths with embedded spaces round-trip correctly; truncated long allowlist debug log lines to at most 20 entries.
+
+  - @fusion/core@0.19.0
+  - @fusion/pi-claude-cli@0.19.0
+
+### @fusion/plugin-sdk
+
+#### Patch Changes
+
+- @fusion/core@0.19.0
+
+### @runfusion/fusion
+
+#### Minor Changes
+
+- 1e73863: Add first-class llama.cpp provider support with bundled extension wiring, dashboard status/auth routes, model filtering, and onboarding/settings UI for enabling llama-server models without manual `pi install` steps.
+- 496c000: Add `fn update` command to check for and install the latest version of Fusion.
+- df253a8: Cache merge verification by tree hash and boost test concurrency for in-review verification.
+
+#### Patch Changes
+
+- d06475b: Harden the publish path against dockerode-class missing-dependency regressions (#33). Adds a generalized invariant test that walks `tsup.config.ts` and asserts every non-builtin `external` is either a runtime dep or in an explicit transitive-allowlist, plus a pre-publish smoke step in `pnpm release` that packs the public tarballs, installs them with plain `npm` into a clean temp dir, and invokes the bin — catching the dockerode-class bug (and others like missing `files` globs) before publish, since pnpm hoisting masks it in the workspace.
+- eeab870: Store generated memory insight artifacts under `.fusion/memory/` (`memory-insights.md`, `memory-audit.md`, and `memory-audit-state.json`) instead of top-level `.fusion/` files, with compatibility migration for existing legacy files.
+- d30f8a7: Allow the dashboard task-detail footer action to manually drive PR-first completion when `mergeStrategy` is `pull-request` and `autoMerge` is disabled.
+- 8483a5f: Make the settings modal fill the viewport on mobile and align section headings with form-group gutters for consistent spacing across each settings page.
+- df253a8: Cache per-package test results by content hash to skip unchanged packages across sequential merges.
+
+  `scripts/test-changed.mjs` now maintains a per-project cache at `.fusion/test-cache.json`. For each package in a changed-mode run, a SHA-256 is computed from the git blob SHAs of every tracked file in the package directory plus `pnpm-lock.yaml` and `tsconfig.base.json`. If the hash matches a cache entry younger than 7 days the package is excluded from the `pnpm --filter` invocation and tests are skipped. After a successful run the passing hashes are written atomically. Cache lookups are bypassed when `FUSION_TEST_NO_CACHE=1` or `--no-cache` is passed, and never applied to full-suite runs. A new `FUSION_TEST_WORKSPACE_CONCURRENCY` env var controls `--workspace-concurrency` (default `2`).
+
+### runfusion.ai
+
+#### Patch Changes
+
+- d06475b: Surface "new version available" notices to users who run `npx runfusion.ai` without ever opening the dashboard. The launcher now reads the existing `~/.fusion/update-check.json` cache (written by the dashboard's update-check service) and prints a one-line stderr notice when a newer Fusion is published. When the cache is missing or older than 24h, a fire-and-forget fetch against the npm registry refreshes it (1.5s timeout) so non-dashboard users still pick up updates on their next run. Disable with `FUSION_NO_UPDATE_CHECK=1`; auto-skipped in CI and non-TTY contexts.
+- Updated dependencies [1e73863]
+- Updated dependencies [d06475b]
+- Updated dependencies [eeab870]
+- Updated dependencies [d30f8a7]
+- Updated dependencies [496c000]
+- Updated dependencies [8483a5f]
+- Updated dependencies [df253a8]
+- Updated dependencies [df253a8]
+  - @runfusion/fusion@0.19.0
+
 ## 0.18.1
 
 ### @fusion/dashboard
@@ -2973,6 +3041,14 @@ for reference.
 - Updated dependencies [25d44e1]
 - Updated dependencies [a2ed6d0]
   - @runfusion/fusion@0.1.0
+
+## 0.11.3
+
+### @fusion/droid-cli
+
+#### Patch Changes
+
+- @fusion-plugin-examples/droid-runtime@0.1.3
 
 ## 0.11.2
 
