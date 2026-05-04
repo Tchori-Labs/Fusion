@@ -92,7 +92,8 @@
 @media (max-width: 768px) {
   .modal-overlay.settings-modal-overlay,
   .modal-overlay:has(.settings-modal) {
-    padding-top: 0;
+    padding: 0;
+    inset: 0;
     align-items: stretch;
     justify-content: stretch;
   }
@@ -102,16 +103,18 @@
     min-width: 0;
     max-width: 100vw;
     height: 100dvh;
-    min-height: 0;
+    min-height: 100dvh;
     max-height: 100dvh;
     margin: 0;
     border: none;
     border-radius: 0;
     resize: none;
+    flex: 1 1 auto;
   }
 
   .modal.settings-modal[style*="--keyboard-overlap"] {
     height: var(--vv-height, 100dvh);
+    min-height: var(--vv-height, 100dvh);
     max-height: var(--vv-height, 100dvh);
     transform: translateY(var(--vv-offset-top, 0px));
     will-change: transform;
@@ -366,16 +369,22 @@
 .settings-section-heading {
   font-size: 14px;
   font-weight: 600;
-  padding: var(--space-lg) 0 var(--space-md);
-  margin: 0;
+  padding: var(--space-lg) var(--space-xl) var(--space-md);
+  margin: 0 0 var(--space-md);
   color: var(--text);
   border-bottom: 1px solid var(--border);
-  margin-bottom: var(--space-xs);
+}
+
+/* First heading inside the section drops top padding to remove a redundant
+   gap stacked on top of the settings-content container's own top padding. */
+.settings-content > .settings-section-heading:first-child,
+.settings-modal-section > .settings-section-heading:first-child {
+  padding-top: var(--space-md);
 }
 
 /* Spacing modifier for settings-section-heading that need extra top margin */
 .settings-section-heading--spaced {
-  margin-top: var(--space-xl);
+  margin-top: var(--space-lg);
 }
 
 .settings-section-description {
@@ -1485,8 +1494,8 @@
   }
 
   .settings-section-heading {
-    padding: var(--space-lg) 0 var(--space-md);
-    margin: 0;
+    padding: var(--space-lg) var(--space-lg) var(--space-md);
+    margin: 0 0 var(--space-md);
   }
 
   .settings-plugins-subsection-toggle {
