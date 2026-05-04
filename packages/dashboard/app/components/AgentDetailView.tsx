@@ -1,5 +1,5 @@
 import "./AgentDetailView.css";
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo, useLayoutEffect } from "react";
 import {
   Bot, Heart, Activity, Pause, Play, Square, Trash2, RefreshCw, 
   Settings, FileText, ActivitySquare, X, Copy, 
@@ -205,7 +205,7 @@ export function AgentDetailView({ agentId, projectId, onClose, addToast, onChild
       }
       const entries = await fetchAgentRunLogs(currentAgentId, latest.id, currentProjectId);
       if (isStale()) return;
-      setLogs([...entries].reverse());
+      setLogs(entries);
       loadedLatestRunLogsRef.current = latest.id;
     } catch (err) {
       if (isStale()) return;
@@ -264,7 +264,7 @@ export function AgentDetailView({ agentId, projectId, onClose, addToast, onChild
             if (contextVersionRef.current !== contextVersionAtStart) return;
             try {
               const entry: AgentLogEntry = JSON.parse(e.data);
-              setLogs(prev => [entry, ...prev]);
+              setLogs(prev => [...prev, entry]);
             } catch {
               // ignore malformed events
             }
@@ -354,12 +354,7 @@ export function AgentDetailView({ agentId, projectId, onClose, addToast, onChild
             if (contextVersionRef.current !== contextVersionAtStart) return;
             try {
               const entry: AgentLogEntry = JSON.parse(e.data);
-              setLogs(prev => [entry, ...prev]);
-
-              const container = logContainerRef.current;
-              if (container && container.scrollTop < 50) {
-                container.scrollTop = 0;
-              }
+              setLogs(prev => [...prev, entry]);
             } catch {
               // Ignore parse errors
             }
@@ -970,6 +965,12 @@ function DashboardTab({
 
 // ── Logs Tab ──────────────────────────────────────────────────────────────
 
+const BOTTOM_FOLLOW_THRESHOLD_PX = 50;
+
+function isNearBottom(container: HTMLDivElement): boolean {
+  return container.scrollHeight - (container.scrollTop + container.clientHeight) <= BOTTOM_FOLLOW_THRESHOLD_PX;
+}
+
 function LogsTab({
   logs,
   isStreaming,
@@ -983,6 +984,35 @@ function LogsTab({
   hasTask: boolean;
   fallbackLabel?: string | null;
 }) {
+  const [isFollowing, setIsFollowing] = useState(true);
+  const previousLogCountRef = useRef(0);
+
+  // Auto-scroll to bottom when new entries arrive and user is near the bottom
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const previousCount = previousLogCountRef.current;
+    previousLogCountRef.current = logs.length;
+
+    if (logs.length > previousCount && isFollowing) {
+      container.scrollTop = container.scrollHeight;
+    }
+  }, [logs.length, isFollowing, containerRef]);
+
+  const handleScroll = useCallback(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    setIsFollowing(isNearBottom(container));
+  }, [containerRef]);
+
+  const scrollToLive = useCallback(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    container.scrollTop = container.scrollHeight;
+    setIsFollowing(true);
+  }, [containerRef]);
+
   if (!hasTask) {
     return (
       <div className="logs-tab">
@@ -1012,7 +1042,7 @@ function LogsTab({
         )}
       </div>
       
-      <div ref={containerRef} className="logs-container">
+      <div ref={containerRef} className="logs-container" onScroll={handleScroll}>
         {logs.length === 0 ? (
           <div className="logs-empty">
             <FileText size={48} opacity={0.3} />
@@ -1029,6 +1059,17 @@ function LogsTab({
               <LogEntry key={`${entry.timestamp}-${i}`} entry={entry} showTimestamp={showTimestamp} />
             );
           })
+        )}
+        {!isFollowing && logs.length > 0 && (
+          <button
+            type="button"
+            className="logs-return-to-live"
+            onClick={scrollToLive}
+            data-testid="logs-return-to-live"
+          >
+            <ChevronDown size={12} />
+            <span>Live</span>
+          </button>
         )}
       </div>
     </div>

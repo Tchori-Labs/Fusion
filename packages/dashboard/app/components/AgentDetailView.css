@@ -1267,6 +1267,37 @@
   font-size: calc(var(--space-sm) + var(--space-xs));
 }
 
+.logs-return-to-live {
+  position: sticky;
+  right: var(--space-md);
+  bottom: var(--space-md);
+  width: fit-content;
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: var(--space-xs) var(--space-sm);
+  color: var(--text-muted);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  font-size: var(--space-md);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  z-index: 2;
+}
+
+.logs-return-to-live:hover {
+  background: var(--card-hover);
+  color: var(--text);
+}
+
+.logs-return-to-live:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring-strong);
+}
+
 .config-textarea-mono {
   font-family: var(--font-mono);
   font-size: calc(var(--space-md) + var(--space-xs) * 0.25);
@@ -1504,6 +1535,11 @@
   /* Logs Tab mobile */
   .logs-container {
     max-height: 50vh;
+  }
+
+  .logs-return-to-live {
+    right: var(--space-sm);
+    bottom: var(--space-sm);
   }
 
   .logs-empty {
