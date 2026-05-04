@@ -20,6 +20,12 @@ export interface ToolCallInfo {
   status: "running" | "completed";
 }
 
+export interface FallbackInfo {
+  primaryModel: string;
+  fallbackModel: string;
+  triggerPoint: "session-creation" | "prompt-time";
+}
+
 export interface ChatMessageInfo {
   id: string;
   sessionId: string;
@@ -27,6 +33,7 @@ export interface ChatMessageInfo {
   content: string;
   thinkingOutput?: string | null;
   toolCalls?: ToolCallInfo[];
+  fallbackInfo?: FallbackInfo;
   createdAt: string;
 }
 
@@ -102,6 +109,19 @@ function buildSessionKey(agentId: string, modelProvider?: string, modelId?: stri
   return `${agentId}::${provider}/${id}`;
 }
 
+function parseModelDescriptor(model: string): ModelSelection {
+  const value = typeof model === "string" ? model.trim() : "";
+  const slashIndex = value.indexOf("/");
+  if (!value || slashIndex <= 0 || slashIndex >= value.length - 1) {
+    return {};
+  }
+
+  return {
+    modelProvider: value.slice(0, slashIndex),
+    modelId: value.slice(slashIndex + 1),
+  };
+}
+
 function extractCompletedToolCalls(metadata: Record<string, unknown> | null | undefined): ToolCallInfo[] | undefined {
   const rawToolCalls = metadata?.toolCalls;
   if (!Array.isArray(rawToolCalls)) {
@@ -135,6 +155,27 @@ function extractCompletedToolCalls(metadata: Record<string, unknown> | null | un
   return parsed.length > 0 ? parsed : undefined;
 }
 
+function extractFallbackInfo(metadata: Record<string, unknown> | null | undefined): FallbackInfo | undefined {
+  const rawFallback = metadata?.fallback;
+  if (!rawFallback || typeof rawFallback !== "object") {
+    return undefined;
+  }
+
+  const record = rawFallback as Record<string, unknown>;
+  const primaryModel = typeof record.primaryModel === "string" ? record.primaryModel : "";
+  const fallbackModel = typeof record.fallbackModel === "string" ? record.fallbackModel : "";
+  const triggerPoint = record.triggerPoint;
+  if (!primaryModel || !fallbackModel || (triggerPoint !== "session-creation" && triggerPoint !== "prompt-time")) {
+    return undefined;
+  }
+
+  return {
+    primaryModel,
+    fallbackModel,
+    triggerPoint,
+  };
+}
+
 function mapChatMessageToInfo(message: ChatMessage): ChatMessageInfo {
   return {
     id: message.id,
@@ -143,6 +184,7 @@ function mapChatMessageToInfo(message: ChatMessage): ChatMessageInfo {
     content: message.content,
     thinkingOutput: message.thinkingOutput,
     toolCalls: extractCompletedToolCalls(message.metadata),
+    fallbackInfo: extractFallbackInfo(message.metadata),
     createdAt: message.createdAt,
   };
 }
@@ -153,7 +195,7 @@ function mapChatMessageToInfo(message: ChatMessage): ChatMessageInfo {
  */
 export function useQuickChat(
   projectId?: string,
-  addToast?: (msg: string, type?: "success" | "error") => void,
+  addToast?: (msg: string, type?: "success" | "error" | "warning") => void,
 ): UseQuickChatReturn {
   // Session state
   const [activeSession, setActiveSession] = useState<ChatSession | null>(null);
@@ -521,6 +563,7 @@ export function useQuickChat(
         let capturedText = "";
         let capturedThinking = "";
         let capturedToolCalls: ToolCallInfo[] = [];
+        let capturedFallbackInfo: FallbackInfo | undefined;
 
         // Coalesce per-token state updates to one render per animation frame —
         // unthrottled setStreamingText pegs the main thread on long replies.
@@ -547,69 +590,89 @@ export function useQuickChat(
         cancelStreamingFlushesRef.current = cancelStreamingFlushes;
 
         const textHandlers = {
-        onThinking: (data: string) => {
-          capturedThinking += data;
-          if (thinkingRaf === null) {
-            thinkingRaf = requestAnimationFrame(flushThinking);
-          }
-        },
-        onText: (data: string) => {
-          capturedText += data;
-          if (textRaf === null) {
-            textRaf = requestAnimationFrame(flushText);
-          }
-        },
-        onToolStart: (data: { toolName: string; args?: Record<string, unknown> }) => {
-          capturedToolCalls = [
-            ...capturedToolCalls,
-            {
-              toolName: data.toolName,
-              args: data.args,
-              isError: false,
-              status: "running",
-            },
-          ];
-          setStreamingToolCalls(capturedToolCalls);
-        },
-        onToolEnd: (data: { toolName: string; isError: boolean; result?: unknown }) => {
-          const nextToolCalls = [...capturedToolCalls];
-          for (let i = nextToolCalls.length - 1; i >= 0; i--) {
-            const candidate = nextToolCalls[i];
-            if (candidate?.toolName === data.toolName && candidate.status === "running") {
-              nextToolCalls[i] = {
-                ...candidate,
-                status: "completed",
+          onThinking: (data: string) => {
+            capturedThinking += data;
+            if (thinkingRaf === null) {
+              thinkingRaf = requestAnimationFrame(flushThinking);
+            }
+          },
+          onText: (data: string) => {
+            capturedText += data;
+            if (textRaf === null) {
+              textRaf = requestAnimationFrame(flushText);
+            }
+          },
+          onToolStart: (data: { toolName: string; args?: Record<string, unknown> }) => {
+            capturedToolCalls = [
+              ...capturedToolCalls,
+              {
+                toolName: data.toolName,
+                args: data.args,
+                isError: false,
+                status: "running",
+              },
+            ];
+            setStreamingToolCalls(capturedToolCalls);
+          },
+          onToolEnd: (data: { toolName: string; isError: boolean; result?: unknown }) => {
+            const nextToolCalls = [...capturedToolCalls];
+            for (let i = nextToolCalls.length - 1; i >= 0; i--) {
+              const candidate = nextToolCalls[i];
+              if (candidate?.toolName === data.toolName && candidate.status === "running") {
+                nextToolCalls[i] = {
+                  ...candidate,
+                  status: "completed",
+                  isError: data.isError,
+                  result: data.result,
+                };
+                capturedToolCalls = nextToolCalls;
+                setStreamingToolCalls(nextToolCalls);
+                return;
+              }
+            }
+
+            capturedToolCalls = [
+              ...nextToolCalls,
+              {
+                toolName: data.toolName,
                 isError: data.isError,
                 result: data.result,
-              };
-              capturedToolCalls = nextToolCalls;
-              setStreamingToolCalls(nextToolCalls);
-              return;
-            }
-          }
-
-          capturedToolCalls = [
-            ...nextToolCalls,
-            {
-              toolName: data.toolName,
-              isError: data.isError,
-              result: data.result,
-              status: "completed",
-            },
-          ];
-          setStreamingToolCalls(capturedToolCalls);
-        },
+                status: "completed",
+              },
+            ];
+            setStreamingToolCalls(capturedToolCalls);
+          },
+          onFallback: (data: FallbackInfo) => {
+            capturedFallbackInfo = data;
+            const nextModel = parseModelDescriptor(data.fallbackModel);
+            setSessions((prev) => prev.map((session) =>
+              session.id === activeSession.id
+                ? {
+                    ...session,
+                    ...nextModel,
+                  }
+                : session,
+            ));
+            setActiveSession((prev) => prev && prev.id === activeSession.id
+              ? {
+                  ...prev,
+                  ...nextModel,
+                }
+              : prev);
+            addToast?.(`Primary model unavailable. Switched to fallback ${data.fallbackModel}.`, "warning");
+          },
           onDone: (data: { messageId: string }) => {
-          cancelStreamingFlushes();
-          const assistantMessage: ChatMessageInfo = {
-            id: data.messageId || `msg-${Date.now()}`,
-            sessionId: activeSession.id,
-            role: "assistant",
-            content: capturedText,
-            thinkingOutput: capturedThinking || undefined,
-            toolCalls: capturedToolCalls.length > 0 ? capturedToolCalls : undefined,
-            createdAt: new Date().toISOString(),
-          };
+            cancelStreamingFlushes();
+            const assistantMessage: ChatMessageInfo = {
+              id: data.messageId || `msg-${Date.now()}`,
+              sessionId: activeSession.id,
+              role: "assistant",
+              content: capturedText,
+              thinkingOutput: capturedThinking || undefined,
+              toolCalls: capturedToolCalls.length > 0 ? capturedToolCalls : undefined,
+              fallbackInfo: capturedFallbackInfo,
+              createdAt: new Date().toISOString(),
+            };
 
             // Preserve user message and add assistant message
             setMessages((prev) => [...prev, assistantMessage]);
@@ -637,7 +700,7 @@ export function useQuickChat(
             setIsStreaming(false);
             streamRef.current = null;
             console.error("[useQuickChat] Stream error:", data);
-            addToast?.("Failed to get response", "error");
+            addToast?.(typeof data === "string" && data.trim() ? data : "Failed to get response", "error");
             sendCompletionRef.current?.reject(new Error(typeof data === "string" ? data : "Failed to get response"));
             sendCompletionRef.current = null;
 

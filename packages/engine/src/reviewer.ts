@@ -17,7 +17,7 @@ import { AgentLogger } from "./agent-logger.js";
 import { reviewerLog } from "./logger.js";
 import { checkSessionError } from "./usage-limit-detector.js";
 import { resolveAgentInstructions, buildSystemPromptWithInstructions } from "./agent-instructions.js";
-import { notifyFallbackUsed } from "./notifier.js";
+import { createFallbackModelObserver } from "./fallback-model-observer.js";
 import { createMemoryGetTool, createMemorySearchTool } from "./agent-tools.js";
 
 export const REVIEWER_SYSTEM_PROMPT = `You are an independent code and plan reviewer.
@@ -493,7 +493,13 @@ export async function reviewStep(
       ...(skillContext?.skillSelectionContext ? { skillSelection: skillContext.skillSelectionContext } : {}),
       taskId: options.taskId,
       taskTitle: options.taskTitle,
-      onFallbackModelUsed: notifyFallbackUsed,
+      onFallbackModelUsed: createFallbackModelObserver({
+        agent: "reviewer",
+        label: "reviewer",
+        store: options.store,
+        taskId: options.taskId,
+        taskTitle: options.taskTitle,
+      }),
       beforeSpawnSession: async () => {
         if (!options.store) return;
         let finalSettings: Settings | undefined;

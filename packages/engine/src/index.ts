@@ -139,6 +139,8 @@ export {
   createResolvedAgentSession,
   promptWithAutoRetry,
   describeAgentModel,
+  extractRuntimeHint,
+  extractRuntimeModel,
   type ResolvedSessionOptions,
   type ResolvedSessionResult,
 } from "./agent-session-helpers.js";

@@ -49,7 +49,7 @@ import {
 import { describeModel, promptWithFallback } from "./pi.js";
 import { accumulateSessionTokenUsage } from "./session-token-usage.js";
 import { createResolvedAgentSession, extractRuntimeHint } from "./agent-session-helpers.js";
-import { notifyFallbackUsed } from "./notifier.js";
+import { createFallbackModelObserver } from "./fallback-model-observer.js";
 import { buildSessionSkillContext } from "./session-skill-context.js";
 import type { WorktreePool } from "./worktree-pool.js";
 import { AgentLogger } from "./agent-logger.js";
@@ -570,9 +570,20 @@ Do not refactor, rename broadly, or make opportunistic improvements.
       defaultModelId: settings.defaultProviderOverride && settings.defaultModelIdOverride
         ? settings.defaultModelIdOverride
         : settings.defaultModelId,
+      fallbackProvider: settings.fallbackProvider,
+      fallbackModelId: settings.fallbackModelId,
       defaultThinkingLevel: settings.defaultThinkingLevel,
       // Skill selection: use assigned agent skills if available, otherwise role fallback
       ...(skillContext?.skillSelectionContext ? { skillSelection: skillContext.skillSelectionContext } : {}),
+      taskId,
+      taskTitle: taskForSkillContext?.title,
+      onFallbackModelUsed: createFallbackModelObserver({
+        agent: "merger",
+        label: "merge verification fix agent",
+        store,
+        taskId,
+        taskTitle: taskForSkillContext?.title,
+      }),
     });
 
     const runId = mergeRunContext?.runId;
@@ -1945,9 +1956,16 @@ You are assisting with a paused \`git pull --rebase\`.
     defaultModelId: settings.defaultProviderOverride && settings.defaultModelIdOverride
       ? settings.defaultModelIdOverride
       : settings.defaultModelId,
+    fallbackProvider: settings.fallbackProvider,
+    fallbackModelId: settings.fallbackModelId,
     defaultThinkingLevel: settings.defaultThinkingLevel,
     taskId,
-    onFallbackModelUsed: notifyFallbackUsed,
+    onFallbackModelUsed: createFallbackModelObserver({
+      agent: "merger",
+      label: "rebase conflict resolver",
+      store,
+      taskId,
+    }),
   });
 
   const prompt = [
@@ -4453,9 +4471,20 @@ async function runAiAgentForCommit(params: AiAgentParams): Promise<{ success: bo
     defaultModelId: settings.defaultProviderOverride && settings.defaultModelIdOverride
       ? settings.defaultModelIdOverride
       : settings.defaultModelId,
+    fallbackProvider: settings.fallbackProvider,
+    fallbackModelId: settings.fallbackModelId,
     defaultThinkingLevel: settings.defaultThinkingLevel,
     // Skill selection: use assigned agent skills if available, otherwise role fallback
     ...(skillContext?.skillSelectionContext ? { skillSelection: skillContext.skillSelectionContext } : {}),
+    taskId,
+    taskTitle: taskForSkillContext?.title,
+    onFallbackModelUsed: createFallbackModelObserver({
+      agent: "merger",
+      label: "merge agent",
+      store,
+      taskId,
+      taskTitle: taskForSkillContext?.title,
+    }),
   });
 
   options.onSession?.(session);
@@ -5041,6 +5070,13 @@ If issues are found that need attention, describe them clearly and include concr
       defaultThinkingLevel: settings.defaultThinkingLevel,
       // Skill selection: use assigned agent skills if available, otherwise role fallback
       ...(postMergeSkillContext?.skillSelectionContext ? { skillSelection: postMergeSkillContext.skillSelectionContext } : {}),
+      taskId,
+      onFallbackModelUsed: createFallbackModelObserver({
+        agent: "merger",
+        label: `post-merge workflow step '${workflowStep.name}'`,
+        store,
+        taskId,
+      }),
     });
 
     mergerLog.log(`${taskId}: [post-merge] workflow step '${workflowStep.name}' using model ${describeModel(session)}${useOverride ? " (workflow step override)" : ""}`);

@@ -1271,6 +1271,12 @@ export interface AuthProvider {
   keyHint?: string;
 }
 
+export interface ManualOAuthCodeInfo {
+  prompt: string;
+  placeholder?: string;
+  helpText?: string;
+}
+
 /**
  * Snapshot of the Claude-CLI-via-pi health state. Powers the
  * "Anthropic — via Claude CLI" provider card.
@@ -1734,10 +1740,26 @@ export function fetchAuthStatus(): Promise<{
 }
 
 /** Initiate OAuth login for a provider. Returns the auth URL to open in a new tab. */
-export function loginProvider(provider: string): Promise<{ url: string; instructions?: string }> {
-  return api<{ url: string; instructions?: string }>("/auth/login", {
+export function loginProvider(provider: string): Promise<{
+  url: string;
+  instructions?: string;
+  manualCode?: ManualOAuthCodeInfo;
+}> {
+  return api<{
+    url: string;
+    instructions?: string;
+    manualCode?: ManualOAuthCodeInfo;
+  }>("/auth/login", {
     method: "POST",
     body: JSON.stringify({ provider, origin: window.location.origin }),
+  });
+}
+
+/** Submit a pasted OAuth callback URL or authorization code for an active login. */
+export function submitProviderManualCode(provider: string, code: string): Promise<{ success: boolean; submitted: boolean }> {
+  return api<{ success: boolean; submitted: boolean }>("/auth/manual-code", {
+    method: "POST",
+    body: JSON.stringify({ provider, code }),
   });
 }
 
@@ -7808,7 +7830,7 @@ export function cancelChatResponse(
 /** Send a chat message and receive the AI response via SSE streaming.
  *
  *  The backend exposes `POST /api/chat/sessions/:id/messages` which returns an SSE
- *  stream (not JSON). Events: `thinking`, `text`, `done`, `error`.
+ *  stream (not JSON). Events: `thinking`, `text`, `fallback`, `done`, `error`.
  *
  *  Since `EventSource` only supports GET requests, this function uses `fetch()`
  *  with a ReadableStream to parse SSE events from the POST response body.
@@ -7823,6 +7845,7 @@ export function streamChatResponse(
     onText?: (data: string) => void;
     onToolStart?: (data: { toolName: string; args?: Record<string, unknown> }) => void;
     onToolEnd?: (data: { toolName: string; isError: boolean; result?: unknown }) => void;
+    onFallback?: (data: { primaryModel: string; fallbackModel: string; triggerPoint: "session-creation" | "prompt-time" }) => void;
     onDone?: (data: { messageId: string }) => void;
     onError?: (data: string) => void;
     onConnectionStateChange?: (state: StreamConnectionState) => void;
@@ -7868,6 +7891,13 @@ export function streamChatResponse(
       case "tool_end":
         try {
           handlers.onToolEnd?.(JSON.parse(rawData));
+        } catch {
+          // skip malformed event
+        }
+        break;
+      case "fallback":
+        try {
+          handlers.onFallback?.(JSON.parse(rawData));
         } catch {
           // skip malformed event
         }

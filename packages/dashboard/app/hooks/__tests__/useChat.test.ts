@@ -456,10 +456,11 @@ describe("useChat", () => {
     });
   });
 
-  it("handles stream errors", async () => {
+  it("handles stream errors and surfaces them to the user", async () => {
     const session = makeSession({ id: "session-001", agentId: "agent-001" });
     mockFetchChatSessions.mockResolvedValueOnce({ sessions: [session] });
     mockFetchChatMessages.mockResolvedValueOnce({ messages: [] });
+    const addToast = vi.fn();
 
     let errorHandler: ((data: string) => void) | undefined;
     mockStreamChatResponse.mockImplementation((_sessionId, _content, handlers) => {
@@ -467,7 +468,7 @@ describe("useChat", () => {
       return { close: vi.fn(), isConnected: () => true };
     });
 
-    const { result } = renderHook(() => useChat());
+    const { result } = renderHook(() => useChat(undefined, addToast));
 
     await waitFor(() => {
       expect(result.current.sessions).toHaveLength(1);
@@ -475,6 +476,10 @@ describe("useChat", () => {
 
     act(() => {
       result.current.selectSession("session-001");
+    });
+
+    await waitFor(() => {
+      expect(result.current.activeSession?.id).toBe("session-001");
     });
 
     await act(async () => {
@@ -489,6 +494,74 @@ describe("useChat", () => {
     await waitFor(() => {
       expect(result.current.isStreaming).toBe(false);
       expect(result.current.messages).toHaveLength(0);
+      expect(addToast).toHaveBeenCalledWith("Stream connection failed", "error");
+    });
+  });
+
+  it("onFallback updates the selected session model, persists fallback metadata, and shows a warning toast", async () => {
+    const session = makeSession({
+      id: "session-001",
+      agentId: "agent-001",
+      modelProvider: "openai-codex",
+      modelId: "gpt-5.3-codex",
+    });
+    mockFetchChatSessions.mockResolvedValueOnce({ sessions: [session] });
+    mockFetchChatMessages.mockResolvedValueOnce({ messages: [] });
+    const addToast = vi.fn();
+
+    let fallbackHandler:
+      | ((data: { primaryModel: string; fallbackModel: string; triggerPoint: "session-creation" | "prompt-time" }) => void)
+      | undefined;
+    let textHandler: ((data: string) => void) | undefined;
+    let doneHandler: ((data: { messageId: string }) => void) | undefined;
+    mockStreamChatResponse.mockImplementation((_sessionId, _content, handlers) => {
+      fallbackHandler = handlers.onFallback;
+      textHandler = handlers.onText;
+      doneHandler = handlers.onDone;
+      return { close: vi.fn(), isConnected: () => true };
+    });
+
+    const { result } = renderHook(() => useChat(undefined, addToast));
+
+    await waitFor(() => {
+      expect(result.current.sessions).toHaveLength(1);
+    });
+
+    act(() => {
+      result.current.selectSession("session-001");
+    });
+
+    await act(async () => {
+      await result.current.sendMessage("Hello!");
+    });
+
+    act(() => {
+      fallbackHandler?.({
+        primaryModel: "openai-codex/gpt-5.3-codex",
+        fallbackModel: "zai/glm-5.1",
+        triggerPoint: "prompt-time",
+      });
+      textHandler?.("Fallback reply");
+      doneHandler?.({ messageId: "msg-fallback" });
+    });
+
+    await waitFor(() => {
+      expect(result.current.activeSession?.modelProvider).toBe("zai");
+      expect(result.current.activeSession?.modelId).toBe("glm-5.1");
+      expect(addToast).toHaveBeenCalledWith(
+        "Primary model unavailable. Switched to fallback zai/glm-5.1.",
+        "warning",
+      );
+      expect(result.current.messages.at(-1)).toEqual(expect.objectContaining({
+        id: "msg-fallback",
+        role: "assistant",
+        content: "Fallback reply",
+        fallbackInfo: {
+          primaryModel: "openai-codex/gpt-5.3-codex",
+          fallbackModel: "zai/glm-5.1",
+          triggerPoint: "prompt-time",
+        },
+      }));
     });
   });
 

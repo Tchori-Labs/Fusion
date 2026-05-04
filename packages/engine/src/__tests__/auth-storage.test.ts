@@ -5,6 +5,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createFusionAuthStorage, getFusionAuthPath } from "../auth-storage.js";
 
+function encodeBase64Url(value: string): string {
+  return Buffer.from(value, "utf-8").toString("base64url");
+}
+
+function createJwt(payload: Record<string, unknown>): string {
+  return [
+    encodeBase64Url(JSON.stringify({ alg: "none", typ: "JWT" })),
+    encodeBase64Url(JSON.stringify(payload)),
+    "signature",
+  ].join(".");
+}
+
 describe("createFusionAuthStorage", () => {
   // HOME override required — createFusionAuthStorage() has no dir parameter
   const originalHome = process.env.HOME;
@@ -93,6 +105,88 @@ describe("createFusionAuthStorage", () => {
     expect(await authStorage.getApiKey("openrouter")).toBeUndefined();
     expect(existsSync(join(homeDir, ".pi", "agent", "auth.json"))).toBe(false);
     expect(existsSync(join(homeDir, ".pi", "auth.json"))).toBe(false);
+  });
+
+  it("reads valid Codex CLI OAuth credentials from ~/.codex/auth.json", async () => {
+    const codexDir = join(homeDir, ".codex");
+    mkdirSync(codexDir, { recursive: true });
+    const accessToken = createJwt({
+      exp: Math.floor(Date.now() / 1000) + 3600,
+      "https://api.openai.com/auth": {
+        chatgpt_account_id: "acct_codex",
+      },
+    });
+
+    writeFileSync(
+      join(codexDir, "auth.json"),
+      JSON.stringify({
+        tokens: {
+          access_token: accessToken,
+          refresh_token: "codex-refresh-token",
+        },
+      }),
+    );
+
+    const authStorage = createFusionAuthStorage();
+
+    expect(await authStorage.getApiKey("openai-codex")).toBe(accessToken);
+    expect(authStorage.get("openai-codex")).toEqual({
+      type: "oauth",
+      access: accessToken,
+      refresh: "codex-refresh-token",
+      expires: expect.any(Number),
+      accountId: "acct_codex",
+    });
+  });
+
+  it("hydrates newer Codex CLI OAuth credentials into Fusion auth on reload", async () => {
+    const fusionAgentDir = join(homeDir, ".fusion", "agent");
+    const codexDir = join(homeDir, ".codex");
+    mkdirSync(fusionAgentDir, { recursive: true });
+    mkdirSync(codexDir, { recursive: true });
+
+    const olderAccessToken = createJwt({
+      exp: Math.floor(Date.now() / 1000) + 900,
+    });
+    writeFileSync(
+      getFusionAuthPath(homeDir),
+      JSON.stringify({
+        "openai-codex": {
+          type: "oauth",
+          access: olderAccessToken,
+          refresh: "old-refresh-token",
+          expires: Date.now() + 900_000,
+        },
+      }),
+    );
+
+    const newerAccessToken = createJwt({
+      exp: Math.floor(Date.now() / 1000) + 3600,
+      "https://api.openai.com/auth": {
+        chatgpt_account_id: "acct_newer",
+      },
+    });
+    writeFileSync(
+      join(codexDir, "auth.json"),
+      JSON.stringify({
+        tokens: {
+          access_token: newerAccessToken,
+          refresh_token: "new-refresh-token",
+        },
+      }),
+    );
+
+    const authStorage = createFusionAuthStorage();
+    authStorage.reload();
+
+    expect(await authStorage.getApiKey("openai-codex")).toBe(newerAccessToken);
+    expect(authStorage.get("openai-codex")).toEqual({
+      type: "oauth",
+      access: newerAccessToken,
+      refresh: "new-refresh-token",
+      expires: expect.any(Number),
+      accountId: "acct_newer",
+    });
   });
 
   describe("models.json API key fallback", () => {

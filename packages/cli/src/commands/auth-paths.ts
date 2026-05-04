@@ -14,6 +14,10 @@ export function getFusionAuthPath(home = process.env.HOME || process.env.USERPRO
   return join(getFusionAgentDir(home), "auth.json");
 }
 
+export function getCodexCliAuthPath(home = process.env.HOME || process.env.USERPROFILE || homedir()): string {
+  return join(home, ".codex", "auth.json");
+}
+
 export function getLegacyAuthPaths(home = process.env.HOME || process.env.USERPROFILE || homedir()): string[] {
   return [
     join(home, ".pi", "agent", "auth.json"),

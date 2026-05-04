@@ -2,13 +2,14 @@ import "./ModelOnboardingModal.css";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { X, Loader2, CheckCircle, Key, Zap, GitPullRequest, Rocket, Plus } from "lucide-react";
 import { getErrorMessage, type Task } from "@fusion/core";
-import type { AuthProvider, ModelInfo, CustomProvider, CustomProviderConfig } from "../api";
+import type { AuthProvider, ManualOAuthCodeInfo, ModelInfo, CustomProvider, CustomProviderConfig } from "../api";
 import {
   fetchAuthStatus,
   fetchGlobalSettings,
   loginProvider,
   logoutProvider,
   cancelProviderLogin,
+  submitProviderManualCode,
   saveApiKey,
   clearApiKey,
   fetchModels,
@@ -24,6 +25,7 @@ import { ProviderIcon } from "./ProviderIcon";
 import { ClaudeCliProviderCard } from "./ClaudeCliProviderCard";
 import { DroidCliProviderCard } from "./DroidCliProviderCard";
 import { LoginInstructions } from "./LoginInstructions";
+import { OAuthManualCodeForm } from "./OAuthManualCodeForm";
 import { OnboardingDisclosure } from "./OnboardingDisclosure";
 import { CustomProviderForm } from "./CustomProviderForm";
 import { PluginSlot } from "./PluginSlot";
@@ -575,6 +577,9 @@ export function ModelOnboardingModal({
   const [authLoading, setAuthLoading] = useState(true);
   const [authActionInProgress, setAuthActionInProgress] = useState<string | null>(null);
   const [loginInstructions, setLoginInstructions] = useState<Record<string, string>>({});
+  const [manualCodeConfigs, setManualCodeConfigs] = useState<Record<string, ManualOAuthCodeInfo>>({});
+  const [manualCodeInputs, setManualCodeInputs] = useState<Record<string, string>>({});
+  const [manualCodeSubmitInProgress, setManualCodeSubmitInProgress] = useState<string | null>(null);
   const [availableModels, setAvailableModels] = useState<ModelInfo[]>([]);
   const [selectedModel, setSelectedModel] = useState<string>("");
   const [saving, setSaving] = useState(false);
@@ -1048,14 +1053,34 @@ export function ModelOnboardingModal({
         return prev;
       });
 
-      setLoginInstructions((prev) => {
-        if (!(providerId in prev)) {
-          return prev;
-        }
-        const next = { ...prev };
-        delete next[providerId];
-        return next;
-      });
+      const clearAuthLoginUiState = () => {
+        setLoginInstructions((prev) => {
+          if (!(providerId in prev)) {
+            return prev;
+          }
+          const next = { ...prev };
+          delete next[providerId];
+          return next;
+        });
+        setManualCodeConfigs((prev) => {
+          if (!(providerId in prev)) {
+            return prev;
+          }
+          const next = { ...prev };
+          delete next[providerId];
+          return next;
+        });
+        setManualCodeInputs((prev) => {
+          if (!(providerId in prev)) {
+            return prev;
+          }
+          const next = { ...prev };
+          delete next[providerId];
+          return next;
+        });
+      };
+
+      clearAuthLoginUiState();
 
       // Set outcome to pending
       setLoginOutcomes((prev) => ({ ...prev, [providerId]: "pending" }));
@@ -1063,9 +1088,12 @@ export function ModelOnboardingModal({
       pollCountRef.current = 0;
 
       try {
-        const { url, instructions } = await loginProvider(providerId);
+        const { url, instructions, manualCode } = await loginProvider(providerId);
         if (instructions?.trim()) {
           setLoginInstructions((prev) => ({ ...prev, [providerId]: instructions }));
+        }
+        if (manualCode) {
+          setManualCodeConfigs((prev) => ({ ...prev, [providerId]: manualCode }));
         }
         window.open(appendTokenQuery(url), "_blank");
 
@@ -1081,14 +1109,7 @@ export function ModelOnboardingModal({
             }
             setAuthActionInProgress(null);
             setLoginOutcomes((prev) => ({ ...prev, [providerId]: "timeout" }));
-            setLoginInstructions((prev) => {
-              if (!(providerId in prev)) {
-                return prev;
-              }
-              const next = { ...prev };
-              delete next[providerId];
-              return next;
-            });
+            clearAuthLoginUiState();
             addToast("Login timed out. Please try again.", "warning");
             return;
           }
@@ -1106,18 +1127,23 @@ export function ModelOnboardingModal({
               }
               setAuthActionInProgress(null);
               setLoginOutcomes((prev) => ({ ...prev, [providerId]: "success" }));
-              setLoginInstructions((prev) => {
-                if (!(providerId in prev)) {
-                  return prev;
-                }
-                const next = { ...prev };
-                delete next[providerId];
-                return next;
-              });
+              clearAuthLoginUiState();
               if (providerId === "github") {
                 setGitHubSkippedState(false);
               }
               addToast("Login successful", "success");
+              return;
+            }
+
+            if (!provider?.loginInProgress) {
+              if (pollIntervalRef.current) {
+                clearInterval(pollIntervalRef.current);
+                pollIntervalRef.current = null;
+              }
+              setAuthActionInProgress(null);
+              setLoginOutcomes((prev) => ({ ...prev, [providerId]: "failed" }));
+              clearAuthLoginUiState();
+              addToast("Login did not complete. Please try again.", "error");
             }
           } catch {
             // Continue polling
@@ -1138,7 +1164,24 @@ export function ModelOnboardingModal({
           setLoginOutcomes((prev) => ({ ...prev, [providerId]: "failed" }));
         }
         setAuthActionInProgress(null);
-        setLoginInstructions((prev) => {
+        clearAuthLoginUiState();
+      }
+    },
+    [addToast, loadAuthStatus, setGitHubSkippedState],
+  );
+
+  const handleSubmitManualCode = useCallback(async (providerId: string) => {
+    const code = manualCodeInputs[providerId]?.trim();
+    if (!code) {
+      addToast("Paste the full redirect URL or authorization code first.", "warning");
+      return;
+    }
+
+    setManualCodeSubmitInProgress(providerId);
+    try {
+      const result = await submitProviderManualCode(providerId, code);
+      if (result.submitted) {
+        setManualCodeInputs((prev) => {
           if (!(providerId in prev)) {
             return prev;
           }
@@ -1146,10 +1189,16 @@ export function ModelOnboardingModal({
           delete next[providerId];
           return next;
         });
+        addToast("Authorization code received. Finishing login…", "success");
+      } else {
+        addToast("That authorization code was already submitted. Waiting for login…", "warning");
       }
-    },
-    [addToast, loadAuthStatus, setGitHubSkippedState],
-  );
+    } catch (err) {
+      addToast(getErrorMessage(err) || "Failed to submit authorization code", "error");
+    } finally {
+      setManualCodeSubmitInProgress(null);
+    }
+  }, [addToast, manualCodeInputs]);
 
   // Cancellation handler for in-progress logins
   const handleCancelLogin = useCallback(async (providerId: string) => {
@@ -1159,11 +1208,14 @@ export function ModelOnboardingModal({
     }
     setAuthActionInProgress(providerId);
     pollCountRef.current = 0;
+    setAuthProviders((prev) => prev.map((provider) =>
+      provider.id === providerId ? { ...provider, loginInProgress: false } : provider,
+    ));
+    setLoginOutcomes((prev) => ({ ...prev, [providerId]: "cancelled" }));
 
     try {
       await cancelProviderLogin(providerId);
-      await loadAuthStatus();
-      setLoginOutcomes((prev) => ({ ...prev, [providerId]: "cancelled" }));
+      await loadAuthStatus().catch(() => {});
       addToast("Login cancelled", "success");
     } catch (err) {
       addToast(getErrorMessage(err) || "Failed to cancel login", "error");
@@ -1177,6 +1229,23 @@ export function ModelOnboardingModal({
         delete next[providerId];
         return next;
       });
+      setManualCodeConfigs((prev) => {
+        if (!(providerId in prev)) {
+          return prev;
+        }
+        const next = { ...prev };
+        delete next[providerId];
+        return next;
+      });
+      setManualCodeInputs((prev) => {
+        if (!(providerId in prev)) {
+          return prev;
+        }
+        const next = { ...prev };
+        delete next[providerId];
+        return next;
+      });
+      setManualCodeSubmitInProgress((prev) => prev === providerId ? null : prev);
     }
   }, [addToast, loadAuthStatus]);
 
@@ -1823,6 +1892,19 @@ export function ModelOnboardingModal({
           <LoginInstructions
             instructions={loginInstructions[provider.id]}
             data-testid={`onboarding-login-instructions-${provider.id}`}
+          />
+        )}
+        {(authActionInProgress === provider.id || provider.loginInProgress) && manualCodeConfigs[provider.id] && (
+          <OAuthManualCodeForm
+            value={manualCodeInputs[provider.id] ?? ""}
+            onChange={(value) => setManualCodeInputs((prev) => ({ ...prev, [provider.id]: value }))}
+            onSubmit={() => void handleSubmitManualCode(provider.id)}
+            prompt={manualCodeConfigs[provider.id].prompt}
+            placeholder={manualCodeConfigs[provider.id].placeholder}
+            helpText={manualCodeConfigs[provider.id].helpText}
+            disabled={manualCodeSubmitInProgress === provider.id}
+            submitLabel={manualCodeSubmitInProgress === provider.id ? "Submitting…" : "Submit code"}
+            data-testid={`onboarding-manual-code-${provider.id}`}
           />
         )}
         {loginOutcomes[provider.id] === "timeout" && authActionInProgress !== provider.id && (
@@ -2658,4 +2740,3 @@ export function ModelOnboardingModal({
     </div>
   );
 }
-

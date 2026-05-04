@@ -23,7 +23,7 @@ import type {
 import { createFnAgent, promptWithFallback, type AgentResult } from "./pi.js";
 import { createResolvedAgentSession, extractRuntimeHint } from "./agent-session-helpers.js";
 import { createLogger } from "./logger.js";
-import { notifyFallbackUsed } from "./notifier.js";
+import { createFallbackModelObserver } from "./fallback-model-observer.js";
 
 /** Logger for the mission execution loop subsystem. */
 export const loopLog = createLogger("mission-loop");
@@ -360,7 +360,13 @@ export class MissionExecutionLoop extends EventEmitter {
         },
         taskId: task?.id,
         taskTitle: task?.title,
-        onFallbackModelUsed: notifyFallbackUsed,
+        onFallbackModelUsed: createFallbackModelObserver({
+          agent: "reviewer",
+          label: "mission validator",
+          store: this.taskStore,
+          taskId: task?.id,
+          taskTitle: task?.title,
+        }),
       });
       session = { session: sessionResult.session, sessionFile: sessionResult.sessionFile };
 

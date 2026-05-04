@@ -30,7 +30,7 @@ import { AgentSemaphore } from "./concurrency.js";
 import { StuckTaskDetector } from "./stuck-task-detector.js";
 import { AgentLogger } from "./agent-logger.js";
 import { createLogger } from "./logger.js";
-import { notifyFallbackUsed } from "./notifier.js";
+import { createFallbackModelObserver } from "./fallback-model-observer.js";
 import { isContextLimitError } from "./context-limit-detector.js";
 import { checkSessionError } from "./usage-limit-detector.js";
 import {
@@ -1015,7 +1015,13 @@ Follow instructions precisely and avoid unrelated changes.`,
             ...(this.options.skillSelection ? { skillSelection: this.options.skillSelection } : {}),
             taskId: taskDetail.id,
             taskTitle: taskDetail.title,
-            onFallbackModelUsed: notifyFallbackUsed,
+            onFallbackModelUsed: createFallbackModelObserver({
+              agent: "executor",
+              label: "workflow step agent",
+              store: this.store,
+              taskId: taskDetail.id,
+              taskTitle: taskDetail.title,
+            }),
           });
           session = createResult.session;
 

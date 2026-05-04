@@ -35,7 +35,7 @@ import { useMobileScrollLock } from "../hooks/useMobileScrollLock";
 
 export interface ChatViewProps {
   projectId?: string;
-  addToast: (msg: string, type?: "success" | "error") => void;
+  addToast: (msg: string, type?: "success" | "error" | "warning") => void;
 }
 
 function formatRelativeTime(dateStr: string): string {
@@ -712,7 +712,7 @@ export function ChatView({ projectId, addToast }: ChatViewProps) {
     searchQuery,
     setSearchQuery,
     filteredSessions,
-  } = useChat(projectId);
+  } = useChat(projectId, addToast);
 
   const [showNewDialog, setShowNewDialog] = useState(false);
   const [messageInput, setMessageInput] = useState("");

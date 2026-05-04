@@ -680,7 +680,7 @@ describe("useQuickChat", () => {
     });
   });
 
-  it("onError shows toast with failed response message", async () => {
+  it("onError shows the backend error message in the toast", async () => {
     const existingSession = makeSession({ id: "session-existing", agentId: "agent-001" });
     const addToast = vi.fn();
     let onErrorHandler: ((data: string) => void) | undefined;
@@ -701,11 +701,72 @@ describe("useQuickChat", () => {
 
     act(() => {
       result.current.sendMessage("Hello");
-      onErrorHandler?.("Connection aborted");
+      onErrorHandler?.("No API key for provider: openai-codex");
     });
 
     await waitFor(() => {
-      expect(addToast).toHaveBeenCalledWith("Failed to get response", "error");
+      expect(addToast).toHaveBeenCalledWith("No API key for provider: openai-codex", "error");
+    });
+  });
+
+  it("onFallback updates the active model, persists fallback metadata, and shows a warning toast", async () => {
+    const existingSession = makeSession({
+      id: "session-existing",
+      agentId: FN_AGENT_ID,
+      modelProvider: "openai-codex",
+      modelId: "gpt-5.3-codex",
+    });
+    const addToast = vi.fn();
+    let onFallbackHandler:
+      | ((data: { primaryModel: string; fallbackModel: string; triggerPoint: "session-creation" | "prompt-time" }) => void)
+      | undefined;
+    let onTextHandler: ((data: string) => void) | undefined;
+    let onDoneHandler: ((data: { messageId: string }) => void) | undefined;
+
+    mockFetchResumeChatSession.mockResolvedValueOnce({ session: existingSession });
+    mockFetchChatMessages.mockResolvedValue({ messages: [] });
+
+    mockStreamChatResponse.mockImplementation((_sessionId, _content, handlers) => {
+      onFallbackHandler = handlers.onFallback;
+      onTextHandler = handlers.onText;
+      onDoneHandler = handlers.onDone;
+      return { close: vi.fn(), isConnected: () => true };
+    });
+
+    const { result } = renderHook(() => useQuickChat("proj-123", addToast));
+
+    await act(async () => {
+      await result.current.switchSession(FN_AGENT_ID, "openai-codex", "gpt-5.3-codex");
+    });
+
+    act(() => {
+      result.current.sendMessage("Hello");
+      onFallbackHandler?.({
+        primaryModel: "openai-codex/gpt-5.3-codex",
+        fallbackModel: "zai/glm-5.1",
+        triggerPoint: "prompt-time",
+      });
+      onTextHandler?.("Fallback reply");
+      onDoneHandler?.({ messageId: "msg-fallback" });
+    });
+
+    await waitFor(() => {
+      expect(result.current.activeSession?.modelProvider).toBe("zai");
+      expect(result.current.activeSession?.modelId).toBe("glm-5.1");
+      expect(addToast).toHaveBeenCalledWith(
+        "Primary model unavailable. Switched to fallback zai/glm-5.1.",
+        "warning",
+      );
+      expect(result.current.messages.at(-1)).toEqual(expect.objectContaining({
+        id: "msg-fallback",
+        role: "assistant",
+        content: "Fallback reply",
+        fallbackInfo: {
+          primaryModel: "openai-codex/gpt-5.3-codex",
+          fallbackModel: "zai/glm-5.1",
+          triggerPoint: "prompt-time",
+        },
+      }));
     });
   });
 

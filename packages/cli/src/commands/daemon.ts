@@ -56,7 +56,7 @@ import {
 } from "./droid-cli-extension.js";
 import { resolveSelfExtension } from "./self-extension.js";
 import { createReadOnlyAuthFileStorage, mergeAuthStorageReads, wrapAuthStorageWithApiKeyProviders } from "./provider-auth.js";
-import { getFusionAuthPath, getLegacyAuthPaths, getModelRegistryModelsPath, getPackageManagerAgentDir } from "./auth-paths.js";
+import { getCodexCliAuthPath, getFusionAuthPath, getLegacyAuthPaths, getModelRegistryModelsPath, getPackageManagerAgentDir } from "./auth-paths.js";
 import { resolveProject } from "../project-context.js";
 import { ensureBundledDependencyGraphPluginInstalled } from "../plugins/bundled-plugin-install.js";
 
@@ -415,8 +415,11 @@ export async function runDaemon(opts: DaemonOptions = {}) {
   const automationStore = cwdEngine.getAutomationStore();
 
   const authStorage = AuthStorage.create(getFusionAuthPath());
-  const legacyAuthStorage = createReadOnlyAuthFileStorage(getLegacyAuthPaths());
-  const mergedAuthStorage = mergeAuthStorageReads(authStorage, [legacyAuthStorage]);
+  const supplementalAuthStorage = createReadOnlyAuthFileStorage([
+    ...getLegacyAuthPaths(),
+    getCodexCliAuthPath(),
+  ]);
+  const mergedAuthStorage = mergeAuthStorageReads(authStorage, [supplementalAuthStorage]);
   const modelRegistry = ModelRegistry.create(mergedAuthStorage, getModelRegistryModelsPath());
   const dashboardAuthStorage = wrapAuthStorageWithApiKeyProviders(mergedAuthStorage, modelRegistry);
 

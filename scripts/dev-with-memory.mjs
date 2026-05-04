@@ -8,6 +8,7 @@
  * 
  * Cross-platform: Works on Windows, macOS, and Linux.
  */
+import { buildDevNodeArgs } from "./dev-with-memory-lib.mjs";
 
 // Set increased heap size (8GB) to prevent OOM during initial build/start
 const MEMORY_MB = process.env.FUSION_DEV_MEMORY_MB || "8192";
@@ -62,13 +63,13 @@ const ENTRY = path.resolve(process.cwd(), "packages/cli/src/bin.ts");
 // Inspector flags are CLI args here so they apply only to this process and
 // don't propagate to grandchildren via NODE_OPTIONS.
 function runApp(extraArgs) {
-  const tsx = spawn(process.execPath, [
-    ...inspectFlags,
-    "--require", PRELOAD,
-    "--import", `file://${LOADER}`,
-    ENTRY,
-    ...extraArgs,
-  ], { stdio: "inherit" });
+  const tsx = spawn(process.execPath, buildDevNodeArgs({
+    inspectFlags,
+    preload: PRELOAD,
+    loader: LOADER,
+    entry: ENTRY,
+    args: extraArgs,
+  }), { stdio: "inherit" });
   tsx.on("close", (c) => process.exit(c ?? 1));
 }
 

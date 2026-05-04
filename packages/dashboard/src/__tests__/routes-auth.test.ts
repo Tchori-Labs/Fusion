@@ -520,6 +520,7 @@ function createMockAuthStorage(overrides: Partial<AuthStorageLike> = {}): AuthSt
       { id: "anthropic", name: "Anthropic" },
     ]),
     hasAuth: vi.fn().mockReturnValue(false),
+    get: vi.fn().mockReturnValue(undefined),
     login: vi.fn().mockImplementation((_provider: string, callbacks: any) => {
       // Simulate onAuth callback with a URL, then resolve
       callbacks.onAuth({ url: "https://auth.example.com/login", instructions: "Open in browser" });
@@ -603,6 +604,21 @@ describe("GET /auth/status", () => {
 
     expect(res.status).toBe(200);
     expect(res.body.providers[0].authenticated).toBe(false);
+  });
+
+  it("treats expired oauth credentials as unauthenticated", async () => {
+    (authStorage.hasAuth as ReturnType<typeof vi.fn>).mockReturnValue(true);
+    (authStorage.get as ReturnType<typeof vi.fn>).mockImplementation((provider: string) =>
+      provider === "anthropic"
+        ? { type: "oauth", access: "token", refresh: "refresh", expires: Date.now() - 1_000 }
+        : undefined,
+    );
+
+    const res = await GET(buildApp(), "/api/auth/status");
+
+    expect(res.status).toBe(200);
+    const anthropic = res.body.providers.find((p: any) => p.id === "anthropic");
+    expect(anthropic.authenticated).toBe(false);
   });
 
   it("reports loginInProgress for oauth providers with active logins", async () => {
@@ -1048,6 +1064,35 @@ describe("POST /auth/login", () => {
     expect(res.status).toBe(200);
     expect(res.body.url).toBe(unchangedUrl);
   });
+
+  it("does not rewrite redirect_uri for openai-codex even on non-localhost origins", async () => {
+    const unchangedUrl =
+      "https://auth.openai.com/oauth/authorize?state=test-state&redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback";
+
+    (authStorage.getOAuthProviders as ReturnType<typeof vi.fn>).mockReturnValue([
+      { id: "openai-codex", name: "OpenAI Codex" },
+    ]);
+    (authStorage.login as ReturnType<typeof vi.fn>).mockImplementation((_provider: string, callbacks: any) => {
+      callbacks.onAuth({ url: unchangedUrl });
+      return Promise.resolve();
+    });
+
+    const res = await REQUEST(
+      buildApp(),
+      "POST",
+      "/api/auth/login",
+      JSON.stringify({ provider: "openai-codex", origin: "https://my-host.example.com" }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.body.url).toBe(unchangedUrl);
+    expect(res.body.manualCode).toEqual({
+      prompt: "Paste the final redirect URL or authorization code",
+      placeholder: "http://localhost:1455/auth/callback?code=...&state=... or just the code",
+      helpText: "After sign-in, OpenAI may redirect to a localhost callback that cannot open from this dashboard host. Copy the full browser URL from the address bar and paste it here.",
+    });
+  });
   it("returns 400 when provider is missing", async () => {
     const res = await REQUEST(buildApp(), "POST", "/api/auth/login", JSON.stringify({}), {
       "Content-Type": "application/json",
@@ -1177,6 +1222,83 @@ describe("POST /auth/cancel", () => {
 
     expect(res.status).toBe(400);
     expect(res.body.error).toBe("provider is required");
+  });
+});
+
+describe("POST /auth/manual-code", () => {
+  let store: TaskStore;
+  let authStorage: AuthStorageLike;
+
+  beforeEach(() => {
+    store = createMockStore();
+    authStorage = createMockAuthStorage({
+      getOAuthProviders: vi.fn().mockReturnValue([{ id: "openai-codex", name: "OpenAI Codex" }]),
+    });
+  });
+
+  function buildApp() {
+    const app = express();
+    app.use(express.json());
+    app.use("/api", createApiRoutes(store, { authStorage }));
+    return app;
+  }
+
+  it("submits pasted manual code into an active login", async () => {
+    let submittedCode: string | undefined;
+    let releaseLogin: (() => void) | undefined;
+    (authStorage.login as ReturnType<typeof vi.fn>).mockImplementation(
+      async (_provider: string, callbacks: {
+        onAuth: (info: { url: string; instructions?: string }) => void;
+        onManualCodeInput?: () => Promise<string>;
+      }) => {
+        callbacks.onAuth({
+          url: "https://auth.openai.com/oauth/authorize?state=test-state&redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback",
+        });
+        submittedCode = await callbacks.onManualCodeInput?.();
+        releaseLogin?.();
+      },
+    );
+
+    const app = buildApp();
+    const loginRes = await REQUEST(
+      app,
+      "POST",
+      "/api/auth/login",
+      JSON.stringify({ provider: "openai-codex", origin: "https://remote.example.com" }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(loginRes.status).toBe(200);
+
+    const submitRes = await REQUEST(
+      app,
+      "POST",
+      "/api/auth/manual-code",
+      JSON.stringify({
+        provider: "openai-codex",
+        code: "http://localhost:1455/auth/callback?code=test-code&state=test-state",
+      }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(submitRes.status).toBe(200);
+    expect(submitRes.body).toEqual({ success: true, submitted: true });
+    await vi.waitFor(() => {
+      expect(submittedCode).toBe("http://localhost:1455/auth/callback?code=test-code&state=test-state");
+    });
+  });
+
+  it("returns 409 when no login is in progress", async () => {
+    const res = await REQUEST(
+      buildApp(),
+      "POST",
+      "/api/auth/manual-code",
+      JSON.stringify({ provider: "openai-codex", code: "test-code" }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(409);
+    expect(res.body.error).toBe("No login in progress for openai-codex");
   });
 });
 
@@ -2989,4 +3111,3 @@ describe("Pause/Unpause endpoints", () => {
 });
 
 // --- GitHub Import route tests ---
-

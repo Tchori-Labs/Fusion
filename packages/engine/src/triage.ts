@@ -24,7 +24,7 @@ import { buildSessionSkillContext } from "./session-skill-context.js";
 import { PRIORITY_SPECIFY, type AgentSemaphore } from "./concurrency.js";
 import { AgentLogger } from "./agent-logger.js";
 import { resolveAgentInstructions, buildSystemPromptWithInstructions } from "./agent-instructions.js";
-import { notifyFallbackUsed } from "./notifier.js";
+import { createFallbackModelObserver } from "./fallback-model-observer.js";
 import { planLog, reviewerLog, formatError } from "./logger.js";
 import {
   isUsageLimitError,
@@ -1032,7 +1032,13 @@ export class TriageProcessor {
           ...(skillContext.skillSelectionContext ? { skillSelection: skillContext.skillSelectionContext } : {}),
           taskId: task.id,
           taskTitle: task.title,
-          onFallbackModelUsed: notifyFallbackUsed,
+          onFallbackModelUsed: createFallbackModelObserver({
+            agent: "triage",
+            label: "triage",
+            store: this.store,
+            taskId: task.id,
+            taskTitle: task.title,
+          }),
         });
 
         const modelDesc = describeModel(session);
@@ -1232,7 +1238,13 @@ export class TriageProcessor {
               ...(skillContext.skillSelectionContext ? { skillSelection: skillContext.skillSelectionContext } : {}),
               taskId: task.id,
               taskTitle: task.title,
-              onFallbackModelUsed: notifyFallbackUsed,
+              onFallbackModelUsed: createFallbackModelObserver({
+                agent: "triage",
+                label: "triage",
+                store: this.store,
+                taskId: task.id,
+                taskTitle: task.title,
+              }),
             });
 
             session = fallbackResult.session;

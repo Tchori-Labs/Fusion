@@ -155,6 +155,7 @@ export interface AuthStorageLike {
     callbacks: {
       onAuth: (info: { url: string; instructions?: string }) => void;
       onPrompt: (prompt: { message: string; placeholder?: string; allowEmpty?: boolean }) => Promise<string>;
+      onManualCodeInput?: () => Promise<string>;
       onProgress?: (message: string) => void;
       signal?: AbortSignal;
     },

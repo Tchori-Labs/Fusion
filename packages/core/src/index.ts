@@ -763,6 +763,14 @@ export type {
 } from "./chat-types.js";
 export { ChatStore } from "./chat-store.js";
 export type { ChatStoreEvents } from "./chat-store.js";
+export {
+  choosePreferredStoredCredential,
+  extractCodexCliStoredCredential,
+  getCodexCliAuthPath,
+  readStoredCredentialsFromAuthFile,
+  shouldHydrateStoredCredential,
+} from "./oauth-credential-interop.js";
+export type { StoredAuthCredential } from "./oauth-credential-interop.js";
 
 // ── Error helpers ─────────────────────────────────────────
 export { getErrorMessage } from "./error-message.js";

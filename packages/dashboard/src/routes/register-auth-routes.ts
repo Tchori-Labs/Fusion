@@ -32,11 +32,35 @@ export const registerAuthRoutes: ApiRouteRegistrar = (ctx) => {
     return key.slice(0, 3) + "•••••" + key.slice(-4);
   }
 
+  function isExpiredOauthCredential(providerId: string, storage: AuthStorageLike): boolean {
+    const credential = storage.get?.(providerId);
+    if (!credential || credential.type !== "oauth" || typeof credential.expires !== "number") {
+      return false;
+    }
+
+    return Date.now() >= credential.expires;
+  }
+
+  type ManualCodeConfig = {
+    prompt: string;
+    placeholder?: string;
+    helpText?: string;
+  };
+
+  type PendingLogin = {
+    abortController: AbortController;
+    inputPromise: Promise<string>;
+    resolveInput: (input: string) => void;
+    rejectInput: (error: Error) => void;
+    inputSubmitted: boolean;
+    manualCode?: ManualCodeConfig;
+  };
+
   /**
    * Track in-progress login flows to prevent concurrent logins for the same provider.
-   * Maps provider ID → AbortController for the active login.
+   * Maps provider ID → pending interactive login state.
    */
-  const loginInProgress = new Map<string, AbortController>();
+  const loginInProgress = new Map<string, PendingLogin>();
 
   const OAUTH_SESSION_TTL_MS = 5 * 60 * 1000;
   const oauthSessions = new Map<string, { port: number; path: string; originalRedirectUri: string; expiresAt: number }>();
@@ -107,6 +131,60 @@ export const registerAuthRoutes: ApiRouteRegistrar = (ctx) => {
     };
   }
 
+  function shouldRewriteOauthRedirect(providerId: string, origin: string | undefined): boolean {
+    if (!origin || isLocalhostOrigin(origin)) {
+      return false;
+    }
+
+    // The upstream OpenAI Codex OAuth provider is hardcoded to request and
+    // later redeem the localhost callback URI `http://localhost:1455/auth/callback`.
+    // Rewriting that authorize-time redirect_uri to the dashboard proxy causes
+    // OpenAI auth to fail with an upstream unknown_error. Keep the original
+    // localhost callback for this provider.
+    if (providerId === "openai-codex") {
+      return false;
+    }
+
+    return true;
+  }
+
+  function getManualCodeConfig(providerId: string, origin: string | undefined): ManualCodeConfig | undefined {
+    if (providerId !== "openai-codex") {
+      return undefined;
+    }
+
+    const remoteDashboard = origin !== undefined && !isLocalhostOrigin(origin);
+    return {
+      prompt: "Paste the final redirect URL or authorization code",
+      placeholder: "http://localhost:1455/auth/callback?code=...&state=... or just the code",
+      helpText: remoteDashboard
+        ? "After sign-in, OpenAI may redirect to a localhost callback that cannot open from this dashboard host. Copy the full browser URL from the address bar and paste it here."
+        : "If the browser cannot finish the localhost callback automatically, copy the full browser URL from the address bar and paste it here.",
+    };
+  }
+
+  function appendManualCodeHint(
+    instructions: string | undefined,
+    providerId: string,
+    origin: string | undefined,
+  ): string | undefined {
+    const manualCode = getManualCodeConfig(providerId, origin);
+    if (!manualCode) {
+      return instructions;
+    }
+
+    const hint = manualCode.helpText;
+    if (!hint) {
+      return instructions;
+    }
+
+    if (!instructions?.trim()) {
+      return hint;
+    }
+
+    return `${instructions.trim()} ${hint}`;
+  }
+
   /**
    * GET /api/auth/status
    * Returns list of all providers with their authentication status and type.
@@ -131,7 +209,7 @@ export const registerAuthRoutes: ApiRouteRegistrar = (ctx) => {
       }[] = oauthProviders.map((p) => ({
         id: p.id,
         name: p.name,
-        authenticated: storage.hasAuth(p.id),
+        authenticated: storage.hasAuth(p.id) && !isExpiredOauthCredential(p.id, storage),
         type: "oauth" as const,
         loginInProgress: loginInProgress.has(p.id),
       }));
@@ -472,7 +550,30 @@ export const registerAuthRoutes: ApiRouteRegistrar = (ctx) => {
       }
 
       const abortController = new AbortController();
-      loginInProgress.set(provider, abortController);
+      let resolveInput: (value: string) => void = () => {};
+      let rejectInput: (error: Error) => void = () => {};
+      const inputPromise = new Promise<string>((resolve, reject) => {
+        resolveInput = resolve;
+        rejectInput = reject;
+      });
+      // Cancellation can reject this promise before the upstream provider has
+      // actually awaited it. Keep the rejection observed so dashboard cancel
+      // does not create unhandled rejection noise.
+      void inputPromise.catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error);
+        if (message !== "cancelled") {
+          console.warn(`[auth/login] manual OAuth input promise rejected for ${provider}: ${message}`);
+        }
+      });
+      const pendingLogin: PendingLogin = {
+        abortController,
+        inputPromise,
+        resolveInput,
+        rejectInput,
+        inputSubmitted: false,
+        manualCode: getManualCodeConfig(provider, origin),
+      };
+      loginInProgress.set(provider, pendingLogin);
 
       // We need to get the URL from the onAuth callback before responding.
       // The login() call continues in the background until the user completes OAuth.
@@ -486,13 +587,16 @@ export const registerAuthRoutes: ApiRouteRegistrar = (ctx) => {
       // Start login flow in background — don't await the full login
       const loginPromise = storage.login(provider, {
         onAuth: (info) => {
-          authResolve({ url: info.url, instructions: info.instructions });
+          authResolve({
+            url: info.url,
+            instructions: appendManualCodeHint(info.instructions, provider, origin),
+          });
         },
-        onPrompt: async (prompt) => {
-          // Web UI cannot interactively prompt — return empty string if allowed
-          if (prompt.allowEmpty) return "";
-          return prompt.placeholder || "";
-        },
+        onPrompt: async () => await pendingLogin.inputPromise,
+        // AuthStorage.login() forwards callbacks to provider-specific OAuth
+        // implementations verbatim. openai-codex supports this optional hook
+        // to race pasted codes against the localhost callback server.
+        onManualCodeInput: async () => await pendingLogin.inputPromise,
         onProgress: () => {}, // no-op for web UI
         signal: abortController.signal,
       });
@@ -519,7 +623,7 @@ export const registerAuthRoutes: ApiRouteRegistrar = (ctx) => {
       clearTimeout(timeout);
 
       let responseUrl = authInfo.url;
-      if (origin && !isLocalhostOrigin(origin)) {
+      if (shouldRewriteOauthRedirect(provider, origin)) {
         const rewritten = rewriteAuthUrl(authInfo.url, origin);
         setOauthSession(rewritten.state, {
           port: rewritten.port,
@@ -529,7 +633,11 @@ export const registerAuthRoutes: ApiRouteRegistrar = (ctx) => {
         responseUrl = rewritten.url;
       }
 
-      res.json({ url: responseUrl, instructions: authInfo.instructions });
+      res.json({
+        url: responseUrl,
+        instructions: authInfo.instructions,
+        manualCode: pendingLogin.manualCode,
+      });
     } catch (err: unknown) {
       if (err instanceof ApiError) {
         throw err;
@@ -561,8 +669,47 @@ export const registerAuthRoutes: ApiRouteRegistrar = (ctx) => {
       }
 
       loginInProgress.delete(provider);
-      activeLogin.abort();
+      activeLogin.inputSubmitted = true;
+      activeLogin.rejectInput(new Error("cancelled"));
+      activeLogin.abortController.abort();
       res.json({ success: true, cancelled: true });
+    } catch (err: unknown) {
+      if (err instanceof ApiError) {
+        throw err;
+      }
+      rethrowAsApiError(err);
+    }
+  });
+
+  /**
+   * POST /api/auth/manual-code
+   * Submit a pasted OAuth callback URL or authorization code for an active login.
+   * Body: { provider: string, code: string }
+   * Response: { success: true, submitted: boolean }
+   */
+  router.post("/auth/manual-code", (req, res) => {
+    try {
+      const { provider, code } = req.body;
+      if (!provider || typeof provider !== "string") {
+        throw badRequest("provider is required");
+      }
+      if (!code || typeof code !== "string" || !code.trim()) {
+        throw badRequest("code is required");
+      }
+
+      const activeLogin = loginInProgress.get(provider);
+      if (!activeLogin) {
+        throw conflict(`No login in progress for ${provider}`);
+      }
+
+      if (activeLogin.inputSubmitted) {
+        res.json({ success: true, submitted: false });
+        return;
+      }
+
+      activeLogin.inputSubmitted = true;
+      activeLogin.resolveInput(code.trim());
+      res.json({ success: true, submitted: true });
     } catch (err: unknown) {
       if (err instanceof ApiError) {
         throw err;

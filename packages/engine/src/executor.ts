@@ -61,7 +61,7 @@ import {
 import { getTaskCompletionBlockerForStore } from "./task-completion.js";
 import { createFusionAuthStorage, getModelRegistryModelsPath } from "./auth-storage.js";
 import { createRunVerificationTool } from "./run-verification-tool.js";
-import { notifyFallbackUsed } from "./notifier.js";
+import { createFallbackModelObserver } from "./fallback-model-observer.js";
 
 // Re-export for backward compatibility (tests import from executor.ts)
 export { summarizeToolArgs } from "./agent-logger.js";
@@ -2839,7 +2839,13 @@ export class TaskExecutor {
           ...(skillContext.skillSelectionContext ? { skillSelection: skillContext.skillSelectionContext } : {}),
           taskId: task.id,
           taskTitle: detail.title,
-          onFallbackModelUsed: notifyFallbackUsed,
+          onFallbackModelUsed: createFallbackModelObserver({
+            agent: "executor",
+            label: "executor",
+            store: this.store,
+            taskId: task.id,
+            taskTitle: detail.title,
+          }),
         });
 
         if (isResuming) {
@@ -4731,36 +4737,36 @@ ${failureFeedback}
    * Uses git diff against the stored baseCommitSha to determine what changed.
    * Returns an empty array if no changes or if git commands fail.
    */
+  private async resolveDiffBaseRef(worktreePath: string, baseCommitSha?: string): Promise<string | undefined> {
+    if (baseCommitSha) return baseCommitSha;
+
+    try {
+      const { stdout } = await execAsync(
+        "git merge-base HEAD origin/main 2>/dev/null || git merge-base HEAD main",
+        { cwd: worktreePath, encoding: "utf-8" },
+      );
+      const ref = stdout.trim();
+      if (ref) return ref;
+    } catch (mergeBaseErr: unknown) {
+      const mergeBaseMsg = mergeBaseErr instanceof Error ? mergeBaseErr.message : String(mergeBaseErr);
+      executorLog.warn(`Failed merge-base lookup for diff base in ${worktreePath}, trying HEAD~1 fallback: ${mergeBaseMsg}`);
+    }
+
+    try {
+      const { stdout } = await execAsync("git rev-parse HEAD~1", {
+        cwd: worktreePath,
+        encoding: "utf-8",
+      });
+      return stdout.trim() || undefined;
+    } catch {
+      executorLog.log(`Could not determine base commit for diff in ${worktreePath}`);
+      return undefined;
+    }
+  }
+
   private async captureModifiedFiles(worktreePath: string, baseCommitSha?: string): Promise<string[]> {
     try {
-      // Determine the base reference for diff
-      // If baseCommitSha is stored, use it; otherwise fall back to merge-base with HEAD
-      let baseRef = baseCommitSha;
-      if (!baseRef) {
-        // Try to find merge-base with main/master as fallback
-        try {
-          const { stdout } = await execAsync("git merge-base HEAD origin/main 2>/dev/null || git merge-base HEAD main", {
-            cwd: worktreePath,
-            encoding: "utf-8",
-          });
-          baseRef = stdout.trim();
-        } catch (mergeBaseErr: unknown) {
-          const mergeBaseMsg = mergeBaseErr instanceof Error ? mergeBaseErr.message : String(mergeBaseErr);
-          executorLog.warn(`Failed merge-base lookup for diff base in ${worktreePath}, trying HEAD~1 fallback: ${mergeBaseMsg}`);
-          // If merge-base fails, use HEAD~1 as last resort
-          try {
-            const { stdout } = await execAsync("git rev-parse HEAD~1", {
-              cwd: worktreePath,
-              encoding: "utf-8",
-            });
-            baseRef = stdout.trim();
-          } catch {
-            executorLog.log(`Could not determine base commit for diff in ${worktreePath}`);
-            return [];
-          }
-        }
-      }
-
+      const baseRef = await this.resolveDiffBaseRef(worktreePath, baseCommitSha);
       if (!baseRef) {
         return [];
       }
@@ -5050,12 +5056,50 @@ ${failureFeedback}
     settings: Settings,
   ): Promise<WorkflowStepOutcome> {
     const toolMode: "coding" | "readonly" = workflowStep.toolMode || "readonly";
+
+    // Compute the diff scope so the workflow step agent reviews only what THIS
+    // task changed — not unrelated files it might wander into. Without this,
+    // open-ended review prompts (e.g. "verify visual polish") have been
+    // observed to spend the entire timeout budget reading pre-existing files
+    // that match the task description's keywords. See FN-3327 post-mortem.
+    const scopedFiles = await this.captureModifiedFiles(worktreePath, task.baseCommitSha);
+    let diffShortstat: string | undefined;
+    try {
+      const baseRef = await this.resolveDiffBaseRef(worktreePath, task.baseCommitSha);
+      if (baseRef) {
+        const { stdout } = await execAsync(`git diff --shortstat ${baseRef}..HEAD`, {
+          cwd: worktreePath,
+          encoding: "utf-8",
+        });
+        diffShortstat = stdout.trim() || undefined;
+      }
+    } catch {
+      // best-effort — fall through with no shortstat
+    }
+
+    const MAX_SCOPE_FILES = 100;
+    const scopeFileBlock = scopedFiles.length === 0
+      ? "(no modified files detected for this task — review the worktree directly, but do NOT browse unrelated files)"
+      : scopedFiles.length > MAX_SCOPE_FILES
+        ? `${scopedFiles.slice(0, MAX_SCOPE_FILES).map((f) => `- ${f}`).join("\n")}\n- ... (${scopedFiles.length - MAX_SCOPE_FILES} more files truncated)`
+        : scopedFiles.map((f) => `- ${f}`).join("\n");
+
+    const scopeBlock = `Diff Scope (files changed by THIS task vs base):
+${scopeFileBlock}${diffShortstat ? `\nDiff stat: ${diffShortstat}` : ""}
+
+CRITICAL SCOPING RULES — read before doing anything else:
+- Review ONLY the files listed above. Do NOT analyze unmodified files or unrelated parts of the codebase.
+- If NONE of the files in the diff scope are relevant to your review category (e.g. a UX/design reviewer with no UI/CSS/component files in scope, a security reviewer with no auth/network code in scope, an a11y reviewer with no markup changes), respond IMMEDIATELY with a single short approval line such as "No relevant changes in scope — approved." and STOP. Do not start exploring the codebase.
+- Your wall-clock budget is short. Spending it browsing unmodified files will cause this step to time out and block merge.`;
+
     const systemPrompt = `You are a workflow step agent executing: ${workflowStep.name}
 
 Task Context:
 - Task ID: ${task.id}
 - Task Description: ${task.description}
 - Worktree: ${worktreePath}
+
+${scopeBlock}
 
 Your role:
 - Execute this workflow step exactly as scoped.

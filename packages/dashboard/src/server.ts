@@ -214,6 +214,8 @@ export interface ServerOptions {
   /** Optional PluginRunner for plugin hooks, routes, and lifecycle operations */
   pluginRunner?: {
     getPluginRoutes(): Array<{ pluginId: string; route: import("@fusion/core").PluginRouteDefinition }>;
+    getRuntimeById?(runtimeId: string): unknown;
+    createRuntimeContext?(pluginId: string): Promise<unknown>;
     reloadPlugin?(pluginId: string): Promise<unknown>;
   };
   /** Optional ChatStore for chat session management */
@@ -902,7 +904,13 @@ export function createServer(store: TaskStore, options?: ServerOptions): ReturnT
   const chatAgentStore = new AgentStore({ rootDir: store.getFusionDir() });
 
   // Create ChatManager for AI chat message handling
-  const chatManager = options?.chatManager ?? new ChatManager(chatStore, store.getRootDir(), chatAgentStore);
+  const chatManager = options?.chatManager ?? new ChatManager(
+    chatStore,
+    store.getRootDir(),
+    chatAgentStore,
+    options?.pluginRunner,
+    () => store.getSettings(),
+  );
 
   const runAiSessionCleanup = (maxAgeMs: number, source: "initial" | "scheduled") => {
     const result = aiSessionStore.cleanupStaleSessions(maxAgeMs);

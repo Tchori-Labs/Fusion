@@ -34,7 +34,7 @@ interface PendingAttachment {
 
 interface QuickChatFABProps {
   projectId?: string;
-  addToast: (msg: string, type?: "success" | "error") => void;
+  addToast: (msg: string, type?: "success" | "error" | "warning") => void;
   /** When false, the FAB button is hidden but the panel can still be opened programmatically via the open prop */
   showFAB?: boolean;
   /** When true, the chat panel is open */
@@ -1011,11 +1011,21 @@ export function QuickChatFAB({
   }, [isOpen]);
 
   const resolvedModelSelection = selectedModel || configuredDefaultModelSelection;
+  const targetModelSelection = useMemo(
+    () => parseModelSelection(resolvedModelSelection),
+    [resolvedModelSelection],
+  );
+  const displayedModelSelection = useMemo(() => {
+    if (chatMode === "model" && activeSession?.modelProvider && activeSession?.modelId) {
+      return `${activeSession.modelProvider}/${activeSession.modelId}`;
+    }
+    return resolvedModelSelection;
+  }, [activeSession?.modelId, activeSession?.modelProvider, chatMode, resolvedModelSelection]);
 
-  const parsedModelSelection = useMemo(() => parseModelSelection(resolvedModelSelection), [resolvedModelSelection]);
+  const parsedModelSelection = useMemo(() => parseModelSelection(displayedModelSelection), [displayedModelSelection]);
   const selectedModelInfo = useMemo(
-    () => models.find((model) => `${model.provider}/${model.id}` === resolvedModelSelection) ?? null,
-    [models, resolvedModelSelection],
+    () => models.find((model) => `${model.provider}/${model.id}` === displayedModelSelection) ?? null,
+    [displayedModelSelection, models],
   );
   const selectedModelTag = useMemo(
     () => formatModelTagName(selectedModelInfo, parsedModelSelection),
@@ -1024,8 +1034,8 @@ export function QuickChatFAB({
 
   const sessionTargetKey = useMemo(() => {
     if (chatMode === "model") {
-      if (parsedModelSelection) {
-        return `${FN_AGENT_ID}::${parsedModelSelection.modelProvider}/${parsedModelSelection.modelId}`;
+      if (targetModelSelection) {
+        return `${FN_AGENT_ID}::${targetModelSelection.modelProvider}/${targetModelSelection.modelId}`;
       }
       return "";
     }
@@ -1034,9 +1044,9 @@ export function QuickChatFAB({
       return `${selectedAgentId}::`;
     }
     return "";
-  }, [chatMode, parsedModelSelection, selectedAgentId]);
+  }, [chatMode, selectedAgentId, targetModelSelection]);
 
-  const hasChatTarget = chatMode === "agent" ? Boolean(selectedAgentId) : Boolean(parsedModelSelection);
+  const hasChatTarget = chatMode === "agent" ? Boolean(selectedAgentId) : Boolean(targetModelSelection);
   const inputDisabled = !hasChatTarget || !activeSession;
 
   useEffect(() => {
@@ -1154,8 +1164,8 @@ export function QuickChatFAB({
 
     prevSessionTargetRef.current = sessionTargetKey;
 
-    if (chatMode === "model" && parsedModelSelection) {
-      void startModelChat(parsedModelSelection.modelProvider, parsedModelSelection.modelId);
+    if (chatMode === "model" && targetModelSelection) {
+      void startModelChat(targetModelSelection.modelProvider, targetModelSelection.modelId);
       return;
     }
 
@@ -1165,7 +1175,7 @@ export function QuickChatFAB({
   }, [
     isOpen,
     chatMode,
-    parsedModelSelection,
+    targetModelSelection,
     selectedAgentId,
     sessionTargetKey,
     activeSession,

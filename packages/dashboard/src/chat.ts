@@ -20,6 +20,7 @@ import type {
   ChatStore,
   ChatSession,
   ChatSessionCreateInput,
+  Settings,
 } from "@fusion/core";
 import { summarizeTitle } from "@fusion/core";
 import { EventEmitter } from "node:events";
@@ -28,13 +29,21 @@ import { join, resolve, relative } from "node:path";
 import { SessionManager } from "@mariozechner/pi-coding-agent";
 import { SessionEventBuffer } from "./sse-buffer.js";
 
-import { createFnAgent as engineCreateFnAgent } from "@fusion/engine";
+import {
+  createFnAgent as engineCreateFnAgent,
+  createResolvedAgentSession as engineCreateResolvedAgentSession,
+  promptWithFallback as enginePromptWithFallback,
+  extractRuntimeHint,
+  extractRuntimeModel,
+} from "@fusion/engine";
 import * as engineModule from "@fusion/engine";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AgentResult = any;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let createFnAgent: any = engineCreateFnAgent;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let createResolvedAgentSession: any = engineCreateResolvedAgentSession;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let buildAgentChatPromptFn: any;
 
@@ -136,6 +145,7 @@ export type ChatStreamEvent =
   | { type: "text"; data: string }
   | { type: "tool_start"; data: { toolName: string; args?: Record<string, unknown> } }
   | { type: "tool_end"; data: { toolName: string; isError: boolean; result?: unknown } }
+  | { type: "fallback"; data: { primaryModel: string; fallbackModel: string; triggerPoint: "session-creation" | "prompt-time" } }
   | { type: "done"; data: { messageId: string; attachments?: ChatAttachment[] } }
   | { type: "error"; data: string };
 
@@ -430,7 +440,62 @@ export class ChatManager {
     private chatStore: ChatStore,
     private rootDir: string,
     private agentStore?: AgentStore,
+    private pluginRunner?: {
+      getRuntimeById?(runtimeId: string): unknown;
+      createRuntimeContext?(pluginId: string): Promise<unknown>;
+    },
+    private getSettings?: () => Promise<Pick<Settings, "fallbackProvider" | "fallbackModelId" | "defaultProvider" | "defaultModelId"> | undefined> | Pick<Settings, "fallbackProvider" | "fallbackModelId" | "defaultProvider" | "defaultModelId"> | undefined,
   ) {}
+
+  private async getChatModelSettings(): Promise<{
+    fallbackProvider?: string;
+    fallbackModelId?: string;
+    defaultProvider?: string;
+    defaultModelId?: string;
+  }> {
+    if (!this.getSettings) {
+      return {};
+    }
+
+    try {
+      const settings = await this.getSettings();
+      return {
+        fallbackProvider: settings?.fallbackProvider ?? undefined,
+        fallbackModelId: settings?.fallbackModelId ?? undefined,
+        defaultProvider: settings?.defaultProvider ?? undefined,
+        defaultModelId: settings?.defaultModelId ?? undefined,
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      diagnostics.warn(`Failed to load chat fallback settings: ${message}`);
+      return {};
+    }
+  }
+
+  private handleFallbackModelUsed(
+    sessionId: string,
+    payload: {
+      primaryModel: string;
+      fallbackModel: string;
+      triggerPoint: "session-creation" | "prompt-time";
+    },
+  ): void {
+    const slashIndex = payload.fallbackModel.indexOf("/");
+    if (slashIndex > 0 && slashIndex < payload.fallbackModel.length - 1) {
+      this.chatStore.updateSession(sessionId, {
+        modelProvider: payload.fallbackModel.slice(0, slashIndex),
+        modelId: payload.fallbackModel.slice(slashIndex + 1),
+      });
+    }
+
+    diagnostics.warn(
+      `[fallback] chat ${sessionId} switched from ${payload.primaryModel} to ${payload.fallbackModel} (${payload.triggerPoint})`,
+    );
+    chatStreamManager.broadcast(sessionId, {
+      type: "fallback",
+      data: payload,
+    });
+  }
 
   /**
    * Resolve the per-chat pi/Claude CLI SessionManager.
@@ -621,6 +686,9 @@ export class ChatManager {
     };
     const toolCallsAccum: ToolCallRecord[] = [];
     const pendingToolStarts = new Map<string, Array<{ toolName: string; args?: Record<string, unknown> }>>();
+    let fallbackInfo:
+      | { primaryModel: string; fallbackModel: string; triggerPoint: "session-creation" | "prompt-time" }
+      | undefined;
 
     try {
       // Validate session exists
@@ -653,34 +721,13 @@ export class ChatManager {
       }
 
       // Use model from session if not overridden (needed for both AI response and title generation)
-      const effectiveModelProvider = modelProvider ?? session.modelProvider ?? undefined;
-      const effectiveModelId = modelId ?? session.modelId ?? undefined;
+      const requestedModelProvider = modelProvider ?? session.modelProvider ?? undefined;
+      const requestedModelId = modelId ?? session.modelId ?? undefined;
+      let effectiveModelProvider = requestedModelProvider;
+      let effectiveModelId = requestedModelId;
+      let hasExplicitAgentRuntimeModel = false;
 
-      // Auto-generate chat title on first message if session has no title
       const needsTitle = session.title === null || session.title === undefined || session.title.trim() === "";
-      if (needsTitle) {
-        // Fire-and-forget title generation (non-blocking)
-        (async () => {
-          try {
-            const generated = await summarizeTitle(
-              content.trim(),
-              this.rootDir,
-              effectiveModelProvider,
-              effectiveModelId,
-            );
-            const title = generated ?? content.trim().slice(0, 60).trim();
-            if (title) {
-              this.chatStore.updateSession(sessionId, { title });
-            }
-          } catch {
-            // Fallback on any error
-            const fallback = content.trim().slice(0, 60).trim();
-            if (fallback) {
-              this.chatStore.updateSession(sessionId, { title: fallback });
-            }
-          }
-        })();
-      }
 
       // Ensure engine is loaded
       await ensureEngineReady();
@@ -718,6 +765,41 @@ export class ChatManager {
         }
       }
 
+      if (agent) {
+        const runtimeModel = extractRuntimeModel(agent.runtimeConfig);
+        if (runtimeModel.provider && runtimeModel.modelId) {
+          hasExplicitAgentRuntimeModel = true;
+        }
+        effectiveModelProvider ??= runtimeModel.provider;
+        effectiveModelId ??= runtimeModel.modelId;
+      }
+
+      // Auto-generate chat title on first message if session has no title.
+      // Run after the agent fetch so the title-summarizer uses the agent's model.
+      if (needsTitle) {
+        // Fire-and-forget title generation (non-blocking)
+        (async () => {
+          try {
+            const generated = await summarizeTitle(
+              content.trim(),
+              this.rootDir,
+              effectiveModelProvider,
+              effectiveModelId,
+            );
+            const title = generated ?? content.trim().slice(0, 60).trim();
+            if (title) {
+              this.chatStore.updateSession(sessionId, { title });
+            }
+          } catch {
+            // Fallback on any error
+            const fallback = content.trim().slice(0, 60).trim();
+            if (fallback) {
+              this.chatStore.updateSession(sessionId, { title: fallback });
+            }
+          }
+        })();
+      }
+
       if (mentions.length > 0) {
         const mentionContext = await this.buildMentionContext(mentions, mentionAgents);
         if (mentionContext) {
@@ -745,12 +827,23 @@ export class ChatManager {
       // first user message we create a fresh, file-backed session and persist
       // its path; subsequent messages reopen the same file.
       const sessionManager = this.resolveCliSessionManager(session);
+      const chatModelSettings = await this.getChatModelSettings();
+      const usesConfiguredDefaultModel =
+        requestedModelProvider === chatModelSettings.defaultProvider
+        && requestedModelId === chatModelSettings.defaultModelId
+        && !!requestedModelProvider
+        && !!requestedModelId;
+      const allowFallback =
+        !hasExplicitAgentRuntimeModel
+        && (
+          !(requestedModelProvider && requestedModelId)
+          || usesConfiguredDefaultModel
+        );
 
-      // Create AI agent session
-      agentResult = await createFnAgent({
+      const sessionOptions = {
         cwd: this.rootDir,
         systemPrompt,
-        tools: "coding",
+        tools: "coding" as const,
         sessionManager,
         ...(effectiveModelProvider && effectiveModelId
           ? {
@@ -758,6 +851,20 @@ export class ChatManager {
               defaultModelId: effectiveModelId,
             }
           : {}),
+        ...(allowFallback && chatModelSettings.fallbackProvider && chatModelSettings.fallbackModelId
+          ? {
+              fallbackProvider: chatModelSettings.fallbackProvider,
+              fallbackModelId: chatModelSettings.fallbackModelId,
+            }
+          : {}),
+        onFallbackModelUsed: (payload: {
+          primaryModel: string;
+          fallbackModel: string;
+          triggerPoint: "session-creation" | "prompt-time";
+        }) => {
+          fallbackInfo = payload;
+          this.handleFallbackModelUsed(sessionId, payload);
+        },
         onThinking: (delta: string) => {
           accumulatedThinking += delta;
           chatStreamManager.broadcast(sessionId, {
@@ -801,7 +908,19 @@ export class ChatManager {
             data: { toolName: name, isError, result },
           });
         },
-      });
+      };
+
+      const agentRuntimeHint = agent ? extractRuntimeHint(agent.runtimeConfig) : undefined;
+      if (agentRuntimeHint) {
+        agentResult = await createResolvedAgentSession({
+          sessionPurpose: "executor",
+          runtimeHint: agentRuntimeHint,
+          pluginRunner: this.pluginRunner,
+          ...sessionOptions,
+        });
+      } else {
+        agentResult = await createFnAgent(sessionOptions);
+      }
       this.activeGenerations.set(sessionId, { abortController, agentResult });
 
       if (abortController.signal.aborted) {
@@ -810,9 +929,22 @@ export class ChatManager {
       }
 
       // Send user message and get response
-      await agentResult.session.prompt(promptContent);
+      await enginePromptWithFallback(agentResult.session, promptContent);
 
       if (abortController.signal.aborted) {
+        return;
+      }
+
+      // Some runtimes (e.g. plugin-backed Codex/openclaw) signal provider failures
+      // by setting session.state.errorMessage rather than throwing. Surface that
+      // as an error event instead of persisting a blank assistant reply.
+      const sessionErrorMessage = (agentResult.session.state as { errorMessage?: unknown }).errorMessage;
+      if (typeof sessionErrorMessage === "string" && sessionErrorMessage.trim().length > 0
+          && !accumulatedText && !accumulatedThinking && toolCallsAccum.length === 0) {
+        chatStreamManager.broadcast(sessionId, {
+          type: "error",
+          data: sessionErrorMessage,
+        });
         return;
       }
 
@@ -841,11 +973,18 @@ export class ChatManager {
       const finalResponseText = accumulatedText || responseText;
 
       // Persist assistant message
+      const assistantMetadata: Record<string, unknown> = {};
+      if (toolCallsAccum.length > 0) {
+        assistantMetadata.toolCalls = toolCallsAccum;
+      }
+      if (fallbackInfo) {
+        assistantMetadata.fallback = fallbackInfo;
+      }
       const assistantMessage = this.chatStore.addMessage(sessionId, {
         role: "assistant",
         content: finalResponseText,
         thinkingOutput: accumulatedThinking || undefined,
-        metadata: toolCallsAccum.length > 0 ? { toolCalls: toolCallsAccum } : undefined,
+        metadata: Object.keys(assistantMetadata).length > 0 ? assistantMetadata : undefined,
       });
 
       // Broadcast done event
@@ -873,6 +1012,7 @@ export class ChatManager {
             thinkingOutput: accumulatedThinking || undefined,
             metadata: {
               interrupted: true,
+              ...(fallbackInfo ? { fallback: fallbackInfo } : {}),
               ...(toolCallsAccum.length > 0 ? { toolCalls: toolCallsAccum } : {}),
             },
           });
@@ -949,6 +1089,13 @@ export function __setCreateFnAgent(mock: typeof createFnAgent): void {
 }
 
 /**
+ * Inject a mock createResolvedAgentSession function. Used for testing only.
+ */
+export function __setCreateResolvedAgentSession(mock: typeof createResolvedAgentSession): void {
+  createResolvedAgentSession = mock;
+}
+
+/**
  * Inject a mock buildAgentChatPrompt function. Used for testing only.
  */
 export function __setBuildAgentChatPrompt(mock: typeof buildAgentChatPromptFn): void {
@@ -962,6 +1109,8 @@ export function __resetChatState(): void {
   chatStreamManager.reset();
   rateLimits.clear();
   buildAgentChatPromptFn = undefined;
+  createFnAgent = engineCreateFnAgent;
+  createResolvedAgentSession = engineCreateResolvedAgentSession;
 
   // Reset diagnostics logger to default
   __setChatDiagnostics(null);

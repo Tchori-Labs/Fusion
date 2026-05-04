@@ -1,18 +1,19 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import {
+  choosePreferredStoredCredential,
+  getCodexCliAuthPath,
+  readStoredCredentialsFromAuthFile,
+  shouldHydrateStoredCredential,
+  type StoredAuthCredential,
+} from "@fusion/core";
 import { AuthStorage } from "@mariozechner/pi-coding-agent";
+import type { AuthCredential } from "@mariozechner/pi-coding-agent";
 import { getOAuthProvider } from "@mariozechner/pi-ai/oauth";
 import type { OAuthCredentials } from "@mariozechner/pi-ai/oauth";
 
-type StoredCredential = {
-  type?: string;
-  key?: string;
-  access?: string;
-  refresh?: string;
-  expires?: number;
-  [key: string]: unknown;
-};
+type StoredCredential = StoredAuthCredential;
 
 function getHomeDir(): string {
   return process.env.HOME || process.env.USERPROFILE || homedir();
@@ -33,6 +34,13 @@ function getLegacyAuthPaths(home = getHomeDir()): string[] {
   ];
 }
 
+function getSupplementalAuthPaths(home = getHomeDir()): string[] {
+  return [
+    ...getLegacyAuthPaths(home),
+    getCodexCliAuthPath(home),
+  ];
+}
+
 function getLegacyModelsPaths(home = getHomeDir()): string[] {
   return [
     join(home, ".pi", "agent", "models.json"),
@@ -49,20 +57,13 @@ export function getModelRegistryModelsPath(home = getHomeDir()): string {
   return getLegacyModelsPaths(home).find((modelsPath) => existsSync(modelsPath)) ?? fusionModelsPath;
 }
 
-function readLegacyCredentials(authPaths = getLegacyAuthPaths()): Record<string, StoredCredential> {
+function readSupplementalCredentials(authPaths = getSupplementalAuthPaths()): Record<string, StoredCredential> {
   const credentials: Record<string, StoredCredential> = {};
 
   for (const authPath of authPaths) {
-    if (!existsSync(authPath)) {
-      continue;
-    }
-    try {
-      const parsed = JSON.parse(readFileSync(authPath, "utf-8")) as Record<string, StoredCredential>;
-      for (const [provider, credential] of Object.entries(parsed)) {
-        credentials[provider] ??= credential;
-      }
-    } catch {
-      // Ignore invalid legacy auth files and continue with other candidates.
+    const parsed = readStoredCredentialsFromAuthFile(authPath);
+    for (const [provider, credential] of Object.entries(parsed)) {
+      credentials[provider] = choosePreferredStoredCredential(credentials[provider], credential) ?? credential;
     }
   }
 
@@ -136,9 +137,23 @@ function readModelsJsonApiKeys(home = getHomeDir()): Map<string, string> {
 
 export function createFusionAuthStorage(): AuthStorage {
   const primary = AuthStorage.create(getFusionAuthPath());
-  let legacyCredentials = readLegacyCredentials();
-  // models.json provider API keys — third fallback after primary auth and legacy auth.json
+  let supplementalCredentials = readSupplementalCredentials();
+  // models.json provider API keys — final fallback after primary auth and supplemental auth.json files
   let modelsJsonApiKeys = readModelsJsonApiKeys();
+
+  const syncSupplementalOauthCredentials = () => {
+    for (const [provider, credential] of Object.entries(supplementalCredentials)) {
+      const current = primary.get(provider) as StoredCredential | undefined;
+      if (!shouldHydrateStoredCredential(current, credential)) {
+        continue;
+      }
+      if (credential.type === "oauth" || credential.type === "api_key") {
+        primary.set(provider, credential as AuthCredential);
+      }
+    }
+  };
+
+  syncSupplementalOauthCredentials();
 
   return new Proxy(primary, {
     // Forward property writes to the target so that methods like
@@ -154,29 +169,50 @@ export function createFusionAuthStorage(): AuthStorage {
       if (prop === "reload") {
         return () => {
           target.reload();
-          legacyCredentials = readLegacyCredentials();
+          supplementalCredentials = readSupplementalCredentials();
+          syncSupplementalOauthCredentials();
           modelsJsonApiKeys = readModelsJsonApiKeys();
         };
       }
 
       if (prop === "get") {
-        return (provider: string) => target.get(provider) ?? legacyCredentials[provider];
+        return (provider: string) =>
+          choosePreferredStoredCredential(
+            target.get(provider) as StoredCredential | undefined,
+            supplementalCredentials[provider],
+          );
       }
 
       if (prop === "has") {
-        return (provider: string) => target.has(provider) || provider in legacyCredentials || modelsJsonApiKeys.has(provider);
+        return (provider: string) => target.has(provider) || provider in supplementalCredentials || modelsJsonApiKeys.has(provider);
       }
 
       if (prop === "hasAuth") {
-        return (provider: string) => target.hasAuth(provider) || Boolean(legacyCredentials[provider]) || modelsJsonApiKeys.has(provider);
+        return (provider: string) => target.hasAuth(provider) || Boolean(supplementalCredentials[provider]) || modelsJsonApiKeys.has(provider);
       }
 
       if (prop === "getAll") {
-        return () => ({ ...legacyCredentials, ...target.getAll() });
+        return () => {
+          const providerIds = new Set([
+            ...Object.keys(supplementalCredentials),
+            ...Object.keys(target.getAll() as Record<string, StoredCredential>),
+          ]);
+          const merged: Record<string, StoredCredential> = {};
+          for (const providerId of providerIds) {
+            const credential = choosePreferredStoredCredential(
+              (target.get(providerId) as StoredCredential | undefined),
+              supplementalCredentials[providerId],
+            );
+            if (credential) {
+              merged[providerId] = credential;
+            }
+          }
+          return merged;
+        };
       }
 
       if (prop === "list") {
-        return () => Array.from(new Set([...Object.keys(legacyCredentials), ...target.list(), ...modelsJsonApiKeys.keys()]));
+        return () => Array.from(new Set([...Object.keys(supplementalCredentials), ...target.list(), ...modelsJsonApiKeys.keys()]));
       }
 
       if (prop === "getApiKey") {
@@ -185,9 +221,9 @@ export function createFusionAuthStorage(): AuthStorage {
           const primaryKey = await target.getApiKey(provider);
           if (primaryKey) return primaryKey;
 
-          // 2. Legacy auth.json credentials
-          const legacyKey = resolveStoredCredentialApiKey(provider, legacyCredentials[provider]);
-          if (legacyKey) return legacyKey;
+          // 2. Supplemental auth.json credentials (.pi + .codex)
+          const supplementalKey = resolveStoredCredentialApiKey(provider, supplementalCredentials[provider]);
+          if (supplementalKey) return supplementalKey;
 
           // 3. models.json provider API keys (e.g., kimi-coding, lmstudio)
           return modelsJsonApiKeys.get(provider);

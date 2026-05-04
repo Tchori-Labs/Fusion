@@ -38,6 +38,12 @@ export interface ToolCallInfo {
   status: "running" | "completed";
 }
 
+export interface FallbackInfo {
+  primaryModel: string;
+  fallbackModel: string;
+  triggerPoint: "session-creation" | "prompt-time";
+}
+
 export interface ChatMessageInfo {
   id: string;
   sessionId: string;
@@ -45,6 +51,7 @@ export interface ChatMessageInfo {
   content: string;
   thinkingOutput?: string | null;
   toolCalls?: ToolCallInfo[];
+  fallbackInfo?: FallbackInfo;
   attachments?: Array<{
     id: string;
     filename: string;
@@ -99,6 +106,18 @@ export interface UseChatReturn {
   agentsMap: Map<string, Agent>;
 }
 
+function parseModelDescriptor(model: string): { modelProvider?: string; modelId?: string } {
+  const value = typeof model === "string" ? model.trim() : "";
+  const slashIndex = value.indexOf("/");
+  if (!value || slashIndex <= 0 || slashIndex >= value.length - 1) {
+    return {};
+  }
+  return {
+    modelProvider: value.slice(0, slashIndex),
+    modelId: value.slice(slashIndex + 1),
+  };
+}
+
 function extractCompletedToolCalls(metadata: Record<string, unknown> | null | undefined): ToolCallInfo[] | undefined {
   const rawToolCalls = metadata?.toolCalls;
   if (!Array.isArray(rawToolCalls)) {
@@ -132,6 +151,27 @@ function extractCompletedToolCalls(metadata: Record<string, unknown> | null | un
   return parsed.length > 0 ? parsed : undefined;
 }
 
+function extractFallbackInfo(metadata: Record<string, unknown> | null | undefined): FallbackInfo | undefined {
+  const rawFallback = metadata?.fallback;
+  if (!rawFallback || typeof rawFallback !== "object") {
+    return undefined;
+  }
+
+  const record = rawFallback as Record<string, unknown>;
+  const primaryModel = typeof record.primaryModel === "string" ? record.primaryModel : "";
+  const fallbackModel = typeof record.fallbackModel === "string" ? record.fallbackModel : "";
+  const triggerPoint = record.triggerPoint;
+  if (!primaryModel || !fallbackModel || (triggerPoint !== "session-creation" && triggerPoint !== "prompt-time")) {
+    return undefined;
+  }
+
+  return {
+    primaryModel,
+    fallbackModel,
+    triggerPoint,
+  };
+}
+
 function mapChatMessageToInfo(message: ChatMessage): ChatMessageInfo {
   return {
     id: message.id,
@@ -140,12 +180,16 @@ function mapChatMessageToInfo(message: ChatMessage): ChatMessageInfo {
     content: message.content,
     thinkingOutput: message.thinkingOutput,
     toolCalls: extractCompletedToolCalls(message.metadata),
+    fallbackInfo: extractFallbackInfo(message.metadata),
     attachments: message.attachments,
     createdAt: message.createdAt,
   };
 }
 
-export function useChat(projectId?: string): UseChatReturn {
+export function useChat(
+  projectId?: string,
+  addToast?: (msg: string, type?: "success" | "error" | "warning") => void,
+): UseChatReturn {
   // Session state
   const [sessions, setSessions] = useState<ChatSessionInfo[]>([]);
   const [activeSession, setActiveSession] = useState<ChatSessionInfo | null>(null);
@@ -489,6 +533,7 @@ export function useChat(projectId?: string): UseChatReturn {
       let capturedText = "";
       let capturedThinking = "";
       let capturedToolCalls: ToolCallInfo[] = [];
+      let capturedFallbackInfo: FallbackInfo | undefined;
 
       // Coalesce per-token state updates to one render per animation frame.
       // ReactMarkdown re-parses the entire growing string on every render and
@@ -569,6 +614,25 @@ export function useChat(projectId?: string): UseChatReturn {
           ];
           setStreamingToolCalls(capturedToolCalls);
         },
+        onFallback: (data: FallbackInfo) => {
+          capturedFallbackInfo = data;
+          const nextModel = parseModelDescriptor(data.fallbackModel);
+          setSessions((prev) => prev.map((session) =>
+            session.id === activeSession.id
+              ? {
+                  ...session,
+                  ...nextModel,
+                }
+              : session,
+          ));
+          setActiveSession((prev) => prev && prev.id === activeSession.id
+            ? {
+                ...prev,
+                ...nextModel,
+              }
+            : prev);
+          addToast?.(`Primary model unavailable. Switched to fallback ${data.fallbackModel}.`, "warning");
+        },
         onDone: (data: { messageId: string }) => {
           cancelStreamingFlushes();
           const assistantMessage: ChatMessageInfo = {
@@ -578,6 +642,7 @@ export function useChat(projectId?: string): UseChatReturn {
             content: capturedText,
             thinkingOutput: capturedThinking,
             toolCalls: capturedToolCalls.length > 0 ? capturedToolCalls : undefined,
+            fallbackInfo: capturedFallbackInfo,
             createdAt: new Date().toISOString(),
           };
 
@@ -616,6 +681,7 @@ export function useChat(projectId?: string): UseChatReturn {
           setIsStreaming(false);
           streamRef.current = null;
           console.error("[useChat] Stream error:", data);
+          addToast?.(typeof data === "string" && data.trim() ? data : "Failed to get response", "error");
 
           if (!cancelledByUserRef.current) {
             const queuedMessage = pendingMessageRef.current.trim();
@@ -630,7 +696,7 @@ export function useChat(projectId?: string): UseChatReturn {
 
       streamRef.current = streamChatResponse(activeSession.id, content, textHandlers, attachments, projectId);
     },
-    [activeSession, isStreaming, projectId, refreshSessions],
+    [activeSession, isStreaming, projectId, refreshSessions, addToast],
   );
 
   // Filter sessions based on search query
