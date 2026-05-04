@@ -3836,7 +3836,7 @@ describe("remote access auth login-url endpoints", () => {
     expect(persistentLoginUrl.pathname).toBe("/remote-login");
     expect(persistentLoginUrl.searchParams.get("rt")).toMatch(/^frt_[A-Za-z0-9_-]+$/);
     expect(res.body.expiresAt).toBeUndefined();
-    expect(store.updateSettings).toHaveBeenCalledWith(expect.objectContaining({
+    expect(store.updateGlobalSettings).toHaveBeenCalledWith(expect.objectContaining({
       remoteAccess: expect.objectContaining({
         tokenStrategy: expect.objectContaining({
           persistent: expect.objectContaining({
