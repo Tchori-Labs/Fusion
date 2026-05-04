@@ -704,7 +704,8 @@ export function AgentDetailView({ agentId, projectId, onClose, addToast, onChild
           )}
 
           {activeTab === "config" && (
-            <ConfigTab 
+            <ConfigTab
+              key={agent.id}
               agent={agent}
               projectId={projectId}
               addToast={addToast}

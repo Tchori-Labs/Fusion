@@ -1459,6 +1459,7 @@ export function AgentsView({ addToast, projectId, onOpenTaskLogs, agentOnboardin
           {selectedAgentId ? (
             <Suspense fallback={null}>
               <AgentDetailView
+                key={selectedAgentId}
                 inline
                 showInlineBackButton={isMobileViewport}
                 agentId={selectedAgentId}
