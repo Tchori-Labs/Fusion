@@ -526,6 +526,8 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   private static readonly AGENT_LOG_BUFFER_SIZE = 50;
   /** Flush interval in milliseconds. */
   private static readonly AGENT_LOG_FLUSH_MS = 2000;
+  /** Absolute backlog cap — oldest entries are dropped when flushes keep failing. */
+  private static readonly MAX_AGENT_LOG_BACKLOG = 5_000;
 
   // Test-only: when true, both fusion.db and archive.db open as `:memory:`
   // SQLite connections instead of disk-backed files. Production code never
@@ -557,8 +559,14 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
    */
   private get db(): Database {
     if (!this._db) {
-      this._db = new Database(this.fusionDir, { inMemory: this.inMemoryDb });
-      this._db.init();
+      const db = new Database(this.fusionDir, { inMemory: this.inMemoryDb });
+      try {
+        db.init();
+      } catch (error) {
+        db.close();
+        throw error;
+      }
+      this._db = db;
       // Auto-migrate legacy data if needed
       if (detectLegacyData(this.fusionDir)) {
         // Note: migrateFromLegacy is async but we need sync access.
@@ -571,8 +579,14 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
 
   private get archiveDb(): ArchiveDatabase {
     if (!this._archiveDb) {
-      this._archiveDb = new ArchiveDatabase(this.fusionDir, { inMemory: this.inMemoryDb });
-      this._archiveDb.init();
+      const db = new ArchiveDatabase(this.fusionDir, { inMemory: this.inMemoryDb });
+      try {
+        db.init();
+      } catch (error) {
+        db.close();
+        throw error;
+      }
+      this._archiveDb = db;
       this.migrateLegacyArchiveEntriesToArchiveDb();
     }
     return this._archiveDb;
@@ -583,8 +597,14 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     
     // Initialize SQLite database
     if (!this._db) {
-      this._db = new Database(this.fusionDir, { inMemory: this.inMemoryDb });
-      this._db.init();
+      const db = new Database(this.fusionDir, { inMemory: this.inMemoryDb });
+      try {
+        db.init();
+      } catch (error) {
+        db.close();
+        throw error;
+      }
+      this._db = db;
     }
     
     // Auto-migrate from legacy file-based storage
@@ -4743,6 +4763,14 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     };
 
     // Buffer the entry for batched insertion to reduce WAL pressure.
+    // Drop oldest entries if backlog exceeds hard cap (prolonged outage).
+    if (this.agentLogBuffer.length >= TaskStore.MAX_AGENT_LOG_BACKLOG) {
+      const dropCount = this.agentLogBuffer.length - TaskStore.MAX_AGENT_LOG_BACKLOG + 1;
+      this.agentLogBuffer.splice(0, dropCount);
+      console.warn(
+        `[fusion] Dropped ${dropCount} buffered agent log entries — backlog cap reached (${this.db.path})`,
+      );
+    }
     this.agentLogBuffer.push({
       taskId,
       timestamp,
