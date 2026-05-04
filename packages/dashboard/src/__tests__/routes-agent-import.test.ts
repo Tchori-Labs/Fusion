@@ -366,6 +366,33 @@ describe("POST /api/agents/import", () => {
     expect(mockCreateAgent).not.toHaveBeenCalled();
   });
 
+  it("maps store-level duplicate errors to skipped results", async () => {
+    mockPrepareAgentCompaniesImport.mockReturnValue({
+      items: [{
+        manifestKey: "dup-agent",
+        aliases: ["dup-agent"],
+        index: 0,
+        input: { name: "Dup Agent", role: "custom" },
+      }],
+      result: {
+        created: ["Dup Agent"],
+        skipped: [],
+        errors: [],
+      },
+    });
+
+    mockCreateAgent.mockRejectedValueOnce(new Error("Agent with name \"Dup Agent\" already exists (agentId: agent-existing)"));
+
+    const response = await postImport(app, {
+      manifest: "---\nname: Dup Agent\n---\nInstructions",
+    });
+
+    expect(response.status).toBe(200);
+    const body = response.body as any;
+    expect(body.skipped).toContain("Dup Agent");
+    expect(body.errors).toEqual([]);
+  });
+
   it("honors skipExisting and returns skipped agents", async () => {
     mockListAgents.mockResolvedValue([{ id: "agent-existing", name: "YAML Agent" }]);
     mockPrepareAgentCompaniesImport.mockReturnValue({

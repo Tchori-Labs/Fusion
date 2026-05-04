@@ -377,6 +377,12 @@ export class InProcessRuntime
           // These workers are not heartbeat-managed dashboard agents, so mark them
           // explicitly and disable heartbeat triggers/timers.
           if (this.agentStore) {
+            if (this.taskAgentMap.has(task.id)) {
+              runtimeLog.warn(`Skipping task-worker creation for ${task.id}: agent already exists (${this.taskAgentMap.get(task.id)})`);
+              return;
+            }
+
+            this.taskAgentMap.set(task.id, "creating");
             this.agentStore.createAgent({
               name: `executor-${task.id}`,
               role: "executor",
@@ -394,6 +400,7 @@ export class InProcessRuntime
               await this.agentStore!.updateAgentState(agent.id, "active");
               await this.agentStore!.updateAgentState(agent.id, "running");
             }).catch((err: unknown) => {
+              this.taskAgentMap.delete(task.id);
               runtimeLog.warn(`Failed to create agent for task ${task.id}:`, err);
             });
           }

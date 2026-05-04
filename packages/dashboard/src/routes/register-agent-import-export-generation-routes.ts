@@ -749,10 +749,17 @@ async function persistImportedSkills(
           created.push({ id: agent.id, name: agent.name });
           createdAgentIdsByManifestKey.set(item.manifestKey, agent.id);
         } catch (err: unknown) {
-      if (err instanceof ApiError) {
-        throw err;
-      }
-          errors.push({ name: item.input.name, error: err instanceof Error ? err.message : String(err) });
+          if (err instanceof ApiError) {
+            throw err;
+          }
+          const message = err instanceof Error ? err.message : String(err);
+          if (message.includes("Agent with name")) {
+            if (!result.skipped.includes(item.input.name)) {
+              result.skipped.push(item.input.name);
+            }
+            continue;
+          }
+          errors.push({ name: item.input.name, error: message });
         }
       }
 

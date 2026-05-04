@@ -627,6 +627,24 @@ describe("InProcessRuntime", () => {
       expect(assignTaskSpy.mock.invocationCallOrder[0]).toBeLessThan(updateStateSpy.mock.invocationCallOrder[0]);
     }, 30000);
 
+    it("does not create duplicate task-worker agents when onStart fires twice for one task", async () => {
+      await runtime.start();
+
+      const store = getAgentStore(runtime);
+      const executorOptions = mockExecutorCtor.mock.calls.at(-1)?.[0] as {
+        onStart?: (task: Task, worktreePath: string) => void;
+      };
+
+      executorOptions.onStart?.({ id: "FN-DUP-ONSTART" } as Task, join(testDir, "worktree-FN-DUP-ONSTART"));
+      executorOptions.onStart?.({ id: "FN-DUP-ONSTART" } as Task, join(testDir, "worktree-FN-DUP-ONSTART"));
+
+      await vi.waitFor(async () => {
+        const agents = await store.listAgents({ includeEphemeral: true });
+        const matching = agents.filter((agent: Agent) => agent.name === "executor-FN-DUP-ONSTART");
+        expect(matching).toHaveLength(1);
+      });
+    }, 30000);
+
     it("does not wake executeHeartbeat for runtime task-worker assignment events", async () => {
       await runtime.start();
 

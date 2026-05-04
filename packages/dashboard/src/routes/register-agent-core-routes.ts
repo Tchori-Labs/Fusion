@@ -154,22 +154,32 @@ export function registerAgentCoreListCreateRoutes(ctx: ApiRoutesContext, deps: A
       const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
       await agentStore.init();
 
-      const agent = await agentStore.createAgent({
-        name,
-        role: role as AgentCapability,
-        metadata,
-        title: title ?? undefined,
-        icon: icon ?? undefined,
-        reportsTo: reportsTo ?? undefined,
-        runtimeConfig,
-        permissions,
-        instructionsPath: instructionsPath ?? undefined,
-        instructionsText: instructionsText ?? undefined,
-        soul: soul ?? undefined,
-        memory: memory ?? undefined,
-        bundleConfig: bundleConfig ?? undefined,
-        heartbeatProcedurePath: heartbeatProcedurePath ?? undefined,
-      });
+      let agent: Agent;
+      try {
+        agent = await agentStore.createAgent({
+          name,
+          role: role as AgentCapability,
+          metadata,
+          title: title ?? undefined,
+          icon: icon ?? undefined,
+          reportsTo: reportsTo ?? undefined,
+          runtimeConfig,
+          permissions,
+          instructionsPath: instructionsPath ?? undefined,
+          instructionsText: instructionsText ?? undefined,
+          soul: soul ?? undefined,
+          memory: memory ?? undefined,
+          bundleConfig: bundleConfig ?? undefined,
+          heartbeatProcedurePath: heartbeatProcedurePath ?? undefined,
+        });
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : String(err);
+        if (message.includes("Agent with name")) {
+          res.status(409).json({ error: "Agent with this name already exists", name });
+          return;
+        }
+        throw err;
+      }
 
       // Seed the default heartbeat procedure file if the new agent landed on
       // the per-agent default path (which createAgent fills in for

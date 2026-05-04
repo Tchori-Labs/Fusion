@@ -137,6 +137,64 @@ describe("AgentStore", () => {
   // ── createAgent ───────────────────────────────────────────────────
 
   describe("createAgent", () => {
+    describe("createAgent name uniqueness", () => {
+      it("rejects creating a non-ephemeral agent with a duplicate name", async () => {
+        const created = await store.createAgent({
+          name: "Alpha",
+          role: "executor",
+        });
+
+        await expect(
+          store.createAgent({
+            name: "Alpha",
+            role: "reviewer",
+          }),
+        ).rejects.toThrow(`Agent with name "Alpha" already exists (agentId: ${created.id})`);
+      });
+
+      it("allows creating ephemeral agents with duplicate names", async () => {
+        const first = await store.createAgent({
+          name: "executor-FN-123",
+          role: "executor",
+          metadata: { agentKind: "task-worker", taskWorker: true },
+        });
+
+        const second = await store.createAgent({
+          name: "executor-FN-123",
+          role: "executor",
+          metadata: { agentKind: "task-worker", taskWorker: true },
+        });
+
+        expect(first.id).not.toBe(second.id);
+        expect(first.name).toBe(second.name);
+      });
+
+      it("findAgentByName returns the correct agent", async () => {
+        const created = await store.createAgent({
+          name: "Beta",
+          role: "executor",
+        });
+
+        const found = await store.findAgentByName("Beta");
+        const missing = await store.findAgentByName("Gamma");
+
+        expect(found?.id).toBe(created.id);
+        expect(found?.name).toBe("Beta");
+        expect(missing).toBeNull();
+      });
+
+      it("findAgentByName excludes ephemeral agents", async () => {
+        await store.createAgent({
+          name: "Ephemeral-X",
+          role: "executor",
+          metadata: { agentKind: "task-worker", taskWorker: true },
+        });
+
+        const found = await store.findAgentByName("Ephemeral-X");
+        expect(found).toBeNull();
+      });
+    });
+
     it("returns an agent with correct fields", async () => {
       const agent = await store.createAgent({
         name: "  Test Agent  ",

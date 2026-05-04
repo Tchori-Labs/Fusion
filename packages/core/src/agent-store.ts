@@ -473,6 +473,40 @@ export class AgentStore extends EventEmitter {
   }
 
   /**
+   * Find the first non-ephemeral agent by exact name.
+   *
+   * Ephemeral task-worker/spawned agents are excluded so callers can use this
+   * for durable identity checks without transient runtime workers conflicting.
+   *
+   * @param name - Agent name to match exactly
+   * @returns Matching non-ephemeral agent, or null when none exists
+   */
+  async findAgentByName(name: string): Promise<Agent | null> {
+    const rows = this.db
+      .prepare("SELECT * FROM agents WHERE name = ? ORDER BY createdAt DESC")
+      .all(name) as unknown as AgentRow[];
+
+    for (const row of rows) {
+      const agent = this.mapAgentRow(row);
+      if (!isEphemeralAgent(agent)) {
+        return agent;
+      }
+    }
+
+    return null;
+  }
+
+  async hasNonEphemeralAgentWithName(name: string): Promise<boolean> {
+    const normalizedName = name.trim();
+    if (!normalizedName) {
+      return false;
+    }
+
+    const existing = await this.findAgentByName(normalizedName);
+    return existing !== null;
+  }
+
+  /**
    * Create a new agent with "idle" state.
    *
    * For non-ephemeral agents, ensures `runtimeConfig.heartbeatIntervalMs` is
@@ -484,9 +518,12 @@ export class AgentStore extends EventEmitter {
    * same default (1h) to both at runtime. Writing the default explicitly
    * removes that divergence and keeps the persisted config truthful.
    *
+   * Also enforces non-ephemeral name uniqueness: durable agents cannot share a
+   * name, while ephemeral task-worker agents are allowed to duplicate names.
+   *
    * @param input - Creation parameters
    * @returns The created agent
-   * @throws Error if input is invalid
+   * @throws Error if input is invalid or a duplicate non-ephemeral name exists
    */
   async createAgent(input: AgentCreateInput): Promise<Agent> {
     if (!input.name?.trim()) {
@@ -496,10 +533,20 @@ export class AgentStore extends EventEmitter {
       throw new Error("Agent role is required");
     }
 
+    const normalizedName = input.name.trim();
+    const metadata = input.metadata ?? {};
+    const ephemeral = isEphemeralAgent({ metadata, name: input.name, role: input.role, reportsTo: input.reportsTo });
+
+    if (!ephemeral) {
+      const existing = await this.findAgentByName(normalizedName);
+      if (existing) {
+        throw new Error(`Agent with name "${normalizedName}" already exists (agentId: ${existing.id})`);
+      }
+    }
+
     const now = new Date().toISOString();
     const agentId = `agent-${randomUUID().slice(0, 8)}`;
 
-    const metadata = input.metadata ?? {};
     const runtimeConfig = resolveCreationRuntimeConfig(input.runtimeConfig, metadata);
 
     // Default heartbeatProcedurePath for new non-ephemeral agents so operators
@@ -508,13 +555,12 @@ export class AgentStore extends EventEmitter {
     // tweaks to one agent's procedure do not bleed into the rest of the
     // team. Ephemeral task workers skip this — they're short-lived and
     // don't need persistent procedure files.
-    const ephemeral = isEphemeralAgent({ metadata, name: input.name, role: input.role, reportsTo: input.reportsTo });
     const resolvedHeartbeatProcedurePath = input.heartbeatProcedurePath
       ?? (ephemeral ? undefined : getDefaultHeartbeatProcedurePath(agentId, input.name));
 
     const agent: Agent = {
       id: agentId,
-      name: input.name.trim(),
+      name: normalizedName,
       role: input.role,
       state: "idle",
       createdAt: now,
