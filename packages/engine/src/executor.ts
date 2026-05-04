@@ -5564,7 +5564,11 @@ and show an appropriate message to the user.\`
     if (shouldGenerateNewName) {
       // Conflicting worktree belongs to an active task — generate new path AND
       // use a suffixed branch name so git doesn't conflict with the branch
-      // already checked out in the existing worktree.
+      // already checked out in the existing worktree. Branch conflicts here
+      // mean the original task branch already exists and is checked out
+      // elsewhere, so suffix retries must branch from that task branch tip
+      // rather than the stale base ref to preserve the task's commits.
+      const conflictStartPoint = branch;
       const newPath = join(this.rootDir, ".worktrees", generateWorktreeName(this.rootDir));
       for (let suffix = 2; suffix <= 6; suffix++) {
         const suffixedBranch = `${branch}-${suffix}`;
@@ -5574,7 +5578,7 @@ and show an appropriate message to the user.\`
             `Conflicting worktree in use by active task, trying new path with branch ${suffixedBranch}`,
             newPath,
           );
-          return await this.tryCreateWorktree(suffixedBranch, newPath, taskId, startPoint, attemptNumber);
+          return await this.tryCreateWorktree(suffixedBranch, newPath, taskId, conflictStartPoint, attemptNumber);
         } catch (suffixErr: unknown) {
           const info = this.extractWorktreeConflictInfo(suffixErr);
           if (info.type === "already-used") {

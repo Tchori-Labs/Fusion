@@ -1333,7 +1333,7 @@ describe("TaskExecutor worktree recovery", () => {
     mockedGenerateWorktreeName.mockReturnValueOnce("jade-finch");
 
     const executor = new TaskExecutor(store, "/tmp/test");
-    await executor.execute(makeTask());
+    await executor.execute({ ...makeTask(), baseBranch: "fusion/fn-049" });
 
     // Should log that we're trying a new path
     expect(store.logEntry).toHaveBeenCalledWith(
@@ -1343,6 +1343,24 @@ describe("TaskExecutor worktree recovery", () => {
     );
     // Should generate a new name
     expect(mockedGenerateWorktreeName).toHaveBeenCalledTimes(2);
+
+    const worktreeAddCalls = mockedExecSync.mock.calls
+      .map((call) => String(call[0]))
+      .filter((command) => command.includes("git worktree add -b"));
+    expect(
+      worktreeAddCalls.some(
+        (command) =>
+          command.includes('git worktree add -b "fusion/fn-050"') &&
+          command.endsWith('"fusion/fn-049"'),
+      ),
+    ).toBe(true);
+    expect(
+      worktreeAddCalls.some(
+        (command) =>
+          command.includes('git worktree add -b "fusion/fn-050-2"') &&
+          command.endsWith('"fusion/fn-050"'),
+      ),
+    ).toBe(true);
   });
 
   it("removes stale branch and retries when branch exists without worktree", async () => {

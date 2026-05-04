@@ -234,10 +234,13 @@ export class WorktreePool {
       }
 
       // Conflicting worktree exists and is active — use a suffixed branch name
-      // to avoid disrupting the other worktree
+      // to avoid disrupting the other worktree. Seed the suffix from the
+      // original task branch tip rather than the generic base ref so retries
+      // preserve the task's commits instead of resetting to main/baseBranch.
+      const conflictBase = branchName;
       for (let suffix = 2; suffix <= 6; suffix++) {
         const suffixedName = `${branchName}-${suffix}`;
-        const suffixedCmd = `git checkout -B "${suffixedName}" ${base}`;
+        const suffixedCmd = `git checkout -B "${suffixedName}" ${conflictBase}`;
         try {
           await execAsync(suffixedCmd, { cwd: worktreePath });
           return suffixedName;

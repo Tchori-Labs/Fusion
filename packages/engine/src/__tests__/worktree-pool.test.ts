@@ -286,7 +286,32 @@ describe("WorktreePool", () => {
       const checkoutCalls = mockedExecSync.mock.calls
         .map((c) => c[0])
         .filter((c) => typeof c === "string" && c.includes("checkout -B"));
-      expect(checkoutCalls).toContain('git checkout -B "fusion/fn-042-2" main');
+      expect(checkoutCalls).toContain('git checkout -B "fusion/fn-042-2" fusion/fn-042');
+    });
+
+    it("seeds suffixed retry branches from the original branch instead of the generic base", async () => {
+      mockedExistsSync.mockReturnValue(true);
+
+      mockedExecSync.mockImplementation((cmd: any) => {
+        const cmdStr = String(cmd);
+        if (cmdStr === 'git checkout -B "fusion/fn-042" fusion/fn-041') {
+          const err: any = new Error("branch conflict");
+          err.stderr = Buffer.from(
+            "fatal: 'fusion/fn-042' is already used by worktree at '/other/wt'"
+          );
+          throw err;
+        }
+        return Buffer.from("");
+      });
+
+      const result = await pool.prepareForTask("/tmp/wt", "fusion/fn-042", "fusion/fn-041");
+      expect(result).toBe("fusion/fn-042-2");
+
+      const checkoutCalls = mockedExecSync.mock.calls
+        .map((c) => c[0])
+        .filter((c) => typeof c === "string" && c.includes("checkout -B"));
+      expect(checkoutCalls).toContain('git checkout -B "fusion/fn-042-2" fusion/fn-042');
+      expect(checkoutCalls).not.toContain('git checkout -B "fusion/fn-042-2" fusion/fn-041');
     });
 
     it("increments suffix when lower suffixes are also in use", async () => {
@@ -295,8 +320,8 @@ describe("WorktreePool", () => {
       mockedExecSync.mockImplementation((cmd: any) => {
         const cmdStr = String(cmd);
         // Original and -2 are both in use
-        if (cmdStr === 'git checkout -B "fusion/fn-042" main' ||
-            cmdStr === 'git checkout -B "fusion/fn-042-2" main') {
+        if (cmdStr.startsWith('git checkout -B "fusion/fn-042" ') ||
+            cmdStr.startsWith('git checkout -B "fusion/fn-042-2" ')) {
           const err: any = new Error("branch conflict");
           err.stderr = Buffer.from(
             `fatal: 'x' is already used by worktree at '/other/wt'`
@@ -308,6 +333,11 @@ describe("WorktreePool", () => {
 
       const result = await pool.prepareForTask("/tmp/wt", "fusion/fn-042");
       expect(result).toBe("fusion/fn-042-3");
+
+      const checkoutCalls = mockedExecSync.mock.calls
+        .map((c) => c[0])
+        .filter((c) => typeof c === "string" && c.includes("checkout -B"));
+      expect(checkoutCalls).toContain('git checkout -B "fusion/fn-042-3" fusion/fn-042');
     });
 
     it("falls back to git worktree prune when conflicting worktree no longer exists on disk", async () => {
