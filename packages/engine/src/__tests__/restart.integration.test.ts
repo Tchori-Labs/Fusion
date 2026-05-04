@@ -79,6 +79,35 @@ vi.mock("node:child_process", () => {
       });
     });
 
+  // execFile(file, args, opts, cb) — assemble a command string and delegate to
+  // execSyncFn so the same mock infrastructure covers execFile-based git calls.
+  const execFileFn: any = vi.fn((file: any, args: any, opts: any, cb: any) => {
+    const callback = typeof opts === "function" ? opts : cb;
+    const options = typeof opts === "function" ? undefined : opts;
+    const cmd = [file, ...(Array.isArray(args) ? args : [])].join(" ");
+    try {
+      const out = execSyncFn(cmd, options);
+      const stdout = out === undefined ? "" : out.toString();
+      if (typeof callback === "function") callback(null, stdout, "");
+    } catch (err: any) {
+      if (typeof callback === "function") {
+        callback(err, err?.stdout?.toString?.() ?? "", err?.stderr?.toString?.() ?? "");
+      }
+    }
+  });
+  execFileFn[promisify.custom] = (file: any, args?: any, opts?: any) =>
+    new Promise((resolve, reject) => {
+      execFileFn(file, args, opts, (err: any, stdout: any, stderr: any) => {
+        if (err) {
+          err.stdout = stdout;
+          err.stderr = stderr;
+          reject(err);
+        } else {
+          resolve({ stdout, stderr });
+        }
+      });
+    });
+
   // spawn() is used by the merger's verification runner. Route it through the
   // same execSyncFn mock so a single mockedExecSync.mockImplementation controls
   // both git calls (execSync) and verification commands (spawn). Throwing from
@@ -104,7 +133,7 @@ vi.mock("node:child_process", () => {
     return child;
   });
 
-  return { execSync: execSyncFn, exec: execFn, spawn: spawnFn };
+  return { execSync: execSyncFn, exec: execFn, execFile: execFileFn, spawn: spawnFn };
 });
 vi.mock("node:fs", () => ({
   existsSync: vi.fn().mockReturnValue(true),

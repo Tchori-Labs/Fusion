@@ -74,7 +74,38 @@ vi.mock("node:child_process", async () => {
         }
       });
     });
-  return { execSync: execSyncFn, exec: execFn, spawn: spawnFn };
+
+  // execFile(file, args, opts, cb) — reassemble a shell-equivalent command and
+  // delegate to execSyncFn so the same mock infrastructure handles both exec and execFile.
+  const execFileFn: any = vi.fn((file: any, args: any, opts: any, cb: any) => {
+    // Normalize overloads: (file, args, cb) or (file, args, opts, cb)
+    const callback = typeof opts === "function" ? opts : cb;
+    const options = typeof opts === "function" ? {} : opts;
+    const cmd = [file, ...(Array.isArray(args) ? args : [])].join(" ");
+    try {
+      const out = execSyncFn(cmd, { stdio: ["pipe", "pipe", "pipe"], ...options });
+      const stdout = out === undefined ? "" : out.toString();
+      if (typeof callback === "function") callback(null, stdout, "");
+    } catch (err: any) {
+      if (typeof callback === "function") {
+        callback(err, err?.stdout?.toString?.() ?? "", err?.stderr?.toString?.() ?? "");
+      }
+    }
+  });
+  execFileFn[promisify.custom] = (file: any, args?: any, opts?: any) =>
+    new Promise((resolve, reject) => {
+      execFileFn(file, args, opts, (err: any, stdout: any, stderr: any) => {
+        if (err) {
+          err.stdout = stdout;
+          err.stderr = stderr;
+          reject(err);
+        } else {
+          resolve({ stdout, stderr });
+        }
+      });
+    });
+
+  return { execSync: execSyncFn, exec: execFn, execFile: execFileFn, spawn: spawnFn };
 });
 
 vi.mock("node:fs", () => ({
@@ -1205,8 +1236,8 @@ describe("push-after-merge", () => {
       if (cmdStr.includes("git diff --name-only --diff-filter=U")) {
         return hasConflicts ? "pnpm-lock.yaml" as any : "" as any;
       }
-      if (cmdStr.startsWith('git checkout --ours "pnpm-lock.yaml"')) return Buffer.from("");
-      if (cmdStr.startsWith('git add "pnpm-lock.yaml"')) {
+      if (cmdStr.includes("checkout --ours") && cmdStr.includes("pnpm-lock.yaml")) return Buffer.from("");
+      if (cmdStr.includes("git add") && cmdStr.includes("pnpm-lock.yaml")) {
         hasConflicts = false;
         return Buffer.from("");
       }
@@ -1235,7 +1266,7 @@ describe("push-after-merge", () => {
 
     expect(result.pushed).toBe(true);
     expect(
-      mockedExecSync.mock.calls.some((call) => String(call[0]).startsWith('git checkout --ours "pnpm-lock.yaml"')),
+      mockedExecSync.mock.calls.some((call) => String(call[0]).includes("checkout --ours") && String(call[0]).includes("pnpm-lock.yaml")),
     ).toBe(true);
     expect(
       mockedExecSync.mock.calls.some((call) => String(call[0]).startsWith("GIT_EDITOR=true git rebase --continue")),
