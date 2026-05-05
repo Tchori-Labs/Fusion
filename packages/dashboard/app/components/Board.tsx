@@ -1,4 +1,4 @@
-import type { Task, TaskDetail, Column as ColumnType, TaskCreateInput } from "@fusion/core";
+import type { Task, TaskDetail, Column as ColumnType, TaskCreateInput, TaskPriority } from "@fusion/core";
 import { COLUMNS } from "@fusion/core";
 import { Column } from "./Column";
 import type { ToastType } from "../hooks/useToast";
@@ -53,29 +53,21 @@ interface BoardProps {
   lastFetchTimeMs?: number;
 }
 
-function normalizeTaskPriority(priority: Task["priority"]): "low" | "normal" | "high" | "urgent" {
-  if (priority === "low" || priority === "normal" || priority === "high" || priority === "urgent") {
-    return priority;
+const PRIORITY_RANK: Record<TaskPriority, number> = {
+  low: 0,
+  normal: 1,
+  high: 2,
+  urgent: 3,
+};
+
+function getTaskPriorityRank(priority: Task["priority"] | null | undefined): number {
+  if (!priority || !(priority in PRIORITY_RANK)) {
+    return PRIORITY_RANK.normal;
   }
-  return "normal";
+  return PRIORITY_RANK[priority];
 }
 
-function getTaskPriorityRank(priority: Task["priority"]): number {
-  switch (normalizeTaskPriority(priority)) {
-    case "urgent":
-      return 3;
-    case "high":
-      return 2;
-    case "normal":
-      return 1;
-    case "low":
-      return 0;
-    default:
-      return 1;
-  }
-}
-
-function compareTaskPriority(a: Task["priority"], b: Task["priority"]): number {
+function compareTaskPriority(a: Task["priority"] | null | undefined, b: Task["priority"] | null | undefined): number {
   return getTaskPriorityRank(b) - getTaskPriorityRank(a);
 }
 
