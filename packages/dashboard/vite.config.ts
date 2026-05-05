@@ -1,7 +1,7 @@
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
-import { resolve } from "node:path";
-import { writeFileSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { mkdirSync, writeFileSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { execSync } from "node:child_process";
 import { createHash } from "node:crypto";
 
@@ -86,6 +86,7 @@ function emitVersionJson(): Plugin {
     apply: "build",
     closeBundle() {
       const outFile = resolve(__dirname, "dist/client/version.json");
+      mkdirSync(dirname(outFile), { recursive: true });
       writeFileSync(outFile, `${JSON.stringify({ version: buildVersion })}\n`);
       console.log(`[fusion] build version: ${buildVersion}`);
     },
