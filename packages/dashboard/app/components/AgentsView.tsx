@@ -235,6 +235,7 @@ export function AgentsView({ addToast, projectId, onOpenTaskLogs, agentOnboardin
   const [onboardingDraft, setOnboardingDraft] = useState<AgentOnboardingSummary | null>(null);
   const [isImporting, setIsImporting] = useState(false);
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
+  const [selectedOrgChartAgentId, setSelectedOrgChartAgentId] = useState<string | null>(null);
   const isMobileDetailOpen = isMobileViewport && !!selectedAgentId;
   const [selectedAgentInitialTab, setSelectedAgentInitialTab] = useState<"dashboard" | "runs">("dashboard");
   const [selectedAgentInitialRunId, setSelectedAgentInitialRunId] = useState<string | null>(null);
@@ -669,6 +670,11 @@ export function AgentsView({ addToast, projectId, onOpenTaskLogs, agentOnboardin
     openAgentDetail(childId);
   }, [openAgentDetail]);
 
+  const handleOrgChartNodeSelect = useCallback((agentId: string) => {
+    setSelectedOrgChartAgentId(agentId);
+    openAgentDetail(agentId);
+  }, [openAgentDetail]);
+
   const handleOverviewAgentSelect = useCallback((agentId: string) => {
     openAgentDetail(agentId);
     if (isMobileViewport) {
@@ -903,6 +909,36 @@ export function AgentsView({ addToast, projectId, onOpenTaskLogs, agentOnboardin
         </div>
       )}
 
+      <NewAgentDialog
+        isOpen={isCreating}
+        onClose={() => {
+          setIsCreating(false);
+          setOnboardingDraft(null);
+        }}
+        onCreated={() => { setIsCreating(false); setOnboardingDraft(null); void loadAgents(); }}
+        projectId={projectId}
+        prefillDraft={onboardingDraft}
+      />
+
+      <ExperimentalAgentOnboardingModal
+        isOpen={isOnboardingOpen}
+        onClose={() => setIsOnboardingOpen(false)}
+        onUseDraft={(draft) => {
+          setOnboardingDraft(draft);
+          setIsOnboardingOpen(false);
+          setIsCreating(true);
+        }}
+        projectId={projectId}
+        existingAgents={agents}
+      />
+
+      <AgentImportModal
+        isOpen={isImporting}
+        onClose={() => setIsImporting(false)}
+        onImported={() => void loadAgents()}
+        projectId={projectId}
+      />
+
       <AgentsOverviewBar
         stats={stats}
         activeAgents={displayActiveAgents}
@@ -913,107 +949,115 @@ export function AgentsView({ addToast, projectId, onOpenTaskLogs, agentOnboardin
         onOpenTaskLogs={onOpenTaskLogs}
       />
 
+      {agentView === "org" ? (
+        <div className="agents-org-full-view">
+          <div className="agents-view-content agents-view-content--org-full">
+            {selectedAgentId ? (
+              <div className="agents-org-detail-view" data-testid="agents-org-detail-view">
+                <button
+                  type="button"
+                  className="btn btn-sm agents-org-detail-back"
+                  onClick={handleCloseDetail}
+                  aria-label="Back to org chart"
+                >
+                  Back to org chart
+                </button>
+                <Suspense fallback={null}>
+                  <AgentDetailView
+                    key={selectedAgentId}
+                    inline
+                    showInlineBackButton={false}
+                    agentId={selectedAgentId}
+                    projectId={projectId}
+                    onClose={handleCloseDetail}
+                    addToast={addToast}
+                    onChildClick={handleChildClick}
+                    initialTab={selectedAgentInitialTab}
+                    initialRunId={selectedAgentInitialRunId}
+                    preferActiveRun={selectedAgentPreferActiveRun}
+                  />
+                </Suspense>
+              </div>
+            ) : showInitialAgentsLoading ? (
+              <div className="agents-view-loading" role="status" aria-live="polite">
+                <RefreshCw size={18} className="spin" />
+                <span>Loading agents...</span>
+              </div>
+            ) : (
+              <div className="agent-org-chart-shell" data-testid="agent-org-chart-shell">
+                {isMobileViewport ? (
+                  <div className="agent-org-chart-controls" data-testid="agent-org-chart-controls">
+                    <button
+                      type="button"
+                      className="btn-icon touch-target"
+                      onClick={() => setOrgChartZoomIndex((value) => Math.max(0, value - 1))}
+                      disabled={orgChartZoomIndex === 0}
+                      aria-label="Zoom out org chart"
+                      title="Zoom out"
+                    >
+                      <ZoomOut size={16} />
+                    </button>
+                    <span className="agent-org-chart-controls__zoom-label" aria-live="polite">{Math.round(orgChartZoom * 100)}%</span>
+                    <button
+                      type="button"
+                      className="btn-icon touch-target"
+                      onClick={() => setOrgChartZoomIndex((value) => Math.min(ORG_CHART_ZOOM_LEVELS.length - 1, value + 1))}
+                      disabled={orgChartZoomIndex === ORG_CHART_ZOOM_LEVELS.length - 1}
+                      aria-label="Zoom in org chart"
+                      title="Zoom in"
+                    >
+                      <ZoomIn size={16} />
+                    </button>
+                    <button
+                      type="button"
+                      className="btn touch-target btn-sm agent-org-chart-controls__fit-btn"
+                      onClick={() => setOrgChartZoomIndex(1)}
+                      aria-label="Fit org chart"
+                      title="Fit org chart"
+                    >
+                      <Minimize2 size={16} />
+                      Fit
+                    </button>
+                  </div>
+                ) : null}
+                <div className="agent-org-chart-viewport" data-testid="agent-org-chart-viewport">
+                  <div className={`agent-org-chart-canvas agent-org-chart-canvas--zoom-${Math.round(orgChartZoom * 100)}`}>
+                    <div className="agent-org-chart" data-testid="agent-org-chart">
+                      {isOrgTreeLoading ? (
+                        <div className="agent-org-chart__loading" role="status" aria-live="polite">
+                          <RefreshCw size={18} className="spin" />
+                          <span>Loading org chart...</span>
+                        </div>
+                      ) : displayOrgTree.length === 0 ? (
+                        <AgentEmptyState onCtaClick={handleOpenNewAgent} />
+                      ) : (
+                        displayOrgTree.map((node) => (
+                          <OrgChartNode
+                            key={node.agent.id}
+                            node={node}
+                            onSelect={handleOrgChartNodeSelect}
+                            getHealthStatus={getHealthStatus}
+                            getRoleIcon={getRoleIcon}
+                            selectedAgentId={selectedOrgChartAgentId}
+                          />
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      ) : (
       <div className="agents-split-layout">
         <div className={`agents-split-sidebar${isMobileDetailOpen ? " agents-split-sidebar--hidden-mobile" : ""}`}>
           <div className="agents-view-content">
-        <NewAgentDialog
-          isOpen={isCreating}
-          onClose={() => {
-            setIsCreating(false);
-            setOnboardingDraft(null);
-          }}
-          onCreated={() => { setIsCreating(false); setOnboardingDraft(null); void loadAgents(); }}
-          projectId={projectId}
-          prefillDraft={onboardingDraft}
-        />
-
-        <ExperimentalAgentOnboardingModal
-          isOpen={isOnboardingOpen}
-          onClose={() => setIsOnboardingOpen(false)}
-          onUseDraft={(draft) => {
-            setOnboardingDraft(draft);
-            setIsOnboardingOpen(false);
-            setIsCreating(true);
-          }}
-          projectId={projectId}
-          existingAgents={agents}
-        />
-
-        <AgentImportModal
-          isOpen={isImporting}
-          onClose={() => setIsImporting(false)}
-          onImported={() => void loadAgents()}
-          projectId={projectId}
-        />
-
         {/* Agent Collection */}
         {showInitialAgentsLoading ? (
           <div className="agents-view-loading" role="status" aria-live="polite">
             <RefreshCw size={18} className="spin" />
             <span>Loading agents...</span>
-          </div>
-        ) : agentView === "org" ? (
-          <div className="agent-org-chart-shell" data-testid="agent-org-chart-shell">
-            {isMobileViewport ? (
-              <div className="agent-org-chart-controls" data-testid="agent-org-chart-controls">
-                <button
-                  type="button"
-                  className="btn-icon touch-target"
-                  onClick={() => setOrgChartZoomIndex((value) => Math.max(0, value - 1))}
-                  disabled={orgChartZoomIndex === 0}
-                  aria-label="Zoom out org chart"
-                  title="Zoom out"
-                >
-                  <ZoomOut size={16} />
-                </button>
-                <span className="agent-org-chart-controls__zoom-label" aria-live="polite">{Math.round(orgChartZoom * 100)}%</span>
-                <button
-                  type="button"
-                  className="btn-icon touch-target"
-                  onClick={() => setOrgChartZoomIndex((value) => Math.min(ORG_CHART_ZOOM_LEVELS.length - 1, value + 1))}
-                  disabled={orgChartZoomIndex === ORG_CHART_ZOOM_LEVELS.length - 1}
-                  aria-label="Zoom in org chart"
-                  title="Zoom in"
-                >
-                  <ZoomIn size={16} />
-                </button>
-                <button
-                  type="button"
-                  className="btn touch-target btn-sm agent-org-chart-controls__fit-btn"
-                  onClick={() => setOrgChartZoomIndex(1)}
-                  aria-label="Fit org chart"
-                  title="Fit org chart"
-                >
-                  <Minimize2 size={16} />
-                  Fit
-                </button>
-              </div>
-            ) : null}
-            <div className="agent-org-chart-viewport" data-testid="agent-org-chart-viewport">
-              <div className={`agent-org-chart-canvas agent-org-chart-canvas--zoom-${Math.round(orgChartZoom * 100)}`}>
-                <div className="agent-org-chart" data-testid="agent-org-chart">
-                  {isOrgTreeLoading ? (
-                    <div className="agent-org-chart__loading" role="status" aria-live="polite">
-                      <RefreshCw size={18} className="spin" />
-                      <span>Loading org chart...</span>
-                    </div>
-                  ) : displayOrgTree.length === 0 ? (
-                    <AgentEmptyState onCtaClick={handleOpenNewAgent} />
-                  ) : (
-                    displayOrgTree.map((node) => (
-                      <OrgChartNode
-                        key={node.agent.id}
-                        node={node}
-                        onSelect={openAgentDetail}
-                        getHealthStatus={getHealthStatus}
-                        getRoleIcon={getRoleIcon}
-                        selectedAgentId={selectedAgentId}
-                      />
-                    ))
-                  )}
-                </div>
-              </div>
-            </div>
           </div>
         ) : agentView === "board" ? (
           <div className="agent-board">
@@ -1409,6 +1453,7 @@ export function AgentsView({ addToast, projectId, onOpenTaskLogs, agentOnboardin
           )}
         </div>
       </div>
+      )}
     </div>
   );
 }

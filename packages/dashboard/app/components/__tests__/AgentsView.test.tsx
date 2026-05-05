@@ -1210,7 +1210,7 @@ describe("AgentsView", () => {
 
     it("renders org chart nodes and opens detail view when clicking a node", async () => {
       mockFetchOrgTree.mockResolvedValue(orgTree);
-      render(<AgentsView addToast={mockAddToast} />);
+      const { container } = render(<AgentsView addToast={mockAddToast} />);
 
       fireEvent.click(screen.getByRole("button", { name: "Org Chart view" }));
 
@@ -1222,11 +1222,25 @@ describe("AgentsView", () => {
         expect(screen.getAllByText(/Healthy|Idle|Paused|Unresponsive|Agent stalled/).length).toBeGreaterThan(0);
       });
 
+      expect(container.querySelector(".agents-split-layout")).toBeNull();
+      expect(container.querySelector(".agents-org-full-view")).toBeTruthy();
+
       fireEvent.click(screen.getByText("Director One"));
 
       await waitFor(() => {
         expect(screen.getByTestId("agent-detail-view")).toHaveTextContent("agent-child-1");
+        expect(screen.getByRole("button", { name: "Back to org chart" })).toBeTruthy();
+        expect(screen.queryByRole("button", { name: "Back to agents" })).toBeNull();
       });
+
+      fireEvent.click(screen.getByRole("button", { name: "Back to org chart" }));
+
+      await waitFor(() => {
+        expect(screen.queryByTestId("agent-detail-view")).toBeNull();
+        expect(screen.getByTestId("agent-org-chart")).toBeTruthy();
+      });
+
+      expect(container.querySelector("[class*='org-chart-node-card--'].agent-card--selected")).toBeTruthy();
     });
 
     it("keeps org chart node metadata compact without skill badges", async () => {

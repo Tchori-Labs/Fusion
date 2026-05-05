@@ -101,7 +101,8 @@ Execution-ownership sync intentionally avoids assignment-trigger side effects (`
 
 The agents surface provides:
 
-- Agent-first list/board/tree/org collection in the left pane (primary content appears first)
+- Agent-first list and board collections use the desktop split-pane layout (primary collection + detail pane)
+- Org Chart is a full-view mode that takes over the full Agents content area; selecting a node opens detail in that same full-width region with back navigation to the chart
 - Org chart nodes intentionally stay compact (role/state/health hierarchy signal only) and do not enumerate per-agent skill badges; detailed skills remain in list/board/detail surfaces
 - A cross-pane **Overview** strip above the split layout with summary metrics and a disclosure to expand active/running live cards
 - A compact **Controls** popup for secondary actions (state filter, Show system agents toggle, Import, and global Heartbeat Speed)
