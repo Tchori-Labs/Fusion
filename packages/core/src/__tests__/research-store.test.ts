@@ -51,6 +51,31 @@ describe("ResearchStore", () => {
     expect(store.getRun(cancelled.id)?.cancelledAt).toBeTruthy();
   });
 
+  it("persists terminal lifecycle metadata and default error codes", () => {
+    const timedOut = store.createRun({ query: "timeout" });
+    store.updateStatus(timedOut.id, "running");
+    store.updateStatus(timedOut.id, "timed_out");
+    const timedOutSaved = store.getRun(timedOut.id)!;
+    expect(timedOutSaved.lifecycle?.terminalReason).toBe("timed_out");
+    expect(timedOutSaved.lifecycle?.retryable).toBe(true);
+    expect(timedOutSaved.lifecycle?.errorCode).toBe("PROVIDER_TIMEOUT");
+    expect(timedOutSaved.lifecycle?.failureClass).toBe("timed_out");
+
+    const failed = store.createRun({ query: "non-retryable" });
+    store.updateStatus(failed.id, "running");
+    store.updateStatus(failed.id, "failed", { lifecycle: { failureClass: "non_retryable" } });
+    const failedSaved = store.getRun(failed.id)!;
+    expect(failedSaved.lifecycle?.terminalReason).toBe("failed");
+    expect(failedSaved.lifecycle?.retryable).toBe(false);
+    expect(failedSaved.lifecycle?.errorCode).toBe("NON_RETRYABLE_PROVIDER_ERROR");
+
+    const done = store.createRun({ query: "done" });
+    store.updateStatus(done.id, "running");
+    store.updateStatus(done.id, "completed");
+    expect(store.getRun(done.id)?.lifecycle?.terminalReason).toBe("completed");
+    expect(store.getRun(done.id)?.lifecycle?.retryable).toBe(false);
+  });
+
   it("enforces terminal immutability and valid transitions", () => {
     const run = store.createRun({ query: "guarded" });
     store.updateStatus(run.id, "running");
@@ -62,14 +87,18 @@ describe("ResearchStore", () => {
     expect(() => store.updateStatus(queued.id, "completed")).toThrow(/Invalid run status transition/i);
   });
 
-  it("persists lifecycle events to research_run_events", () => {
+  it("persists lifecycle events in sequence", () => {
     const run = store.createRun({ query: "events" });
     store.updateStatus(run.id, "running");
     store.appendLifecycleEvent(run.id, { type: "info", message: "custom event" });
+    store.appendEvent(run.id, { type: "progress", message: "snapshot event" });
 
     const events = store.listRunEvents(run.id);
-    expect(events.length).toBeGreaterThanOrEqual(2);
-    expect(events.at(-1)?.message).toBe("custom event");
+    expect(events.length).toBe(3);
+    expect(events.map((event) => event.seq)).toEqual([1, 2, 3]);
+    expect(events[0]?.status).toBe("running");
+    expect(events[1]?.message).toBe("custom event");
+    expect(events[2]?.message).toBe("snapshot event");
   });
 
   it("guards against duplicate active runs per project and trigger", () => {
@@ -107,10 +136,13 @@ describe("ResearchStore", () => {
   it("supports filtering, search, ordering, exports and stats", () => {
     const r1 = store.createRun({ query: "alpha", topic: "first", tags: ["core"] });
     const r2 = store.createRun({ query: "beta", topic: "second", tags: ["edge"] });
+    const r3 = store.createRun({ query: "gamma", topic: "third", tags: ["core", "edge"] });
     store.setResults(r2.id, { summary: "beta summary", findings: [] });
 
-    expect(store.listRuns({ tag: "core" }).map((r) => r.id)).toEqual([r1.id]);
+    expect(store.listRuns({ tag: "core" }).map((r) => r.id).sort()).toEqual([r1.id, r3.id].sort());
+    expect(store.listRuns({ search: "third" }).map((r) => r.id)).toEqual([r3.id]);
     expect(store.searchRuns("beta").map((r) => r.id)).toContain(r2.id);
+    expect(store.listRuns({ limit: 1, offset: 1 })).toHaveLength(1);
 
     const all = store.listRuns();
     expect(all[0].createdAt <= all[1].createdAt).toBe(true);
@@ -124,7 +156,7 @@ describe("ResearchStore", () => {
     store.updateStatus(r2.id, "running");
     store.updateStatus(r2.id, "completed");
     const stats = store.getStats();
-    expect(stats.total).toBeGreaterThanOrEqual(2);
+    expect(stats.total).toBeGreaterThanOrEqual(3);
     expect(stats.byStatus.completed).toBeGreaterThanOrEqual(1);
 
     store.deleteRun(r1.id);
@@ -135,16 +167,21 @@ describe("ResearchStore", () => {
     const run = store.createRun({ query: "cancel me" });
     const first = store.requestCancellation(run.id);
     expect(first.status).toBe("cancelling");
+    expect(first.lifecycle?.errorCode).toBe("RUN_CANCELLED");
     const second = store.requestCancellation(run.id);
     expect(second.status).toBe("cancelling");
+
+    const events = store.listRunEvents(run.id).filter((event) => event.type === "cancel_requested");
+    expect(events).toHaveLength(1);
 
     store.updateStatus(run.id, "cancelled");
     const terminal = store.requestCancellation(run.id);
     expect(terminal.status).toBe("cancelled");
   });
 
-  it("marks retry exhaustion when max attempts reached", () => {
-    const run = store.createRun({ query: "retry", lifecycle: { attempt: 3, maxAttempts: 3 } });
+  it("creates retry_waiting run and marks exhaustion", () => {
+    const run = store.createRun({ query: "retry", lifecycle: { attempt: 1, maxAttempts: 2 } });
+    store.updateStatus(run.id, "running");
     store.updateStatus(run.id, "failed", {
       lifecycle: {
         ...(run.lifecycle ?? {}),
@@ -153,8 +190,24 @@ describe("ResearchStore", () => {
       },
     });
 
-    expect(() => store.createRetryRun(run.id)).toThrow(/non-retryable|exhausted retries/i);
-    expect(store.getRun(run.id)?.status).toBe("retry_exhausted");
+    const retry = store.createRetryRun(run.id);
+    expect(retry.lifecycle?.retryOfRunId).toBe(run.id);
+    expect(store.getRun(retry.id)?.status).toBe("retry_waiting");
+
+    store.updateStatus(retry.id, "queued");
+    store.updateStatus(retry.id, "running");
+    store.updateStatus(retry.id, "failed", {
+      lifecycle: {
+        ...(retry.lifecycle ?? {}),
+        retryable: true,
+        failureClass: "retryable_transient",
+      },
+    });
+
+    expect(() => store.createRetryRun(retry.id)).toThrow(/non-retryable|exhausted retries/i);
+    const exhausted = store.getRun(retry.id)!;
+    expect(exhausted.status).toBe("retry_exhausted");
+    expect(exhausted.lifecycle?.errorCode).toBe("RETRY_EXHAUSTED");
   });
 
   it("emits status events and throws for missing run mutations", () => {

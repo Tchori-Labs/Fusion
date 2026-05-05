@@ -159,7 +159,12 @@ Key endpoints:
   - keep error classification in `ResearchStepRunner`,
   - keep sequencing and policy decisions in `ResearchOrchestrator`.
 
-## 10) Validation references used for this baseline
+## 10) FN-3370 refinement scope correction
+
+- FN-3370 replaces FN-3015's stale insights-backed child scope with the landed research subsystem surfaces in this document (core `ResearchStore` + dashboard `/api/research` + engine orchestrator lifecycle persistence).
+- Regression coverage work should stay bounded to shipped lifecycle/status/export/task-integration contracts and use follow-up tasks for any unshipped behavior instead of feature expansion.
+
+## 11) Validation references used for this baseline
 
 - `packages/dashboard/src/__tests__/research-routes.test.ts`
 - `packages/core/src/__tests__/research-store.test.ts`

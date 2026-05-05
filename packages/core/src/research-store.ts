@@ -158,12 +158,11 @@ export class ResearchStore extends EventEmitter<ResearchStoreEvents> {
       : undefined;
 
     const nonMutableKeys = Object.keys(input).filter((key) => key !== "events" && key !== "metadata");
-    if (
-      TERMINAL_STATUSES.has(normalizedExistingStatus)
-      && nonMutableKeys.length > 0
-      && !(nonMutableKeys.length === 1 && nonMutableKeys[0] === "status")
-    ) {
-      throw new ResearchLifecycleError(`Run ${id} is terminal and immutable`, "terminal_immutable");
+    if (TERMINAL_STATUSES.has(normalizedExistingStatus) && nonMutableKeys.length > 0) {
+      const allowedTerminalMutation = nonMutableKeys.every((key) => key === "status" || key === "lifecycle");
+      if (!allowedTerminalMutation) {
+        throw new ResearchLifecycleError(`Run ${id} is terminal and immutable`, "terminal_immutable");
+      }
     }
 
     if (normalizedInputStatus && normalizedInputStatus !== normalizedExistingStatus) {
@@ -386,6 +385,7 @@ export class ResearchStore extends EventEmitter<ResearchStoreEvents> {
       status: normalizedStatus,
       lifecycle: {
         ...(run.lifecycle ?? {}),
+        ...(extra?.lifecycle ?? {}),
       },
     };
 
@@ -577,7 +577,16 @@ export class ResearchStore extends EventEmitter<ResearchStoreEvents> {
     const configuredMaxAttempts = maxAttempts ?? run.lifecycle?.maxAttempts ?? 3;
     const nextAttempt = currentAttempt + 1;
     if (nextAttempt > configuredMaxAttempts) {
-      this.updateRun(runId, { status: "retry_exhausted" });
+      this.updateRun(runId, {
+        status: "retry_exhausted",
+        lifecycle: {
+          ...(run.lifecycle ?? {}),
+          terminalReason: "retry_exhausted",
+          retryable: false,
+          failureClass: run.lifecycle?.failureClass ?? "non_retryable",
+          errorCode: "RETRY_EXHAUSTED",
+        },
+      });
       throw new ResearchLifecycleError(`Run ${runId} exhausted retries`, "not_retryable");
     }
 
