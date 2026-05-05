@@ -20,8 +20,8 @@ export interface UseNodesResult {
   update: (id: string, updates: NodeUpdateInput) => Promise<NodeInfo>;
   unregister: (id: string) => Promise<void>;
   healthCheck: (id: string) => Promise<void>;
-  fetchDockerConfig: (nodeId: string) => Promise<DockerNodeConfig | null>;
-  patchDockerConfig: (nodeId: string, config: Partial<DockerNodeConfig>) => Promise<DockerNodeConfig>;
+  fetchDockerConfig: (nodeId: string) => Promise<DockerNodeConfigInfo | null>;
+  patchDockerConfig: (nodeId: string, config: Partial<DockerNodeConfigInfo>) => Promise<DockerNodeConfigInfo>;
   fetchDockerDiff: (nodeId: string) => Promise<{ persistedVersion: number; deployedVersion: number | null; needsRecreate: boolean }>;
 }
 
@@ -144,7 +144,7 @@ export function useNodes(): UseNodesResult {
 
   const fetchDockerConfig = useCallback((nodeId: string) => fetchDockerNodeConfig(nodeId), []);
 
-  const patchDockerConfig = useCallback(async (nodeId: string, config: Partial<DockerNodeConfig>) => {
+  const patchDockerConfig = useCallback(async (nodeId: string, config: Partial<DockerNodeConfigInfo>) => {
     const updatedConfig = await updateDockerNodeConfig(nodeId, config);
     setNodes((prev) => prev.map((node) => (
       node.id === nodeId

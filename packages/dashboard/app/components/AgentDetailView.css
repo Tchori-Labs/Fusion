@@ -297,6 +297,91 @@
   color: var(--text-muted);
 }
 
+.dashboard-summary-skills {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.dashboard-summary-skill-badges {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+}
+
+.dashboard-summary-skill-badge {
+  max-width: calc(var(--space-xl) * 8);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dashboard-summary-skill-badge-btn {
+  cursor: pointer;
+}
+
+.dashboard-summary-skill-badge-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring-strong);
+}
+
+.dashboard-summary-skill-badge--selected {
+  border-color: var(--todo);
+  background: color-mix(in srgb, var(--todo) 20%, transparent);
+}
+
+.dashboard-summary-skill-detail {
+  margin-top: var(--space-sm);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  padding: var(--space-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.dashboard-summary-skill-detail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+}
+
+.dashboard-summary-skill-detail-title {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.dashboard-summary-skill-detail-loading,
+.dashboard-summary-skill-detail-empty {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  color: var(--text-muted);
+}
+
+.dashboard-summary-skill-detail-error {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+  color: var(--color-error);
+}
+
+.dashboard-summary-skill-detail-content {
+  margin: 0;
+  padding: var(--space-sm);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: calc(var(--space-2xl) * 6);
+  overflow: auto;
+}
+
 .dashboard-summary-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(calc(var(--space-xl) * 6 + var(--space-sm)), 1fr));
@@ -1457,6 +1542,16 @@
   /* Dashboard Tab mobile */
   .dashboard-tab {
     gap: var(--space-lg);
+  }
+
+  .dashboard-summary-skills {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .dashboard-summary-skill-detail-header {
+    flex-direction: column;
+    align-items: flex-start;
   }
 
   .dashboard-section {

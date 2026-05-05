@@ -44,7 +44,7 @@ interface NodeDetailModalProps {
   containerStatus?: ContainerStatusInfo;
   onFetchContainerStatus?: (managedId: string) => Promise<ContainerStatusInfo>;
   onFetchLogs?: (managedId: string) => Promise<string>;
-  onUpdateDockerConfig?: (nodeId: string, config: Partial<DockerNodeConfig>) => Promise<DockerNodeConfig>;
+  onUpdateDockerConfig?: (nodeId: string, config: Partial<DockerNodeConfigInfo>) => Promise<DockerNodeConfigInfo>;
   onFetchDockerConfigDiff?: (nodeId: string) => Promise<{ persistedVersion: number; deployedVersion: number | null; needsRecreate: boolean }>;
 }
 
@@ -157,7 +157,7 @@ export function NodeDetailModal({
   const [logs, setLogs] = useState("");
   const [logsLoading, setLogsLoading] = useState(false);
   const [dockerConfigExpanded, setDockerConfigExpanded] = useState(false);
-  const [dockerConfigDraft, setDockerConfigDraft] = useState<DockerNodeConfig | null>(node?.dockerConfig ?? null);
+  const [dockerConfigDraft, setDockerConfigDraft] = useState<DockerNodeConfigInfo | null>(node?.dockerConfig ?? null);
   const [dockerEnvReveal, setDockerEnvReveal] = useState<Record<string, boolean>>({});
   const [dockerConfigSaving, setDockerConfigSaving] = useState(false);
   const [dockerConfigNeedsRecreate, setDockerConfigNeedsRecreate] = useState(false);

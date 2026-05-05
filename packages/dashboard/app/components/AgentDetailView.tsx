@@ -4,12 +4,13 @@ import {
   Bot, Heart, Activity, Pause, Play, Square, Trash2, RefreshCw, 
   Settings, FileText, ActivitySquare, X, Copy, 
   ExternalLink, CheckCircle, XCircle, Loader2, GitBranch, ListChecks,
+  AlertCircle,
   ChevronDown, ChevronRight, ChevronLeft, BarChart3, BookOpen, Eye, FileEdit
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { AgentDetail, AgentState, AgentHeartbeatRun, AgentBudgetStatus, ModelInfo, MemoryFileInfo, AgentCapability, PluginRuntimeInfo } from "../api";
-import { fetchAgent, updateAgent, updateAgentState, deleteAgent, fetchAgentLogsWithMeta, fetchAgentRunLogs, fetchAgentChildren, fetchAgentRuns, fetchAgentRunDetail, startAgentRun, stopAgentRun, updateAgentInstructions, updateAgentSoul, updateAgentMemory, fetchAgentMemoryFiles, fetchAgentMemoryFile, saveAgentMemoryFile, fetchAgentTasks, fetchChainOfCommand, fetchAgentBudgetStatus, resetAgentBudget, fetchWorkspaceFileContent, saveWorkspaceFileContent, fetchModels, fetchPluginRuntimes, fetchAgents, upgradeAgentHeartbeatProcedure, updateGlobalSettings } from "../api";
+import type { AgentDetail, AgentState, AgentHeartbeatRun, AgentBudgetStatus, ModelInfo, MemoryFileInfo, AgentCapability, PluginRuntimeInfo, SkillContent } from "../api";
+import { fetchAgent, updateAgent, updateAgentState, deleteAgent, fetchAgentLogsWithMeta, fetchAgentRunLogs, fetchAgentChildren, fetchAgentRuns, fetchAgentRunDetail, startAgentRun, stopAgentRun, updateAgentInstructions, updateAgentSoul, updateAgentMemory, fetchAgentMemoryFiles, fetchAgentMemoryFile, saveAgentMemoryFile, fetchAgentTasks, fetchChainOfCommand, fetchAgentBudgetStatus, resetAgentBudget, fetchWorkspaceFileContent, saveWorkspaceFileContent, fetchModels, fetchPluginRuntimes, fetchAgents, upgradeAgentHeartbeatProcedure, updateGlobalSettings, fetchSkillContent } from "../api";
 import type { Agent } from "../api";
 import type { AgentLogEntry, Task } from "@fusion/core";
 import { getErrorMessage } from "@fusion/core";
@@ -20,6 +21,7 @@ import type { AgentHealthStatus } from "../utils/agentHealth";
 import { SkillMultiselect } from "./SkillMultiselect";
 import { subscribeSse } from "../sse-bus";
 import { DEFAULT_HEARTBEAT_INTERVAL_MS, formatHeartbeatInterval, resolveHeartbeatIntervalMs } from "../utils/heartbeatIntervals";
+import { formatAgentSkillBadgeLabel } from "../utils/agentSkills";
 import { CustomModelDropdown } from "./CustomModelDropdown";
 import { useConfirm } from "../hooks/useConfirm";
 import { useModalResizePersist } from "../hooks/useModalResizePersist";
@@ -760,6 +762,10 @@ function DashboardTab({
   const [isLoadingChainOfCommand, setIsLoadingChainOfCommand] = useState(true);
   const [budgetStatus, setBudgetStatus] = useState<AgentBudgetStatus | null>(null);
   const [availableRuntimes, setAvailableRuntimes] = useState<PluginRuntimeInfo[]>([]);
+  const [selectedSkillId, setSelectedSkillId] = useState<string | null>(null);
+  const [selectedSkillContent, setSelectedSkillContent] = useState<SkillContent | null>(null);
+  const [isLoadingSkillContent, setIsLoadingSkillContent] = useState(false);
+  const [skillContentError, setSkillContentError] = useState<string | null>(null);
 
   const runtimeHint = typeof agent.runtimeConfig?.runtimeHint === "string"
     ? agent.runtimeConfig.runtimeHint
@@ -846,6 +852,36 @@ function DashboardTab({
   }, [agent]);
 
   const recentRuns = (agent.completedRuns || []).slice(0, 5);
+  const agentSkills = Array.isArray(agent.metadata?.skills) ? (agent.metadata.skills as string[]) : [];
+  const selectedSkillLabel = selectedSkillId ? formatAgentSkillBadgeLabel(selectedSkillId) : null;
+  const loadSkillContent = useCallback(async (skillId: string) => {
+    setIsLoadingSkillContent(true);
+    setSkillContentError(null);
+    setSelectedSkillContent(null);
+
+    try {
+      const content = await fetchSkillContent(skillId, projectId);
+      setSelectedSkillContent(content);
+    } catch (err) {
+      setSkillContentError(getErrorMessage(err));
+    } finally {
+      setIsLoadingSkillContent(false);
+    }
+  }, [projectId]);
+
+  const handleSkillBadgeClick = useCallback((skillId: string) => {
+    if (selectedSkillId === skillId) {
+      setSelectedSkillId(null);
+      setSelectedSkillContent(null);
+      setSkillContentError(null);
+      setIsLoadingSkillContent(false);
+      return;
+    }
+
+    setSelectedSkillId(skillId);
+    void loadSkillContent(skillId);
+  }, [loadSkillContent, selectedSkillId]);
+
   const isTicking = agent.state === "active" || agent.state === "running";
   const heartbeatIntervalMs = resolveHeartbeatIntervalMs(agent.runtimeConfig?.heartbeatIntervalMs);
   const nextHeartbeatAt = isTicking && agent.lastHeartbeatAt
@@ -875,12 +911,65 @@ function DashboardTab({
             <span className="dashboard-summary-label">{runtimeHint ? "Runtime" : "Model"}</span>
             <span> {modelDisplay ?? "Auto"}</span>
           </span>
-          {Array.isArray(agent.metadata?.skills) && (agent.metadata.skills as string[]).length > 0 ? (
-            <span>Skills: {(agent.metadata.skills as string[]).join(", ")}</span>
+          {agentSkills.length > 0 ? (
+            <span className="dashboard-summary-skills">
+              <span className="dashboard-summary-label">Skills</span>
+              <span className="dashboard-summary-skill-badges" role="list" aria-label="Assigned skills">
+                {agentSkills.map((skillId) => {
+                  const isSelected = selectedSkillId === skillId;
+                  return (
+                    <button
+                      key={skillId}
+                      type="button"
+                      className={cn("badge", "badge-skill", "dashboard-summary-skill-badge", "dashboard-summary-skill-badge-btn", isSelected && "dashboard-summary-skill-badge--selected")}
+                      title={skillId}
+                      onClick={() => handleSkillBadgeClick(skillId)}
+                      aria-expanded={isSelected}
+                      aria-label={`View details for ${formatAgentSkillBadgeLabel(skillId)}`}
+                    >
+                      {formatAgentSkillBadgeLabel(skillId)}
+                    </button>
+                  );
+                })}
+              </span>
+            </span>
           ) : (
             <span>Skills: —</span>
           )}
         </div>
+        {selectedSkillId ? (
+          <div className="dashboard-summary-skill-detail" data-testid="agent-skill-detail">
+            <div className="dashboard-summary-skill-detail-header">
+              <span className="dashboard-summary-skill-detail-title">{selectedSkillLabel}</span>
+              <button
+                type="button"
+                className="btn btn-sm"
+                onClick={() => handleSkillBadgeClick(selectedSkillId)}
+              >
+                <X size={14} />
+                Close
+              </button>
+            </div>
+            {isLoadingSkillContent ? (
+              <div className="dashboard-summary-skill-detail-loading" role="status" aria-live="polite">
+                <Loader2 size={14} className="animate-spin" />
+                Loading skill content...
+              </div>
+            ) : skillContentError ? (
+              <div className="dashboard-summary-skill-detail-error" role="alert">
+                <AlertCircle size={14} />
+                <span>{skillContentError}</span>
+                <button type="button" className="btn btn-sm" onClick={() => void loadSkillContent(selectedSkillId)}>
+                  Retry
+                </button>
+              </div>
+            ) : selectedSkillContent ? (
+              <pre className="dashboard-summary-skill-detail-content">{selectedSkillContent.skillMd || "(No SKILL.md found)"}</pre>
+            ) : (
+              <div className="dashboard-summary-skill-detail-empty">No skill content available</div>
+            )}
+          </div>
+        ) : null}
       </section>
 
       <section className="dashboard-summary-card">

@@ -26,6 +26,7 @@ import {
 } from "../utils/heartbeatIntervals";
 import { isEphemeralAgent, getErrorMessage } from "@fusion/core";
 import { relativeTime } from "./AgentDetailView";
+import { formatAgentSkillBadgeLabel } from "../utils/agentSkills";
 
 export interface AgentsViewProps {
   addToast: (message: string, type?: "success" | "error") => void;
@@ -46,22 +47,7 @@ const AGENT_ROLES: { value: AgentCapability; label: string; icon: string }[] = [
 
 const HEARTBEAT_MULTIPLIER_PRESETS = [0.1, 0.25, 0.5, 1, 2, 3, 5, 10] as const;
 
-const SKILL_PATH_LABEL_PATTERN = /(?:^|\/)skills\/([^/]+)\/SKILL\.md$/i;
 const ORG_CHART_ZOOM_LEVELS = [0.75, 1, 1.25, 1.5] as const;
-
-export function formatAgentSkillBadgeLabel(skillId: string): string {
-  const trimmedSkillId = skillId.trim();
-  if (!trimmedSkillId) {
-    return skillId;
-  }
-
-  const match = trimmedSkillId.match(SKILL_PATH_LABEL_PATTERN);
-  if (match?.[1]) {
-    return match[1];
-  }
-
-  return trimmedSkillId;
-}
 
 function getStateBadgeClass(state: AgentState): string {
   switch (state) {
