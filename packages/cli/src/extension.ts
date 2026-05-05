@@ -13,6 +13,7 @@ import {
   type InsightRunTrigger,
   type ResearchRun,
   type ResearchRunStatus,
+  RESEARCH_RUN_STATUSES,
   resolveResearchSettings,
 } from "@fusion/core";
 import {
@@ -160,6 +161,14 @@ async function getResearchAvailability(store: TaskStore): Promise<{ ok: boolean;
   return { ok: true };
 }
 
+const RESEARCH_RUN_TERMINAL_STATUSES = new Set<ResearchRunStatus>([
+  "completed",
+  "failed",
+  "cancelled",
+  "timed_out",
+  "retry_exhausted",
+]);
+
 function toResearchRunDetails(run: ResearchRun) {
   return {
     runId: run.id,
@@ -172,6 +181,35 @@ function toResearchRunDetails(run: ResearchRun) {
     error: run.error ?? null,
     setup: null,
   };
+}
+
+function isResearchRunTerminal(status: ResearchRunStatus): boolean {
+  return RESEARCH_RUN_TERMINAL_STATUSES.has(status);
+}
+
+async function sleepWithSignal(ms: number, signal?: AbortSignal): Promise<void> {
+  if (ms <= 0) {
+    return;
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new Error("Operation aborted"));
+    };
+
+    if (signal?.aborted) {
+      onAbort();
+      return;
+    }
+
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 interface GitHubIssueApiResult {
@@ -1247,8 +1285,10 @@ export default function kbExtension(pi: ExtensionAPI) {
     description: "Start a bounded research run and optionally wait for findings.",
     parameters: Type.Object({
       query: Type.String({ description: "Research query or question" }),
+      wait_for_completion: Type.Optional(Type.Boolean({ description: "Wait for the run to complete before returning (default: false)" })),
+      max_wait_ms: Type.Optional(Type.Number({ description: "Max wait time when wait_for_completion=true (default: 90000, capped by settings)" })),
     }),
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+    async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       const store = await getStore(ctx.cwd);
       const availability = await getResearchAvailability(store);
       if (!availability.ok) {
@@ -1258,15 +1298,47 @@ export default function kbExtension(pi: ExtensionAPI) {
         };
       }
 
-      const run = store.getResearchStore().createRun({
+      const researchStore = store.getResearchStore();
+      const run = researchStore.createRun({
         query: params.query,
         topic: params.query,
         providerConfig: {},
       });
 
+      if (!params.wait_for_completion) {
+        return {
+          content: [{ type: "text", text: `Created research run ${run.id}. Start the project engine to process pending runs, then use fn_research_get.` }],
+          details: toResearchRunDetails(run),
+        };
+      }
+
+      const maxWaitMs = Number.isFinite(params.max_wait_ms)
+        ? Math.max(0, params.max_wait_ms ?? 90_000)
+        : 90_000;
+      const pollIntervalMs = 2_000;
+      const deadline = Date.now() + maxWaitMs;
+      let latestRun = run;
+
+      while (Date.now() <= deadline) {
+        const current = researchStore.getRun(run.id);
+        if (!current) {
+          break;
+        }
+
+        latestRun = current;
+        if (isResearchRunTerminal(current.status)) {
+          return {
+            content: [{ type: "text", text: `Research run ${current.id} is ${current.status}.` }],
+            details: toResearchRunDetails(current),
+          };
+        }
+
+        await sleepWithSignal(pollIntervalMs, signal);
+      }
+
       return {
-        content: [{ type: "text", text: `Created research run ${run.id}. Start the project engine to process pending runs, then use fn_research_get.` }],
-        details: toResearchRunDetails(run),
+        content: [{ type: "text", text: `Research run ${latestRun.id} is ${latestRun.status}.` }],
+        details: toResearchRunDetails(latestRun),
       };
     },
   });
@@ -1276,7 +1348,7 @@ export default function kbExtension(pi: ExtensionAPI) {
     label: "fn: List Research Runs",
     description: "List recent research runs.",
     parameters: Type.Object({
-      status: Type.Optional(StringEnum(["pending", "running", "completed", "failed", "cancelled"]) as unknown as TSchema),
+      status: Type.Optional(StringEnum([...RESEARCH_RUN_STATUSES], { description: "Filter by run status" }) as unknown as TSchema),
       limit: Type.Optional(Type.Number({ description: "Max runs to return (default: 10)" })),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {

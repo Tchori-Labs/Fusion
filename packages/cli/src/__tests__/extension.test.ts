@@ -27,7 +27,7 @@ vi.mock("../commands/task.js", () => ({
 }));
 
 import kbExtension from "../extension.js";
-import { TaskStore, AgentStore } from "@fusion/core";
+import { TaskStore, AgentStore, RESEARCH_RUN_STATUSES } from "@fusion/core";
 import { isGhAvailable, isGhAuthenticated, runGhJsonAsync } from "@fusion/core/gh-cli";
 import { runTaskPlan } from "../commands/task.js";
 
@@ -114,6 +114,23 @@ async function removeDirWithRetries(path: string) {
       await delay(25 * attempt);
     }
   }
+}
+
+async function enableResearch(cwd: string): Promise<TaskStore> {
+  const store = new TaskStore(cwd);
+  await store.init();
+  await store.updateGlobalSettings({
+    researchGlobalEnabled: true,
+    researchGlobalDefaults: { searchProvider: "searxng" },
+    researchSearxngUrl: "http://localhost:8888",
+  });
+  await store.updateSettings({
+    researchEnabled: true,
+    researchSettings: { enabled: true, searchProvider: "searxng" },
+    researchWebSearchProvider: "searxng",
+    researchSearxngUrl: "http://localhost:8888",
+  });
+  return store;
 }
 
 // ── Tests ──────────────────────────────────────────────────────────
@@ -1324,6 +1341,61 @@ describe("fn pi extension (runnable structured-output regression slice)", () => 
 
       expect(result.content[0].text).toContain("No agents found");
       expect(result.details.count).toBe(0);
+    });
+  });
+
+  describe("research tools", () => {
+    it("fn_research_list status parameter matches RESEARCH_RUN_STATUSES", () => {
+      const tool = api.tools.get("fn_research_list") as any;
+      const statusSchema = tool.parameters.properties.status;
+      const enumValues = statusSchema.enum ?? statusSchema.anyOf?.[0]?.enum;
+      expect(enumValues).toEqual([...RESEARCH_RUN_STATUSES]);
+    });
+
+    it("fn_research_run preserves fire-and-forget behavior when wait_for_completion is false", async () => {
+      await enableResearch(tmpDir);
+      const tool = api.tools.get("fn_research_run")!;
+
+      const result = await tool.execute(
+        "research-run-ff",
+        { query: "test query", wait_for_completion: false },
+        undefined,
+        undefined,
+        makeCtx(tmpDir),
+      );
+
+      expect(result.content[0].text).toContain("Start the project engine to process pending runs");
+      expect(result.details.status).toBe("queued");
+    });
+
+    it("fn_research_run waits and returns terminal run details when wait_for_completion is true", async () => {
+      const store = await enableResearch(tmpDir);
+      const tool = api.tools.get("fn_research_run")!;
+      const researchStore = store.getResearchStore();
+
+      setTimeout(() => {
+        const queuedRun = researchStore.listRuns({ limit: 1 })[0];
+        if (!queuedRun) {
+          return;
+        }
+        researchStore.updateRun(queuedRun.id, { status: "running" });
+        researchStore.updateRun(queuedRun.id, {
+          status: "completed",
+          results: { summary: "done", findings: [{ heading: "h1", content: "f1", sources: [] }], citations: [] },
+        });
+      }, 25);
+
+      const result = await tool.execute(
+        "research-run-wait",
+        { query: "terminal query", wait_for_completion: true, max_wait_ms: 4000 },
+        undefined,
+        undefined,
+        makeCtx(tmpDir),
+      );
+
+      expect(result.details.status).toBe("completed");
+      expect(result.details.summary).toBe("done");
+      expect(result.content[0].text).toContain("is completed");
     });
   });
 

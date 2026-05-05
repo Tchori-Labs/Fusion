@@ -370,6 +370,8 @@ Start a bounded research run and optionally wait for findings.
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `query` | string | ✓ | Research query or question |
+| `wait_for_completion` | boolean | — | Wait for the run to complete before returning (default: false) |
+| `max_wait_ms` | number | — | Max wait time when wait_for_completion=true (default: 90000, capped by settings) |
 
 ### fn_research_list
 
@@ -377,7 +379,7 @@ List recent research runs.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `status` | string(enum) | — |  |
+| `status` | string(enum) | — | Filter by run status |
 | `limit` | number | — | Max runs to return (default: 10) |
 
 ### fn_research_get
