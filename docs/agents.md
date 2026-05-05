@@ -107,6 +107,7 @@ The agents surface provides:
 - A cross-pane **Overview** strip above the split layout with summary metrics and a disclosure to expand active/running live cards
 - A compact **Controls** popup for secondary actions (state filter, Show system agents toggle, Import, and global Heartbeat Speed)
 - Detail/config panels
+- Split-view synchronization: successful saves and lifecycle actions from the right-side Agent Detail pane immediately refresh the left-side list/selection state (no wait for background polling)
 - A per-agent **Token Usage** panel that summarizes cumulative token consumption for the currently displayed agents
 - Run history
 - Task assignment context

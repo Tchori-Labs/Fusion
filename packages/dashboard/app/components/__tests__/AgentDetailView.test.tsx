@@ -776,6 +776,25 @@ describe("AgentDetailView", () => {
     });
   });
 
+  it("notifies parent mutation callback after successful state change", async () => {
+    const onMutationSuccess = vi.fn();
+
+    render(
+      <AgentDetailView
+        agentId="agent-001"
+        onClose={vi.fn()}
+        addToast={vi.fn()}
+        onMutationSuccess={onMutationSuccess}
+      />
+    );
+
+    await userEvent.click(await screen.findByText("Pause"));
+
+    await waitFor(() => {
+      expect(onMutationSuccess).toHaveBeenCalledWith({ agentId: "agent-001", deleted: false });
+    });
+  });
+
   it("shows Resume button for paused agent", async () => {
     mockFetchAgent.mockResolvedValue(createMockAgent({ state: "paused" }));
 
@@ -1538,6 +1557,7 @@ describe("AgentDetailView", () => {
       mockFetchAgent.mockResolvedValue(createMockAgent({ state: "idle" }));
       const addToast = vi.fn();
       const onClose = vi.fn();
+      const onMutationSuccess = vi.fn();
       const user = userEvent.setup();
 
       render(
@@ -1546,6 +1566,7 @@ describe("AgentDetailView", () => {
           projectId="proj_123"
           onClose={onClose}
           addToast={addToast}
+          onMutationSuccess={onMutationSuccess}
         />,
       );
 
@@ -1560,6 +1581,7 @@ describe("AgentDetailView", () => {
         });
         expect(mockDeleteAgent).toHaveBeenCalledWith("agent-001", "proj_123");
         expect(addToast).toHaveBeenCalledWith('Agent "Test Agent" deleted', "success");
+        expect(onMutationSuccess).toHaveBeenCalledWith({ agentId: "agent-001", deleted: true });
         expect(onClose).toHaveBeenCalledTimes(1);
       });
     });
@@ -3563,6 +3585,7 @@ describe("AgentDetailView", () => {
 
     it("calls saveWorkspaceFileContent when saving file content", async () => {
       const addToast = vi.fn();
+      const onMutationSuccess = vi.fn();
       mockFetchAgent.mockResolvedValue(createMockAgent({
         instructionsPath: ".fusion/agents/test.md",
       }));
@@ -3578,6 +3601,7 @@ describe("AgentDetailView", () => {
           agentId="agent-001"
           onClose={vi.fn()}
           addToast={addToast}
+          onMutationSuccess={onMutationSuccess}
         />
       );
 
@@ -3602,6 +3626,7 @@ describe("AgentDetailView", () => {
           ".fusion/agents/test.md",
           "Updated content",
         );
+        expect(onMutationSuccess).toHaveBeenCalledWith({ agentId: "agent-001", deleted: false });
       });
       expect(addToast).toHaveBeenCalledWith("Instructions file saved", "success");
     });

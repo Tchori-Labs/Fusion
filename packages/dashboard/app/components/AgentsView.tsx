@@ -226,7 +226,7 @@ export function AgentsView({ addToast, projectId, onOpenTaskLogs, agentOnboardin
   const viewportMode = useViewportMode();
   const isMobileViewport = viewportMode === "mobile";
   const [filterState, setFilterState] = useState<AgentState | "all">("all");
-  const { agents, stats, isLoading, loadAgents } = useAgents(projectId, {
+  const { agents, stats, isLoading, loadAgents, refreshAgents } = useAgents(projectId, {
     filterState,
     showSystemAgents,
   });
@@ -486,7 +486,7 @@ export function AgentsView({ addToast, projectId, onOpenTaskLogs, agentOnboardin
     try {
       await deleteAgent(agentId, projectId);
       addToast(`Agent "${agentName}" deleted`, "success");
-      void loadAgents();
+      await loadAgents();
     } catch (err) {
       addToast(`Failed to delete agent: ${getErrorMessage(err)}`, "error");
     }
@@ -674,6 +674,13 @@ export function AgentsView({ addToast, projectId, onOpenTaskLogs, agentOnboardin
     setSelectedOrgChartAgentId(agentId);
     openAgentDetail(agentId);
   }, [openAgentDetail]);
+
+  const handleDetailMutationSuccess = useCallback(async ({ agentId, deleted }: { agentId: string; deleted?: boolean }) => {
+    await refreshAgents();
+    if (deleted && selectedAgentId === agentId) {
+      handleCloseDetail();
+    }
+  }, [refreshAgents, selectedAgentId, handleCloseDetail]);
 
   const handleOverviewAgentSelect = useCallback((agentId: string) => {
     openAgentDetail(agentId);
@@ -1442,6 +1449,7 @@ export function AgentsView({ addToast, projectId, onOpenTaskLogs, agentOnboardin
                 initialTab={selectedAgentInitialTab}
                 initialRunId={selectedAgentInitialRunId}
                 preferActiveRun={selectedAgentPreferActiveRun}
+                onMutationSuccess={handleDetailMutationSuccess}
               />
             </Suspense>
           ) : (

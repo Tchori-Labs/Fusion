@@ -31,11 +31,12 @@ vi.mock("../../api", async (importOriginal) => {
 });
 
 vi.mock("../AgentDetailView", () => ({
-  AgentDetailView: ({ agentId, inline, onClose, showInlineBackButton, initialTab, initialRunId, preferActiveRun }: { agentId: string; inline?: boolean; onClose?: () => void; showInlineBackButton?: boolean; initialTab?: string; initialRunId?: string | null; preferActiveRun?: boolean }) => (
+  AgentDetailView: ({ agentId, inline, onClose, showInlineBackButton, initialTab, initialRunId, preferActiveRun, onMutationSuccess }: { agentId: string; inline?: boolean; onClose?: () => void; showInlineBackButton?: boolean; initialTab?: string; initialRunId?: string | null; preferActiveRun?: boolean; onMutationSuccess?: (context: { agentId: string; deleted?: boolean }) => void | Promise<void> }) => (
     <div data-testid="agent-detail-view" data-inline={inline ? "true" : "false"} data-initial-tab={initialTab ?? "dashboard"} data-initial-run-id={initialRunId ?? ""} data-prefer-active-run={preferActiveRun ? "true" : "false"}>
       {showInlineBackButton ? (
         <button type="button" aria-label="Back to agents" onClick={onClose}>Agents</button>
       ) : null}
+      <button type="button" onClick={() => void onMutationSuccess?.({ agentId })}>Trigger detail mutation success</button>
       Agent detail: {agentId}
     </div>
   ),
@@ -626,6 +627,29 @@ describe("AgentsView", () => {
 
       await waitFor(() => {
         expect(screen.getByTestId("agent-detail-view")).toHaveTextContent("agent-003");
+      });
+    });
+
+    it("refreshes left-pane list immediately when detail pane reports a successful mutation", async () => {
+      mockFetchAgents
+        .mockResolvedValueOnce(mockAgents)
+        .mockResolvedValueOnce([
+          { ...mockAgents[0], name: "Renamed Agent" },
+          ...mockAgents.slice(1),
+        ]);
+
+      render(<AgentsView addToast={mockAddToast} />);
+
+      await waitFor(() => {
+        expect(screen.getAllByText("Test Agent 1").length).toBeGreaterThan(0);
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: "View details for Test Agent 1" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Trigger detail mutation success" }));
+
+      await waitFor(() => {
+        expect(mockFetchAgents).toHaveBeenCalledTimes(2);
+        expect(screen.getAllByText("Renamed Agent").length).toBeGreaterThan(0);
       });
     });
 

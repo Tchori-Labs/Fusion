@@ -68,6 +68,7 @@ interface AgentDetailViewProps {
   initialTab?: TabId;
   initialRunId?: string | null;
   preferActiveRun?: boolean;
+  onMutationSuccess?: (context: { agentId: string; deleted?: boolean }) => void | Promise<void>;
 }
 
 type TabId = "dashboard" | "logs" | "config" | "runs" | "tasks" | "employees" | "soul" | "instructions" | "memory" | "reflections";
@@ -126,7 +127,7 @@ function pickDefaultAgentMemoryPath(files: MemoryFileInfo[], currentPath: string
     ?? "";
 }
 
-export function AgentDetailView({ agentId, projectId, onClose, addToast, onChildClick, inline = false, showInlineBackButton = false, initialTab, initialRunId, preferActiveRun = false }: AgentDetailViewProps) {
+export function AgentDetailView({ agentId, projectId, onClose, addToast, onChildClick, inline = false, showInlineBackButton = false, initialTab, initialRunId, preferActiveRun = false, onMutationSuccess }: AgentDetailViewProps) {
   const [agent, setAgent] = useState<AgentDetail | null>(null);
   const { confirm } = useConfirm();
   const [logs, setLogs] = useState<AgentLogEntry[]>([]);
@@ -219,6 +220,15 @@ export function AgentDetailView({ agentId, projectId, onClose, addToast, onChild
   const handleConfigChangesState = useCallback((hasChanges: boolean) => {
     hasConfigChangesRef.current = hasChanges;
   }, []);
+
+  const notifyMutationSuccess = useCallback(async (deleted = false) => {
+    await onMutationSuccess?.({ agentId, deleted });
+  }, [agentId, onMutationSuccess]);
+
+  const handleSavedMutation = useCallback(async () => {
+    await loadAgent();
+    await notifyMutationSuccess(false);
+  }, [loadAgent, notifyMutationSuccess]);
 
   useEffect(() => {
     void loadAgent();
@@ -396,7 +406,7 @@ export function AgentDetailView({ agentId, projectId, onClose, addToast, onChild
     try {
       await updateAgentState(agentId, newState, projectId);
       addToast(`Agent state updated to ${newState}`, "success");
-      void loadAgent();
+      await handleSavedMutation();
     } catch (err) {
       setAgent((prev) => (prev ? { ...prev, state: previousState } : prev));
       addToast(`Failed to update state: ${getErrorMessage(err)}`, "error");
@@ -416,6 +426,7 @@ export function AgentDetailView({ agentId, projectId, onClose, addToast, onChild
     try {
       await deleteAgent(agentId, projectId);
       addToast(`Agent "${agent.name}" deleted`, "success");
+      await notifyMutationSuccess(true);
       onClose();
     } catch (err) {
       addToast(`Failed to delete agent: ${getErrorMessage(err)}`, "error");
@@ -681,7 +692,7 @@ export function AgentDetailView({ agentId, projectId, onClose, addToast, onChild
               agent={agent}
               projectId={projectId}
               addToast={addToast}
-              onSaved={loadAgent}
+              onSaved={handleSavedMutation}
             />
           )}
 
@@ -690,7 +701,7 @@ export function AgentDetailView({ agentId, projectId, onClose, addToast, onChild
               agent={agent}
               projectId={projectId}
               addToast={addToast}
-              onSaved={loadAgent}
+              onSaved={handleSavedMutation}
             />
           )}
 
@@ -699,7 +710,7 @@ export function AgentDetailView({ agentId, projectId, onClose, addToast, onChild
               agent={agent}
               projectId={projectId}
               addToast={addToast}
-              onSaved={loadAgent}
+              onSaved={handleSavedMutation}
             />
           )}
 
@@ -717,7 +728,7 @@ export function AgentDetailView({ agentId, projectId, onClose, addToast, onChild
               agent={agent}
               projectId={projectId}
               addToast={addToast}
-              onSaved={loadAgent}
+              onSaved={handleSavedMutation}
               onHasChangesChange={handleConfigChangesState}
               onDelete={handleDelete}
             />
@@ -2061,6 +2072,7 @@ function MemoryTab({
       setFileSwitchHint("");
       await loadMemoryFiles(selectedFilePath);
       addToast("Agent memory file saved", "success");
+      await onSaved();
     } catch (err) {
       addToast(`Failed to save agent memory file: ${getErrorMessage(err)}`, "error");
     } finally {
@@ -2398,6 +2410,7 @@ function InstructionsTab({
         clearTimeout(justSavedFileTimeoutRef.current);
       }
       justSavedFileTimeoutRef.current = setTimeout(() => setJustSavedFile(false), 3000);
+      await onSaved();
     } catch (err) {
       addToast(`Failed to save instructions file: ${getErrorMessage(err)}`, "error");
     } finally {
@@ -2734,6 +2747,7 @@ function HeartbeatProcedureSection({
         clearTimeout(justSavedFileTimeoutRef.current);
       }
       justSavedFileTimeoutRef.current = setTimeout(() => setJustSavedFile(false), 3000);
+      await onSaved();
     } catch (err) {
       addToast(`Failed to save heartbeat procedure file: ${getErrorMessage(err)}`, "error");
     } finally {
