@@ -157,7 +157,7 @@ export function mergeAuthStorageReads(
 
   const getCredential = (providerId: string) => {
     if (loggedOutProviders.has(providerId)) {
-      return authStorage.get(providerId) as StoredCredential | undefined;
+      return undefined;
     }
     return selectCredential(providerId, readAuthStorages);
   };
@@ -187,6 +187,13 @@ export function mergeAuthStorageReads(
         return (provider: string) => {
           loggedOutProviders.add(provider);
           target.logout(provider);
+        };
+      }
+
+      if (prop === "remove") {
+        return (provider: string) => {
+          loggedOutProviders.add(provider);
+          target.remove(provider);
         };
       }
 

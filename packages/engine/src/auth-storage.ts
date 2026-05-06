@@ -202,7 +202,7 @@ export function createFusionAuthStorage(): AuthStorage {
       if (prop === "get") {
         return (provider: string) => {
           if (loggedOutProviders.has(provider)) {
-            return target.get(provider);
+            return undefined;
           }
           return choosePreferredStoredCredential(
             target.get(provider) as StoredCredential | undefined,
@@ -239,9 +239,12 @@ export function createFusionAuthStorage(): AuthStorage {
           ]);
           const merged: Record<string, StoredCredential> = {};
           for (const providerId of providerIds) {
+            if (loggedOutProviders.has(providerId)) {
+              continue;
+            }
             const credential = choosePreferredStoredCredential(
               (target.get(providerId) as StoredCredential | undefined),
-              loggedOutProviders.has(providerId) ? undefined : supplementalCredentials[providerId],
+              supplementalCredentials[providerId],
             );
             if (credential) {
               merged[providerId] = credential;
@@ -253,7 +256,12 @@ export function createFusionAuthStorage(): AuthStorage {
 
       if (prop === "list") {
         return () => {
-          const providers = new Set([...target.list(), ...modelsJsonApiKeys.keys()]);
+          const providers = new Set([...target.list()]);
+          for (const p of modelsJsonApiKeys.keys()) {
+            if (!loggedOutProviders.has(p)) {
+              providers.add(p);
+            }
+          }
           for (const p of Object.keys(supplementalCredentials)) {
             if (!loggedOutProviders.has(p)) {
               providers.add(p);
