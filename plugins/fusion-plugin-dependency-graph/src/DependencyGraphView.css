@@ -51,10 +51,12 @@
 
 .dependency-graph-edge.is-related {
   stroke: var(--todo);
+  opacity: 1;
 }
 
 .dependency-graph-edge.is-dimmed {
-  opacity: 0.4;
+  stroke: var(--border);
+  opacity: 0.35;
 }
 
 .dependency-graph-node {
@@ -76,15 +78,22 @@
 .dependency-graph-node.is-selected .card {
   box-shadow: var(--focus-ring-strong);
   border-color: var(--todo);
+  opacity: 1;
 }
 
 .dependency-graph-node.is-related:not(.is-selected) .card {
   border-color: var(--in-progress);
+  box-shadow: var(--shadow-sm);
+  opacity: 1;
 }
 
 .dependency-graph-node.is-dimmed {
   opacity: 0.5;
   filter: saturate(0.8);
+}
+
+.dependency-graph-node.is-dimmed .card {
+  border-color: var(--border);
 }
 
 .dependency-graph-empty {
