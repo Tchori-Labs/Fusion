@@ -218,6 +218,14 @@ export interface ServerOptions {
     getRuntimeById?(runtimeId: string): unknown;
     createRuntimeContext?(pluginId: string): Promise<unknown>;
     reloadPlugin?(pluginId: string): Promise<unknown>;
+    checkPluginSetup?(pluginId: string): Promise<import("@fusion/core").PluginSetupCheckResult>;
+    installPluginSetup?(pluginId: string): Promise<void | { success: boolean; error?: string }>;
+    uninstallPluginSetup?(pluginId: string): Promise<void | { success: boolean; error?: string }>;
+    getPluginSetupInfo?(): Array<{
+      pluginId: string;
+      manifest: import("@fusion/core").PluginSetupManifest;
+      hooks: import("@fusion/core").PluginSetupHooks;
+    }>;
   };
   /** Optional ChatStore for chat session management */
   chatStore?: import("@fusion/core").ChatStore;

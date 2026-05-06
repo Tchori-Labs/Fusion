@@ -34,6 +34,7 @@ import type {
   PluginPromptContributions,
   PluginSetupManifest,
   PluginSetupHooks,
+  PluginSetupCheckResult,
 } from "./plugin-types.js";
 import { normalizePluginUiContributionDefinition, validatePluginManifest } from "./plugin-types.js";
 import { createLogger } from "./logger.js";
@@ -742,6 +743,89 @@ export class PluginLoader extends EventEmitter<{
     const result = fn(...args);
     if (result instanceof Promise) {
       await result;
+    }
+  }
+
+  async checkPluginSetup(pluginId: string): Promise<PluginSetupCheckResult> {
+    const plugin = this.plugins.get(pluginId);
+    if (!plugin) {
+      throw new Error(`Plugin "${pluginId}" is not loaded`);
+    }
+
+    if (!plugin.setup) {
+      return { status: "installed" };
+    }
+
+    const timeout = plugin.setup.manifest.defaultTimeoutMs ?? 30_000;
+
+    try {
+      const ctx = await this.createContext(plugin);
+      return await this.withTimeout(
+        plugin.setup.hooks.checkSetup(ctx),
+        timeout,
+        `Setup check for "${pluginId}" timed out after ${timeout}ms`,
+      );
+    } catch (error) {
+      return {
+        status: "error",
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+
+  async installPluginSetup(pluginId: string): Promise<void> {
+    const plugin = this.plugins.get(pluginId);
+    if (!plugin) {
+      throw new Error(`Plugin "${pluginId}" is not loaded`);
+    }
+
+    if (!plugin.setup?.hooks.install) {
+      throw new Error(`Plugin "${pluginId}" has no install hook`);
+    }
+
+    const timeout = plugin.setup.manifest.defaultTimeoutMs ?? 120_000;
+    const ctx = await this.createContext(plugin);
+
+    try {
+      await this.withTimeout(
+        plugin.setup.hooks.install(ctx),
+        timeout,
+        `Install command for "${pluginId}" timed out after ${timeout}ms`,
+      );
+    } catch (error) {
+      if (error instanceof Error && error.message.includes(`timed out after ${timeout}ms`)) {
+        throw error;
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`Install hook failed for "${pluginId}": ${message}`);
+    }
+  }
+
+  async uninstallPluginSetup(pluginId: string): Promise<void> {
+    const plugin = this.plugins.get(pluginId);
+    if (!plugin) {
+      throw new Error(`Plugin "${pluginId}" is not loaded`);
+    }
+
+    if (!plugin.setup?.hooks.uninstall) {
+      return;
+    }
+
+    const timeout = plugin.setup.manifest.defaultTimeoutMs ?? 60_000;
+    const ctx = await this.createContext(plugin);
+
+    try {
+      await this.withTimeout(
+        plugin.setup.hooks.uninstall(ctx),
+        timeout,
+        `Uninstall command for "${pluginId}" timed out after ${timeout}ms`,
+      );
+    } catch (error) {
+      if (error instanceof Error && error.message.includes(`timed out after ${timeout}ms`)) {
+        throw error;
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`Uninstall hook failed for "${pluginId}": ${message}`);
     }
   }
 

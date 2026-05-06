@@ -327,3 +327,82 @@ export async function runPluginDisable(
   console.log(`  ✓ ${plugin.name} disabled and stopped`);
   console.log();
 }
+
+export async function runPluginSetupStatus(
+  id: string,
+  options?: { projectName?: string },
+): Promise<void> {
+  const projectName = options?.projectName;
+  const { store, loader } = await createPluginLoader(await createPluginStore(projectName), projectName);
+
+  try {
+    await store.getPlugin(id);
+  } catch {
+    console.error(`Plugin "${id}" not found`);
+    process.exit(1);
+  }
+
+  if (!loader.isPluginLoaded(id)) {
+    console.error(`Plugin "${id}" is not loaded. Enable the plugin first.`);
+    process.exit(1);
+  }
+
+  const loadedPlugin = loader.getPlugin(id);
+  if (!loadedPlugin?.setup) {
+    console.log("Plugin has no setup requirements");
+    return;
+  }
+
+  const result = await loader.checkPluginSetup(id);
+  console.log(`status: ${result.status}`);
+  if (result.version) console.log(`version: ${result.version}`);
+  if (result.binaryPath) console.log(`binaryPath: ${result.binaryPath}`);
+  if (result.error) console.log(`error: ${result.error}`);
+}
+
+export async function runPluginSetup(
+  id: string,
+  options?: { action?: "install" | "uninstall"; projectName?: string },
+): Promise<void> {
+  const projectName = options?.projectName;
+  const action = options?.action ?? "install";
+  const { store, loader } = await createPluginLoader(await createPluginStore(projectName), projectName);
+
+  let plugin;
+  try {
+    plugin = await store.getPlugin(id);
+  } catch {
+    console.error(`Plugin "${id}" not found`);
+    process.exit(1);
+  }
+
+  if (!loader.isPluginLoaded(id)) {
+    console.error(`Plugin "${id}" is not loaded. Enable the plugin first.`);
+    process.exit(1);
+  }
+
+  const loadedPlugin = loader.getPlugin(id);
+  if (!loadedPlugin?.setup) {
+    console.log("Plugin has no setup requirements");
+    return;
+  }
+
+  try {
+    if (action === "uninstall") {
+      await loader.uninstallPluginSetup(id);
+      console.log(`✓ ${plugin.name} setup uninstalled`);
+      return;
+    }
+
+    if (!loadedPlugin.setup.hooks.install) {
+      console.error("Plugin has no install hook");
+      process.exit(1);
+    }
+
+    await loader.installPluginSetup(id);
+    console.log(`✓ ${plugin.name} setup installed`);
+  } catch (error) {
+    console.error(`Failed to ${action} setup for "${id}": ${error instanceof Error ? error.message : String(error)}`);
+    process.exit(1);
+  }
+}

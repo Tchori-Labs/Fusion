@@ -259,7 +259,7 @@ Features:
 - Inspect plugin runtime state and transition feedback
 - Edit and save plugin-defined settings schemas from the same panel
 
-For plugin-related settings and experimental toggles, see [Settings reference](./settings-reference.md).
+For full plugin lifecycle workflows (discovery, install, enable/disable, configure, update, uninstall, troubleshooting), see [Plugin Management](./plugin-management.md). For plugin-related settings and experimental toggles, see [Settings reference](./settings-reference.md).
 
 ## Pi Extensions Manager
 

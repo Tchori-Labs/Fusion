@@ -2096,6 +2096,224 @@ export default plugin;
     });
   });
 
+  describe("plugin setup lifecycle", () => {
+    it("checkPluginSetup returns installed for plugins without setup", async () => {
+      await pluginStore.init();
+      loader = new PluginLoader({ pluginStore, taskStore: mockTaskStore });
+      (loader as any).plugins.set("plain-plugin", {
+        manifest: makeManifest({ id: "plain-plugin" }),
+        state: "started",
+        hooks: {},
+      } as FusionPlugin);
+
+      await expect(loader.checkPluginSetup("plain-plugin")).resolves.toEqual({ status: "installed" });
+    });
+
+    it("checkPluginSetup throws when plugin is not loaded", async () => {
+      await pluginStore.init();
+      loader = new PluginLoader({ pluginStore, taskStore: mockTaskStore });
+      await expect(loader.checkPluginSetup("missing-plugin")).rejects.toThrow('Plugin "missing-plugin" is not loaded');
+    });
+
+    it("checkPluginSetup calls hook and returns result", async () => {
+      await pluginStore.init();
+      loader = new PluginLoader({ pluginStore, taskStore: mockTaskStore });
+      const checkSetup = vi.fn().mockResolvedValue({ status: "installed", version: "1.2.3", binaryPath: "/bin/agent-browser" });
+      (loader as any).plugins.set("setup-plugin", {
+        manifest: makeManifest({ id: "setup-plugin" }),
+        state: "started",
+        hooks: {},
+        setup: {
+          manifest: { binaryName: "agent-browser", description: "Binary" },
+          hooks: { checkSetup },
+        },
+      } as FusionPlugin);
+
+      await expect(loader.checkPluginSetup("setup-plugin")).resolves.toEqual({
+        status: "installed",
+        version: "1.2.3",
+        binaryPath: "/bin/agent-browser",
+      });
+      expect(checkSetup).toHaveBeenCalledTimes(1);
+    });
+
+    it("checkPluginSetup returns error status when hook throws", async () => {
+      await pluginStore.init();
+      loader = new PluginLoader({ pluginStore, taskStore: mockTaskStore });
+      const checkSetup = vi.fn().mockRejectedValue(new Error("probe failed"));
+      (loader as any).plugins.set("error-setup-plugin", {
+        manifest: makeManifest({ id: "error-setup-plugin" }),
+        state: "started",
+        hooks: {},
+        setup: { manifest: { binaryName: "agent-browser", description: "Binary" }, hooks: { checkSetup } },
+      } as FusionPlugin);
+
+      await expect(loader.checkPluginSetup("error-setup-plugin")).resolves.toEqual({ status: "error", error: "probe failed" });
+    });
+
+    it("checkPluginSetup returns error status when hook times out", async () => {
+      await pluginStore.init();
+      loader = new PluginLoader({ pluginStore, taskStore: mockTaskStore });
+      vi.useFakeTimers();
+      const checkSetup = vi.fn().mockImplementation(() => new Promise(() => undefined));
+      (loader as any).plugins.set("timeout-setup-plugin", {
+        manifest: makeManifest({ id: "timeout-setup-plugin" }),
+        state: "started",
+        hooks: {},
+        setup: {
+          manifest: { binaryName: "agent-browser", description: "Binary", defaultTimeoutMs: 5 },
+          hooks: { checkSetup },
+        },
+      } as FusionPlugin);
+
+      const resultPromise = loader.checkPluginSetup("timeout-setup-plugin");
+      await vi.advanceTimersByTimeAsync(6);
+      await expect(resultPromise).resolves.toEqual({
+        status: "error",
+        error: 'Setup check for "timeout-setup-plugin" timed out after 5ms',
+      });
+      vi.useRealTimers();
+    });
+
+    it("checkPluginSetup respects manifest defaultTimeoutMs", async () => {
+      await pluginStore.init();
+      loader = new PluginLoader({ pluginStore, taskStore: mockTaskStore });
+      vi.useFakeTimers();
+      const checkSetup = vi.fn().mockImplementation(() => new Promise(() => undefined));
+      (loader as any).plugins.set("custom-timeout-setup-plugin", {
+        manifest: makeManifest({ id: "custom-timeout-setup-plugin" }),
+        state: "started",
+        hooks: {},
+        setup: {
+          manifest: { binaryName: "agent-browser", description: "Binary", defaultTimeoutMs: 12 },
+          hooks: { checkSetup },
+        },
+      } as FusionPlugin);
+
+      const resultPromise = loader.checkPluginSetup("custom-timeout-setup-plugin");
+      await vi.advanceTimersByTimeAsync(11);
+      expect(checkSetup).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(resultPromise).resolves.toEqual({
+        status: "error",
+        error: 'Setup check for "custom-timeout-setup-plugin" timed out after 12ms',
+      });
+      vi.useRealTimers();
+    });
+
+    it("installPluginSetup calls install hook", async () => {
+      await pluginStore.init();
+      loader = new PluginLoader({ pluginStore, taskStore: mockTaskStore });
+      const install = vi.fn().mockResolvedValue(undefined);
+      (loader as any).plugins.set("install-plugin", {
+        manifest: makeManifest({ id: "install-plugin" }),
+        state: "started",
+        hooks: {},
+        setup: {
+          manifest: { binaryName: "agent-browser", description: "Binary" },
+          hooks: { checkSetup: vi.fn().mockResolvedValue({ status: "installed" }), install },
+        },
+      } as FusionPlugin);
+
+      await expect(loader.installPluginSetup("install-plugin")).resolves.toBeUndefined();
+      expect(install).toHaveBeenCalledTimes(1);
+    });
+
+    it("installPluginSetup throws when plugin has no install hook", async () => {
+      await pluginStore.init();
+      loader = new PluginLoader({ pluginStore, taskStore: mockTaskStore });
+      (loader as any).plugins.set("no-install-plugin", {
+        manifest: makeManifest({ id: "no-install-plugin" }),
+        state: "started",
+        hooks: {},
+        setup: { manifest: { binaryName: "agent-browser", description: "Binary" }, hooks: { checkSetup: vi.fn() } },
+      } as FusionPlugin);
+
+      await expect(loader.installPluginSetup("no-install-plugin")).rejects.toThrow('Plugin "no-install-plugin" has no install hook');
+    });
+
+    it("installPluginSetup throws when plugin is not loaded", async () => {
+      await pluginStore.init();
+      loader = new PluginLoader({ pluginStore, taskStore: mockTaskStore });
+      await expect(loader.installPluginSetup("missing-install-plugin")).rejects.toThrow('Plugin "missing-install-plugin" is not loaded');
+    });
+
+    it("installPluginSetup throws on timeout", async () => {
+      await pluginStore.init();
+      loader = new PluginLoader({ pluginStore, taskStore: mockTaskStore });
+      vi.useFakeTimers();
+      const install = vi.fn().mockImplementation(() => new Promise(() => undefined));
+      (loader as any).plugins.set("timeout-install-plugin", {
+        manifest: makeManifest({ id: "timeout-install-plugin" }),
+        state: "started",
+        hooks: {},
+        setup: {
+          manifest: { binaryName: "agent-browser", description: "Binary", defaultTimeoutMs: 5 },
+          hooks: { checkSetup: vi.fn(), install },
+        },
+      } as FusionPlugin);
+
+      const installPromise = loader.installPluginSetup("timeout-install-plugin");
+      const installAssertion = expect(installPromise).rejects.toThrow('Install command for "timeout-install-plugin" timed out after 5ms');
+      await vi.advanceTimersByTimeAsync(6);
+      await installAssertion;
+      vi.useRealTimers();
+    });
+
+    it("uninstallPluginSetup calls uninstall hook", async () => {
+      await pluginStore.init();
+      loader = new PluginLoader({ pluginStore, taskStore: mockTaskStore });
+      const uninstall = vi.fn().mockResolvedValue(undefined);
+      (loader as any).plugins.set("uninstall-plugin", {
+        manifest: makeManifest({ id: "uninstall-plugin" }),
+        state: "started",
+        hooks: {},
+        setup: {
+          manifest: { binaryName: "agent-browser", description: "Binary" },
+          hooks: { checkSetup: vi.fn().mockResolvedValue({ status: "installed" }), uninstall },
+        },
+      } as FusionPlugin);
+
+      await expect(loader.uninstallPluginSetup("uninstall-plugin")).resolves.toBeUndefined();
+      expect(uninstall).toHaveBeenCalledTimes(1);
+    });
+
+    it("uninstallPluginSetup returns silently when no uninstall hook", async () => {
+      await pluginStore.init();
+      loader = new PluginLoader({ pluginStore, taskStore: mockTaskStore });
+      (loader as any).plugins.set("no-uninstall-plugin", {
+        manifest: makeManifest({ id: "no-uninstall-plugin" }),
+        state: "started",
+        hooks: {},
+        setup: { manifest: { binaryName: "agent-browser", description: "Binary" }, hooks: { checkSetup: vi.fn() } },
+      } as FusionPlugin);
+
+      await expect(loader.uninstallPluginSetup("no-uninstall-plugin")).resolves.toBeUndefined();
+    });
+
+    it("uninstallPluginSetup respects timeout", async () => {
+      await pluginStore.init();
+      loader = new PluginLoader({ pluginStore, taskStore: mockTaskStore });
+      vi.useFakeTimers();
+      const uninstall = vi.fn().mockImplementation(() => new Promise(() => undefined));
+      (loader as any).plugins.set("timeout-uninstall-plugin", {
+        manifest: makeManifest({ id: "timeout-uninstall-plugin" }),
+        state: "started",
+        hooks: {},
+        setup: {
+          manifest: { binaryName: "agent-browser", description: "Binary", defaultTimeoutMs: 5 },
+          hooks: { checkSetup: vi.fn(), uninstall },
+        },
+      } as FusionPlugin);
+
+      const uninstallPromise = loader.uninstallPluginSetup("timeout-uninstall-plugin");
+      const uninstallAssertion = expect(uninstallPromise).rejects.toThrow('Uninstall command for "timeout-uninstall-plugin" timed out after 5ms');
+      await vi.advanceTimersByTimeAsync(6);
+      await uninstallAssertion;
+      vi.useRealTimers();
+    });
+  });
+
   // ── getLoadedPlugins ───────────────────────────────────────────────
 
   describe("getLoadedPlugins", () => {
