@@ -1182,7 +1182,10 @@ export async function createFnAgent(options: AgentOptions): Promise<AgentResult>
     if (selectionResult.diagnostics.length > 0) {
       const purpose = effectiveSkillSelection.sessionPurpose ?? "skills";
       for (const diag of selectionResult.diagnostics) {
-        piLog.warn(`[skills] [${purpose}] ${diag.type}: ${diag.message}`);
+        const msg = `[skills] [${purpose}] ${diag.type}: ${diag.message}`;
+        if (diag.type === "error") piLog.error(msg);
+        else if (diag.type === "warning") piLog.warn(msg);
+        else piLog.log(msg);
       }
     }
     skillsOverrideFn = createSkillsOverrideFromSelection(selectionResult, {
