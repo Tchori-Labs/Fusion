@@ -675,13 +675,24 @@ describe("POST /plugins/:id/disable", () => {
 describe("POST /plugins/:id/reload", () => {
   let store: TaskStore;
   let pluginStore: PluginStore;
-  let pluginRunner: { getPluginRoutes: ReturnType<typeof vi.fn>; reloadPlugin: ReturnType<typeof vi.fn> };
+  let pluginRunner: {
+    getPluginRoutes: ReturnType<typeof vi.fn>;
+    reloadPlugin: ReturnType<typeof vi.fn>;
+    checkPluginSetup: ReturnType<typeof vi.fn>;
+    installPluginSetup: ReturnType<typeof vi.fn>;
+    uninstallPluginSetup: ReturnType<typeof vi.fn>;
+    getPluginSetupInfo: ReturnType<typeof vi.fn>;
+  };
 
   beforeEach(() => {
     pluginStore = createMockPluginStore();
     pluginRunner = {
       getPluginRoutes: vi.fn().mockReturnValue([]),
       reloadPlugin: vi.fn().mockResolvedValue(undefined),
+      checkPluginSetup: vi.fn().mockResolvedValue({ status: "installed" }),
+      installPluginSetup: vi.fn().mockResolvedValue({ success: true }),
+      uninstallPluginSetup: vi.fn().mockResolvedValue({ success: true }),
+      getPluginSetupInfo: vi.fn().mockReturnValue([]),
     };
     store = createMockTaskStore({
       getPluginStore: vi.fn().mockReturnValue(pluginStore),
@@ -756,6 +767,140 @@ describe("POST /plugins/:id/reload", () => {
 
     expect(res.status).toBe(500);
     expect(res.body.error).toContain("Reload failed: boom");
+  });
+});
+
+describe("plugin setup routes", () => {
+  let store: TaskStore;
+  let pluginStore: PluginStore;
+  let pluginRunner: {
+    getPluginRoutes: ReturnType<typeof vi.fn>;
+    checkPluginSetup: ReturnType<typeof vi.fn>;
+    installPluginSetup: ReturnType<typeof vi.fn>;
+    uninstallPluginSetup: ReturnType<typeof vi.fn>;
+    getPluginSetupInfo: ReturnType<typeof vi.fn>;
+  };
+
+  beforeEach(() => {
+    pluginStore = createMockPluginStore();
+    pluginRunner = {
+      getPluginRoutes: vi.fn().mockReturnValue([]),
+      checkPluginSetup: vi.fn().mockResolvedValue({ status: "installed", version: "1.0.0" }),
+      installPluginSetup: vi.fn().mockResolvedValue({ success: true }),
+      uninstallPluginSetup: vi.fn().mockResolvedValue({ success: true }),
+      getPluginSetupInfo: vi.fn().mockReturnValue([]),
+    };
+    store = createMockTaskStore({
+      getPluginStore: vi.fn().mockReturnValue(pluginStore),
+    });
+  });
+
+  function buildApp() {
+    const app = express();
+    app.use(express.json());
+    app.use("/api", createApiRoutes(store, {
+      pluginStore,
+      pluginLoader: createMockPluginLoader(),
+      pluginRunner,
+    }));
+    return app;
+  }
+
+  it("GET /plugins/:id/setup-status returns hasSetup true result", async () => {
+    (pluginStore.getPlugin as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ ...FAKE_PLUGIN, state: "started" });
+    pluginRunner.getPluginSetupInfo.mockReturnValueOnce([
+      {
+        pluginId: "test-plugin",
+        manifest: { binaryName: "agent-browser", description: "Binary" },
+        hooks: { checkSetup: vi.fn() },
+      },
+    ]);
+
+    const res = await REQUEST(buildApp(), "GET", "/api/plugins/test-plugin/setup-status");
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ hasSetup: true, status: "installed", version: "1.0.0" });
+  });
+
+  it("GET /plugins/:id/setup-status returns hasSetup false when no setup", async () => {
+    (pluginStore.getPlugin as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ ...FAKE_PLUGIN, state: "started" });
+    pluginRunner.getPluginSetupInfo.mockReturnValueOnce([]);
+
+    const res = await REQUEST(buildApp(), "GET", "/api/plugins/test-plugin/setup-status");
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ hasSetup: false });
+  });
+
+  it("GET /plugins/:id/setup-status returns 404 for nonexistent plugin", async () => {
+    (pluginStore.getPlugin as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('Plugin "missing" not found'));
+
+    const res = await REQUEST(buildApp(), "GET", "/api/plugins/missing/setup-status");
+    expect(res.status).toBe(404);
+  });
+
+  it("POST /plugins/:id/setup/install returns success true", async () => {
+    (pluginStore.getPlugin as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ ...FAKE_PLUGIN, enabled: true });
+    pluginRunner.getPluginSetupInfo.mockReturnValueOnce([
+      {
+        pluginId: "test-plugin",
+        manifest: { binaryName: "agent-browser", description: "Binary" },
+        hooks: { checkSetup: vi.fn(), install: vi.fn() },
+      },
+    ]);
+
+    const res = await REQUEST(buildApp(), "POST", "/api/plugins/test-plugin/setup/install", {});
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ success: true });
+  });
+
+  it("POST /plugins/:id/setup/install returns setup failure result", async () => {
+    (pluginStore.getPlugin as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ ...FAKE_PLUGIN, enabled: true });
+    pluginRunner.getPluginSetupInfo.mockReturnValueOnce([
+      {
+        pluginId: "test-plugin",
+        manifest: { binaryName: "agent-browser", description: "Binary" },
+        hooks: { checkSetup: vi.fn(), install: vi.fn() },
+      },
+    ]);
+    pluginRunner.installPluginSetup.mockResolvedValueOnce({ success: false, error: "install failed" });
+
+    const res = await REQUEST(buildApp(), "POST", "/api/plugins/test-plugin/setup/install", {});
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ success: false, error: "install failed" });
+  });
+
+  it("POST /plugins/:id/setup/install returns 400 when no install hook", async () => {
+    (pluginStore.getPlugin as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ ...FAKE_PLUGIN, enabled: true });
+    pluginRunner.getPluginSetupInfo.mockReturnValueOnce([
+      {
+        pluginId: "test-plugin",
+        manifest: { binaryName: "agent-browser", description: "Binary" },
+        hooks: { checkSetup: vi.fn() },
+      },
+    ]);
+
+    const res = await REQUEST(buildApp(), "POST", "/api/plugins/test-plugin/setup/install", {});
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain("no install hook");
+  });
+
+  it("POST /plugins/:id/setup/uninstall returns success and failure results", async () => {
+    (pluginStore.getPlugin as ReturnType<typeof vi.fn>).mockResolvedValue({ ...FAKE_PLUGIN, enabled: true });
+    pluginRunner.getPluginSetupInfo.mockReturnValue([
+      {
+        pluginId: "test-plugin",
+        manifest: { binaryName: "agent-browser", description: "Binary" },
+        hooks: { checkSetup: vi.fn(), uninstall: vi.fn() },
+      },
+    ]);
+
+    const successRes = await REQUEST(buildApp(), "POST", "/api/plugins/test-plugin/setup/uninstall", {});
+    expect(successRes.status).toBe(200);
+    expect(successRes.body).toEqual({ success: true });
+
+    pluginRunner.uninstallPluginSetup.mockResolvedValueOnce({ success: false, error: "uninstall failed" });
+    const failureRes = await REQUEST(buildApp(), "POST", "/api/plugins/test-plugin/setup/uninstall", {});
+    expect(failureRes.status).toBe(200);
+    expect(failureRes.body).toEqual({ success: false, error: "uninstall failed" });
   });
 });
 

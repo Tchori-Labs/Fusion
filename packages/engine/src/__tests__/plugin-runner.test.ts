@@ -41,6 +41,9 @@ describe("PluginRunner", () => {
     getPluginWorkflowStepTemplates: ReturnType<typeof vi.fn>;
     getPluginPromptContributions: ReturnType<typeof vi.fn>;
     getPluginSetupInfo: ReturnType<typeof vi.fn>;
+    checkPluginSetup: ReturnType<typeof vi.fn>;
+    installPluginSetup: ReturnType<typeof vi.fn>;
+    uninstallPluginSetup: ReturnType<typeof vi.fn>;
     getLoadedPlugins: ReturnType<typeof vi.fn>;
     getPlugin: ReturnType<typeof vi.fn>;
     loadPlugin: ReturnType<typeof vi.fn>;
@@ -102,6 +105,9 @@ describe("PluginRunner", () => {
       getPluginWorkflowStepTemplates: vi.fn().mockReturnValue([]),
       getPluginPromptContributions: vi.fn().mockReturnValue([]),
       getPluginSetupInfo: vi.fn().mockReturnValue([]),
+      checkPluginSetup: vi.fn().mockResolvedValue({ status: "installed" }),
+      installPluginSetup: vi.fn().mockResolvedValue(undefined),
+      uninstallPluginSetup: vi.fn().mockResolvedValue(undefined),
       getLoadedPlugins: vi.fn().mockReturnValue([]),
       getPlugin: vi.fn(),
       loadPlugin: vi.fn().mockResolvedValue({}),
@@ -908,6 +914,64 @@ describe("PluginRunner", () => {
       expect(mockPluginLoader.getPluginWorkflowStepTemplates).toHaveBeenCalledTimes(3);
       expect(mockPluginLoader.getPluginPromptContributions).toHaveBeenCalledTimes(3);
       expect(mockPluginLoader.getPluginSetupInfo).toHaveBeenCalledTimes(3);
+    });
+
+    it("checkPluginSetup delegates to loader and returns result", async () => {
+      const result = { status: "installed" as const, version: "1.2.3" };
+      mockPluginLoader.checkPluginSetup.mockResolvedValue(result);
+      await expect(pluginRunner.checkPluginSetup("test-plugin")).resolves.toEqual(result);
+      expect(mockPluginLoader.checkPluginSetup).toHaveBeenCalledWith("test-plugin");
+    });
+
+    it("checkPluginSetup returns error status when loader throws", async () => {
+      mockPluginLoader.checkPluginSetup.mockRejectedValue(new Error("check failed"));
+      await expect(pluginRunner.checkPluginSetup("test-plugin")).resolves.toEqual({ status: "error", error: "check failed" });
+    });
+
+    it("installPluginSetup returns success true on success", async () => {
+      await expect(pluginRunner.installPluginSetup("test-plugin")).resolves.toEqual({ success: true });
+      expect(mockPluginLoader.installPluginSetup).toHaveBeenCalledWith("test-plugin");
+    });
+
+    it("installPluginSetup returns success false on failure", async () => {
+      mockPluginLoader.installPluginSetup.mockRejectedValue(new Error("install failed"));
+      await expect(pluginRunner.installPluginSetup("test-plugin")).resolves.toEqual({ success: false, error: "install failed" });
+    });
+
+    it("uninstallPluginSetup returns success and failure results", async () => {
+      await expect(pluginRunner.uninstallPluginSetup("test-plugin")).resolves.toEqual({ success: true });
+      mockPluginLoader.uninstallPluginSetup.mockRejectedValueOnce(new Error("uninstall failed"));
+      await expect(pluginRunner.uninstallPluginSetup("test-plugin")).resolves.toEqual({ success: false, error: "uninstall failed" });
+    });
+
+    it("getSetupStatuses returns statuses for all plugins with setup", async () => {
+      mockPluginLoader.getPluginSetupInfo.mockReturnValue([
+        { pluginId: "a", manifest: { binaryName: "a-bin", description: "A" }, hooks: { checkSetup: vi.fn() } },
+        { pluginId: "b", manifest: { binaryName: "b-bin", description: "B" }, hooks: { checkSetup: vi.fn() } },
+      ]);
+      mockPluginLoader.checkPluginSetup
+        .mockResolvedValueOnce({ status: "installed", version: "1.0.0" })
+        .mockResolvedValueOnce({ status: "not-installed" });
+
+      await expect(pluginRunner.getSetupStatuses()).resolves.toEqual([
+        { pluginId: "a", manifest: { binaryName: "a-bin", description: "A" }, status: { status: "installed", version: "1.0.0" } },
+        { pluginId: "b", manifest: { binaryName: "b-bin", description: "B" }, status: { status: "not-installed" } },
+      ]);
+    });
+
+    it("getSetupStatuses handles setup check failures gracefully", async () => {
+      mockPluginLoader.getPluginSetupInfo.mockReturnValue([
+        { pluginId: "offline", manifest: { binaryName: "off-bin", description: "Offline" }, hooks: { checkSetup: vi.fn() } },
+      ]);
+      mockPluginLoader.checkPluginSetup.mockRejectedValue(new Error("Plugin \"offline\" is not loaded"));
+
+      await expect(pluginRunner.getSetupStatuses()).resolves.toEqual([
+        {
+          pluginId: "offline",
+          manifest: { binaryName: "off-bin", description: "Offline" },
+          status: { status: "error", error: 'Plugin "offline" is not loaded' },
+        },
+      ]);
     });
   });
 

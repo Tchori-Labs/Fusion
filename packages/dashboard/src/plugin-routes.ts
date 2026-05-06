@@ -35,6 +35,10 @@ import {
 // PluginRunner interface for optional plugin runner
 interface PluginRunner {
   reloadPlugin?(pluginId: string): Promise<void>;
+  checkPluginSetup?(pluginId: string): Promise<import("@fusion/core").PluginSetupCheckResult>;
+  installPluginSetup?(pluginId: string): Promise<{ success: boolean; error?: string }>;
+  uninstallPluginSetup?(pluginId: string): Promise<{ success: boolean; error?: string }>;
+  getPluginSetupInfo?(): Array<{ pluginId: string; manifest: import("@fusion/core").PluginSetupManifest; hooks: import("@fusion/core").PluginSetupHooks }>;
   getPluginRoutes(): Array<{ pluginId: string; route: import("@fusion/core").PluginRouteDefinition }>;
 }
 

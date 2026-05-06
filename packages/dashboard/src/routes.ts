@@ -3474,6 +3474,103 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   });
 
   /**
+   * GET /api/plugins/:id/setup-status
+   * Check plugin setup status.
+   */
+  router.get("/plugins/:id/setup-status", async (req: Request, res: Response) => {
+    const { store: scopedStore } = await getProjectContext(req);
+    const pluginStore = scopedStore.getPluginStore();
+    const id = req.params.id as string;
+
+    let plugin: import("@fusion/core").PluginInstallation;
+    try {
+      plugin = await pluginStore.getPlugin(id);
+    } catch (err: unknown) {
+      if (err instanceof Error && err.message.includes("not found")) {
+        throw notFound(`Plugin "${id}" not found`);
+      }
+      throw internalError(err instanceof Error ? err.message : "Unknown error");
+    }
+
+    if (!options?.pluginRunner?.checkPluginSetup || !options?.pluginRunner?.getPluginSetupInfo) {
+      throw internalError("Plugin runner not available");
+    }
+
+    const setupInfo = options.pluginRunner.getPluginSetupInfo();
+    const hasSetup = setupInfo.some((entry) => entry.pluginId === id);
+
+    if (!hasSetup) {
+      res.json({ hasSetup: false });
+      return;
+    }
+
+    if (plugin.state !== "started") {
+      res.json({
+        hasSetup: false,
+        status: { status: "error", error: "Plugin not loaded" },
+      });
+      return;
+    }
+
+    const status = await options.pluginRunner.checkPluginSetup(id);
+    res.json({ hasSetup: true, ...status });
+  });
+
+  /**
+   * POST /api/plugins/:id/setup/install
+   * Trigger plugin setup install hook.
+   */
+  router.post("/plugins/:id/setup/install", async (req: Request, res: Response) => {
+    const { store: scopedStore } = await getProjectContext(req);
+    const pluginStore = scopedStore.getPluginStore();
+    const id = req.params.id as string;
+
+    const plugin = await pluginStore.getPlugin(id);
+    if (!plugin.enabled) {
+      throw badRequest("Plugin must be enabled before setup install");
+    }
+
+    if (!options?.pluginRunner?.installPluginSetup || !options?.pluginRunner?.getPluginSetupInfo) {
+      throw internalError("Plugin runner not available");
+    }
+
+    const setupInfo = options.pluginRunner.getPluginSetupInfo();
+    const setup = setupInfo.find((entry) => entry.pluginId === id);
+    if (!setup?.hooks.install) {
+      throw badRequest("Plugin has no install hook");
+    }
+
+    const result = await options.pluginRunner.installPluginSetup(id);
+    res.json(result ?? { success: true });
+  });
+
+  /**
+   * POST /api/plugins/:id/setup/uninstall
+   * Trigger plugin setup uninstall hook.
+   */
+  router.post("/plugins/:id/setup/uninstall", async (req: Request, res: Response) => {
+    const { store: scopedStore } = await getProjectContext(req);
+    const pluginStore = scopedStore.getPluginStore();
+    const id = req.params.id as string;
+
+    await pluginStore.getPlugin(id);
+
+    if (!options?.pluginRunner?.uninstallPluginSetup || !options?.pluginRunner?.getPluginSetupInfo) {
+      throw internalError("Plugin runner not available");
+    }
+
+    const setupInfo = options.pluginRunner.getPluginSetupInfo();
+    const setup = setupInfo.find((entry) => entry.pluginId === id);
+    if (!setup) {
+      res.json({ success: true });
+      return;
+    }
+
+    const result = await options.pluginRunner.uninstallPluginSetup(id);
+    res.json(result ?? { success: true });
+  });
+
+  /**
    * PUT /api/plugins/:id/settings
    * Update plugin settings.
    * Body: { settings: Record<string, unknown>, projectId?: string }

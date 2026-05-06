@@ -54,10 +54,11 @@ For a full walkthrough (installation, onboarding, first task, and daily workflow
 | [Code Signing](./CODE_SIGNING.md) | macOS and Windows code signing configuration for release binaries |
 | [Mobile](../MOBILE.md) | Capacitor/PWA mobile development setup and workflow |
 
-### Plugin Development
+### Plugins
 | Guide | Description |
 |---|---|
-| [Plugin Authoring](./PLUGIN_AUTHORING.md) | Creating Fusion plugins with the plugin system |
+| [Plugin Management](./plugin-management.md) | End-user guide for discovering, installing, enabling, configuring, updating, uninstalling, and troubleshooting Fusion plugins |
+| [Plugin Authoring](./PLUGIN_AUTHORING.md) | Developer guide for building Fusion plugins (manifest, SDK hooks, routes, UI/runtime contributions) |
 | [Memory Plugin Contract](./memory-plugin-contract.md) | Pluggable memory backend architecture, interface contract, and migration strategy |
 
 ### Audit Reports

@@ -91,6 +91,8 @@ const commandMocks = vi.hoisted(() => ({
   runPluginUninstall: vi.fn(),
   runPluginEnable: vi.fn(),
   runPluginDisable: vi.fn(),
+  runPluginSetupStatus: vi.fn(),
+  runPluginSetup: vi.fn(),
   runPluginCreate: vi.fn(),
 
   runResearchCreate: vi.fn(),
@@ -211,6 +213,8 @@ vi.mock("../commands/plugin.js", () => ({
   runPluginUninstall: commandMocks.runPluginUninstall,
   runPluginEnable: commandMocks.runPluginEnable,
   runPluginDisable: commandMocks.runPluginDisable,
+  runPluginSetupStatus: commandMocks.runPluginSetupStatus,
+  runPluginSetup: commandMocks.runPluginSetup,
 }));
 
 vi.mock("../commands/plugin-scaffold.js", () => ({
@@ -432,7 +436,7 @@ describe("bin command routing and fallbacks", () => {
     await expect(runBin(["plugin", "oops"])).rejects.toThrow("process.exit:1");
     expect(errorSpy).toHaveBeenCalledWith("Unknown subcommand: plugin oops");
     expect(logSpy).toHaveBeenCalledWith(
-      "Try: fn plugin list | install | add (alias for install) | uninstall | enable | disable | create",
+      "Try: fn plugin list | install | add (alias for install) | uninstall | enable | disable | setup-status | setup | create",
     );
   });
 

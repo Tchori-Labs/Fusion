@@ -25,6 +25,7 @@ import type {
   PluginPromptSurface,
   PluginSetupManifest,
   PluginSetupHooks,
+  PluginSetupCheckResult,
 } from "@fusion/core";
 import type { ToolDefinition } from "@mariozechner/pi-coding-agent";
 import { Type } from "@mariozechner/pi-ai";
@@ -369,6 +370,55 @@ export class PluginRunner {
       };
     }
     return this.cachedSetupInfo.setups;
+  }
+
+  async checkPluginSetup(pluginId: string): Promise<PluginSetupCheckResult> {
+    try {
+      return await this.withTimeout(
+        this.options.pluginLoader.checkPluginSetup(pluginId),
+        this.hookTimeoutMs,
+        `Setup check for plugin ${pluginId} timed out`,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.log.warn(`Setup check failed for plugin ${pluginId}: ${message}`);
+      return { status: "error", error: message };
+    }
+  }
+
+  async installPluginSetup(pluginId: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      await this.options.pluginLoader.installPluginSetup(pluginId);
+      this.invalidateSetupCache();
+      return { success: true };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.log.warn(`Setup install failed for plugin ${pluginId}: ${message}`);
+      return { success: false, error: message };
+    }
+  }
+
+  async uninstallPluginSetup(pluginId: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      await this.options.pluginLoader.uninstallPluginSetup(pluginId);
+      this.invalidateSetupCache();
+      return { success: true };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.log.warn(`Setup uninstall failed for plugin ${pluginId}: ${message}`);
+      return { success: false, error: message };
+    }
+  }
+
+  async getSetupStatuses(): Promise<Array<{ pluginId: string; manifest: PluginSetupManifest; status?: PluginSetupCheckResult }>> {
+    const setupInfo = this.getPluginSetupInfo();
+    return Promise.all(
+      setupInfo.map(async ({ pluginId, manifest }) => ({
+        pluginId,
+        manifest,
+        status: await this.checkPluginSetup(pluginId),
+      })),
+    );
   }
 
   getPromptContributionsForSurface(surface: PluginPromptSurface): Array<{
