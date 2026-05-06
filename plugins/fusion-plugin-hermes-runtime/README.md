@@ -36,7 +36,9 @@ Because we drive the CLI's `chat -q` mode:
 - **No per-token streaming.** Hermes buffers output through prompt_toolkit; the full response arrives once the process exits. `onText` is called exactly once per turn.
 - **No reasoning/thinking deltas.** `-Q` mode suppresses them. If you need streaming + reasoning, switch to Hermes's ACP mode (not yet implemented in this plugin).
 - **No tool-call hooks.** Hermes runs tools internally; Fusion only sees the final assistant text. Use `yolo: true` to skip Hermes's interactive approval prompts in non-interactive sessions.
-- **`AgentRuntimeOptions.cwd`, `tools`, `skills`, `sessionManager`, etc. are ignored** — Hermes's own session/tools/skills systems handle these.
+- **No JS tool callbacks.** `customTools` callback functions are still not executable through Hermes CLI mode; Hermes runs its own tool layer and Fusion receives final text.
+- **Fusion context is prompt-mediated.** The engine forwards requested Fusion skill names into `skills`, and the adapter prepends Fusion system/runtime context on the first turn of each session so capability expectations (for example messaging/delegation flows) are not silently dropped on non-pi runtimes.
+- `AgentRuntimeOptions.cwd` / `sessionManager` are still adapter-noops in CLI mode.
 
 ## Settings
 

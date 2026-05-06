@@ -61,7 +61,8 @@ describe("HermesRuntimeAdapter — promptWithFallback", () => {
 
     expect(mockInvoke).toHaveBeenCalledTimes(1);
     const [prompt, settings, resumeId] = mockInvoke.mock.calls[0];
-    expect(prompt).toBe("first prompt");
+    expect(prompt).toContain("User request:\nfirst prompt");
+    expect(prompt).toContain("Fusion runtime context:");
     expect(settings.model).toBe("claude-sonnet-4-5");
     expect(resumeId).toBeUndefined();
     expect(onText).toHaveBeenCalledWith("hello from hermes");
@@ -78,7 +79,8 @@ describe("HermesRuntimeAdapter — promptWithFallback", () => {
     await adapter.promptWithFallback(session, "p1");
     await adapter.promptWithFallback(session, "p2");
 
-    const [, , resume2] = mockInvoke.mock.calls[1];
+    const [prompt2, , resume2] = mockInvoke.mock.calls[1];
+    expect(prompt2).toBe("p2");
     expect(resume2).toBe("20260427_120000_abc123");
   });
 

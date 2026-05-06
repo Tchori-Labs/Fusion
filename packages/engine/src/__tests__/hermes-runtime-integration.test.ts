@@ -165,6 +165,41 @@ describe("Hermes runtime integration via engine resolution pipeline", () => {
     });
   });
 
+  it("forwards skillSelection.requestedSkillNames as runtime skills for plugin runtimes", async () => {
+    const hermesCreateSession = vi.fn().mockResolvedValue({
+      session: { runtime: "hermes", prompt: vi.fn() },
+      sessionFile: "/tmp/hermes.session.json",
+    });
+    const hermesRegistration = createHermesRegistration(() => ({
+      id: "hermes",
+      name: "Hermes Runtime",
+      createSession: hermesCreateSession,
+      promptWithFallback: vi.fn().mockResolvedValue(undefined),
+      describeModel: vi.fn().mockReturnValue("anthropic/claude-sonnet-4-5"),
+    }));
+
+    const pluginRunner = createMockPluginRunner({
+      getRuntimeById: vi.fn().mockReturnValue(hermesRegistration),
+    });
+
+    await createResolvedAgentSession({
+      sessionPurpose: "executor",
+      runtimeHint: "hermes",
+      pluginRunner,
+      cwd: "/tmp/project",
+      systemPrompt: "You are helpful",
+      skillSelection: {
+        projectRootDir: "/tmp/project",
+        requestedSkillNames: ["fusion"],
+        sessionPurpose: "executor",
+      },
+    });
+
+    expect(hermesCreateSession).toHaveBeenCalledWith(expect.objectContaining({
+      skills: ["fusion"],
+    }));
+  });
+
   it("falls back to default pi runtime when Hermes factory throws", async () => {
     const hermesRegistration = createHermesRegistration(() => {
       throw new Error("factory exploded");

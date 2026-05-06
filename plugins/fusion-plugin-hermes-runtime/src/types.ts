@@ -12,6 +12,13 @@ export interface HermesCallbacks {
   onToolEnd?: (toolName: string, isError: boolean, result?: unknown) => void;
 }
 
+export interface HermesRuntimeContext {
+  sessionPurpose?: string;
+  toolMode?: "coding" | "readonly";
+  customToolNames?: string[];
+  requestedSkillNames?: string[];
+}
+
 export interface HermesStreamSession {
   model: unknown;
   systemPrompt: string;
@@ -22,6 +29,8 @@ export interface HermesStreamSession {
   lastModelDescription: string;
   callbacks: HermesCallbacks;
   usage?: unknown;
+  runtimeContext?: HermesRuntimeContext;
+  fusedSystemPrompt: string;
   dispose(): void;
 }
 
@@ -49,6 +58,7 @@ export interface AgentRuntimeOptions {
   sessionManager?: unknown;
   skillSelection?: unknown;
   skills?: string[];
+  runtimeContext?: HermesRuntimeContext;
 }
 
 /** Result of creating a session. */

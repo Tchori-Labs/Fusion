@@ -4,6 +4,7 @@ These tools are **not** part of the user-invokable extension surface. They are i
 
 - Source files: `packages/engine/src/agent-tools.ts`, `triage.ts`, `executor.ts`, `merger.ts`, `agent-heartbeat.ts`
 - Availability: only when the engine creates a session for the matching agent role
+- Runtime contract: engine sessions now forward requested skill names (`skillSelection.requestedSkillNames`) into the generic runtime `skills` field so non-pi runtimes can still receive Fusion skill intent.
 - Important: do not tell users to call these directly from the generic extension tool list
 
 ## Shared runtime tools (`agent-tools.ts`)
@@ -28,8 +29,8 @@ These tools are **not** part of the user-invokable extension surface. They are i
 | `fn_delegate_task` | triage, executor, heartbeat | Create and assign a new task to a specific agent | `agent_id` (string), `description` (string), `dependencies?` (string[]) |
 | `fn_get_agent_config` | executor, heartbeat | Read full config for a direct-report agent | `agent_id` (string) |
 | `fn_update_agent_config` | executor, heartbeat | Update config fields for a direct-report, non-ephemeral agent | `agent_id` (string), optional: `soul`, `instructions_text`, `instructions_path`, `heartbeat_procedure_path`, `heartbeat_interval_ms`, `heartbeat_timeout_ms`, `max_concurrent_runs`, `message_response_mode` |
-| `fn_send_message` | executor, heartbeat | Send inbox messages to agents/users | `to_id` (string), `content` (string), `type?` (`agent-to-agent` \| `agent-to-user`), `reply_to_message_id?` (string) |
-| `fn_read_messages` | executor, heartbeat | Read inbox messages | `unread_only?` (boolean), `limit?` (number) |
+| `fn_send_message` | executor, step-session, heartbeat | Send inbox messages to agents/users | `to_id` (string), `content` (string), `type?` (`agent-to-agent` \| `agent-to-user`), `reply_to_message_id?` (string) |
+| `fn_read_messages` | executor, step-session, heartbeat | Read inbox messages | `unread_only?` (boolean), `limit?` (number) |
 
 ## Triage-only runtime tools (`triage.ts`)
 
@@ -40,6 +41,8 @@ These tools are **not** part of the user-invokable extension surface. They are i
 | `fn_review_spec` | Spawn spec reviewer and return `APPROVE`/`REVISE`/`RETHINK`/`UNAVAILABLE` | none |
 
 ## Executor-only runtime tools (`executor.ts`)
+
+Note: step-session execution (`step-session-executor.ts`) reuses executor coordination tools (`fn_send_message`, `fn_read_messages`, `fn_list_agents`, `fn_delegate_task`, task-document tools, and memory tools) so spawned/session-sliced execution keeps parity with main executor runs.
 
 | Tool | Purpose | Parameters |
 |---|---|---|

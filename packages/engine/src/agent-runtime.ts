@@ -22,6 +22,13 @@ import type { FallbackModelUsedPayload } from "./pi.js";
  * Options for creating an agent session.
  * Mirrors the options accepted by createFnAgent.
  */
+export interface AgentRuntimeContext {
+  sessionPurpose?: string;
+  toolMode?: "coding" | "readonly";
+  customToolNames?: string[];
+  requestedSkillNames?: string[];
+}
+
 export interface AgentRuntimeOptions {
   /** Working directory for the agent session */
   cwd: string;
@@ -55,6 +62,8 @@ export interface AgentRuntimeOptions {
   skillSelection?: SkillSelectionContext;
   /** Convenience: skill names to include in the session */
   skills?: string[];
+  /** Runtime-facing context for non-pi runtimes that cannot consume JS ToolDefinition objects directly. */
+  runtimeContext?: AgentRuntimeContext;
   /**
    * Last-chance abort hook fired by the runtime *immediately before* the
    * underlying LLM session is instantiated — i.e., after all of the runtime's

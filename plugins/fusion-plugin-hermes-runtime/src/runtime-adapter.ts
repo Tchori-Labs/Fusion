@@ -16,6 +16,28 @@ import type {
   HermesStreamSession,
 } from "./types.js";
 
+function buildRuntimeContextSection(options: AgentRuntimeOptions): string {
+  const skillNames = Array.isArray(options.skills) ? options.skills.filter((value): value is string => typeof value === "string" && value.trim().length > 0) : [];
+  const skillSelection = options.skillSelection as { requestedSkillNames?: unknown } | undefined;
+  const selectionSkillNames = Array.isArray(skillSelection?.requestedSkillNames)
+    ? skillSelection.requestedSkillNames.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    : [];
+  const mergedSkills = skillNames.length > 0 ? skillNames : selectionSkillNames;
+
+  const lines: string[] = [
+    "Fusion runtime context:",
+    `- Tool mode: ${options.tools ?? "coding"}`,
+  ];
+
+  if (mergedSkills.length > 0) {
+    lines.push(`- Requested skills: ${mergedSkills.join(", ")}`);
+  }
+
+  lines.push("- If fn_* tools are available in your runtime, use them directly for coordination/memory/task actions.");
+
+  return lines.join("\n");
+}
+
 export class HermesRuntimeAdapter implements AgentRuntime {
   readonly id = "hermes";
   readonly name = "Hermes Runtime";
@@ -43,6 +65,8 @@ export class HermesRuntimeAdapter implements AgentRuntime {
         onToolStart: options.onToolStart,
         onToolEnd: options.onToolEnd,
       },
+      runtimeContext: options.runtimeContext,
+      fusedSystemPrompt: [options.systemPrompt.trim(), buildRuntimeContextSection(options).trim()].filter((part) => part.length > 0).join("\n\n"),
       dispose: () => undefined,
     };
 
@@ -55,7 +79,10 @@ export class HermesRuntimeAdapter implements AgentRuntime {
     _options?: unknown,
   ): Promise<void> {
     const resumeId = session.sessionId || undefined;
-    const result = await invokeHermesCli(prompt, this.settings, resumeId);
+    const promptWithContext = resumeId
+      ? prompt
+      : `${session.fusedSystemPrompt}\n\nUser request:\n${prompt}`;
+    const result = await invokeHermesCli(promptWithContext, this.settings, resumeId);
 
     session.sessionId = result.sessionId;
     session.lastModelDescription = this.describeFromSettings();

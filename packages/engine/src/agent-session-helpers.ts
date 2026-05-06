@@ -8,6 +8,7 @@
  */
 
 import type { AgentRuntimeOptions } from "./agent-runtime.js";
+import type { SkillSelectionContext } from "./skill-resolver.js";
 import type { PluginRunner } from "./plugin-runner.js";
 import type { AgentSession } from "@mariozechner/pi-coding-agent";
 import { resolveRuntime, buildRuntimeResolutionContext, type SessionPurpose } from "./runtime-resolution.js";
@@ -16,6 +17,16 @@ import { promptWithFallback, describeModel } from "./pi.js";
 
 /** Logger for agent session helpers */
 const sessionLog = createLogger("agent-session");
+
+function extractSkillNamesFromSelection(skillSelection: SkillSelectionContext | undefined): string[] {
+  if (!skillSelection || !Array.isArray(skillSelection.requestedSkillNames)) {
+    return [];
+  }
+
+  return skillSelection.requestedSkillNames
+    .map((name) => (typeof name === "string" ? name.trim() : ""))
+    .filter((name) => name.length > 0);
+}
 
 /**
  * Options for creating an agent session with runtime resolution.
@@ -115,7 +126,17 @@ export function extractRuntimeModel(
 export async function createResolvedAgentSession(
   options: ResolvedSessionOptions,
 ): Promise<ResolvedSessionResult> {
-  const { sessionPurpose, pluginRunner, runtimeHint, ...runtimeOptions } = options;
+  const { sessionPurpose, pluginRunner, runtimeHint, ...runtimeOptionsRaw } = options;
+
+  const skillNamesFromSelection = extractSkillNamesFromSelection(runtimeOptionsRaw.skillSelection);
+  const mergedSkillNames = runtimeOptionsRaw.skills && runtimeOptionsRaw.skills.length > 0
+    ? runtimeOptionsRaw.skills
+    : skillNamesFromSelection;
+
+  const runtimeOptions: AgentRuntimeOptions = {
+    ...runtimeOptionsRaw,
+    ...(mergedSkillNames.length > 0 ? { skills: mergedSkillNames } : {}),
+  };
 
   // Build the resolution context
   const context = buildRuntimeResolutionContext(sessionPurpose, pluginRunner, runtimeHint);
