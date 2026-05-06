@@ -891,7 +891,7 @@ export class HeartbeatMonitor {
           await this.store.updateAgentState(agentId, "error");
           await this.store.updateAgent(agentId, { lastError: completionResult.stderrExcerpt ?? "Run failed" });
         } else if (completionResult.status === "terminated") {
-          await this.store.updateAgentState(agentId, "paused");
+          await this.store.updateAgentState(agentId, "terminated");
         } else {
           // Completed successfully - back to active
           await this.store.updateAgentState(agentId, "active");
@@ -2518,9 +2518,9 @@ const OVERDUE_FIRE_JITTER_MS = 5_000;
  * - "idle" — Agent is between tasks, waiting for work (FN-2289 fix)
  * 
  * States where timers should be cleared:
- * - "paused" — Agent halted (manual stop, run terminated, child cleanup)
- * - "error" — Agent encountered an error
  * - "paused" — Agent is paused by budget exhaustion or manual action
+ * - "error" — Agent encountered an error
+ * - "terminated" — Agent was explicitly stopped/terminated
  */
 function isTickableState(state: Agent["state"]): boolean {
   return state === "active" || state === "running" || state === "idle";

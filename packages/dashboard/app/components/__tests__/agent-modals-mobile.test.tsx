@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import fs from "node:fs";
 import path from "node:path";
@@ -228,6 +228,61 @@ describe("agent modal mobile CSS structure", () => {
       expect(styles).toMatch(/@media \(max-width: 768px\)[\s\S]*?\.agent-detail-modal[\s\S]*?width:\s*100vw/);
       expect(styles).toMatch(/@media \(max-width: 768px\)[\s\S]*?\.agent-detail-modal[\s\S]*?height:\s*100dvh/);
       expect(styles).toMatch(/@media \(max-width: 768px\)[\s\S]*?\.agent-detail-modal[\s\S]*?border-radius:\s*0/);
+    });
+
+    it("shows stop control for active agents", async () => {
+      mockFetchAgent.mockResolvedValueOnce({
+        id: "agent-active",
+        name: "Active Agent",
+        role: "executor",
+        state: "active",
+        taskId: null,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        metadata: {},
+        runtimeConfig: {},
+        heartbeatHistory: [],
+        activeRun: null,
+        completedRuns: [],
+      } as any);
+
+      render(<AgentDetailView agentId="agent-active" onClose={vi.fn()} addToast={vi.fn()} />);
+
+      const controls = await waitFor(() => {
+        const node = document.querySelector(".agent-detail-controls");
+        expect(node).toBeTruthy();
+        return node as HTMLElement;
+      });
+
+      expect(within(controls).getByRole("button", { name: "Stop" })).toBeInTheDocument();
+    });
+
+    it("shows terminated controls for terminated agents", async () => {
+      mockFetchAgent.mockResolvedValueOnce({
+        id: "agent-terminated",
+        name: "Terminated Agent",
+        role: "executor",
+        state: "terminated",
+        taskId: null,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        metadata: {},
+        runtimeConfig: {},
+        heartbeatHistory: [],
+        activeRun: null,
+        completedRuns: [],
+      } as any);
+
+      render(<AgentDetailView agentId="agent-terminated" onClose={vi.fn()} addToast={vi.fn()} />);
+
+      const controls = await waitFor(() => {
+        const node = document.querySelector(".agent-detail-controls");
+        expect(node).toBeTruthy();
+        return node as HTMLElement;
+      });
+
+      expect(within(controls).getByRole("button", { name: "Reactivate" })).toBeInTheDocument();
+      expect(within(controls).getByRole("button", { name: "Delete" })).toBeInTheDocument();
     });
   });
 

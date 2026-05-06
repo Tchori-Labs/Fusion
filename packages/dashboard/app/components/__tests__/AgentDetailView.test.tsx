@@ -857,6 +857,24 @@ describe("AgentDetailView", () => {
     });
   });
 
+  it("transitions running agent to terminated when Stop is clicked", async () => {
+    mockFetchAgent.mockResolvedValue(createMockAgent({ state: "running" }));
+
+    render(
+      <AgentDetailView
+        agentId="agent-001"
+        onClose={vi.fn()}
+        addToast={vi.fn()}
+      />
+    );
+
+    await userEvent.click(await screen.findByText("Stop"));
+
+    await waitFor(() => {
+      expect(mockUpdateAgentState).toHaveBeenCalledWith("agent-001", "terminated", undefined);
+    });
+  });
+
   it("shows Retry and Stop buttons for error agent", async () => {
     mockFetchAgent.mockResolvedValue(createMockAgent({ state: "error" }));
 
@@ -871,6 +889,24 @@ describe("AgentDetailView", () => {
     await waitFor(() => {
       expect(screen.getByText("Retry")).toBeInTheDocument();
       expect(screen.getByText("Stop")).toBeInTheDocument();
+    });
+  });
+
+  it("transitions error agent to terminated when Stop is clicked", async () => {
+    mockFetchAgent.mockResolvedValue(createMockAgent({ state: "error" }));
+
+    render(
+      <AgentDetailView
+        agentId="agent-001"
+        onClose={vi.fn()}
+        addToast={vi.fn()}
+      />
+    );
+
+    await userEvent.click(await screen.findByText("Stop"));
+
+    await waitFor(() => {
+      expect(mockUpdateAgentState).toHaveBeenCalledWith("agent-001", "terminated", undefined);
     });
   });
 

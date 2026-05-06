@@ -1172,10 +1172,13 @@ export class AgentStore extends EventEmitter {
         ...agent,
         state: newState,
         updatedAt: new Date().toISOString(),
-        // Clear lastError when transitioning away from terminated
-        // Clear lastError when an agent re-enters an actionable state so
-        // a resumed agent does not carry stale "Error" badges.
-        ...((newState === "active" || newState === "running") && { lastError: undefined }),
+        // Clear lastError when leaving terminated for an actionable state so
+        // resumed agents do not carry stale error badges.
+        ...(
+          currentState === "terminated" &&
+          (newState === "idle" || newState === "active" || newState === "running") &&
+          { lastError: undefined }
+        ),
       };
 
       await this.writeAgent(updated);

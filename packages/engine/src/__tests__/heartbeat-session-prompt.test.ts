@@ -572,7 +572,7 @@ describe("Budget Governance", () => {
     });
 
     expect(store.getBudgetStatus).not.toHaveBeenCalled();
-    expect(store.updateAgentState).toHaveBeenCalledWith("agent-001", "paused");
+    expect(store.updateAgentState).toHaveBeenCalledWith("agent-001", "terminated");
     expect(store.updateAgent).not.toHaveBeenCalledWith("agent-001", { pauseReason: "budget-exhausted" });
   });
 
