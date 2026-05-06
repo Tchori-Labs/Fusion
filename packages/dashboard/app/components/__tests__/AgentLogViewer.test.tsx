@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { AgentLogViewer } from "../AgentLogViewer";
 import type { AgentLogEntry } from "@fusion/core";
@@ -30,6 +30,10 @@ function getScrollContainer(container: HTMLElement): HTMLDivElement {
 }
 
 describe("AgentLogViewer", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
   it("shows loading message when loading with no entries", () => {
     render(<AgentLogViewer entries={[]} loading={true} />);
     expect(screen.getByText("Loading agent logs…")).toBeTruthy();
@@ -1524,7 +1528,7 @@ describe("AgentLogViewer", () => {
         makeEntry({ text: "done", type: "tool_result" }),
         makeEntry({ text: "fail", type: "tool_error" }),
       ];
-      const { container, rerender } = render(<AgentLogViewer entries={entries} loading={false} />);
+      const { container } = render(<AgentLogViewer entries={entries} loading={false} />);
       const toggle = container.querySelector("[data-testid='agent-log-mode-toggle']") as HTMLButtonElement;
 
       // Tool entries in markdown mode
@@ -1572,6 +1576,137 @@ describe("AgentLogViewer", () => {
       expect(strong!.textContent).toBe("safe");
       // No script elements are rendered for any HTML content in markdown
       expect(textSpans[0].querySelector("script")).toBeNull();
+    });
+  });
+
+  describe("tool output toggle", () => {
+    it("renders the tool output toggle defaulting to On", () => {
+      const entries = [makeEntry()];
+      const { container } = render(<AgentLogViewer entries={entries} loading={false} />);
+      const toggle = container.querySelector("[data-testid='agent-log-tool-output-toggle']") as HTMLButtonElement;
+      expect(toggle).toBeTruthy();
+      expect(toggle.textContent).toBe("Tools: On");
+      expect(toggle.getAttribute("aria-pressed")).toBe("true");
+    });
+
+    it("hides tool entries when toggled off and shows them again when toggled back on", () => {
+      const entries = [
+        makeEntry({ text: "before tool", type: "text", agent: "executor" }),
+        makeEntry({ text: "Read", type: "tool", agent: "executor" }),
+        makeEntry({ text: "done", type: "tool_result", agent: "executor" }),
+        makeEntry({ text: "fail", type: "tool_error", agent: "executor" }),
+        makeEntry({ text: "after tool", type: "text", agent: "executor" }),
+      ];
+      const { container } = render(<AgentLogViewer entries={entries} loading={false} />);
+      const toggle = container.querySelector("[data-testid='agent-log-tool-output-toggle']") as HTMLButtonElement;
+
+      expect(container.querySelector(".agent-log-tool")).toBeTruthy();
+      expect(container.querySelector(".agent-log-tool-result")).toBeTruthy();
+      expect(container.querySelector(".agent-log-tool-error")).toBeTruthy();
+
+      fireEvent.click(toggle);
+      expect(toggle.textContent).toBe("Tools: Off");
+      expect(toggle.getAttribute("aria-pressed")).toBe("false");
+
+      expect(container.querySelector(".agent-log-tool")).toBeNull();
+      expect(container.querySelector(".agent-log-tool-result")).toBeNull();
+      expect(container.querySelector(".agent-log-tool-error")).toBeNull();
+      const textRows = container.querySelectorAll(".agent-log-text");
+      const combined = Array.from(textRows).map((r) => r.textContent).join(" ");
+      expect(combined).toContain("before tool");
+      expect(combined).toContain("after tool");
+
+      fireEvent.click(toggle);
+      expect(toggle.textContent).toBe("Tools: On");
+      expect(container.querySelector(".agent-log-tool")).toBeTruthy();
+      expect(container.querySelector(".agent-log-tool-result")).toBeTruthy();
+      expect(container.querySelector(".agent-log-tool-error")).toBeTruthy();
+    });
+
+    it("does not render any tool log entries when off (only agent text)", () => {
+      const entries = [
+        makeEntry({ text: "Read", type: "tool", agent: "executor", detail: "some/path" }),
+        makeEntry({ text: "thinking out loud", type: "thinking", agent: "executor" }),
+      ];
+      const { container } = render(<AgentLogViewer entries={entries} loading={false} />);
+      const toggle = container.querySelector("[data-testid='agent-log-tool-output-toggle']") as HTMLButtonElement;
+      fireEvent.click(toggle);
+
+      expect(container.querySelector(".agent-log-tool")).toBeNull();
+      expect(container.querySelector("[data-testid='tool-detail-toggle']")).toBeNull();
+      expect(container.querySelector(".agent-log-thinking")).toBeTruthy();
+    });
+
+    it("reflects hidden tool entries in the pagination summary", () => {
+      const entries = [
+        makeEntry({ text: "hi", type: "text" }),
+        makeEntry({ text: "Read", type: "tool" }),
+        makeEntry({ text: "done", type: "tool_result" }),
+      ];
+      const { container } = render(
+        <AgentLogViewer entries={entries} loading={false} totalCount={3} />,
+      );
+      const toggle = container.querySelector("[data-testid='agent-log-tool-output-toggle']") as HTMLButtonElement;
+      fireEvent.click(toggle);
+
+      const summary = container.querySelector("[data-testid='agent-log-summary']") as HTMLElement;
+      expect(summary).toBeTruthy();
+      expect(summary.textContent).toContain("Showing 1 of 3 entries");
+      expect(summary.textContent).toContain("2 tool entries hidden");
+    });
+  });
+
+  describe("toggle persistence across remounts", () => {
+    it("persists the markdown toggle state in localStorage", () => {
+      const entries = [makeEntry()];
+      const first = render(<AgentLogViewer entries={entries} loading={false} />);
+      const toggle = first.container.querySelector(
+        "[data-testid='agent-log-mode-toggle']",
+      ) as HTMLButtonElement;
+      fireEvent.click(toggle);
+      expect(window.localStorage.getItem("fn-agent-log-markdown")).toBe("false");
+      first.unmount();
+
+      const second = render(<AgentLogViewer entries={entries} loading={false} />);
+      const restoredToggle = second.container.querySelector(
+        "[data-testid='agent-log-mode-toggle']",
+      ) as HTMLButtonElement;
+      expect(restoredToggle.textContent).toBe("Plain");
+      expect(restoredToggle.getAttribute("aria-pressed")).toBe("false");
+    });
+
+    it("persists the tool output toggle state in localStorage", () => {
+      const entries = [
+        makeEntry({ text: "Read", type: "tool" }),
+        makeEntry({ text: "hi", type: "text" }),
+      ];
+      const first = render(<AgentLogViewer entries={entries} loading={false} />);
+      const toggle = first.container.querySelector(
+        "[data-testid='agent-log-tool-output-toggle']",
+      ) as HTMLButtonElement;
+      fireEvent.click(toggle);
+      expect(window.localStorage.getItem("fn-agent-log-tool-output")).toBe("false");
+      first.unmount();
+
+      const second = render(<AgentLogViewer entries={entries} loading={false} />);
+      const restoredToggle = second.container.querySelector(
+        "[data-testid='agent-log-tool-output-toggle']",
+      ) as HTMLButtonElement;
+      expect(restoredToggle.textContent).toBe("Tools: Off");
+      expect(second.container.querySelector(".agent-log-tool")).toBeNull();
+    });
+
+    it("uses default true values when no preference is stored", () => {
+      const entries = [makeEntry({ text: "Read", type: "tool" })];
+      const { container } = render(<AgentLogViewer entries={entries} loading={false} />);
+      const markdown = container.querySelector(
+        "[data-testid='agent-log-mode-toggle']",
+      ) as HTMLButtonElement;
+      const tools = container.querySelector(
+        "[data-testid='agent-log-tool-output-toggle']",
+      ) as HTMLButtonElement;
+      expect(markdown.textContent).toBe("Markdown");
+      expect(tools.textContent).toBe("Tools: On");
     });
   });
 

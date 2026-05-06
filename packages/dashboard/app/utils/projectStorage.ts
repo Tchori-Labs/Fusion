@@ -4,6 +4,8 @@ export const GLOBAL_STORAGE_KEYS: string[] = [
   "kb-dashboard-view-mode",
   "kb-dashboard-current-project",
   "kb-dashboard-recent-projects",
+  "fn-agent-log-markdown",
+  "fn-agent-log-tool-output",
 ];
 
 export const PROJECT_STORAGE_KEYS: string[] = [

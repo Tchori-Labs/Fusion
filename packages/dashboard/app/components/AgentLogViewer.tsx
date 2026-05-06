@@ -7,6 +7,29 @@ import type { Components } from "react-markdown";
 import { Maximize2, Minimize2, Loader2, ChevronDown, ChevronRight } from "lucide-react";
 import "./AgentLogViewer.css";
 
+const MARKDOWN_TOGGLE_STORAGE_KEY = "fn-agent-log-markdown";
+const TOOL_OUTPUT_TOGGLE_STORAGE_KEY = "fn-agent-log-tool-output";
+
+function readBooleanPref(key: string, defaultValue: boolean): boolean {
+  if (typeof window === "undefined") return defaultValue;
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (raw === null) return defaultValue;
+    return raw === "true";
+  } catch {
+    return defaultValue;
+  }
+}
+
+function writeBooleanPref(key: string, value: boolean): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(key, value ? "true" : "false");
+  } catch {
+    // ignore storage failures (quota, private mode, etc.)
+  }
+}
+
 function formatTimestamp(iso: string): string {
   const date = new Date(iso);
   const now = new Date();
@@ -240,19 +263,37 @@ export function AgentLogViewer({
   const previousScrollHeightRef = useRef<number>(0);
   const previousOldestEntryKeyRef = useRef<string | null>(null);
   const previousNewestEntryKeyRef = useRef<string | null>(null);
-  const [renderMarkdown, setRenderMarkdown] = useState(true);
+  const [renderMarkdown, setRenderMarkdown] = useState(() =>
+    readBooleanPref(MARKDOWN_TOGGLE_STORAGE_KEY, true),
+  );
+  const [showToolOutput, setShowToolOutput] = useState(() =>
+    readBooleanPref(TOOL_OUTPUT_TOGGLE_STORAGE_KEY, true),
+  );
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [modelHeaderExpanded, setModelHeaderExpanded] = useState(false);
   const [isFollowing, setIsFollowing] = useState(true);
 
+  useEffect(() => {
+    writeBooleanPref(MARKDOWN_TOGGLE_STORAGE_KEY, renderMarkdown);
+  }, [renderMarkdown]);
+
+  useEffect(() => {
+    writeBooleanPref(TOOL_OUTPUT_TOGGLE_STORAGE_KEY, showToolOutput);
+  }, [showToolOutput]);
+
+  const visibleEntries = useMemo(
+    () => (showToolOutput ? entries : entries.filter((e) => !isToolLikeType(e.type))),
+    [entries, showToolOutput],
+  );
+
   const chronologicalEntryKeys = useMemo(
-    () => buildEntryRenderKeys(entries),
-    [entries],
+    () => buildEntryRenderKeys(visibleEntries),
+    [visibleEntries],
   );
 
   const renderGroups = useMemo(
-    () => buildRenderGroups(entries, chronologicalEntryKeys),
-    [entries, chronologicalEntryKeys],
+    () => buildRenderGroups(visibleEntries, chronologicalEntryKeys),
+    [visibleEntries, chronologicalEntryKeys],
   );
 
   // Keep live-follow pinned to the bottom when new streamed entries append.
@@ -422,6 +463,16 @@ export function AgentLogViewer({
           </button>
           <button
             className="agent-log-mode-toggle"
+            onClick={() => setShowToolOutput((prev) => !prev)}
+            aria-label={showToolOutput ? "Hide tool output" : "Show tool output"}
+            aria-pressed={showToolOutput}
+            data-testid="agent-log-tool-output-toggle"
+            title={showToolOutput ? "Hide tool calls and results" : "Show tool calls and results"}
+          >
+            {showToolOutput ? "Tools: On" : "Tools: Off"}
+          </button>
+          <button
+            className="agent-log-mode-toggle"
             onClick={() => setIsFullscreen((prev) => !prev)}
             aria-label={isFullscreen ? "Exit full screen" : "Expand agent log to full screen"}
             data-testid="agent-log-fullscreen-toggle"
@@ -478,7 +529,10 @@ export function AgentLogViewer({
         {/* Pagination summary */}
         {totalCount !== null && (
           <div className="agent-log-summary" data-testid="agent-log-summary">
-            Showing {entries.length} of {totalCount} entries
+            Showing {visibleEntries.length} of {totalCount} entries
+            {!showToolOutput && entries.length !== visibleEntries.length
+              ? ` (${entries.length - visibleEntries.length} tool entries hidden)`
+              : ""}
           </div>
         )}
 
