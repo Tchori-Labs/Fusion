@@ -38,19 +38,22 @@ const fsPromises = requireFromHere("node:fs/promises") as FsPromisesModule;
 const childProcess = requireFromHere("node:child_process") as ChildProcessModule;
 const { mkdtempSync, mkdirSync, rmSync, realpathSync, existsSync } = fs;
 
+type EmitWarningArgs = Parameters<typeof process.emitWarning>;
+type EmitWarningRestArgs = EmitWarningArgs extends [string | Error, ...infer Rest] ? Rest : never;
+
 function installWarningFilter(): void {
   const warningState = globalThis as typeof globalThis & { __fusionTestWarningFilterInstalled?: boolean };
   if (warningState.__fusionTestWarningFilterInstalled) return;
   warningState.__fusionTestWarningFilterInstalled = true;
 
   const originalEmitWarning = process.emitWarning.bind(process);
-  process.emitWarning = ((warning: string | Error, ...args: unknown[]) => {
+  process.emitWarning = ((warning: string | Error, ...args: EmitWarningRestArgs) => {
     const warningText = warning instanceof Error ? warning.message : warning;
     const warningType = typeof args[0] === "string" ? args[0] : undefined;
     if (warningType === "ExperimentalWarning" && warningText.includes("SQLite is an experimental feature")) {
       return;
     }
-    return originalEmitWarning(warning as string, ...(args as Parameters<typeof process.emitWarning> extends [any, ...infer Rest] ? Rest : never));
+    return originalEmitWarning(warning, ...args);
   }) as typeof process.emitWarning;
 }
 
