@@ -5,6 +5,26 @@ import { computeMaxWorkers } from "../core/src/__test-utils__/vitest-workers";
 
 const maxWorkers = computeMaxWorkers({ defaultCap: 3 });
 
+const qualityAppTests = [
+  // Top-level API-client, mobile layout, styling, auth, and shell regressions.
+  "app/__tests__/*.test.{ts,tsx}",
+  "app/api/**/*.test.ts",
+  // Representative workflow/component coverage. Exhaustive modal/view suites
+  // stay available in the full `dashboard-app` project.
+  "app/components/__tests__/{ActiveAgentsPanel,AgentMentionPopup,AgentMetricsBar,AgentReflectionsTab,AgentTokenStatsPanel,AuthTokenRecoveryDialog,Board,Column,ConfirmDialog,ConversationHistory,DashboardLoader,DirectoryPicker,ErrorBoundary,ExecutorStatusBar,FileBrowser,FileEditor,InlineCreateCard,LoginInstructions,MessageComposer,MobileNavBar,NewTaskModal,NodeCard,NodeHealthDot,NodeStatusIndicator,ProjectCard,ProjectSelector,ProviderIcon,QuickChatFAB,TaskCard,TaskChangesTab,TaskComments,TaskDocumentsTab,TaskForm,ThemeSelectorSwatchContract,WorkflowResultsTab}.test.tsx",
+  // Hooks and utilities are fast, user-visible state/formatting behavior.
+  "app/context/**/*.test.tsx",
+  "app/hooks/__tests__/{useAgents,useAgentLogs,useAppSettings,useAuthOnboarding,useConfirm,useCurrentProject,useNodes,useNodeSettingsSync,useProjects,useQuickChat,useTasks,useTerminalSessions,useTheme,useToast,useUsageData,useViewState}.test.{ts,tsx}",
+  "app/utils/**/*.test.{ts,tsx}",
+];
+
+const qualityApiTests = [
+  // Critical HTTP/server behavior: auth, task/project/settings mutation,
+  // git/GitHub, agents, nodes, chat/files, realtime, and isolation guards.
+  "src/__tests__/{api-error,auth-middleware,auth-middleware-integration,chat-attachment-routes,chat-routes,file-service,github,github-webhooks,initialize,planning-flow-diagnostics-guardrail,project-routes,project-store-resolver,remote-access-routes,remote-auth,routes-agent-budget,routes-agent-keys,routes-agent-permissions,routes-agent-ratings,routes-agent-runs,routes-agent-soul-memory,routes-agents,routes-automation,routes-git,routes-github,routes-nodes,routes-settings,routes-tasks,server,server-static-assets,server-webhook,server.events,setup-routes,sse,sse-buffer,test-isolation-guard,update-check-route,websocket}.test.ts",
+  "src/routes/__tests__/{custom-provider-routes,custom-providers,register-docker-node-routes}.test.ts",
+];
+
 export default defineConfig({
   plugins: [react()],
   resolve: {
@@ -54,6 +74,24 @@ export default defineConfig({
     testTimeout: 15_000,
     hookTimeout: 15_000,
     projects: [
+      {
+        extends: true,
+        test: {
+          name: "dashboard-app-quality",
+          environment: "jsdom",
+          include: qualityAppTests,
+          css: { include: [/app\//] },
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: "dashboard-api-quality",
+          environment: "node",
+          include: qualityApiTests,
+          css: { include: [] },
+        },
+      },
       {
         extends: true,
         test: {

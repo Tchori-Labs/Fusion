@@ -210,6 +210,7 @@ describe("Scoped @fusion/* packages publishing config", () => {
 
 describe("Workspace bootstrap script contract", () => {
   const rootPkg = loadRootPackageJson();
+  const dashboardPkg = loadPackageJson("dashboard");
 
   it("makes root test changed-only while keeping explicit full-suite and CI-shard commands", () => {
     expect(rootPkg.scripts?.test).toBe("node scripts/test-changed.mjs");
@@ -245,6 +246,13 @@ describe("Workspace bootstrap script contract", () => {
     expect(rootPkg.scripts?.["mobile:build"]).toBe(
       "pnpm --filter @fusion/dashboard build && pnpm --filter @fusion/mobile cap sync",
     );
+  });
+
+  it("keeps dashboard's default test lane curated with explicit deep coverage", () => {
+    expect(dashboardPkg.scripts?.test).toContain("--project dashboard-app-quality");
+    expect(dashboardPkg.scripts?.test).toContain("--project dashboard-api-quality");
+    expect(dashboardPkg.scripts?.["test:deep"]).toContain("--project dashboard-app");
+    expect(dashboardPkg.scripts?.["test:deep"]).toContain("--project dashboard-api");
   });
 });
 
