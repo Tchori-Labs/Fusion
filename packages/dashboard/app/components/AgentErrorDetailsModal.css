@@ -45,7 +45,27 @@
 }
 
 @media (max-width: 768px) {
+  .modal-overlay:has(.agent-error-modal) {
+    padding-top: var(--space-md);
+    align-items: stretch;
+  }
+
   .agent-error-modal {
     width: calc(100% - var(--space-lg));
+    max-height: calc(100vh - var(--space-lg) * 2);
+    flex: 1 1 auto;
+  }
+
+  .agent-error-modal__content {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+  }
+
+  .agent-error-modal__error {
+    flex: 1 1 auto;
+    max-height: none;
+    min-height: 0;
+    width: 100%;
   }
 }
