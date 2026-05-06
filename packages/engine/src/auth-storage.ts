@@ -178,15 +178,15 @@ export function createFusionAuthStorage(): AuthStorage {
     get(target, prop, receiver) {
       if (prop === "logout") {
         return (provider: string) => {
-          loggedOutProviders.add(provider);
           target.logout(provider);
+          loggedOutProviders.add(provider);
         };
       }
 
       if (prop === "set") {
         return (provider: string, credential: AuthCredential) => {
-          loggedOutProviders.delete(provider);
           target.set(provider, credential);
+          loggedOutProviders.delete(provider);
         };
       }
 

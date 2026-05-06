@@ -185,22 +185,22 @@ export function mergeAuthStorageReads(
     get(target, prop, receiver) {
       if (prop === "logout") {
         return (provider: string) => {
-          loggedOutProviders.add(provider);
           target.logout(provider);
+          loggedOutProviders.add(provider);
         };
       }
 
       if (prop === "remove") {
         return (provider: string) => {
-          loggedOutProviders.add(provider);
           target.remove(provider);
+          loggedOutProviders.add(provider);
         };
       }
 
       if (prop === "set") {
         return (provider: string, credential: AuthCredential) => {
-          loggedOutProviders.delete(provider);
           target.set(provider, credential);
+          loggedOutProviders.delete(provider);
         };
       }
 
