@@ -61,6 +61,8 @@ function getStateBadgeClass(state: AgentState): string {
       return "agent-badge--paused";
     case "error":
       return "agent-badge--error";
+    case "terminated":
+      return "agent-badge--terminated";
     case "idle":
     default:
       return "agent-badge--idle";
@@ -80,6 +82,8 @@ function getStateCardClass(
       return `${prefix}--paused`;
     case "error":
       return `${prefix}--error`;
+    case "terminated":
+      return `${prefix}--terminated`;
     case "idle":
     default:
       return `${prefix}--idle`;
@@ -852,6 +856,7 @@ export function AgentsView({ addToast, projectId, onOpenTaskLogs, agentOnboardin
                   <option value="running">Running</option>
                   <option value="paused">Paused</option>
                   <option value="error">Error</option>
+                  <option value="terminated">Terminated</option>
                 </select>
               </div>
 

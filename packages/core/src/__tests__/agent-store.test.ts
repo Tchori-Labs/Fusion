@@ -1525,6 +1525,69 @@ describe("AgentStore", () => {
       expect(updated.state).toBe("active");
     });
 
+    it("active → terminated transition succeeds", async () => {
+      const agent = await createReadyAgent(store, "ActiveToTerminated");
+      await store.updateAgentState(agent.id, "active");
+      const updated = await store.updateAgentState(agent.id, "terminated");
+      expect(updated.state).toBe("terminated");
+    });
+
+    it("paused → terminated transition succeeds", async () => {
+      const agent = await createReadyAgent(store, "PausedToTerminated");
+      await store.updateAgentState(agent.id, "active");
+      await store.updateAgentState(agent.id, "paused");
+      const updated = await store.updateAgentState(agent.id, "terminated");
+      expect(updated.state).toBe("terminated");
+    });
+
+    it("error → terminated transition succeeds", async () => {
+      const agent = await createReadyAgent(store, "ErrorToTerminated");
+      await store.updateAgentState(agent.id, "active");
+      await store.updateAgentState(agent.id, "error");
+      const updated = await store.updateAgentState(agent.id, "terminated");
+      expect(updated.state).toBe("terminated");
+    });
+
+    it("running → terminated transition succeeds", async () => {
+      const agent = await createReadyAgent(store, "RunningToTerminated");
+      await store.updateAgentState(agent.id, "active");
+      await store.updateAgentState(agent.id, "running");
+      const updated = await store.updateAgentState(agent.id, "terminated");
+      expect(updated.state).toBe("terminated");
+    });
+
+    it("terminated → idle|active|running transitions succeed", async () => {
+      const idleAgent = await createReadyAgent(store, "TerminatedToIdle");
+      await store.updateAgentState(idleAgent.id, "active");
+      await store.updateAgentState(idleAgent.id, "terminated");
+      expect((await store.updateAgentState(idleAgent.id, "idle")).state).toBe("idle");
+
+      const activeAgent = await createReadyAgent(store, "TerminatedToActive");
+      await store.updateAgentState(activeAgent.id, "active");
+      await store.updateAgentState(activeAgent.id, "terminated");
+      expect((await store.updateAgentState(activeAgent.id, "active")).state).toBe("active");
+
+      const runningAgent = await createReadyAgent(store, "TerminatedToRunning");
+      await store.updateAgentState(runningAgent.id, "active");
+      await store.updateAgentState(runningAgent.id, "terminated");
+      expect((await store.updateAgentState(runningAgent.id, "running")).state).toBe("running");
+    });
+
+    it("clears lastError when leaving terminated for actionable states", async () => {
+      const agent = await createReadyAgent(store, "TerminatedClearsError");
+      await store.updateAgentState(agent.id, "active");
+      await store.updateAgentState(agent.id, "terminated");
+      await store.updateAgent(agent.id, { lastError: "old error" });
+
+      const toActive = await store.updateAgentState(agent.id, "active");
+      expect(toActive.lastError).toBeUndefined();
+
+      await store.updateAgentState(agent.id, "terminated");
+      await store.updateAgent(agent.id, { lastError: "old error again" });
+      const toRunning = await store.updateAgentState(agent.id, "running");
+      expect(toRunning.lastError).toBeUndefined();
+    });
+
     it("same-state transition returns agent unchanged (no-op)", async () => {
       const agent = await store.createAgent({ name: "SameState", role: "executor" });
       const unchanged = await store.updateAgentState(agent.id, "idle");
@@ -1842,6 +1905,7 @@ describe("AgentStore", () => {
         lastError: "something broke",
       });
       await s.updateAgentState(agent.id, "paused");
+      await s.updateAgentState(agent.id, "terminated");
       return agent;
     }
 

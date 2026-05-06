@@ -673,9 +673,13 @@ Heartbeat timers are armed for agents in valid working states and remain armed a
 - `idle` — Agent is between tasks, waiting for work
 
 **States where timers are cleared:**
-- `terminated` — Agent has completed or been stopped
+- `terminated` — Agent has completed or been stopped (non-tickable until explicitly reactivated)
 - `error` — Agent encountered an unrecoverable error
 - `paused` — Agent is paused (e.g., by budget exhaustion or manual action)
+
+Lifecycle notes:
+- Agents can enter `terminated` from `active`, `running`, `paused`, or `error`.
+- From `terminated`, agents can be explicitly reactivated to `idle`, `active`, or `running`.
 
 **Key behaviors:**
 - Timers remain armed when agents transition between `active`, `running`, and `idle` states

@@ -94,7 +94,7 @@ function isTaskWorkerAgent(agent: AgentHealthInput): boolean {
  * state, runtimeConfig, and last heartbeat timestamp.
  *
  * Health labels (in priority order):
- * (agent.state === "terminated" was removed in the lifecycle refactor)
+ * - "Terminated" — agent.state === "terminated"
  * - "Error" — agent.state === "error" (uses lastError if available)
  * - "Paused" — agent.state === "paused" (uses pauseReason if available)
  * - "Running" — agent.state === "running", or a detected task worker in "active"
@@ -113,6 +113,15 @@ export function getAgentHealthStatus(agent: AgentHealthInput): AgentHealthStatus
   const isHeartbeatEnabled = isTaskWorker || runtimeConfig?.enabled !== false;
 
   // Terminal states - these always take precedence
+  if (state === "terminated") {
+    return {
+      label: "Terminated",
+      icon: <Pause size={14} />,
+      color: "var(--state-paused-text)",
+      stateDerived: true,
+    };
+  }
+
   if (state === "error") {
     return {
       label: lastError ?? "Error",
