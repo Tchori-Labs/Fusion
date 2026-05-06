@@ -1473,17 +1473,6 @@ export function Header({
           </button>
         )}
 
-        {!isCompact && todosEnabled && onOpenTodos && (
-          <button
-            className={`btn-icon${todosOpen ? " btn-icon--active" : ""}`}
-            onClick={onOpenTodos}
-            title="Open todos"
-            data-testid="todos-toggle-btn"
-          >
-            <CheckSquare size={16} />
-          </button>
-        )}
-
         {/* Git Manager button - desktop only (moved to overflow on mobile/tablet) */}
         {!isCompact && onOpenGitManager && (
           <button

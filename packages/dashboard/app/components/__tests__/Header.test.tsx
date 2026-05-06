@@ -381,21 +381,27 @@ describe("Header", () => {
     });
   });
 
-  describe("todos button", () => {
-    it("renders todos button on desktop when enabled", () => {
-      renderHeader({ onOpenTodos: vi.fn(), todosEnabled: true }, "desktop");
-      expect(screen.getByTitle("Open todos")).toBeDefined();
+  describe("todos navigation", () => {
+    it("shows Todos only in More views on desktop when enabled", () => {
+      renderHeader({ onChangeView: noop, onOpenTodos: vi.fn(), todosEnabled: true }, "desktop");
+      expect(screen.queryByTestId("todos-toggle-btn")).toBeNull();
+
+      fireEvent.click(screen.getByTestId("view-toggle-overflow-trigger"));
+      expect(screen.getAllByText("Todos")).toHaveLength(1);
+      expect(screen.getByTestId("view-overflow-todos")).toBeInTheDocument();
     });
 
-    it("does not render todos button when disabled", () => {
-      renderHeader({ onOpenTodos: vi.fn(), todosEnabled: false }, "desktop");
-      expect(screen.queryByTitle("Open todos")).toBeNull();
+    it("does not show Todos entry in More views when disabled", () => {
+      renderHeader({ onChangeView: noop, onOpenTodos: vi.fn(), todosEnabled: false }, "desktop");
+      fireEvent.click(screen.getByTestId("view-toggle-overflow-trigger"));
+      expect(screen.queryByTestId("view-overflow-todos")).toBeNull();
     });
 
-    it("calls onOpenTodos when clicked", () => {
+    it("calls onOpenTodos from More views", () => {
       const onOpenTodos = vi.fn();
-      renderHeader({ onOpenTodos, todosEnabled: true }, "desktop");
-      fireEvent.click(screen.getByTitle("Open todos"));
+      renderHeader({ onChangeView: noop, onOpenTodos, todosEnabled: true }, "desktop");
+      fireEvent.click(screen.getByTestId("view-toggle-overflow-trigger"));
+      fireEvent.click(screen.getByTestId("view-overflow-todos"));
       expect(onOpenTodos).toHaveBeenCalled();
     });
   });

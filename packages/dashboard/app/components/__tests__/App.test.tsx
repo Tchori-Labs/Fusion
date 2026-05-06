@@ -1687,10 +1687,11 @@ describe("App view switching", () => {
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.getByTestId("todos-toggle-btn")).toBeInTheDocument();
+      expect(screen.getByTestId("view-toggle-overflow-trigger")).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByTestId("todos-toggle-btn"));
+    fireEvent.click(screen.getByTestId("view-toggle-overflow-trigger"));
+    fireEvent.click(screen.getByTestId("view-overflow-todos"));
 
     await waitFor(() => {
       expect(screen.getByTestId("todo-view")).toBeInTheDocument();

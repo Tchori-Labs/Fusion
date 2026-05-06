@@ -3306,6 +3306,7 @@ function ConfigTab({
     setHeartbeatEnabled(deriveHeartbeatEnabled(agent.runtimeConfig));
     setAutoClaimRelevantTasksEnabled(deriveAutoClaimRelevantTasksEnabled(agent.runtimeConfig));
     setRunMissedHeartbeatOnStartup(deriveRunMissedHeartbeatOnStartup(agent.runtimeConfig));
+    setAllowParallelExecution(deriveAllowParallelExecution(agent.runtimeConfig));
     setBudgetValues(deriveBudgetValues(agent.runtimeConfig));
     setModelValue(initialModelValue);
     setSelectedRuntimeId(initialRuntimeHint);

@@ -237,6 +237,7 @@ The `runtimeConfig` field on agents supports the following options:
 | `autoClaimRelevantTasks` | `boolean` | `true` | During no-task heartbeats, opportunistically claim unowned relevant todo tasks that align with the agent's role/soul |
 | `heartbeatTimeoutMs` | `number` | — | Time without heartbeat before agent is considered unresponsive (ms) |
 | `maxConcurrentRuns` | `number` | `1` | Max concurrent heartbeat runs for this agent |
+| `allowParallelExecution` | `boolean` | `true` (when unset) | Permanent agents only. When `false`, heartbeat and executor paths serialize symmetrically: a heartbeat will not start while the agent's bound task has an active executor session, and an executor session will not start while the agent has an active heartbeat run |
 | `messageResponseMode` | `"immediate" \| "on-heartbeat"` | `"immediate"` | Whether agent wakes immediately on message (immediate) or processes during heartbeat (on-heartbeat). See [Heartbeat Run Mailbox Checking](#heartbeat-run-mailbox-checking) |
 | `selfImproveEnabled` | `boolean` | `true` | Enable periodic self-improvement reflection prompts during heartbeat runs |
 | `selfImproveIntervalMs` | `number` | `14400000` (4h) | Minimum delay between self-improvement cycles (minimum enforced: 3600000 ms) |
@@ -247,6 +248,8 @@ The `runtimeConfig` field on agents supports the following options:
 
 Heartbeat values are validated and minimum-clamped to 5 minutes (300,000 ms).
 Project setting `heartbeatMultiplier` (default `1`) scales resolved heartbeat intervals globally; per-agent `heartbeatIntervalMs` remains the base interval before multiplier scaling. This setting is configured from the **Agents** screen's **Controls** popup under "Heartbeat Speed".
+
+`allowParallelExecution` defaults to `true` when unset; setting it to `false` is serialized explicitly so operators can enforce non-parallel heartbeat/executor behavior for that permanent agent.
 
 ### No-task auto-claim behavior
 

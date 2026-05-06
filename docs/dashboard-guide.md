@@ -131,7 +131,7 @@ Todo View is an experimental dashboard surface for managing per-project todo lis
 > Available when `experimentalFeatures.todoView` is enabled.
 
 Navigation:
-- Desktop: **Header → More views → Todos**
+- Desktop: **Header → More views → Todos** (single canonical desktop entry)
 - Mobile: **More** sheet → **Todos**
 
 For full behavior, API contracts, and storage details, use the canonical [Todo View guide](./todo-view.md).

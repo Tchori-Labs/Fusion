@@ -105,6 +105,22 @@ describe("MobileNavBar", () => {
     expect(screen.queryByTestId("mobile-nav-tab-skills")).toBeNull();
   });
 
+  it("keeps Todos in the mobile More sheet when todoView is enabled", () => {
+    const onOpenTodos = vi.fn();
+    render(
+      <MobileNavBar
+        {...createDefaultProps()}
+        onOpenTodos={onOpenTodos}
+        experimentalFeatures={{ todoView: true }}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("mobile-nav-tab-more"));
+    fireEvent.click(screen.getByTestId("mobile-more-item-todos"));
+
+    expect(onOpenTodos).toHaveBeenCalled();
+  });
+
   it("renders dependency graph as a top-level tab and keeps additional plugin views in More", () => {
     const props = createDefaultProps();
     render(

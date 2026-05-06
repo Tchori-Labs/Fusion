@@ -37,7 +37,7 @@ Behavior when disabled:
 
 When enabled:
 
-- Desktop: header overflow menu (**More views**) → **Todos**
+- Desktop: header overflow menu (**More views**) → **Todos** (the only desktop Todos navigation entry)
 - Mobile: **More** sheet in the mobile nav bar → **Todos**
 
 ## List management

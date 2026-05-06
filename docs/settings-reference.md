@@ -751,6 +751,8 @@ Common heartbeat/runtime keys on `runtimeConfig` include:
 | `heartbeatTimeoutMs` | `number` | Per-agent heartbeat timeout |
 | `maxConcurrentRuns` | `number` | Per-agent concurrent heartbeat limit |
 | `messageResponseMode` | `"immediate" \| "on-heartbeat"` | Wake on message immediately or process during periodic heartbeat |
+| `runMissedHeartbeatOnStartup` | `boolean` | Fire one startup catch-up heartbeat when the last tick was missed while the server was down (default `false`) |
+| `allowParallelExecution` | `boolean` | Permanent agents only. Default `true` when unset. Set `false` to serialize heartbeat and executor sessions symmetrically (heartbeat won't start while executor is active, and executor won't start while heartbeat is active); `false` is explicitly persisted while unset/`true` keeps parallel behavior |
 | `selfImproveEnabled` | `boolean` | Enables periodic self-improvement prompts |
 | `selfImproveIntervalMs` | `number` | Delay between self-improvement cycles (default 4h, minimum 1h) |
 | `lastSelfImproveAt` | `string` | Last self-improvement checkpoint timestamp (managed by heartbeat monitor) |
