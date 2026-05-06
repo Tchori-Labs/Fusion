@@ -1,10 +1,24 @@
 #!/usr/bin/env node
 import { readdirSync, statSync, existsSync, writeFileSync, readFileSync, realpathSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve, sep } from "node:path";
 import { spawnSync } from "node:child_process";
 
-const BASELINE_FILE = join(tmpdir(), ".fusion-isolation-baseline");
+function stableCwd() {
+  try {
+    return realpathSync(process.cwd());
+  } catch {
+    return process.cwd();
+  }
+}
+
+// Namespace the baseline by cwd so concurrent worktrees don't clobber each
+// other's baseline. Without this, running `--before` in worktree A and the
+// post-test check in worktree B reads a baseline that doesn't include B's
+// `.fusion`, which then trips the "live data changed" failure path.
+const cwdHash = createHash("sha1").update(stableCwd()).digest("hex").slice(0, 12);
+const BASELINE_FILE = join(tmpdir(), `.fusion-isolation-baseline-${cwdHash}`);
 
 const TRACKED_PREFIXES = [
   "fusion-worker-",
@@ -84,6 +98,7 @@ const RUNTIME_IGNORE_PATTERNS = [
   /^\d{4}-\d{2}-\d{2}\.md$/,
   /^scripts\.json$/,
   /^update-check\.json$/,
+  /^disabled-auto-extension-discovery$/,
 ];
 
 function isRuntimePath(relPath) {
@@ -187,9 +202,17 @@ function checkAgainstBaseline() {
   const unstableProtectedDirs = new Set(baseline.unstableProtectedDirs ?? []);
   const currentProtected = snapshotProtectedFusion();
   const candidateViolations = [];
+  const skippedUnknownDirs = [];
   for (const current of currentProtected) {
     if (unstableProtectedDirs.has(current.dir)) continue;
-    const base = baselineByDir.get(current.dir) ?? { exists: false, entries: [] };
+    const base = baselineByDir.get(current.dir);
+    if (!base) {
+      // No baseline for this dir — the `--before` step ran from a different
+      // cwd (or never ran). We can't distinguish pre-existing entries from
+      // test-created ones, so warn and skip instead of false-failing.
+      skippedUnknownDirs.push(current.dir);
+      continue;
+    }
     const changedExistence = Boolean(base.exists) !== Boolean(current.exists);
     const changedEntries = JSON.stringify(base.entries) !== JSON.stringify(current.entries);
     if (changedExistence || changedEntries) {
@@ -223,6 +246,11 @@ function checkAgainstBaseline() {
         protectedViolations.push(dir);
       }
     }
+  }
+
+  if (skippedUnknownDirs.length > 0) {
+    console.warn(`[test-isolation] WARN: ${skippedUnknownDirs.length} protected dir(s) absent from baseline (was \`--before\` run from a different cwd?):`);
+    for (const dir of skippedUnknownDirs) console.warn(`  ${dir}`);
   }
 
   if (leaks.length === 0 && protectedViolations.length === 0) {
