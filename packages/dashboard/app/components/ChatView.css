@@ -57,16 +57,16 @@
 
 .chat-sidebar-search-icon {
   position: absolute;
-  left: 12px;
+  left: var(--space-md);
   color: var(--text-tertiary);
   pointer-events: none;
 }
 
 .chat-sidebar-search {
   width: 100%;
-  padding: 8px 12px 8px 32px;
+  padding: var(--space-sm) var(--space-md) var(--space-sm) calc(var(--space-2xl) + var(--space-xs));
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--bg);
   color: var(--text);
   font-size: 13px;
@@ -81,7 +81,7 @@
 
 .chat-session-item {
   padding: 10px 12px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   cursor: pointer;
   display: flex;
   flex-direction: column;
@@ -146,13 +146,13 @@
 /* === Chat Session Delete Button === */
 .chat-session-delete-btn {
   position: absolute;
-  top: 8px;
-  right: 8px;
+  top: var(--space-sm);
+  right: var(--space-sm);
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
+  width: calc(var(--space-md) * 2);
+  height: calc(var(--space-md) * 2);
   padding: 0;
   background: transparent;
   border: none;
@@ -183,23 +183,23 @@
   position: fixed;
   background: var(--bg-elevated, var(--bg));
   border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 4px 12px var(--shadow);
-  padding: 4px;
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  padding: var(--space-xs);
   z-index: 100;
 }
 
 .chat-session-context-menu button {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-sm);
   width: 100%;
-  padding: 8px 12px;
+  padding: var(--space-sm) var(--space-md);
   border: none;
   background: none;
   color: var(--text);
   cursor: pointer;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   font-size: 13px;
 }
 
@@ -311,15 +311,15 @@
 .chat-message--user {
   align-self: flex-end;
   background: var(--accent);
-  color: var(--accent-text, #fff);
-  border-bottom-right-radius: 4px;
+  color: var(--accent-text);
+  border-bottom-right-radius: var(--radius-sm);
 }
 
 .chat-message--assistant {
   align-self: flex-start;
   background: var(--bg-elevated, var(--bg-secondary));
   color: var(--text);
-  border-bottom-left-radius: 4px;
+  border-bottom-left-radius: var(--radius-sm);
 }
 
 .chat-message-avatar {
@@ -908,7 +908,7 @@
   border-radius: 50%;
   border: none;
   background: var(--accent);
-  color: var(--accent-text, #fff);
+  color: var(--accent-text);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -1196,6 +1196,10 @@
 
   .chat-session-delete-btn {
     opacity: 1;
+    width: calc(var(--space-lg) * 2.25);
+    height: calc(var(--space-lg) * 2.25);
+    min-width: calc(var(--space-lg) * 2.25);
+    min-height: calc(var(--space-lg) * 2.25);
   }
 
   .chat-message--assistant .chat-message-render-toggle {
