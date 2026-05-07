@@ -1,8 +1,8 @@
-import { getScopedItem, removeScopedItem, setScopedItem } from "./scopedStorage";
+import { getScopedItem, removeScopedItem, setScopedItem } from "@fusion/dashboard/app/utils/projectStorage";
 
 export type NodePositions = Record<string, { x: number; y: number }>;
 
-const STORAGE_KEY = "dependency-graph-positions";
+const STORAGE_KEY = "fusion-plugin-dependency-graph:positions";
 
 function isPosition(value: unknown): value is { x: number; y: number } {
   if (!value || typeof value !== "object") return false;

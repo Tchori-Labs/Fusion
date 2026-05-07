@@ -31,6 +31,10 @@
       "types": "./app/utils/taskStuck.ts",
       "import": "./app/utils/taskStuck.ts"
     },
+    "./app/utils/projectStorage": {
+      "types": "./app/utils/projectStorage.ts",
+      "import": "./app/utils/projectStorage.ts"
+    },
     "./app/plugins/pluginViewRegistry": {
       "types": "./app/plugins/pluginViewRegistry.tsx",
       "import": "./app/plugins/pluginViewRegistry.tsx"

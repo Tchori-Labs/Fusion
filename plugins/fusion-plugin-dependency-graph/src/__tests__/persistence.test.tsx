@@ -38,7 +38,7 @@ describe("dependency graph position persistence", () => {
   it("saves/restores project-scoped position shape", () => {
     savePositions({ A: { x: 10, y: 20 }, B: { x: 30, y: 40 } }, new Set(["A", "B"]), "p1");
 
-    expect(window.localStorage.getItem("kb:p1:dependency-graph-positions")).toBe(
+    expect(window.localStorage.getItem("kb:p1:fusion-plugin-dependency-graph:positions")).toBe(
       JSON.stringify({ A: { x: 10, y: 20 }, B: { x: 30, y: 40 } }),
     );
     expect(loadPositions("p1")).toEqual({ A: { x: 10, y: 20 }, B: { x: 30, y: 40 } });
@@ -53,7 +53,7 @@ describe("dependency graph position persistence", () => {
   });
 
   it("falls back to auto-layout with corrupt storage and does not crash", () => {
-    window.localStorage.setItem("kb:p1:dependency-graph-positions", "{broken");
+    window.localStorage.setItem("kb:p1:fusion-plugin-dependency-graph:positions", "{broken");
 
     render(<DependencyGraph tasks={[createTask("A")]} projectId="p1" />);
     expect(screen.getByTestId("graph-task-node-A")).toBeTruthy();
@@ -68,7 +68,7 @@ describe("dependency graph position persistence", () => {
     fireEvent.pointerMove(node, { pointerId: 1, isPrimary: true, clientX: 30, clientY: 40 });
     fireEvent.pointerUp(node, { pointerId: 1, isPrimary: true, clientX: 30, clientY: 40 });
 
-    expect(window.localStorage.getItem("kb:p1:dependency-graph-positions")).toContain('"A"');
+    expect(window.localStorage.getItem("kb:p1:fusion-plugin-dependency-graph:positions")).toContain('"A"');
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
@@ -79,11 +79,11 @@ describe("dependency graph position persistence", () => {
     fireEvent.pointerMove(node, { pointerId: 1, isPrimary: true, clientX: 40, clientY: 50 });
     fireEvent.pointerUp(node, { pointerId: 1, isPrimary: true, clientX: 40, clientY: 50 });
 
-    window.localStorage.removeItem("kb:p1:dependency-graph-positions");
+    window.localStorage.removeItem("kb:p1:fusion-plugin-dependency-graph:positions");
     unmount();
 
     render(<DependencyGraph tasks={[createTask("A")]} projectId="p1" />);
-    expect(window.localStorage.getItem("kb:p1:dependency-graph-positions")).toBeNull();
+    expect(window.localStorage.getItem("kb:p1:fusion-plugin-dependency-graph:positions")).toBeNull();
     expect(screen.getByTestId("graph-task-node-A")).toBeTruthy();
   });
 });

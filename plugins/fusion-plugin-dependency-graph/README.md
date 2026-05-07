@@ -27,11 +27,12 @@ Plugin-provided top-level **Graph** dashboard view for Fusion.
 
 ## Position persistence
 
-- Storage key format: `kb:${projectId}:dependency-graph-positions` (falls back to `dependency-graph-positions` when no project is selected)
+- Canonical base key: `fusion-plugin-dependency-graph:positions`
+- Storage key format: `kb:${projectId}:fusion-plugin-dependency-graph:positions` (falls back to `fusion-plugin-dependency-graph:positions` when no project is selected)
 - Read path: positions load on graph mount and whenever `projectId` changes, then merge with fresh auto-layout so new tasks still receive layout defaults
 - Write path: positions persist on drag end only (not on every drag frame), filtered to currently visible tasks for stale cleanup
 - Reset behavior: Fit to graph / Reset view clear persisted positions and re-apply auto-layout
-- Implementation detail: the plugin ships local `scopedStorage` helpers duplicated from dashboard `projectStorage` to stay plugin-isolated while preserving the same `kb:${projectId}:${baseKey}` convention
+- Implementation detail: the plugin now reuses dashboard `projectStorage` helpers (`getScopedItem` / `setScopedItem` / `removeScopedItem`) instead of duplicating scoped localStorage logic
 
 ## Dependency chain highlighting
 

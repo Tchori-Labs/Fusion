@@ -47,7 +47,12 @@ export function getScopedItem(baseKey: string, projectId?: string): string | nul
     return null;
   }
 
-  return window.localStorage.getItem(scopedKey(baseKey, projectId));
+  const getItem = window.localStorage?.getItem;
+  if (typeof getItem !== "function") {
+    return null;
+  }
+
+  return getItem.call(window.localStorage, scopedKey(baseKey, projectId));
 }
 
 export function setScopedItem(baseKey: string, value: string, projectId?: string): void {
@@ -55,7 +60,12 @@ export function setScopedItem(baseKey: string, value: string, projectId?: string
     return;
   }
 
-  window.localStorage.setItem(scopedKey(baseKey, projectId), value);
+  const setItem = window.localStorage?.setItem;
+  if (typeof setItem !== "function") {
+    return;
+  }
+
+  setItem.call(window.localStorage, scopedKey(baseKey, projectId), value);
 }
 
 export function removeScopedItem(baseKey: string, projectId?: string): void {
@@ -63,5 +73,10 @@ export function removeScopedItem(baseKey: string, projectId?: string): void {
     return;
   }
 
-  window.localStorage.removeItem(scopedKey(baseKey, projectId));
+  const removeItem = window.localStorage?.removeItem;
+  if (typeof removeItem !== "function") {
+    return;
+  }
+
+  removeItem.call(window.localStorage, scopedKey(baseKey, projectId));
 }

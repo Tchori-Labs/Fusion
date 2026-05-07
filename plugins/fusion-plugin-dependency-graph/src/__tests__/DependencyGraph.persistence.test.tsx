@@ -74,7 +74,7 @@ describe("DependencyGraph persistence", () => {
     fireEvent.pointerMove(node, { pointerId: 1, isPrimary: true, clientX: 30, clientY: 40 });
     fireEvent.pointerUp(node, { pointerId: 1, isPrimary: true, clientX: 30, clientY: 40 });
 
-    expect(window.localStorage.getItem("kb:p1:dependency-graph-positions")).toContain('"A":{"x":20,"y":30}');
+    expect(window.localStorage.getItem("kb:p1:fusion-plugin-dependency-graph:positions")).toContain('"A":{"x":20,"y":30}');
 
     unmount();
     render(<DependencyGraph tasks={[createTask("A")]} projectId="p1" />);
@@ -84,7 +84,7 @@ describe("DependencyGraph persistence", () => {
   });
 
   it("merges saved positions with auto-layout for new tasks", () => {
-    window.localStorage.setItem("kb:p1:dependency-graph-positions", JSON.stringify({ A: { x: 25, y: 35 } }));
+    window.localStorage.setItem("kb:p1:fusion-plugin-dependency-graph:positions", JSON.stringify({ A: { x: 25, y: 35 } }));
 
     render(<DependencyGraph tasks={[createTask("A"), createTask("B")]} projectId="p1" />);
 
@@ -93,18 +93,18 @@ describe("DependencyGraph persistence", () => {
   });
 
   it("fit to graph clears saved positions and reapplies auto-layout", () => {
-    window.localStorage.setItem("kb:p1:dependency-graph-positions", JSON.stringify({ A: { x: 25, y: 35 } }));
+    window.localStorage.setItem("kb:p1:fusion-plugin-dependency-graph:positions", JSON.stringify({ A: { x: 25, y: 35 } }));
 
     render(<DependencyGraph tasks={[createTask("A")]} projectId="p1" />);
     fireEvent.click(screen.getByRole("button", { name: "Fit to graph" }));
 
-    expect(window.localStorage.getItem("kb:p1:dependency-graph-positions")).toBeNull();
+    expect(window.localStorage.getItem("kb:p1:fusion-plugin-dependency-graph:positions")).toBeNull();
     expect(screen.getByTestId("graph-task-node-A").getAttribute("style")).toContain("left: 0px");
   });
 
   it("switching projects loads project-scoped positions", () => {
-    window.localStorage.setItem("kb:p1:dependency-graph-positions", JSON.stringify({ A: { x: 11, y: 22 } }));
-    window.localStorage.setItem("kb:p2:dependency-graph-positions", JSON.stringify({ A: { x: 33, y: 44 } }));
+    window.localStorage.setItem("kb:p1:fusion-plugin-dependency-graph:positions", JSON.stringify({ A: { x: 11, y: 22 } }));
+    window.localStorage.setItem("kb:p2:fusion-plugin-dependency-graph:positions", JSON.stringify({ A: { x: 33, y: 44 } }));
 
     const { rerender } = render(<DependencyGraph tasks={[createTask("A")]} projectId="p1" />);
     expect(screen.getByTestId("graph-task-node-A").getAttribute("style")).toContain("left: 11px");

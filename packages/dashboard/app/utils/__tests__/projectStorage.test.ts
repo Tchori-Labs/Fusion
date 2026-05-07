@@ -1,4 +1,4 @@
-import { describe, expect, it, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   GLOBAL_STORAGE_KEYS,
@@ -113,6 +113,24 @@ describe("projectStorage", () => {
     expect(getScopedItem("kb-dashboard-base-branch-filter", "proj-1")).toBe("__fusion:no-branch__");
     expect(getScopedItem("kb-dashboard-working-branch-filter", "proj-2")).toBe("feature/b");
     expect(getScopedItem("kb-dashboard-working-branch-filter", "proj-3")).toBeNull();
+  });
+
+  it("getScopedItem returns null when localStorage.getItem is unavailable", () => {
+    vi.stubGlobal("window", { localStorage: {} });
+    expect(getScopedItem("kb-dashboard-list-columns", "proj-abc")).toBeNull();
+    vi.unstubAllGlobals();
+  });
+
+  it("setScopedItem is a no-op when localStorage.setItem is unavailable", () => {
+    vi.stubGlobal("window", { localStorage: {} });
+    expect(() => setScopedItem("kb-dashboard-list-columns", "value", "proj-abc")).not.toThrow();
+    vi.unstubAllGlobals();
+  });
+
+  it("removeScopedItem is a no-op when localStorage.removeItem is unavailable", () => {
+    vi.stubGlobal("window", { localStorage: {} });
+    expect(() => removeScopedItem("kb-dashboard-list-columns", "proj-abc")).not.toThrow();
+    vi.unstubAllGlobals();
   });
 
   it("has no overlap between global and project-scoped keys", () => {
