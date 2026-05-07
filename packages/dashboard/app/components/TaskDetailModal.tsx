@@ -439,6 +439,8 @@ export function TaskDetailContent({
   const [editTitle, setEditTitle] = useState(task.title || "");
   const [editDescription, setEditDescription] = useState(task.description || "");
   const [editDependencies, setEditDependencies] = useState<string[]>(task.dependencies || []);
+  const [editBranch, setEditBranch] = useState(task.branch ?? "");
+  const [editBaseBranch, setEditBaseBranch] = useState(task.baseBranch ?? "");
   const [editExecutorModel, setEditExecutorModel] = useState("");
   const [editValidatorModel, setEditValidatorModel] = useState("");
   const [editPlanningModel, setEditPlanningModel] = useState("");
@@ -501,6 +503,8 @@ export function TaskDetailContent({
   useEffect(() => {
     setEditTitle(task.title || "");
     setEditDescription(task.description || "");
+    setEditBranch(task.branch ?? "");
+    setEditBaseBranch(task.baseBranch ?? "");
     setEditSourceIssueProvider(task.sourceIssue?.provider ?? "");
     setEditSourceIssueRepository(task.sourceIssue?.repository ?? "");
     setEditSourceIssueExternalId(task.sourceIssue?.externalIssueId ?? "");
@@ -508,7 +512,7 @@ export function TaskDetailContent({
     setEditExecutionMode(normalizeExecutionModeValue(task.executionMode));
     setSourceIssueExpanded(false);
     setIsEditing(false);
-  }, [task.id, task.title, task.description, task.sourceIssue, task.executionMode]);
+  }, [task.id, task.title, task.description, task.branch, task.baseBranch, task.sourceIssue, task.executionMode]);
 
   useEffect(() => {
     setWorkflowEnabledSteps(task.enabledWorkflowSteps || []);
@@ -694,6 +698,8 @@ export function TaskDetailContent({
     setEditTitle(task.title || "");
     setEditDescription(task.description || "");
     setEditDependencies(task.dependencies || []);
+    setEditBranch(task.branch ?? "");
+    setEditBaseBranch(task.baseBranch ?? "");
     // Populate model overrides from task
     const execModel = task.modelProvider && task.modelId ? `${task.modelProvider}/${task.modelId}` : "";
     const valModel = task.validatorModelProvider && task.validatorModelId ? `${task.validatorModelProvider}/${task.validatorModelId}` : "";
@@ -721,6 +727,8 @@ export function TaskDetailContent({
     setEditTitle(task.title || "");
     setEditDescription(task.description || "");
     setEditDependencies(task.dependencies || []);
+    setEditBranch(task.branch ?? "");
+    setEditBaseBranch(task.baseBranch ?? "");
     setEditNodeId(task.nodeId);
     setEditSourceIssueProvider(task.sourceIssue?.provider ?? "");
     setEditSourceIssueRepository(task.sourceIssue?.repository ?? "");
@@ -745,6 +753,14 @@ export function TaskDetailContent({
     if (includeDescription && trimmedDescription && trimmedDescription !== (task.description ?? "")) updates.description = trimmedDescription;
     if (!sameStringArray(editDependencies, task.dependencies ?? [])) updates.dependencies = editDependencies;
     if (!sameStringArray(editSelectedWorkflowSteps, task.enabledWorkflowSteps ?? [])) updates.enabledWorkflowSteps = editSelectedWorkflowSteps;
+
+    const normalizedBranch = editBranch.trim() || null;
+    const currentBranch = task.branch ?? null;
+    if (normalizedBranch !== currentBranch) updates.branch = normalizedBranch;
+
+    const normalizedBaseBranch = editBaseBranch.trim() || null;
+    const currentBaseBranch = task.baseBranch ?? null;
+    if (normalizedBaseBranch !== currentBaseBranch) updates.baseBranch = normalizedBaseBranch;
 
     const executorSelection = splitModelSelection(editExecutorModel);
     const currentExecutorModel = task.modelProvider && task.modelId ? `${task.modelProvider}/${task.modelId}` : "";
@@ -809,7 +825,7 @@ export function TaskDetailContent({
     }
 
     return { updates, error: null as string | null };
-  }, [editDependencies, editDescription, editExecutionMode, editExecutorModel, editNodeId, editPlanningModel, editPriority, editReviewLevel, editSelectedWorkflowSteps, editSourceIssueExternalId, editSourceIssueProvider, editSourceIssueRepository, editSourceIssueUrl, editThinkingLevel, editTitle, editValidatorModel, task]);
+  }, [editBaseBranch, editBranch, editDependencies, editDescription, editExecutionMode, editExecutorModel, editNodeId, editPlanningModel, editPriority, editReviewLevel, editSelectedWorkflowSteps, editSourceIssueExternalId, editSourceIssueProvider, editSourceIssueRepository, editSourceIssueUrl, editThinkingLevel, editTitle, editValidatorModel, task]);
 
   const persistEditChanges = useCallback(async (includeDescription: boolean) => {
     const { updates, error } = buildEditUpdates(includeDescription);
@@ -879,6 +895,8 @@ export function TaskDetailContent({
     isEditing,
     editTitle,
     editDependencies,
+    editBranch,
+    editBaseBranch,
     editExecutorModel,
     editValidatorModel,
     editPlanningModel,
@@ -1628,6 +1646,10 @@ export function TaskDetailContent({
                 onDescriptionChange={setEditDescription}
                 dependencies={editDependencies}
                 onDependenciesChange={setEditDependencies}
+                branch={editBranch}
+                onBranchChange={setEditBranch}
+                baseBranch={editBaseBranch}
+                onBaseBranchChange={setEditBaseBranch}
                 executorModel={editExecutorModel}
                 onExecutorModelChange={setEditExecutorModel}
                 validatorModel={editValidatorModel}

@@ -58,6 +58,8 @@ Expand the creation panel (▼) to access additional controls:
 - **Attach** — Add image attachments
 - **Models** (🧠) — Set per-task model overrides (executor, validator, planning)
 - **Priority** (🚩) — Set task priority (`low`, `normal`, `high`, `urgent`) before creation; the selected value is applied to the created task (it does not reset to default unless omitted)
+- **Working branch** — Set `branch` (task work branch). Leave blank to let execution choose defaults; clear to send an explicit empty value (`null`/unset).
+- **Merge target / base branch** — Set `baseBranch` (intended merge target branch). Leave blank to use defaults; clear to remove.
 - **Agent** — Assign an agent to the task
 - **Review** — Set review rigor level (None, Plan Only, Plan and Code, Full)
 - **Browser Verify** — Enable browser verification workflow step
@@ -206,7 +208,7 @@ Research document content appears in the existing **Documents** tab in Task Deta
 
 The task detail modal exposes multiple tabs.
 
-Task settings edited from the modal now auto-save as you edit (change/blur with debounce for text-like fields). This includes title, description, dependencies, workflow-step selection, model overrides in the edit form, and source issue metadata. The footer Save button remains available, but normal field edits no longer depend on a manual save click.
+Task settings edited from the modal now auto-save as you edit (change/blur with debounce for text-like fields). This includes title, description, dependencies, working/base branch (`branch`/`baseBranch`), workflow-step selection, model overrides in the edit form, and source issue metadata. The footer Save button remains available, but normal field edits no longer depend on a manual save click.
 
 The edit footer shows inline autosave state (saving/saved/error), and successful saves propagate the returned task through `onTaskUpdated` so open detail/list state stays fresh.
 

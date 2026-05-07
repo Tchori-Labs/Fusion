@@ -963,6 +963,69 @@ describe("TaskDetailModal", () => {
       expect(descTextarea.value).toBe("My Description");
     });
 
+    it("pre-populates working/base branch inputs and saves changed branch only", async () => {
+      const { updateTask } = await import("../../api");
+      const mockUpdate = vi.mocked(updateTask);
+      mockUpdate.mockResolvedValueOnce({ id: "FN-001" } as Task);
+
+      const { container } = render(
+        <TaskDetailModal
+          task={makeTask({ id: "FN-001", column: "todo", branch: "feature/fn-3422", baseBranch: "develop" })}
+          onClose={noop}
+          onMoveTask={noopMove}
+          onDeleteTask={noopDelete}
+          onMergeTask={noopMerge}
+          onOpenDetail={noopOpenDetail}
+          addToast={noop}
+        />,
+      );
+
+      fireEvent.click(container.querySelector(".modal-edit-btn")!);
+
+      const workingBranchInput = container.querySelector("#task-working-branch") as HTMLInputElement;
+      const baseBranchInput = container.querySelector("#task-base-branch") as HTMLInputElement;
+      expect(workingBranchInput.value).toBe("feature/fn-3422");
+      expect(baseBranchInput.value).toBe("develop");
+
+      fireEvent.change(workingBranchInput, { target: { value: "feature/fn-3422-updated" } });
+      fireEvent.click(screen.getByText("Save"));
+
+      await waitFor(() => {
+        expect(mockUpdate).toHaveBeenCalledWith("FN-001", { branch: "feature/fn-3422-updated" }, undefined);
+      });
+    });
+
+    it("sends null branch fields when working/base branches are cleared", async () => {
+      const { updateTask } = await import("../../api");
+      const mockUpdate = vi.mocked(updateTask);
+      mockUpdate.mockResolvedValueOnce({ id: "FN-001" } as Task);
+
+      const { container } = render(
+        <TaskDetailModal
+          task={makeTask({ id: "FN-001", column: "todo", branch: "feature/fn-3422", baseBranch: "main" })}
+          onClose={noop}
+          onMoveTask={noopMove}
+          onDeleteTask={noopDelete}
+          onMergeTask={noopMerge}
+          onOpenDetail={noopOpenDetail}
+          addToast={noop}
+        />,
+      );
+
+      fireEvent.click(container.querySelector(".modal-edit-btn")!);
+      fireEvent.change(container.querySelector("#task-working-branch") as HTMLInputElement, { target: { value: "" } });
+      fireEvent.change(container.querySelector("#task-base-branch") as HTMLInputElement, { target: { value: "" } });
+      fireEvent.click(screen.getByText("Save"));
+
+      await waitFor(() => {
+        expect(mockUpdate).toHaveBeenCalledWith(
+          "FN-001",
+          expect.objectContaining({ branch: null, baseBranch: null }),
+          undefined,
+        );
+      });
+    });
+
     it("propagates auto-saved description updates via onTaskUpdated", async () => {
       const { updateTask } = await import("../../api");
       const mockUpdateTask = vi.mocked(updateTask);

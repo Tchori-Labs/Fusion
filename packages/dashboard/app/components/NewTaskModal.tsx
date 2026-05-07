@@ -42,6 +42,8 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
     : {};
   const [description, setDescription] = useState("");
   const [dependencies, setDependencies] = useState<string[]>([]);
+  const [branch, setBranch] = useState("");
+  const [baseBranch, setBaseBranch] = useState("");
   const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [executorModel, setExecutorModel] = useState("");
@@ -170,9 +172,11 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
       selectedAgentId !== null ||
       reviewLevel !== undefined ||
       priority !== DEFAULT_TASK_PRIORITY ||
-      nodeId !== undefined;
+      nodeId !== undefined ||
+      branch !== "" ||
+      baseBranch !== "";
     setHasDirtyState(isDirty);
-  }, [description, dependencies, pendingImages, executorModel, validatorModel, planningModel, thinkingLevel, selectedWorkflowSteps, selectedAgentId, reviewLevel, priority, nodeId]);
+  }, [description, dependencies, pendingImages, executorModel, validatorModel, planningModel, thinkingLevel, selectedWorkflowSteps, selectedAgentId, reviewLevel, priority, nodeId, branch, baseBranch]);
 
   const handleClose = useCallback(async () => {
     if (hasDirtyState) {
@@ -202,6 +206,8 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
     setReviewLevel(undefined);
     setPriority(DEFAULT_TASK_PRIORITY);
     setNodeId(undefined);
+    setBranch("");
+    setBaseBranch("");
     setHasDirtyState(false);
     onClose();
   }, [hasDirtyState, onClose, pendingImages, confirm]);
@@ -236,6 +242,8 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
         reviewLevel,
         priority,
         nodeId,
+        branch: branch.trim() === "" ? undefined : branch.trim(),
+        baseBranch: baseBranch.trim() === "" ? undefined : baseBranch.trim(),
       });
 
       // Upload pending images as attachments
@@ -271,6 +279,8 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
       setReviewLevel(undefined);
       setPriority(DEFAULT_TASK_PRIORITY);
       setNodeId(undefined);
+      setBranch("");
+      setBaseBranch("");
 
       addToast(`Created ${task.id}`, "success");
       onClose();
@@ -279,7 +289,7 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
     } finally {
       setIsSubmitting(false);
     }
-  }, [description, dependencies, pendingImages, executorModel, validatorModel, planningModel, thinkingLevel, isSubmitting, onCreateTask, addToast, onClose, projectId, presetMode, selectedPresetId, selectedWorkflowSteps, workflowStepsExplicitlySet, selectedAgentId, reviewLevel, priority, nodeId]);
+  }, [description, dependencies, pendingImages, executorModel, validatorModel, planningModel, thinkingLevel, isSubmitting, onCreateTask, addToast, onClose, projectId, presetMode, selectedPresetId, selectedWorkflowSteps, workflowStepsExplicitlySet, selectedAgentId, reviewLevel, priority, nodeId, branch, baseBranch]);
 
   // Handle keyboard shortcuts
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
@@ -483,6 +493,10 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
             onReviewLevelChange={setReviewLevel}
             priority={priority}
             onPriorityChange={setPriority}
+            branch={branch}
+            onBranchChange={setBranch}
+            baseBranch={baseBranch}
+            onBaseBranchChange={setBaseBranch}
             nodeId={nodeId}
             onNodeIdChange={setNodeId}
             nodeOptions={nodes}

@@ -221,6 +221,51 @@ describe("TaskForm", () => {
     expect(onPriorityChange).toHaveBeenCalledWith("urgent");
   });
 
+  it("renders working and base branch inputs when branch callbacks are provided", () => {
+    renderTaskForm({
+      branch: "feature/fn-3422",
+      baseBranch: "main",
+      onBranchChange: vi.fn(),
+      onBaseBranchChange: vi.fn(),
+    });
+
+    fireEvent.click(screen.getByTestId("task-form-more-options-toggle"));
+
+    expect(screen.getByLabelText("Working branch")).toHaveValue("feature/fn-3422");
+    expect(screen.getByLabelText("Merge target / base branch")).toHaveValue("main");
+  });
+
+  it("calls branch change handlers and supports explicit clearing", () => {
+    const onBranchChange = vi.fn();
+    const onBaseBranchChange = vi.fn();
+
+    renderTaskForm({
+      branch: "feature/fn-3422",
+      baseBranch: "develop",
+      onBranchChange,
+      onBaseBranchChange,
+    });
+
+    fireEvent.click(screen.getByTestId("task-form-more-options-toggle"));
+
+    fireEvent.change(screen.getByLabelText("Working branch"), { target: { value: "feature/new" } });
+    fireEvent.change(screen.getByLabelText("Merge target / base branch"), { target: { value: "" } });
+
+    expect(onBranchChange).toHaveBeenCalledWith("feature/new");
+    expect(onBaseBranchChange).toHaveBeenCalledWith("");
+  });
+
+  it("auto-expands more options when branch fields are prefilled", () => {
+    renderTaskForm({
+      branch: "feature/fn-3422",
+      baseBranch: "main",
+      onBranchChange: vi.fn(),
+      onBaseBranchChange: vi.fn(),
+    });
+
+    expect(screen.getByTestId("task-form-more-options-toggle")).toHaveAttribute("aria-expanded", "true");
+  });
+
   it("auto-expands more options when priority is non-default", () => {
     renderTaskForm({ priority: "high", onPriorityChange: vi.fn() });
 

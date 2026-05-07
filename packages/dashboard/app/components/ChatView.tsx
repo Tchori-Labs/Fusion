@@ -1366,6 +1366,22 @@ export function ChatView({ projectId, addToast }: ChatViewProps) {
       window.clearTimeout(hideSkillMenuTimeoutRef.current);
       hideSkillMenuTimeoutRef.current = null;
     }
+    // iOS quirk: after the keyboard has been dismissed once, re-focusing
+    // an input leaves window.scrollY > 0 *and* visualViewport.offsetTop
+    // > 0 — the layout viewport drifts up, and the position:fixed
+    // useMobileScrollLock applies to a body that is no longer at the
+    // top of the document. Result: the message thread anchors above
+    // the visible viewport with a large blank area below it. Forcing
+    // scroll back to (0,0) on the focus event neutralizes the drift
+    // before lock applies. Done in a microtask so iOS finishes its
+    // own scroll-into-view first.
+    if (typeof window !== "undefined" && window.innerWidth <= 768) {
+      window.setTimeout(() => {
+        if (window.scrollY !== 0 || window.scrollX !== 0) {
+          window.scrollTo(0, 0);
+        }
+      }, 0);
+    }
   }, []);
 
   // Handle archive

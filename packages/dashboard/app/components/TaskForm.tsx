@@ -48,6 +48,10 @@ export interface TaskFormProps {
   // Dependencies
   dependencies: string[];
   onDependenciesChange: (deps: string[]) => void;
+  branch?: string;
+  onBranchChange?: (value: string) => void;
+  baseBranch?: string;
+  onBaseBranchChange?: (value: string) => void;
   nodeId?: string;
   onNodeIdChange?: (nodeId: string | undefined) => void;
   nodeOptions?: NodeInfo[];
@@ -119,6 +123,10 @@ export function TaskForm({
   onTitleChange,
   dependencies,
   onDependenciesChange,
+  branch,
+  onBranchChange,
+  baseBranch,
+  onBaseBranchChange,
   nodeId,
   onNodeIdChange,
   nodeOptions,
@@ -173,6 +181,8 @@ export function TaskForm({
     (thinkingLevel || "") !== "" ||
     reviewLevel !== undefined ||
     executionMode === "fast" ||
+    (branch || "") !== "" ||
+    (baseBranch || "") !== "" ||
     (nodeId || "") !== "";
 
   const [showDepDropdown, setShowDepDropdown] = useState(false);
@@ -239,6 +249,8 @@ export function TaskForm({
     (thinkingLevel || "") !== "" ||
     reviewLevel !== undefined ||
     executionMode === "fast" ||
+    (branch || "") !== "" ||
+    (baseBranch || "") !== "" ||
     (nodeId || "") !== "";
 
   // Auto-select preset by size (create mode only)
@@ -916,6 +928,38 @@ export function TaskForm({
         )}
       </div>
         </>
+      )}
+
+      {(onBranchChange || onBaseBranchChange) && (
+        <div className="form-group">
+          <label>Branch Settings</label>
+          {onBranchChange && (
+            <>
+              <label htmlFor="task-working-branch" className="model-select-label">Working branch</label>
+              <input
+                id="task-working-branch"
+                className="input"
+                value={branch || ""}
+                onChange={(e) => onBranchChange(e.target.value)}
+                placeholder="e.g. feature/my-task"
+                disabled={disabled}
+              />
+            </>
+          )}
+          {onBaseBranchChange && (
+            <>
+              <label htmlFor="task-base-branch" className="model-select-label">Merge target / base branch</label>
+              <input
+                id="task-base-branch"
+                className="input"
+                value={baseBranch || ""}
+                onChange={(e) => onBaseBranchChange(e.target.value)}
+                placeholder="e.g. main"
+                disabled={disabled}
+              />
+            </>
+          )}
+        </div>
       )}
 
       {/* Model Selection */}

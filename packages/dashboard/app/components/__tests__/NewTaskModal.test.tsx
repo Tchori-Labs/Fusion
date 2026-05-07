@@ -215,6 +215,42 @@ describe("NewTaskModal", () => {
     });
   });
 
+  it("includes branch and baseBranch when provided", async () => {
+    const { props } = renderNewTaskModal();
+
+    fireEvent.change(screen.getByPlaceholderText("What needs to be done?"), { target: { value: "Task with branches" } });
+    fireEvent.click(screen.getByTestId("task-form-more-options-toggle"));
+    fireEvent.change(screen.getByLabelText("Working branch"), { target: { value: " feature/fn-3422 " } });
+    fireEvent.change(screen.getByLabelText("Merge target / base branch"), { target: { value: " main " } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Create Task" }));
+
+    await waitFor(() => {
+      expect(props.onCreateTask).toHaveBeenCalledWith(
+        expect.objectContaining({
+          branch: "feature/fn-3422",
+          baseBranch: "main",
+        }),
+      );
+    });
+  });
+
+  it("omits branch and baseBranch when left blank", async () => {
+    const { props } = renderNewTaskModal();
+
+    fireEvent.change(screen.getByPlaceholderText("What needs to be done?"), { target: { value: "Task without branches" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create Task" }));
+
+    await waitFor(() => {
+      expect(props.onCreateTask).toHaveBeenCalledWith(
+        expect.objectContaining({
+          branch: undefined,
+          baseBranch: undefined,
+        }),
+      );
+    });
+  });
+
   it("still submits when setup warnings are shown", async () => {
     const { fetchAuthStatus } = await import("../../api");
     vi.mocked(fetchAuthStatus).mockResolvedValueOnce({
@@ -742,7 +778,7 @@ describe("NewTaskModal", () => {
       const select = document.getElementById("review-level") as HTMLSelectElement;
       fireEvent.change(select, { target: { value: "2" } });
 
-      const descTextarea = screen.getByRole('textbox');
+      const descTextarea = screen.getByPlaceholderText("What needs to be done?");
       fireEvent.change(descTextarea, { target: { value: "Task with review level" } });
 
       fireEvent.click(screen.getByRole("button", { name: "Create Task" }));
@@ -770,7 +806,7 @@ describe("NewTaskModal", () => {
       const select = document.getElementById("review-level") as HTMLSelectElement;
       fireEvent.change(select, { target: { value: "3" } });
 
-      const descTextarea = screen.getByRole('textbox');
+      const descTextarea = screen.getByPlaceholderText("What needs to be done?");
       fireEvent.change(descTextarea, { target: { value: "Task with full review" } });
 
       fireEvent.click(screen.getByRole("button", { name: "Create Task" }));
@@ -806,7 +842,7 @@ describe("NewTaskModal", () => {
 
       fireEvent.click(screen.getByTestId("task-form-more-options-toggle"));
       fireEvent.change(screen.getByTestId("task-priority-select"), { target: { value: "urgent" } });
-      fireEvent.change(screen.getByRole("textbox"), { target: { value: "Task with urgent priority" } });
+      fireEvent.change(screen.getByPlaceholderText("What needs to be done?"), { target: { value: "Task with urgent priority" } });
       fireEvent.click(screen.getByRole("button", { name: "Create Task" }));
 
       await waitFor(() => {

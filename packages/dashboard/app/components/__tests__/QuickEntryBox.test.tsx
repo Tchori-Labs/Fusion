@@ -724,6 +724,44 @@ describe("QuickEntryBox", () => {
       });
     });
 
+    it("includes branch and baseBranch when provided", async () => {
+      const { props } = renderQuickEntryBox({});
+      expandQuickEntry();
+      const textarea = screen.getByTestId("quick-entry-input");
+
+      fireEvent.change(textarea, { target: { value: "Task with quick-entry branches" } });
+      fireEvent.change(screen.getByTestId("quick-entry-working-branch"), { target: { value: " feature/quick " } });
+      fireEvent.change(screen.getByTestId("quick-entry-base-branch"), { target: { value: " main " } });
+      fireEvent.keyDown(textarea, { key: "Enter" });
+
+      await waitFor(() => {
+        expect(props.onCreate).toHaveBeenCalledWith(
+          expect.objectContaining({
+            branch: "feature/quick",
+            baseBranch: "main",
+          }),
+        );
+      });
+    });
+
+    it("omits branch and baseBranch when branch fields are blank", async () => {
+      const { props } = renderQuickEntryBox({});
+      expandQuickEntry();
+      const textarea = screen.getByTestId("quick-entry-input");
+
+      fireEvent.change(textarea, { target: { value: "Task without quick-entry branches" } });
+      fireEvent.keyDown(textarea, { key: "Enter" });
+
+      await waitFor(() => {
+        expect(props.onCreate).toHaveBeenCalledWith(
+          expect.objectContaining({
+            branch: undefined,
+            baseBranch: undefined,
+          }),
+        );
+      });
+    });
+
     it("toggles Fast pressed state", () => {
       renderQuickEntryBox({});
       expandQuickEntry();
