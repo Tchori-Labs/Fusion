@@ -10,6 +10,7 @@ import {
   buildExecutionMemoryInstructions,
   getTaskMergeBlocker,
   isEphemeralAgent,
+  isResearchExperimentalEnabled,
   resolveAgentPrompt,
   resolveProjectDefaultModel,
   type RunCommandResult,
@@ -2826,11 +2827,13 @@ export class TaskExecutor {
         this.createSpawnAgentTool(task.id, worktreePath, settings),
         this.createTaskDocumentWriteTool(task.id),
         this.createTaskDocumentReadTool(task.id),
-        ...createResearchTools({
-          store: this.store,
-          rootDir: this.rootDir,
-          getSettings: async () => this.store.getSettings(),
-        }),
+        ...(isResearchExperimentalEnabled(settings)
+          ? createResearchTools({
+            store: this.store,
+            rootDir: this.rootDir,
+            getSettings: async () => this.store.getSettings(),
+          })
+          : []),
         ...createMemoryTools(this.rootDir, settings, assignedAgent ? {
           agentMemory: {
             agentId: assignedAgent.id,

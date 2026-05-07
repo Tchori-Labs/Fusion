@@ -838,6 +838,14 @@ describe("fast-mode triage", () => {
       await mkdir(join(rootDir, ".fusion", "tasks", task.id), { recursive: true });
 
       const store = createMockStore({
+        getSettings: vi.fn().mockResolvedValue({
+          maxConcurrent: 2,
+          maxWorktrees: 4,
+          pollIntervalMs: 10000,
+          groupOverlappingFiles: false,
+          autoMerge: true,
+          experimentalFeatures: { researchView: true },
+        } as Settings),
         getTask: vi.fn().mockResolvedValue({ ...mockTaskDetail, id: task.id, attachments: [], comments: [] }),
         parseDependenciesFromPrompt: vi.fn().mockResolvedValue([]),
         parseStepsFromPrompt: vi.fn().mockResolvedValue([]),
@@ -879,6 +887,43 @@ describe("fast-mode triage", () => {
     } finally {
       await cleanupTriageFixtureRoot(rootDir);
     }
+  });
+
+  it("omits research tools when researchView experimental flag is disabled", async () => {
+    const task = createTriageTask({ id: "FN-FAST-005", executionMode: "fast" });
+    const store = createMockStore({
+      getSettings: vi.fn().mockResolvedValue({
+        maxConcurrent: 2,
+        maxWorktrees: 4,
+        pollIntervalMs: 10000,
+        groupOverlappingFiles: false,
+        autoMerge: true,
+        experimentalFeatures: { researchView: false },
+      } as Settings),
+      getTask: vi.fn().mockResolvedValue({ ...mockTaskDetail, id: task.id, attachments: [], comments: [] }),
+    });
+
+    let capturedTools: any[] = [];
+    mockCreateFnAgent.mockImplementationOnce(async (opts: any) => {
+      capturedTools = opts.customTools;
+      return {
+        session: {
+          state: {},
+          sessionManager: { getLeafId: vi.fn().mockReturnValue(null) },
+          prompt: vi.fn().mockResolvedValue(undefined),
+          dispose: vi.fn(),
+          navigateTree: vi.fn(),
+        },
+      };
+    });
+
+    const processor = new TriageProcessor(store, "/tmp/root");
+    await processor.specifyTask(task);
+
+    expect(capturedTools.some((tool: any) => tool.name === "fn_research_run")).toBe(false);
+    expect(capturedTools.some((tool: any) => tool.name === "fn_research_list")).toBe(false);
+    expect(capturedTools.some((tool: any) => tool.name === "fn_research_get")).toBe(false);
+    expect(capturedTools.some((tool: any) => tool.name === "fn_research_cancel")).toBe(false);
   });
 });
 

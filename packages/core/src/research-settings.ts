@@ -1,5 +1,9 @@
 import type { ResearchEnabledSources, Settings } from "./types.js";
 
+export function isResearchExperimentalEnabled(settings: Partial<Settings> | undefined): boolean {
+  return settings?.experimentalFeatures?.researchView === true;
+}
+
 export interface ResolvedResearchSettings {
   enabled: boolean;
   searchProvider?: string;

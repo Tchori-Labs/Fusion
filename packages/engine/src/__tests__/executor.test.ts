@@ -4684,8 +4684,11 @@ const mockedReviewStep = vi.mocked(mockedReviewStepFn);
  * Helper: executes a task and captures the custom tools passed to createFnAgent.
  * Returns a map of tool name → tool execute function for direct testing.
  */
-async function captureTools(): Promise<Record<string, (id: string, params: any) => Promise<any>>> {
+async function captureTools(settingsOverride?: Record<string, unknown>): Promise<Record<string, (id: string, params: any) => Promise<any>>> {
   const store = createMockStore();
+  if (settingsOverride) {
+    store.getSettings.mockResolvedValue({ ...(await store.getSettings()), ...settingsOverride });
+  }
   // Simulate the real TaskStore: forward transitions persist, but in-progress
   // regressions on done/skipped steps are rejected so executor.ts can surface
   // the "already <status>" diagnostic.
@@ -4908,12 +4911,20 @@ describe("Code review verdict enforcement - fn_task_update blocking", () => {
     expect(allowed.content[0].text).toContain("→ done");
   });
 
-  it("registers research runtime tools in customTools", async () => {
-    const tools = await captureTools();
+  it("registers research runtime tools in customTools when researchView experimental flag is enabled", async () => {
+    const tools = await captureTools({ experimentalFeatures: { researchView: true } });
     expect(tools.fn_research_run).toBeTypeOf("function");
     expect(tools.fn_research_list).toBeTypeOf("function");
     expect(tools.fn_research_get).toBeTypeOf("function");
     expect(tools.fn_research_cancel).toBeTypeOf("function");
+  });
+
+  it("does not register research runtime tools when researchView experimental flag is disabled", async () => {
+    const tools = await captureTools({ experimentalFeatures: { researchView: false } });
+    expect(tools.fn_research_run).toBeUndefined();
+    expect(tools.fn_research_list).toBeUndefined();
+    expect(tools.fn_research_get).toBeUndefined();
+    expect(tools.fn_research_cancel).toBeUndefined();
   });
 
   it("REVISE tool response text includes re-review instructions", async () => {

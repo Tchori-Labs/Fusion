@@ -123,6 +123,7 @@ async function enableResearch(cwd: string): Promise<TaskStore> {
     researchGlobalEnabled: true,
     researchGlobalDefaults: { searchProvider: "searxng" },
     researchGlobalSearxngUrl: "http://localhost:8888",
+    experimentalFeatures: { researchView: true } as Record<string, boolean>,
   });
   await store.updateSettings({
     researchEnabled: true,

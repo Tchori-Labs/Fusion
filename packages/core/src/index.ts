@@ -721,7 +721,7 @@ export type {
   ResearchCancellationState,
 } from "./research-types.js";
 
-export { resolveResearchSettings } from "./research-settings.js";
+export { isResearchExperimentalEnabled, resolveResearchSettings } from "./research-settings.js";
 export type { ResolvedResearchSettings } from "./research-settings.js";
 export { resolveEvalSettings } from "./eval-settings.js";
 

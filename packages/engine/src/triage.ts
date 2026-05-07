@@ -8,6 +8,7 @@ import type {
 } from "@fusion/core";
 import {
   buildTriageMemoryInstructions,
+  isResearchExperimentalEnabled,
   resolveAgentPrompt,
   sortTasksByPriorityThenAgeAndId,
 } from "@fusion/core";
@@ -941,11 +942,13 @@ export class TriageProcessor {
           }),
           createTaskDocumentWriteTool(this.store, task.id),
           createTaskDocumentReadTool(this.store, task.id),
-          ...createResearchTools({
-            store: this.store,
-            rootDir: this.rootDir,
-            getSettings: async () => this.store.getSettings(),
-          }),
+          ...(isResearchExperimentalEnabled(settings)
+            ? createResearchTools({
+              store: this.store,
+              rootDir: this.rootDir,
+              getSettings: async () => this.store.getSettings(),
+            })
+            : []),
           ...createMemoryTools(this.rootDir, settings),
           // Agent delegation tools — discover and delegate work to other agents.
           ...(this.options.agentStore ? [

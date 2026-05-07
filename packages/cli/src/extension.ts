@@ -14,6 +14,7 @@ import {
   type ResearchRun,
   type ResearchRunStatus,
   RESEARCH_RUN_STATUSES,
+  isResearchExperimentalEnabled,
   resolveResearchSettings,
 } from "@fusion/core";
 import {
@@ -200,6 +201,10 @@ function formatTaskLine(t: Task): string {
 
 async function getResearchAvailability(store: TaskStore): Promise<{ ok: boolean; code?: string; message?: string }> {
   const settings = await store.getSettings();
+  if (!isResearchExperimentalEnabled(settings)) {
+    return { ok: false, code: "feature-disabled", message: "Research tools are disabled. Enable experimentalFeatures.researchView first." };
+  }
+
   const resolved = resolveResearchSettings(settings);
   if (!resolved.enabled) {
     return { ok: false, code: "feature-disabled", message: "Research is disabled in settings." };
@@ -1426,6 +1431,14 @@ export default function kbExtension(pi: ExtensionAPI) {
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const store = await getStore(ctx.cwd);
+      const availability = await getResearchAvailability(store);
+      if (!availability.ok) {
+        return {
+          content: [{ type: "text", text: availability.message! }],
+          details: { runs: [], setup: { code: availability.code, message: availability.message } },
+        };
+      }
+
       const runs = store.getResearchStore().listRuns({ status: params.status as ResearchRunStatus | undefined, limit: params.limit ?? 10 });
       const text = runs.length ? runs.map((run) => `- ${run.id} [${run.status}] ${run.query}`).join("\n") : "No research runs found.";
       return { content: [{ type: "text", text }], details: { runs: runs.map(toResearchRunDetails) } };
@@ -1439,6 +1452,22 @@ export default function kbExtension(pi: ExtensionAPI) {
     parameters: Type.Object({ id: Type.String({ description: "Research run ID" }) }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const store = await getStore(ctx.cwd);
+      const availability = await getResearchAvailability(store);
+      if (!availability.ok) {
+        return {
+          content: [{ type: "text", text: availability.message! }],
+          details: {
+            runId: params.id,
+            status: "unavailable",
+            summary: null,
+            findings: [],
+            citations: [],
+            error: availability.message,
+            setup: { code: availability.code, message: availability.message },
+          },
+        };
+      }
+
       const run = store.getResearchStore().getRun(params.id);
       if (!run) {
         return {
@@ -1465,6 +1494,23 @@ export default function kbExtension(pi: ExtensionAPI) {
     parameters: Type.Object({ id: Type.String({ description: "Research run ID" }) }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const store = await getStore(ctx.cwd);
+      const availability = await getResearchAvailability(store);
+      if (!availability.ok) {
+        return {
+          content: [{ type: "text", text: availability.message! }],
+          isError: true,
+          details: {
+            runId: params.id,
+            status: "unavailable",
+            summary: null,
+            findings: [],
+            citations: [],
+            error: availability.message,
+            setup: { code: availability.code, message: availability.message },
+          },
+        };
+      }
+
       const researchStore = store.getResearchStore();
       const run = researchStore.getRun(params.id);
       if (!run) {
@@ -1510,6 +1556,23 @@ export default function kbExtension(pi: ExtensionAPI) {
     parameters: Type.Object({ id: Type.String({ description: "Research run ID" }) }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const store = await getStore(ctx.cwd);
+      const availability = await getResearchAvailability(store);
+      if (!availability.ok) {
+        return {
+          content: [{ type: "text", text: availability.message! }],
+          isError: true,
+          details: {
+            runId: params.id,
+            status: "unavailable",
+            summary: null,
+            findings: [],
+            citations: [],
+            error: availability.message,
+            setup: { code: availability.code, message: availability.message },
+          },
+        };
+      }
+
       const researchStore = store.getResearchStore();
       const run = researchStore.getRun(params.id);
       if (!run) {
