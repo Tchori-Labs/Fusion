@@ -1998,21 +1998,22 @@ export function ChatView({ projectId, addToast }: ChatViewProps) {
                     if (typeof window === "undefined" || window.innerWidth > 768) return;
                     event.preventDefault();
                     if (event.pointerType && event.pointerType !== "mouse") {
-                      // Dedupe across the pointerdown/touchstart/click burst
-                      // from a single tap. preventDefault() on pointer/touch
-                      // can suppress the synthesized click that previously
-                      // cleared this ref, so we self-clear it via a short
-                      // timeout — otherwise once set the next tap silently
-                      // bails (long press stops working too).
+                      // On mobile, both onPointerDown and onTouchStart fire
+                      // for a quick tap. Without this guard handleSend runs
+                      // twice — the second call closes the first's stream
+                      // (useChat.ts: streamRef.current.close()) and the
+                      // server-side beginGeneration aborts the in-flight
+                      // generation, leaving the chat with no output. A
+                      // long-press doesn't fire both events the same way,
+                      // which is why holding the button "fixes" sending.
                       if (handledMobileSendRef.current) return;
                       handledMobileSendRef.current = true;
                       markPreserveComposerFocus();
                       focusComposerInput();
                       void handleSend();
                       window.setTimeout(() => {
-                        handledMobileSendRef.current = false;
                         preserveComposerFocusRef.current = false;
-                      }, 500);
+                      }, 1500);
                     }
                   }}
                   onTouchStart={(event) => {
@@ -2024,9 +2025,8 @@ export function ChatView({ projectId, addToast }: ChatViewProps) {
                     focusComposerInput();
                     void handleSend();
                     window.setTimeout(() => {
-                      handledMobileSendRef.current = false;
                       preserveComposerFocusRef.current = false;
-                    }, 500);
+                    }, 1500);
                   }}
                   onMouseDown={(event) => {
                     if (typeof window === "undefined" || window.innerWidth > 768) return;
