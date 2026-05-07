@@ -530,6 +530,69 @@ describe("TaskStore", () => {
     });
   });
 
+  describe("branch field persistence", () => {
+    it("persists baseBranch and branch when provided at create time", async () => {
+      const task = await store.createTask({
+        description: "Branch fields on create",
+        baseBranch: "main",
+        branch: "fusion/fn-001-custom",
+      });
+
+      expect(task.baseBranch).toBe("main");
+      expect(task.branch).toBe("fusion/fn-001-custom");
+
+      const detail = await store.getTask(task.id);
+      expect(detail.baseBranch).toBe("main");
+      expect(detail.branch).toBe("fusion/fn-001-custom");
+    });
+
+    it("updates and clears branch fields via null patch semantics", async () => {
+      const task = await store.createTask({
+        description: "Branch field update",
+        baseBranch: "main",
+        branch: "fusion/fn-001-initial",
+      });
+
+      const updated = await store.updateTask(task.id, {
+        baseBranch: "release/2026.05",
+        branch: "fusion/fn-001-updated",
+      });
+      expect(updated.baseBranch).toBe("release/2026.05");
+      expect(updated.branch).toBe("fusion/fn-001-updated");
+
+      const cleared = await store.updateTask(task.id, {
+        baseBranch: null,
+        branch: null,
+      });
+      expect(cleared.baseBranch).toBeUndefined();
+      expect(cleared.branch).toBeUndefined();
+    });
+
+    it("round-trips branch fields through listTasks and reload", async () => {
+      store.close();
+      store = new TaskStore(rootDir, globalDir);
+      await store.init();
+
+      const created = await store.createTask({
+        description: "Branch field reinit persistence",
+        baseBranch: "develop",
+        branch: "fusion/fn-001-reinit",
+      });
+
+      const listed = (await store.listTasks()).find((task) => task.id === created.id);
+      expect(listed?.baseBranch).toBe("develop");
+      expect(listed?.branch).toBe("fusion/fn-001-reinit");
+
+      store.close();
+      store = new TaskStore(rootDir, globalDir);
+      await store.init();
+
+      const reloaded = await store.getTask(created.id);
+      expect(reloaded.baseBranch).toBe("develop");
+      expect(reloaded.branch).toBe("fusion/fn-001-reinit");
+    });
+  });
+
   describe("nodeId persistence", () => {
     it("creates a task with nodeId when provided", async () => {
       const task = await store.createTask({

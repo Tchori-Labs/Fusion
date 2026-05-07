@@ -269,6 +269,8 @@ export function createTask(input: TaskCreateInput, projectId?: string): Promise<
     executionMode,
     priority,
     source,
+    branch,
+    baseBranch,
   } = input;
 
   return api<Task>(withProjectId("/tasks", projectId), {
@@ -294,6 +296,8 @@ export function createTask(input: TaskCreateInput, projectId?: string): Promise<
       executionMode,
       priority,
       source,
+      branch,
+      baseBranch,
     }),
   });
 }
@@ -318,6 +322,8 @@ export function updateTask(
     priority?: TaskPriority | null;
     sourceIssue?: TaskSourceIssue | null;
     nodeId?: string | null;
+    branch?: string | null;
+    baseBranch?: string | null;
   },
   projectId?: string,
 ): Promise<Task> {

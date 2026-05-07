@@ -441,6 +441,22 @@ describe("updateTask", () => {
     expect(body).not.toHaveProperty("executionMode");
   });
 
+  it("sends branch and baseBranch (including null clears) in update payload", async () => {
+    globalThis.fetch = vi.fn().mockReturnValue(mockFetchResponse(true, {
+      ...FAKE_TASK,
+      branch: undefined,
+      baseBranch: undefined,
+    }));
+
+    await updateTask("FN-001", { branch: null, baseBranch: "main" });
+
+    expect(globalThis.fetch).toHaveBeenCalledWith("/api/tasks/FN-001", {
+      headers: { "Content-Type": "application/json" },
+      method: "PATCH",
+      body: JSON.stringify({ branch: null, baseBranch: "main" }),
+    });
+  });
+
   it("sends sourceIssue object when source metadata is provided", async () => {
     const sourceIssue = {
       provider: "github",
@@ -551,6 +567,25 @@ describe("createTask", () => {
     const call = vi.mocked(globalThis.fetch).mock.calls[0];
     const body = JSON.parse((call[1] as RequestInit).body as string);
     expect(body.priority).toBe("urgent");
+  });
+
+  it("serializes branch and baseBranch in create payload", async () => {
+    globalThis.fetch = vi.fn().mockReturnValue(mockFetchResponse(true, {
+      ...FAKE_CREATED_TASK,
+      branch: "fusion/fn-branch",
+      baseBranch: "main",
+    }));
+
+    await createTask({
+      description: "Task with branches",
+      branch: "fusion/fn-branch",
+      baseBranch: "main",
+    });
+
+    const call = vi.mocked(globalThis.fetch).mock.calls[0];
+    const body = JSON.parse((call[1] as RequestInit).body as string);
+    expect(body.branch).toBe("fusion/fn-branch");
+    expect(body.baseBranch).toBe("main");
   });
 
   it("sends POST with multiple fields including executionMode", async () => {

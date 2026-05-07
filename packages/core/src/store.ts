@@ -2326,6 +2326,8 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       thinkingLevel: input.thinkingLevel,
       reviewLevel: input.reviewLevel,
       executionMode: input.executionMode,
+      baseBranch: input.baseBranch,
+      branch: input.branch,
       missionId: input.missionId,
       sliceId: input.sliceId,
       steps: [],

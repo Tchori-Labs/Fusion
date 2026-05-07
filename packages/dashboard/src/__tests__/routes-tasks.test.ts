@@ -670,6 +670,51 @@ describe("POST /tasks", () => {
     );
   });
 
+  it("forwards branch and baseBranch on create", async () => {
+    const createdTask = {
+      ...FAKE_TASK_DETAIL,
+      column: "triage",
+      branch: "fusion/fn-branch",
+      baseBranch: "main",
+    };
+    (store.createTask as ReturnType<typeof vi.fn>).mockResolvedValue(createdTask);
+
+    const res = await REQUEST(
+      buildApp(),
+      "POST",
+      "/api/tasks",
+      JSON.stringify({
+        description: "Task with branch fields",
+        branch: " fusion/fn-branch ",
+        baseBranch: " main ",
+      }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(201);
+    expect(store.createTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        branch: "fusion/fn-branch",
+        baseBranch: "main",
+      }),
+      expect.any(Object),
+    );
+  });
+
+  it("returns 400 when create branch payload is not a string", async () => {
+    const res = await REQUEST(
+      buildApp(),
+      "POST",
+      "/api/tasks",
+      JSON.stringify({ description: "Task", branch: 10 }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain("branch must be a string");
+    expect(store.createTask).not.toHaveBeenCalled();
+  });
+
   it("forwards model overrides when both provider and id are supplied", async () => {
     const createdTask = {
       ...FAKE_TASK_DETAIL,
@@ -1379,6 +1424,79 @@ describe("POST /tasks", () => {
         onSummarize: expect.any(Function),
       }),
     );
+  });
+});
+
+describe("PATCH /tasks/:id branch fields", () => {
+  let store: TaskStore;
+
+  beforeEach(() => {
+    store = createMockStore();
+  });
+
+  function buildApp() {
+    const app = express();
+    app.use(express.json());
+    app.use("/api", createApiRoutes(store));
+    return app;
+  }
+
+  it("forwards trimmed branch and baseBranch values", async () => {
+    (store.updateTask as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...FAKE_TASK_DETAIL,
+      branch: "fusion/fn-123",
+      baseBranch: "main",
+    });
+
+    const res = await REQUEST(
+      buildApp(),
+      "PATCH",
+      "/api/tasks/FN-001",
+      JSON.stringify({ branch: " fusion/fn-123 ", baseBranch: " main " }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(200);
+    expect(store.updateTask).toHaveBeenCalledWith("FN-001", expect.objectContaining({
+      branch: "fusion/fn-123",
+      baseBranch: "main",
+    }));
+  });
+
+  it("treats empty-string patch values as clears (null)", async () => {
+    (store.updateTask as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...FAKE_TASK_DETAIL,
+      branch: undefined,
+      baseBranch: undefined,
+    });
+
+    const res = await REQUEST(
+      buildApp(),
+      "PATCH",
+      "/api/tasks/FN-001",
+      JSON.stringify({ branch: "   ", baseBranch: "" }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(200);
+    expect(store.updateTask).toHaveBeenCalledWith("FN-001", expect.objectContaining({
+      branch: null,
+      baseBranch: null,
+    }));
+  });
+
+  it("returns 400 for invalid branch payload types", async () => {
+    const res = await REQUEST(
+      buildApp(),
+      "PATCH",
+      "/api/tasks/FN-001",
+      JSON.stringify({ branch: 42 }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain("branch must be a string or null");
+    expect(store.updateTask).not.toHaveBeenCalled();
   });
 });
 

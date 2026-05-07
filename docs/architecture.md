@@ -933,6 +933,17 @@ Behavior summary:
 
 `TaskStore.updateTask()` applies this guard before persisting `nodeId` changes.
 
+### Task branch field plumbing (`branch` + `baseBranch`)
+
+Task create/update now preserves both branch fields end-to-end:
+- **Request validation/normalization (dashboard route layer):** `packages/dashboard/src/routes/register-task-workflow-routes.ts`
+  - `POST /api/tasks` accepts `branch` and `baseBranch` as string values.
+  - `PATCH /api/tasks/:id` accepts `branch` and `baseBranch` as `string | null` for PATCH-style updates, trims string inputs, and treats empty strings as clears (`null`).
+  - Route handlers reject non-string/non-null payloads with `400`.
+- **Durable persistence (core store layer):** `packages/core/src/store.ts`
+  - `TaskStore.createTask()` persists both `branch` and `baseBranch` on task creation.
+  - `TaskStore.updateTask()` preserves existing PATCH semantics where explicit `null` clears either field.
+  - Fields round-trip through JSON and SQLite persistence via the shared task contract in `packages/core/src/types.ts`.
 
 ### Routing activity visibility
 

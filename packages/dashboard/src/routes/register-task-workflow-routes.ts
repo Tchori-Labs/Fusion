@@ -95,6 +95,8 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
         executionMode,
         priority,
         source,
+        branch,
+        baseBranch,
       } = req.body;
       if (!description || typeof description !== "string") {
         throw badRequest("description is required");
@@ -184,6 +186,18 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
           ? source
           : { sourceType: "api" as const };
 
+      const validateOptionalBranchString = (value: unknown, fieldName: string): string | undefined => {
+        if (value === undefined || value === null) return undefined;
+        if (typeof value !== "string") {
+          throw badRequest(`${fieldName} must be a string`);
+        }
+        const trimmed = value.trim();
+        return trimmed.length > 0 ? trimmed : undefined;
+      };
+
+      const normalizedBranch = validateOptionalBranchString(branch, "branch");
+      const normalizedBaseBranch = validateOptionalBranchString(baseBranch, "baseBranch");
+
       const task = await scopedStore.createTask(
         {
           title,
@@ -205,6 +219,8 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
           executionMode: executionMode || undefined,
           priority: priority ?? undefined,
           source: normalizedSource,
+          branch: normalizedBranch,
+          baseBranch: normalizedBaseBranch,
         },
         { onSummarize, settings: { autoSummarizeTitles: settings.autoSummarizeTitles } }
       );
@@ -1383,7 +1399,7 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
   router.patch("/tasks/:id", async (req, res) => {
     try {
       const { store: scopedStore } = await getProjectContext(req);
-      const { title, description, prompt, priority, dependencies, enabledWorkflowSteps, modelProvider, modelId, validatorModelProvider, validatorModelId, planningModelProvider, planningModelId, thinkingLevel, assigneeUserId, reviewLevel, executionMode, sourceIssue, nodeId } = req.body;
+      const { title, description, prompt, priority, dependencies, enabledWorkflowSteps, modelProvider, modelId, validatorModelProvider, validatorModelId, planningModelProvider, planningModelId, thinkingLevel, assigneeUserId, reviewLevel, executionMode, sourceIssue, nodeId, branch, baseBranch } = req.body;
       const hasBodyField = (field: string) => Object.prototype.hasOwnProperty.call(req.body, field);
 
       // Validate model fields are strings or undefined/null
@@ -1495,6 +1511,19 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
         }
       }
 
+      const validatePatchBranchField = (value: unknown, fieldName: string): string | null | undefined => {
+        if (value === undefined) return undefined;
+        if (value === null) return null;
+        if (typeof value !== "string") {
+          throw new Error(`${fieldName} must be a string or null`);
+        }
+        const trimmed = value.trim();
+        return trimmed.length > 0 ? trimmed : null;
+      };
+
+      const normalizedBranch = hasBodyField("branch") ? validatePatchBranchField(branch, "branch") : undefined;
+      const normalizedBaseBranch = hasBodyField("baseBranch") ? validatePatchBranchField(baseBranch, "baseBranch") : undefined;
+
       const updates: Parameters<typeof scopedStore.updateTask>[1] = {};
       if (title !== undefined) updates.title = title;
       if (description !== undefined) updates.description = description;
@@ -1514,6 +1543,8 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
       if (hasBodyField("executionMode")) updates.executionMode = executionMode === null ? null : executionMode;
       if (hasBodyField("sourceIssue")) updates.sourceIssue = validatedSourceIssue === undefined ? undefined : validatedSourceIssue;
       if (hasBodyField("nodeId")) updates.nodeId = validatedNodeId;
+      if (hasBodyField("branch")) updates.branch = normalizedBranch;
+      if (hasBodyField("baseBranch")) updates.baseBranch = normalizedBaseBranch;
 
       if (hasBodyField("nodeId") && validatedNodeId !== undefined) {
         const currentTask = await scopedStore.getTask(req.params.id);

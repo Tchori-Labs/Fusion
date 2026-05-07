@@ -1083,6 +1083,11 @@ export interface InboxTask {
 export interface TaskCreateInput {
   title?: string;
   description: string;
+  /** Configured merge target/base branch for this task (task intent).
+   *  Defaults to the project default branch when omitted. */
+  baseBranch?: string;
+  /** Actual git working branch name used for this task's worktree. */
+  branch?: string;
   /** Durable source provenance for the originating external issue. */
   sourceIssue?: TaskSourceIssue;
   /** Optional persisted aggregate token usage snapshot for task creation/import paths. */
