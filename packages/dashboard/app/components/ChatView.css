@@ -282,6 +282,13 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
+  /* Stop iOS rubber-band scroll from propagating to the parent /
+     document when the user swipes on the edge of the messages list
+     with the keyboard up. Without this, the bounce escapes the
+     scroll container, the page itself shifts, and the chat-thread
+     transform momentarily exposes the body background as a gray
+     box partially covering the messages. */
+  overscroll-behavior: contain;
 }
 
 .chat-message {
@@ -753,6 +760,10 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-sm);
+  /* Stop iOS rubber-band escape when the user swipes on the composer
+     edge with the keyboard up. Without it the page momentarily shifts
+     and the body background peeks through above the messages. */
+  overscroll-behavior: contain;
 }
 
 .chat-input-row {
@@ -837,6 +848,12 @@
   line-height: 1.4;
   max-height: 120px;
   min-height: 40px;
+  /* iOS: a vertical swipe started on the textarea otherwise rubber-bands
+     the document, momentarily exposing the body background. pan-y keeps
+     internal multi-line scroll usable while preventing the gesture from
+     escaping to the page. */
+  touch-action: pan-y;
+  overscroll-behavior: contain;
 }
 
 .chat-input-textarea:focus {
