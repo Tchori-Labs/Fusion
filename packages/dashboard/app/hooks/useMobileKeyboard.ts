@@ -157,17 +157,35 @@ export function useMobileKeyboard(
       setKeyboardOpen(metrics.open);
     };
 
-    update();
+    // Re-snapshot once iOS has settled. focusin/page-restore frequently
+    // fire while the visualViewport is still mid-transition; the
+    // synchronous read captures stale offsetTop and the chat-thread
+    // anchors wrong. A short tail of updates catches the settled value.
+    const updateWithTail = () => {
+      update();
+      window.setTimeout(update, 50);
+      window.setTimeout(update, 200);
+      window.setTimeout(update, 500);
+    };
+
+    updateWithTail();
     vv.addEventListener("resize", update);
     vv.addEventListener("scroll", updateScrollOnly);
-    document.addEventListener("focusin", update);
+    document.addEventListener("focusin", updateWithTail);
     document.addEventListener("focusout", update);
+    // When the user navigates back to this view, force a fresh snapshot
+    // — without it the hook initializes with stale metrics (keyboard up
+    // from before, but our state thinks it's closed).
+    document.addEventListener("visibilitychange", updateWithTail);
+    window.addEventListener("pageshow", updateWithTail);
 
     return () => {
       vv.removeEventListener("resize", update);
       vv.removeEventListener("scroll", updateScrollOnly);
-      document.removeEventListener("focusin", update);
+      document.removeEventListener("focusin", updateWithTail);
       document.removeEventListener("focusout", update);
+      document.removeEventListener("visibilitychange", updateWithTail);
+      window.removeEventListener("pageshow", updateWithTail);
       setKeyboardOverlap(0);
       setViewportHeight(null);
       setViewportOffsetTop(0);
