@@ -291,7 +291,7 @@ This layered behavior is shared by heartbeat agents and task-scoped sessions tha
 
 ## Research Tools in Planning/Execution Sessions
 
-Triage and executor runtime sessions now include a bounded research tool surface:
+Triage and executor runtime sessions include a bounded research tool surface only when `experimentalFeatures.researchView` is enabled for the project:
 
 - `fn_research_run` — create/start a bounded research run for a focused query
 - `fn_research_list` — list recent runs and statuses
@@ -304,7 +304,8 @@ Expected behavior and boundaries:
 
 - Agents should use research only when repository/local context is insufficient
 - Queries should stay narrow and task-scoped; avoid open-ended exploration
-- If research is disabled or provider setup is incomplete, tools return actionable `setup` responses instead of crashing
+- When `experimentalFeatures.researchView` is disabled, sessions do not register `fn_research_*` tools and prompts do not advertise research capabilities
+- If the research surface is enabled but provider setup is incomplete, tools return actionable `setup` responses instead of crashing
 - Durable conclusions should be persisted with `fn_task_document_write` (for example, `key="research"`)
 - Research runs require the project engine to be running for processing; `fn_research_run` creates the run but does not block for completion unless `wait_for_completion` is set
 

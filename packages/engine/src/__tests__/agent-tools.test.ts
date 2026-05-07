@@ -19,6 +19,7 @@ import {
 } from "../agent-tools.js";
 import * as core from "@fusion/core";
 import type { MessageStore, Message } from "@fusion/core";
+import { getEnabledPluginTools, getResearchToolSurfaceStatus } from "../tool-availability.js";
 
 const loggerSpies = vi.hoisted(() => ({
   log: vi.fn(),
@@ -58,6 +59,30 @@ vi.mock("node:child_process", async () => {
     ...actual,
     execFile: execFileMock,
   };
+});
+
+describe("tool availability helpers", () => {
+  it("treats research surface as disabled when researchView experimental flag is off", () => {
+    expect(getResearchToolSurfaceStatus({ experimentalFeatures: { researchView: false } } as any)).toEqual({
+      enabled: false,
+      reason: "experimental-disabled",
+    });
+  });
+
+  it("treats research surface as enabled when researchView experimental flag is on", () => {
+    expect(getResearchToolSurfaceStatus({ experimentalFeatures: { researchView: true } } as any)).toEqual({
+      enabled: true,
+      reason: "enabled",
+    });
+  });
+
+  it("resolves legacy experimental feature aliases through core helper", () => {
+    expect(core.isExperimentalFeatureEnabled({ experimentalFeatures: { devServer: true } } as any, "devServerView")).toBe(true);
+  });
+
+  it("returns no plugin tools when plugin runner is absent", () => {
+    expect(getEnabledPluginTools(undefined)).toEqual([]);
+  });
 });
 
 describe("createTaskCreateTool", () => {

@@ -8,7 +8,6 @@ import type {
 } from "@fusion/core";
 import {
   buildTriageMemoryInstructions,
-  isResearchExperimentalEnabled,
   resolveAgentPrompt,
   sortTasksByPriorityThenAgeAndId,
 } from "@fusion/core";
@@ -56,6 +55,10 @@ import {
   createTaskDocumentReadTool,
   createTaskDocumentWriteTool,
 } from "./agent-tools.js";
+import {
+  getResearchGuidanceForSurface,
+  isResearchToolSurfaceEnabled,
+} from "./tool-availability.js";
 
 export const TRIAGE_SYSTEM_PROMPT = `You are a task specification agent for "fn", an AI-orchestrated task board.
 
@@ -243,10 +246,6 @@ When the planning conversation produces a structured plan, save it as a document
 - Order steps by dependency (foundation before integration, implementation before final validation)
 - Testing & Verification must run before Documentation & Delivery
 - Avoid giant catch-all steps; split outcomes so execution can be verified incrementally
-
-## Research tools
-When spec work needs missing domain context, you may use research tools (\`fn_research_run\`, \`fn_research_list\`, \`fn_research_get\`, \`fn_research_cancel\`). Keep research bounded to the task at hand, prefer concise queries, and write durable findings into task documents when useful.
-If research is unavailable or unconfigured, continue planning with repository context and clearly note assumptions.
 
 ## Guidelines
 - Read the project structure and relevant source files to understand context BEFORE writing
@@ -951,7 +950,7 @@ export class TriageProcessor {
           }),
           createTaskDocumentWriteTool(this.store, task.id),
           createTaskDocumentReadTool(this.store, task.id),
-          ...(isResearchExperimentalEnabled(settings)
+          ...(isResearchToolSurfaceEnabled(settings)
             ? createResearchTools({
               store: this.store,
               rootDir: this.rootDir,
@@ -1016,7 +1015,13 @@ export class TriageProcessor {
         const triageSystemPrompt = buildSystemPromptWithInstructions(
           resolveAgentPrompt("triage", settings.agentPrompts)
             || (isFast ? FAST_TRIAGE_SYSTEM_PROMPT : TRIAGE_SYSTEM_PROMPT),
-          [triageIdentitySection, triageInstructions].filter((section) => section.trim()).join("\n\n"),
+          [
+            triageIdentitySection,
+            triageInstructions,
+            isResearchToolSurfaceEnabled(settings)
+              ? getResearchGuidanceForSurface("triage")
+              : "",
+          ].filter((section) => section.trim()).join("\n\n"),
         );
         const triageContributions = this.options.pluginRunner
           ?.getPromptContributionsForSurface("triage")

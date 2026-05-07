@@ -4938,6 +4938,72 @@ describe("Code review verdict enforcement - fn_task_update blocking", () => {
     expect(result.content[0].text).toContain('type="code"');
   });
 
+  it("omits research prompt guidance when researchView experimental flag is disabled", async () => {
+    let capturedSystemPrompt = "";
+    mockedCreateFnAgent.mockImplementation(async (opts: any) => {
+      capturedSystemPrompt = opts.systemPrompt || "";
+      return {
+        session: {
+          prompt: vi.fn().mockResolvedValue(undefined),
+          dispose: vi.fn(),
+          sessionManager: { getLeafId: vi.fn(), branchWithSummary: vi.fn() },
+          navigateTree: vi.fn(),
+        },
+      } as any;
+    });
+
+    const store = createMockStore();
+    store.getSettings.mockResolvedValue({ ...(await store.getSettings()), experimentalFeatures: { researchView: false } });
+    const executor = new TaskExecutor(store, "/tmp/test");
+    await executor.execute({
+      id: "FN-SYS-NO-RESEARCH",
+      title: "Test",
+      description: "Test",
+      column: "in-progress",
+      dependencies: [],
+      steps: [],
+      currentStep: 0,
+      log: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    expect(capturedSystemPrompt).not.toContain("fn_research_run");
+  });
+
+  it("includes research prompt guidance when researchView experimental flag is enabled", async () => {
+    let capturedSystemPrompt = "";
+    mockedCreateFnAgent.mockImplementation(async (opts: any) => {
+      capturedSystemPrompt = opts.systemPrompt || "";
+      return {
+        session: {
+          prompt: vi.fn().mockResolvedValue(undefined),
+          dispose: vi.fn(),
+          sessionManager: { getLeafId: vi.fn(), branchWithSummary: vi.fn() },
+          navigateTree: vi.fn(),
+        },
+      } as any;
+    });
+
+    const store = createMockStore();
+    store.getSettings.mockResolvedValue({ ...(await store.getSettings()), experimentalFeatures: { researchView: true } });
+    const executor = new TaskExecutor(store, "/tmp/test");
+    await executor.execute({
+      id: "FN-SYS-RESEARCH",
+      title: "Test",
+      description: "Test",
+      column: "in-progress",
+      dependencies: [],
+      steps: [],
+      currentStep: 0,
+      log: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    expect(capturedSystemPrompt).toContain("fn_research_run");
+  });
+
   it("EXECUTOR_SYSTEM_PROMPT contains code review enforcement language", async () => {
     // Capture the system prompt passed to createFnAgent
     let capturedSystemPrompt = "";
