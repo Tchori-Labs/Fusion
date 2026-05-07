@@ -1994,43 +1994,19 @@ export function ChatView({ projectId, addToast }: ChatViewProps) {
                 <button
                   type="button"
                   className="chat-input-send"
-                  onPointerDown={(event) => {
-                    if (typeof window === "undefined" || window.innerWidth > 768) return;
-                    event.preventDefault();
-                    if (event.pointerType && event.pointerType !== "mouse") {
-                      handledMobileSendRef.current = true;
-                      markPreserveComposerFocus();
-                      focusComposerInput();
-                      void handleSend();
-                      window.setTimeout(() => {
-                        preserveComposerFocusRef.current = false;
-                      }, 1500);
-                    }
-                  }}
-                  onTouchStart={(event) => {
-                    if (typeof window === "undefined" || window.innerWidth > 768) return;
-                    event.preventDefault();
-                    handledMobileSendRef.current = true;
-                    markPreserveComposerFocus();
-                    focusComposerInput();
-                    void handleSend();
-                    window.setTimeout(() => {
-                      preserveComposerFocusRef.current = false;
-                    }, 1500);
-                  }}
-                  onMouseDown={(event) => {
-                    if (typeof window === "undefined" || window.innerWidth > 768) return;
-                    event.preventDefault();
-                  }}
+                  // Workaround: previous mobile flow used pointerdown +
+                  // touchstart with preventDefault and a focus-preservation
+                  // dance to keep the keyboard up while sending. On iOS that
+                  // path made quick taps fail entirely (only long press
+                  // registered). Falling back to plain onClick reliably fires
+                  // the send on tap; the soft keyboard may dismiss but the
+                  // message goes through, which beats silent failure.
                   onClick={() => {
-                    if (handledMobileSendRef.current) {
-                      handledMobileSendRef.current = false;
-                      return;
-                    }
                     void handleSend();
                   }}
                   disabled={!messageInput.trim() && pendingAttachments.length === 0}
                   data-testid="chat-send-btn"
+                  style={{ touchAction: "manipulation" }}
                 >
                   <Send size={16} />
                 </button>
