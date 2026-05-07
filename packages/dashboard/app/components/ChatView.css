@@ -848,11 +848,14 @@
   line-height: 1.4;
   max-height: 120px;
   min-height: 40px;
-  /* iOS: a vertical swipe started on the textarea otherwise rubber-bands
-     the document, momentarily exposing the body background. pan-y keeps
-     internal multi-line scroll usable while preventing the gesture from
-     escaping to the page. */
-  touch-action: pan-y;
+  /* iOS: any pan-y gesture on the textarea (including pan-y itself)
+     can drive an auto-scroll-into-view that lifts the composer up
+     off-screen even with body locked. touch-action: none blocks
+     gesture-driven panning while keeping tap-to-focus and typing
+     intact. Trade-off: loses gesture scroll within the textarea once
+     content exceeds max-height (~6 lines); arrow keys / caret moves
+     still work. */
+  touch-action: none;
   overscroll-behavior: contain;
 }
 
