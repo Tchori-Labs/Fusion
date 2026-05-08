@@ -559,7 +559,7 @@ export class AgentStore extends EventEmitter {
   }
 
   /**
-   * Create a new agent with "idle" state.
+   * Create a new agent with a default state based on ephemeral classification.
    *
    * For non-ephemeral agents, ensures `runtimeConfig.heartbeatIntervalMs` is
    * persisted at creation time — previously it was only ever written when the
@@ -618,7 +618,10 @@ export class AgentStore extends EventEmitter {
       id: agentId,
       name: normalizedName,
       role: input.role,
-      state: "idle",
+      // Non-ephemeral agents start active so they immediately participate in
+      // heartbeat scheduling; ephemeral/task-worker agents start idle and are
+      // activated by the engine when work is assigned.
+      state: ephemeral ? "idle" : "active",
       createdAt: now,
       updatedAt: now,
       metadata,

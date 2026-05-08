@@ -2113,6 +2113,11 @@ describe("Agent create/update routes", () => {
   });
 
   it("POST /api/agents/:id/state returns 400 for invalid state transitions", async () => {
+    const { AgentStore } = await import("@fusion/core");
+    const agentStore = new AgentStore({ rootDir: fusionDir });
+    await agentStore.init();
+    await agentStore.updateAgentState(agentId, "idle");
+
     const res = await REQUEST(
       buildAgentApp(),
       "POST",
