@@ -106,10 +106,7 @@ describe("Database", () => {
       expect(tableNames).toContain("agentRatings");
       expect(tableNames).toContain("task_documents");
       expect(tableNames).toContain("task_document_revisions");
-      // Roadmap tables
-      expect(tableNames).toContain("roadmaps");
-      expect(tableNames).toContain("roadmap_milestones");
-      expect(tableNames).toContain("roadmap_features");
+      // Roadmap tables are plugin-owned (FN-3159) and initialized via plugin schema hooks.
       // Verification cache (migration 61)
       expect(tableNames).toContain("verification_cache");
       expect(tableNames).toContain("distributed_task_id_state");
@@ -156,9 +153,7 @@ describe("Database", () => {
       expect(indexNames).toContain("idxAgentApiKeysAgentId");
       expect(indexNames).toContain("idxAgentConfigRevisionsAgentIdCreatedAt");
       expect(indexNames).toContain("idxTasksCreatedAt");
-      // Roadmap indexes
-      expect(indexNames).toContain("idxRoadmapMilestonesRoadmapOrder");
-      expect(indexNames).toContain("idxRoadmapFeaturesMilestoneOrder");
+      // Roadmap indexes are plugin-owned (FN-3159) and initialized via plugin schema hooks.
       // Verification cache index (migration 61)
       expect(indexNames).toContain("idxVerificationCacheRecordedAt");
     });

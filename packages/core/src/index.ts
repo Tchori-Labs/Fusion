@@ -310,37 +310,6 @@ export {
 } from "./memory-compaction.js";
 // Note: AiServiceError is shared with ai-summarize.ts and re-exported from there
 
-// ── Standalone Roadmap Model ───────────────────────────────────────────
-
-export type {
-  Roadmap,
-  RoadmapMilestone,
-  RoadmapFeature,
-  RoadmapCreateInput,
-  RoadmapUpdateInput,
-  RoadmapMilestoneCreateInput,
-  RoadmapMilestoneUpdateInput,
-  RoadmapFeatureCreateInput,
-  RoadmapFeatureUpdateInput,
-  RoadmapMilestoneReorderInput,
-  RoadmapFeatureReorderInput,
-  RoadmapFeatureMoveInput,
-  RoadmapFeatureMoveResult,
-  RoadmapMilestoneWithFeatures,
-  RoadmapWithHierarchy,
-  RoadmapExportBundle,
-  RoadmapFeatureSourceRef,
-  RoadmapFeatureTaskPlanningHandoff,
-  RoadmapMissionPlanningMilestoneHandoff,
-  RoadmapMissionPlanningHandoff,
-} from "./roadmap-types.js";
-export {
-  normalizeRoadmapMilestoneOrder,
-  applyRoadmapMilestoneReorder,
-  normalizeRoadmapFeatureOrder,
-  applyRoadmapFeatureReorder,
-  moveRoadmapFeature,
-} from "./roadmap-ordering.js";
 export {
   isTaskPriority,
   normalizeTaskPriority,
@@ -352,12 +321,6 @@ export {
   sortTasksForDisplayColumn,
 } from "./task-priority.js";
 export type { TaskPrioritySortable, TaskColumnSortable } from "./task-priority.js";
-export {
-  mapFeatureToTaskHandoff,
-  mapRoadmapToMissionHandoff,
-  mapRoadmapWithHierarchyToMissionHandoff,
-  mapAllFeaturesToTaskHandoffs,
-} from "./roadmap-handoff.js";
 
 // ── Mission Hierarchy Types ────────────────────────────────────────────
 
@@ -433,8 +396,6 @@ export type {
 } from "./mission-types.js";
 export { MissionStore } from "./mission-store.js";
 export type { MissionStoreEvents, MissionSummary } from "./mission-store.js";
-export { RoadmapStore } from "./roadmap-store.js";
-export type { RoadmapStoreEvents } from "./roadmap-store.js";
 
 // ── Central Infrastructure (Multi-Project Support) ───────────────────────────
 

@@ -191,7 +191,7 @@ export interface PluginToolResult {
 
 // ── Plugin Routes ────────────────────────────────────────────────────
 
-export type PluginRouteMethod = "GET" | "POST" | "PUT" | "DELETE";
+export type PluginRouteMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
 /**
  * Custom dashboard API route definition.

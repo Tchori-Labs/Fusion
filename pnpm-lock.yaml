@@ -214,6 +214,9 @@ importers:
       '@fusion-plugin-examples/paperclip-runtime':
         specifier: workspace:*
         version: link:../../plugins/fusion-plugin-paperclip-runtime
+      '@fusion-plugin-examples/roadmap':
+        specifier: workspace:*
+        version: link:../../plugins/fusion-plugin-roadmap
       '@fusion/core':
         specifier: workspace:*
         version: link:../core
@@ -768,6 +771,9 @@ importers:
         specifier: ^5.1.0
         version: 5.2.1
     devDependencies:
+      '@types/express':
+        specifier: ^5.0.5
+        version: 5.0.6
       '@types/node':
         specifier: ^25.5.2
         version: 25.5.2

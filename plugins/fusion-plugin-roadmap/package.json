@@ -10,12 +10,16 @@
       "import": "./src/index.ts"
     },
     "./server": {
-      "types": "./src/server/index.ts",
+      "types": "./src/server/index.d.ts",
       "import": "./src/server/index.ts"
     },
     "./dashboard-view": {
       "types": "./src/dashboard-view.ts",
       "import": "./src/dashboard-view.ts"
+    },
+    "./roadmap-suggestions": {
+      "types": "./src/roadmap-suggestions.d.ts",
+      "import": "./src/roadmap-suggestions.ts"
     }
   },
   "scripts": {
@@ -29,6 +33,7 @@
     "express": "^5.1.0"
   },
   "devDependencies": {
+    "@types/express": "^5.0.5",
     "@types/node": "^25.5.2",
     "typescript": "^5.7.0",
     "vitest": "^3.2.4"

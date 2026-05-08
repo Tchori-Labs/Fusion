@@ -685,51 +685,6 @@ CREATE TABLE IF NOT EXISTS routines (
   updatedAt TEXT NOT NULL
 );
 
--- Roadmap persistence tables (FN-1690)
--- Standalone roadmap: Roadmap → RoadmapMilestone → RoadmapFeature
--- with deterministic ordering indexes and FK cascade integrity
-
--- Roadmaps table
-CREATE TABLE IF NOT EXISTS roadmaps (
-  id TEXT PRIMARY KEY,
-  title TEXT NOT NULL,
-  description TEXT,
-  createdAt TEXT NOT NULL,
-  updatedAt TEXT NOT NULL
-);
-
--- Roadmap milestones table
-CREATE TABLE IF NOT EXISTS roadmap_milestones (
-  id TEXT PRIMARY KEY,
-  roadmapId TEXT NOT NULL,
-  title TEXT NOT NULL,
-  description TEXT,
-  orderIndex INTEGER NOT NULL,
-  createdAt TEXT NOT NULL,
-  updatedAt TEXT NOT NULL,
-  FOREIGN KEY (roadmapId) REFERENCES roadmaps(id) ON DELETE CASCADE
-);
-
--- Roadmap features table
-CREATE TABLE IF NOT EXISTS roadmap_features (
-  id TEXT PRIMARY KEY,
-  milestoneId TEXT NOT NULL,
-  title TEXT NOT NULL,
-  description TEXT,
-  orderIndex INTEGER NOT NULL,
-  createdAt TEXT NOT NULL,
-  updatedAt TEXT NOT NULL,
-  FOREIGN KEY (milestoneId) REFERENCES roadmap_milestones(id) ON DELETE CASCADE
-);
-
--- Covering index for deterministic milestone ordering within a roadmap
-CREATE INDEX IF NOT EXISTS idxRoadmapMilestonesRoadmapOrder
-  ON roadmap_milestones(roadmapId, orderIndex, createdAt, id);
-
--- Covering index for deterministic feature ordering within a milestone
-CREATE INDEX IF NOT EXISTS idxRoadmapFeaturesMilestoneOrder
-  ON roadmap_features(milestoneId, orderIndex, createdAt, id);
-
 -- Insight persistence tables (FN-1877)
 -- Normalized insight entities and insight-generation run records
 
@@ -1907,66 +1862,6 @@ export class Database {
         this.db.exec(`CREATE INDEX IF NOT EXISTS idxFixLineageSourceFeatureId ON mission_fix_feature_lineage(sourceFeatureId)`);
         this.db.exec(`CREATE INDEX IF NOT EXISTS idxFixLineageFixFeatureId ON mission_fix_feature_lineage(fixFeatureId)`);
         this.db.exec(`CREATE INDEX IF NOT EXISTS idxFixLineageRunId ON mission_fix_feature_lineage(runId)`);
-      });
-    }
-
-    // Roadmap persistence tables (FN-1690)
-    // Standalone roadmap: Roadmap → RoadmapMilestone → RoadmapFeature
-    // with deterministic ordering indexes and FK cascade integrity
-    if (version < 32) {
-      this.applyMigration(32, () => {
-        // Roadmaps table
-        this.db.exec(`
-          CREATE TABLE IF NOT EXISTS roadmaps (
-            id TEXT PRIMARY KEY,
-            title TEXT NOT NULL,
-            description TEXT,
-            createdAt TEXT NOT NULL,
-            updatedAt TEXT NOT NULL
-          )
-        `);
-
-        // Roadmap milestones table
-        this.db.exec(`
-          CREATE TABLE IF NOT EXISTS roadmap_milestones (
-            id TEXT PRIMARY KEY,
-            roadmapId TEXT NOT NULL,
-            title TEXT NOT NULL,
-            description TEXT,
-            orderIndex INTEGER NOT NULL,
-            createdAt TEXT NOT NULL,
-            updatedAt TEXT NOT NULL,
-            FOREIGN KEY (roadmapId) REFERENCES roadmaps(id) ON DELETE CASCADE
-          )
-        `);
-
-        // Roadmap features table
-        this.db.exec(`
-          CREATE TABLE IF NOT EXISTS roadmap_features (
-            id TEXT PRIMARY KEY,
-            milestoneId TEXT NOT NULL,
-            title TEXT NOT NULL,
-            description TEXT,
-            orderIndex INTEGER NOT NULL,
-            createdAt TEXT NOT NULL,
-            updatedAt TEXT NOT NULL,
-            FOREIGN KEY (milestoneId) REFERENCES roadmap_milestones(id) ON DELETE CASCADE
-          )
-        `);
-
-        // Covering index for deterministic milestone ordering within a roadmap
-        // Covers: WHERE roadmapId = ? ORDER BY orderIndex ASC, createdAt ASC, id ASC
-        this.db.exec(`
-          CREATE INDEX IF NOT EXISTS idxRoadmapMilestonesRoadmapOrder
-            ON roadmap_milestones(roadmapId, orderIndex, createdAt, id)
-        `);
-
-        // Covering index for deterministic feature ordering within a milestone
-        // Covers: WHERE milestoneId = ? ORDER BY orderIndex ASC, createdAt ASC, id ASC
-        this.db.exec(`
-          CREATE INDEX IF NOT EXISTS idxRoadmapFeaturesMilestoneOrder
-            ON roadmap_features(milestoneId, orderIndex, createdAt, id)
-        `);
       });
     }
 

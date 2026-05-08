@@ -14,7 +14,6 @@ import { ArchiveDatabase } from "./archive-db.js";
 import { detectLegacyData, migrateFromLegacy } from "./db-migrate.js";
 import { MissionStore } from "./mission-store.js";
 import { PluginStore } from "./plugin-store.js";
-import { RoadmapStore } from "./roadmap-store.js";
 import { InsightStore } from "./insight-store.js";
 import { ResearchStore } from "./research-store.js";
 import { TodoStore } from "./todo-store.js";
@@ -513,8 +512,6 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   private missionStore: MissionStore | null = null;
   /** Cached PluginStore instance */
   private pluginStore: PluginStore | null = null;
-  /** Cached RoadmapStore instance */
-  private roadmapStore: RoadmapStore | null = null;
   /** Cached InsightStore instance */
   private insightStore: InsightStore | null = null;
   /** Cached ResearchStore instance */
@@ -6811,17 +6808,6 @@ ${notificationsSection}`;
       this.pluginStore = new PluginStore(this.rootDir, { centralGlobalDir: this.globalSettingsDir });
     }
     return this.pluginStore;
-  }
-
-  /**
-   * Get the RoadmapStore instance for standalone roadmap operations.
-   * Lazily initializes the RoadmapStore on first access.
-   */
-  getRoadmapStore(): RoadmapStore {
-    if (!this.roadmapStore) {
-      this.roadmapStore = new RoadmapStore(this.db);
-    }
-    return this.roadmapStore;
   }
 
   /**

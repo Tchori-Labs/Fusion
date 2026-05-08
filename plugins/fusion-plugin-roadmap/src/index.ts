@@ -1,6 +1,6 @@
 import type { Database } from "@fusion/core";
 import { definePlugin } from "@fusion/plugin-sdk";
-import { createRoadmapPluginRoutes } from "./roadmap-routes.js";
+import { createRoadmapPluginRoutes } from "./routes/roadmap-routes.js";
 
 export function ensureRoadmapSchema(db: Database): void {
   db.exec(`

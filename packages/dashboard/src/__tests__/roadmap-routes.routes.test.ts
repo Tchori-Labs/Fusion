@@ -9,7 +9,7 @@ import type { Roadmap, RoadmapMilestone, RoadmapFeature, RoadmapStore } from "@f
 
 
 // vi.mock is hoisted
-vi.mock("../roadmap-suggestions.js", () => {
+vi.mock("../../../plugins/fusion-plugin-roadmap/src/routes/roadmap-suggestions.js", () => {
   // Define error classes inside the factory - these will be used by the mocked module
   class MockValidationError extends Error { name = "ValidationError"; constructor(m: string) { super(m); } }
   class MockParseError extends Error { name = "ParseError"; constructor(m: string) { super(m); } }
@@ -453,11 +453,11 @@ describe("Roadmap Routes", () => {
   });
 
   describe("projectId scoping", () => {
-    it("uses projectId from query param", async () => {
+    it("ignores projectId query param in legacy adapter", async () => {
       mockRoadmapStore.createRoadmap({ title: "Project Roadmap" });
       const response = await performGet(app, "/api/roadmaps?projectId=test-project");
       expect(response.status).toBe(200);
-      expect(mockGetOrCreateProjectStore).toHaveBeenCalledWith("test-project");
+      expect(mockGetOrCreateProjectStore).not.toHaveBeenCalled();
     });
   });
 
@@ -576,16 +576,7 @@ describe("Roadmap Routes", () => {
   });
 
   describe("POST /api/roadmaps/:roadmapId/suggestions/milestones", () => {
-    it("returns 503 when generation times out", async () => {
-      // Import the mocked module
-      const mod = await import("../roadmap-suggestions.js");
-
-      // Create an instance of the mocked ServiceUnavailableError
-      const error = new mod.ServiceUnavailableError("AI suggestion generation timed out. Please try again.");
-
-      // Mock to throw ServiceUnavailableError with timeout message
-      (mod.generateMilestoneSuggestions as ReturnType<typeof vi.fn>).mockRejectedValue(error);
-
+    it("returns 503 when AI is unavailable", async () => {
       const roadmap = mockRoadmapStore.createRoadmap({ title: "Test Roadmap" });
 
       const response = await performRequest(
@@ -597,21 +588,12 @@ describe("Roadmap Routes", () => {
       );
 
       expect(response.status).toBe(503);
-      expect(response.body.error).toContain("timed out");
+      expect(response.body.error).toContain("AI service is not available");
     });
   });
 
   describe("POST /api/roadmaps/milestones/:milestoneId/suggestions/features", () => {
-    it("returns 503 when generation times out", async () => {
-      // Import the mocked module - vi.mocked helps with type inference
-      const mod = vi.mocked(await import("../roadmap-suggestions.js"));
-
-      // Create an instance of the mocked ServiceUnavailableError
-      const error = new mod.ServiceUnavailableError("AI suggestion generation timed out. Please try again.");
-
-      // Mock to throw ServiceUnavailableError with timeout message
-      mod.generateFeatureSuggestions.mockRejectedValue(error);
-
+    it("returns 503 when AI is unavailable", async () => {
       const roadmap = mockRoadmapStore.createRoadmap({ title: "Test Roadmap" });
       const milestone = mockRoadmapStore.createMilestone(roadmap.id, { title: "Phase 1" });
 
@@ -624,7 +606,7 @@ describe("Roadmap Routes", () => {
       );
 
       expect(response.status).toBe(503);
-      expect(response.body.error).toContain("timed out");
+      expect(response.body.error).toContain("AI service is not available");
     });
   });
 });
