@@ -9,7 +9,7 @@ import type { Roadmap, RoadmapMilestone, RoadmapFeature, RoadmapStore } from "@f
 
 
 // vi.mock is hoisted
-vi.mock("../../../plugins/fusion-plugin-roadmap/src/routes/roadmap-suggestions.js", () => {
+vi.mock("@fusion-plugin-examples/roadmap/roadmap-suggestions", () => {
   // Define error classes inside the factory - these will be used by the mocked module
   class MockValidationError extends Error { name = "ValidationError"; constructor(m: string) { super(m); } }
   class MockParseError extends Error { name = "ParseError"; constructor(m: string) { super(m); } }

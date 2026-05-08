@@ -242,7 +242,7 @@ export async function generateMilestoneSuggestions(
       }
     })(),
     new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new ServiceUnavailableError("AI suggestion generation timed out. Please try again.")), SUGGESTION_TIMEOUT_MS),
+      globalThis.setTimeout(() => reject(new ServiceUnavailableError("AI suggestion generation timed out. Please try again.")), SUGGESTION_TIMEOUT_MS),
     ),
   ]);
 
@@ -336,7 +336,7 @@ export async function generateFeatureSuggestions(
       }
     })(),
     new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new ServiceUnavailableError("AI suggestion generation timed out. Please try again.")), SUGGESTION_TIMEOUT_MS),
+      globalThis.setTimeout(() => reject(new ServiceUnavailableError("AI suggestion generation timed out. Please try again.")), SUGGESTION_TIMEOUT_MS),
     ),
   ]);
 

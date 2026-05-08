@@ -14,6 +14,7 @@ import {
   validateFeatureSuggestionInput,
   validateSuggestionInput,
   ValidationError as SuggestionValidationError,
+  SUGGESTION_TIMEOUT_MS,
 } from "./roadmap-suggestions.js";
 
 const roadmapStoreCache = new WeakMap<object, RoadmapStore>();
@@ -37,6 +38,11 @@ function getRoadmapStore(ctx: PluginContext): RoadmapStore {
 
 function asRequest(req: unknown): RouteRequest {
   return req as RouteRequest;
+}
+
+function paramValue(value: string | string[] | undefined): string {
+  if (Array.isArray(value)) return value[0] ?? "";
+  return value ?? "";
 }
 
 function badRequest(message: string): PluginRouteResponse {
@@ -129,8 +135,8 @@ export function createRoadmapPluginRoutes(): PluginRouteDefinition[] {
       method: "GET",
       path: "/roadmaps/:roadmapId",
       handler: routeHandler((req, _ctx, roadmapStore) => {
-        const roadmap = roadmapStore.getRoadmapWithHierarchy(req.params.roadmapId);
-        return roadmap ? roadmap : notFound(`Roadmap ${req.params.roadmapId} not found`);
+        const roadmap = roadmapStore.getRoadmapWithHierarchy(paramValue(req.params.roadmapId));
+        return roadmap ? roadmap : notFound(`Roadmap ${paramValue(req.params.roadmapId)} not found`);
       }),
     },
     {
@@ -139,7 +145,7 @@ export function createRoadmapPluginRoutes(): PluginRouteDefinition[] {
       handler: routeHandler((req, _ctx, roadmapStore) => {
         const body = req.body as { title?: string; description?: string };
         try {
-          return roadmapStore.updateRoadmap(req.params.roadmapId, {
+          return roadmapStore.updateRoadmap(paramValue(req.params.roadmapId), {
             title: body.title !== undefined ? validateTitle(body.title) : undefined,
             description: body.description !== undefined ? validateDescription(body.description) : undefined,
           });
@@ -149,7 +155,7 @@ export function createRoadmapPluginRoutes(): PluginRouteDefinition[] {
       }),
     },
     { method: "DELETE", path: "/roadmaps/:roadmapId", handler: routeHandler((req, _ctx, roadmapStore) => {
-      roadmapStore.deleteRoadmap(req.params.roadmapId);
+      roadmapStore.deleteRoadmap(paramValue(req.params.roadmapId));
       return noContent();
     }) },
     {
@@ -160,7 +166,7 @@ export function createRoadmapPluginRoutes(): PluginRouteDefinition[] {
         try {
           return {
             status: 201,
-            body: roadmapStore.createMilestone(req.params.roadmapId, {
+            body: roadmapStore.createMilestone(paramValue(req.params.roadmapId), {
               title: validateTitle(body?.title),
               description: validateDescription(body?.description),
             }),
@@ -176,7 +182,7 @@ export function createRoadmapPluginRoutes(): PluginRouteDefinition[] {
       handler: routeHandler((req, _ctx, roadmapStore) => {
         try {
           const body = req.body as { orderedMilestoneIds: string[] };
-          roadmapStore.reorderMilestones({ roadmapId: req.params.roadmapId, orderedMilestoneIds: validateStringArray(body?.orderedMilestoneIds, "orderedMilestoneIds") });
+          roadmapStore.reorderMilestones({ roadmapId: paramValue(req.params.roadmapId), orderedMilestoneIds: validateStringArray(body?.orderedMilestoneIds, "orderedMilestoneIds") });
           return noContent();
         } catch (error) {
           return badRequest(error instanceof Error ? error.message : "Invalid input");
@@ -189,7 +195,7 @@ export function createRoadmapPluginRoutes(): PluginRouteDefinition[] {
       handler: routeHandler((req, _ctx, roadmapStore) => {
         const body = req.body as { title?: string; description?: string };
         try {
-          return roadmapStore.updateMilestone(req.params.milestoneId, {
+          return roadmapStore.updateMilestone(paramValue(req.params.milestoneId), {
             title: body.title !== undefined ? validateTitle(body.title) : undefined,
             description: body.description !== undefined ? validateDescription(body.description) : undefined,
           });
@@ -199,7 +205,7 @@ export function createRoadmapPluginRoutes(): PluginRouteDefinition[] {
       }),
     },
     { method: "DELETE", path: "/roadmaps/milestones/:milestoneId", handler: routeHandler((req, _ctx, roadmapStore) => {
-      roadmapStore.deleteMilestone(req.params.milestoneId);
+      roadmapStore.deleteMilestone(paramValue(req.params.milestoneId));
       return noContent();
     }) },
     {
@@ -210,7 +216,7 @@ export function createRoadmapPluginRoutes(): PluginRouteDefinition[] {
         try {
           return {
             status: 201,
-            body: roadmapStore.createFeature(req.params.milestoneId, {
+            body: roadmapStore.createFeature(paramValue(req.params.milestoneId), {
               title: validateTitle(body?.title),
               description: validateDescription(body?.description),
             }),
@@ -226,9 +232,9 @@ export function createRoadmapPluginRoutes(): PluginRouteDefinition[] {
       handler: routeHandler((req, _ctx, roadmapStore) => {
         try {
           const body = req.body as { orderedFeatureIds: string[] };
-          const milestone = roadmapStore.getMilestone(req.params.milestoneId);
-          if (!milestone) return notFound(`Milestone ${req.params.milestoneId} not found`);
-          roadmapStore.reorderFeatures({ roadmapId: milestone.roadmapId, milestoneId: req.params.milestoneId, orderedFeatureIds: validateStringArray(body?.orderedFeatureIds, "orderedFeatureIds") });
+          const milestone = roadmapStore.getMilestone(paramValue(req.params.milestoneId));
+          if (!milestone) return notFound(`Milestone ${paramValue(req.params.milestoneId)} not found`);
+          roadmapStore.reorderFeatures({ roadmapId: milestone.roadmapId, milestoneId: paramValue(req.params.milestoneId), orderedFeatureIds: validateStringArray(body?.orderedFeatureIds, "orderedFeatureIds") });
           return noContent();
         } catch (error) {
           return badRequest(error instanceof Error ? error.message : "Invalid input");
@@ -241,7 +247,7 @@ export function createRoadmapPluginRoutes(): PluginRouteDefinition[] {
       handler: routeHandler((req, _ctx, roadmapStore) => {
         const body = req.body as { title?: string; description?: string };
         try {
-          return roadmapStore.updateFeature(req.params.featureId, {
+          return roadmapStore.updateFeature(paramValue(req.params.featureId), {
             title: body.title !== undefined ? validateTitle(body.title) : undefined,
             description: body.description !== undefined ? validateDescription(body.description) : undefined,
           });
@@ -251,7 +257,7 @@ export function createRoadmapPluginRoutes(): PluginRouteDefinition[] {
       }),
     },
     { method: "DELETE", path: "/roadmaps/features/:featureId", handler: routeHandler((req, _ctx, roadmapStore) => {
-      roadmapStore.deleteFeature(req.params.featureId);
+      roadmapStore.deleteFeature(paramValue(req.params.featureId));
       return noContent();
     }) },
     {
@@ -262,8 +268,8 @@ export function createRoadmapPluginRoutes(): PluginRouteDefinition[] {
         if (!body?.targetMilestoneId) return badRequest("targetMilestoneId is required");
         if (typeof body.targetIndex !== "number") return badRequest("targetIndex must be a number");
 
-        const feature = roadmapStore.getFeature(req.params.featureId);
-        if (!feature) return notFound(`Feature ${req.params.featureId} not found`);
+        const feature = roadmapStore.getFeature(paramValue(req.params.featureId));
+        if (!feature) return notFound(`Feature ${paramValue(req.params.featureId)} not found`);
         const fromMilestone = roadmapStore.getMilestone(feature.milestoneId);
         if (!fromMilestone) return notFound(`Source milestone ${feature.milestoneId} not found`);
         const toMilestone = roadmapStore.getMilestone(body.targetMilestoneId);
@@ -271,7 +277,7 @@ export function createRoadmapPluginRoutes(): PluginRouteDefinition[] {
 
         roadmapStore.moveFeature({
           roadmapId: fromMilestone.roadmapId,
-          featureId: req.params.featureId,
+          featureId: paramValue(req.params.featureId),
           fromMilestoneId: feature.milestoneId,
           toMilestoneId: body.targetMilestoneId,
           targetOrderIndex: body.targetIndex,
@@ -284,8 +290,8 @@ export function createRoadmapPluginRoutes(): PluginRouteDefinition[] {
       method: "POST",
       path: "/roadmaps/:roadmapId/suggestions/milestones",
       handler: routeHandler(async (req, ctx, roadmapStore) => {
-        const roadmap = roadmapStore.getRoadmap(req.params.roadmapId);
-        if (!roadmap) return notFound(`Roadmap ${req.params.roadmapId} not found`);
+        const roadmap = roadmapStore.getRoadmap(paramValue(req.params.roadmapId));
+        if (!roadmap) return notFound(`Roadmap ${paramValue(req.params.roadmapId)} not found`);
 
         try {
           validateSuggestionInput(req.body);
@@ -318,8 +324,8 @@ export function createRoadmapPluginRoutes(): PluginRouteDefinition[] {
       method: "POST",
       path: "/roadmaps/milestones/:milestoneId/suggestions/features",
       handler: routeHandler(async (req, ctx, roadmapStore) => {
-        const milestone = roadmapStore.getMilestone(req.params.milestoneId);
-        if (!milestone) return notFound(`Milestone ${req.params.milestoneId} not found`);
+        const milestone = roadmapStore.getMilestone(paramValue(req.params.milestoneId));
+        if (!milestone) return notFound(`Milestone ${paramValue(req.params.milestoneId)} not found`);
         const roadmap = roadmapStore.getRoadmap(milestone.roadmapId);
         if (!roadmap) return notFound(`Roadmap ${milestone.roadmapId} not found`);
 
@@ -360,25 +366,25 @@ export function createRoadmapPluginRoutes(): PluginRouteDefinition[] {
     {
       method: "GET",
       path: "/roadmaps/:roadmapId/export",
-      handler: routeHandler((req, _ctx, roadmapStore) => roadmapStore.getRoadmapExport(req.params.roadmapId)),
+      handler: routeHandler((req, _ctx, roadmapStore) => roadmapStore.getRoadmapExport(paramValue(req.params.roadmapId))),
     },
     {
       method: "GET",
       path: "/roadmaps/:roadmapId/handoff",
       handler: routeHandler((req, _ctx, roadmapStore) => ({
-        mission: roadmapStore.getMissionPlanningHandoff(req.params.roadmapId),
-        features: roadmapStore.listFeatureTaskPlanningHandoffs(req.params.roadmapId),
+        mission: roadmapStore.getMissionPlanningHandoff(paramValue(req.params.roadmapId)),
+        features: roadmapStore.listFeatureTaskPlanningHandoffs(paramValue(req.params.roadmapId)),
       })),
     },
     {
       method: "GET",
       path: "/roadmaps/:roadmapId/handoff/mission",
-      handler: routeHandler((req, _ctx, roadmapStore) => roadmapStore.getMissionPlanningHandoff(req.params.roadmapId)),
+      handler: routeHandler((req, _ctx, roadmapStore) => roadmapStore.getMissionPlanningHandoff(paramValue(req.params.roadmapId))),
     },
     {
       method: "GET",
       path: "/roadmaps/:roadmapId/milestones/:milestoneId/features/:featureId/handoff/task",
-      handler: routeHandler((req, _ctx, roadmapStore) => roadmapStore.getRoadmapFeatureHandoff(req.params.roadmapId, req.params.milestoneId, req.params.featureId)),
+      handler: routeHandler((req, _ctx, roadmapStore) => roadmapStore.getRoadmapFeatureHandoff(paramValue(req.params.roadmapId), paramValue(req.params.milestoneId), paramValue(req.params.featureId))),
     },
   ];
 }

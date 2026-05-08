@@ -47,7 +47,7 @@ function makeManifest(overrides?: Partial<{ id: string; version: string; name: s
       {
         viewId: "graph",
         label: "Graph",
-        componentPath: "./src/DependencyGraphView.tsx",
+        componentPath: "./dashboard-view",
         icon: "Network",
         placement: "more",
         order: 40,

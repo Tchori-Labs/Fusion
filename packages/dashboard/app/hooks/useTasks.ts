@@ -255,11 +255,18 @@ export function useTasks(options?: UseTasksOptions) {
       }
       const { task, to }: { task: Task; from: Column; to: Column } = JSON.parse(e.data);
       const normalizedTask = normalizeTask(task);
-      setTasks((prev) =>
-        prev.map((t) =>
-          t.id === normalizedTask.id ? { ...normalizedTask, column: normalizeColumn(to, normalizedTask.column) } : t
-        )
-      );
+      const movedTask = { ...normalizedTask, column: normalizeColumn(to, normalizedTask.column) };
+      setTasks((prev) => {
+        const existingIndex = prev.findIndex((t) => t.id === movedTask.id);
+        if (existingIndex === -1) {
+          // SSE created event was missed (e.g., reconnect gap); upsert so the
+          // task becomes visible instead of being silently dropped.
+          return [...prev, movedTask];
+        }
+        const next = [...prev];
+        next[existingIndex] = movedTask;
+        return next;
+      });
       lastFetchTimeMs.current = Date.now();
     };
 
@@ -270,12 +277,18 @@ export function useTasks(options?: UseTasksOptions) {
         return;
       }
       const incoming = normalizeTask(JSON.parse(e.data) as Task);
-      setTasks((prev) =>
-        prev.map((t) => {
-          if (t.id !== incoming.id) return t;
-          return mergeIncomingTask(t, incoming);
-        })
-      );
+      setTasks((prev) => {
+        const existingIndex = prev.findIndex((t) => t.id === incoming.id);
+        if (existingIndex === -1) {
+          return [...prev, incoming];
+        }
+        const current = prev[existingIndex]!;
+        const merged = mergeIncomingTask(current, incoming);
+        if (merged === current) return prev;
+        const next = [...prev];
+        next[existingIndex] = merged;
+        return next;
+      });
       lastFetchTimeMs.current = Date.now();
     };
 
@@ -297,11 +310,16 @@ export function useTasks(options?: UseTasksOptions) {
       }
       const { task }: { task: Task } = JSON.parse(e.data);
       const normalizedTask = normalizeTask(task);
-      setTasks((prev) =>
-        prev.map((t) =>
-          t.id === normalizedTask.id ? { ...normalizedTask, column: "done" as Column } : t
-        )
-      );
+      const mergedTask = { ...normalizedTask, column: "done" as Column };
+      setTasks((prev) => {
+        const existingIndex = prev.findIndex((t) => t.id === mergedTask.id);
+        if (existingIndex === -1) {
+          return [...prev, mergedTask];
+        }
+        const next = [...prev];
+        next[existingIndex] = mergedTask;
+        return next;
+      });
     };
 
     const unsubscribe = subscribeSse(`/api/events${query}`, {

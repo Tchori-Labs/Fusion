@@ -3,7 +3,8 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi, afterEach } from "vitest";
 import { definePlugin } from "@fusion/plugin-sdk";
 import { validatePluginManifest } from "@fusion/core";
-import plugin, { DependencyGraphDashboardView } from "../index";
+import plugin from "../index";
+import { DependencyGraphDashboardView } from "../dashboard-view";
 import { getPluginViewId } from "../../../../packages/dashboard/app/plugins/pluginViewRegistry";
 
 vi.mock("@fusion/dashboard/app/components/TaskCard", () => ({
