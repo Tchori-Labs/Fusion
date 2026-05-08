@@ -135,3 +135,4 @@ export async function persistNodeProjectPathMappings(
     projectMappings.map(({ projectId, path }) => upsertProjectPathMapping(projectId, nodeId, path)),
   );
 }
+

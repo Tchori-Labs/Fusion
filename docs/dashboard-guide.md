@@ -368,6 +368,19 @@ Click the chevron next to the status indicator to open the node selector dropdow
 - **Local** — Switch back to viewing the local Fusion instance
 - **Remote nodes** — Select a remote node to view its tasks, projects, and status
 
+### Remote Node Onboarding Discovery
+
+When adding a **remote** node in the Nodes view, onboarding now discovers projects directly from the target node **before** the node is registered.
+
+1. Enter the remote URL (and API key when required)
+2. Click **Discover Remote Projects**
+3. Fusion calls the remote node's `/api/projects` endpoint and shows discovered projects (`name`, `path`, `status`)
+4. For selected local projects, Fusion only auto-prefills a node path when there is exactly one discovered project with the same name
+5. If discovery fails, onboarding shows an inline error and does not prefill remote mappings for that attempt
+6. If discovery succeeds with zero projects, onboarding shows an explicit empty state
+
+This keeps remote path mappings anchored to remote-authoritative data instead of local guesses.
+
 ### How Node Switching Works
 
 1. The node selector appears in the header when remote nodes are registered in the mesh

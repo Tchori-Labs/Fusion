@@ -1,6 +1,48 @@
 import { ApiError, badRequest, notFound } from "../api-error.js";
 import type { ApiRouteRegistrar } from "./types.js";
 
+const REMOTE_DISCOVERY_TIMEOUT_MS = 5000;
+
+type DiscoveredRemoteProject = {
+  id: string;
+  name: string;
+  path: string;
+  status: "active" | "paused" | "errored" | "initializing";
+  isolationMode: "in-process" | "child-process";
+};
+
+function normalizeNodeUrl(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    throw badRequest("url is required and must be a non-empty string");
+  }
+
+  const withProtocol = /^https?:\/\//i.test(trimmed) ? trimmed : `http://${trimmed}`;
+  let parsed: URL;
+  try {
+    parsed = new URL(withProtocol);
+  } catch {
+    throw badRequest("url must be a valid HTTP(S) URL");
+  }
+
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw badRequest("url must use http or https");
+  }
+
+  return parsed.toString().replace(/\/$/, "");
+}
+
+function isDiscoveredRemoteProject(value: unknown): value is DiscoveredRemoteProject {
+  if (!value || typeof value !== "object") return false;
+  const project = value as Record<string, unknown>;
+
+  return typeof project.id === "string"
+    && typeof project.name === "string"
+    && typeof project.path === "string"
+    && ["active", "paused", "errored", "initializing"].includes(String(project.status))
+    && ["in-process", "child-process"].includes(String(project.isolationMode));
+}
+
 export const registerNodeRoutes: ApiRouteRegistrar = (ctx) => {
   const { router, rethrowAsApiError } = ctx;
 
@@ -90,6 +132,70 @@ export const registerNodeRoutes: ApiRouteRegistrar = (ctx) => {
           ? 400
           : 500;
       throw new ApiError(status, err instanceof Error ? err.message : String(err));
+    }
+  });
+
+  /**
+   * POST /api/nodes/discover-projects
+   * Discover projects from a remote node before registration.
+   * Body: { url: string; apiKey?: string }
+   */
+  router.post("/nodes/discover-projects", async (req, res) => {
+    try {
+      const { url, apiKey } = req.body as { url?: unknown; apiKey?: unknown };
+      if (typeof url !== "string") {
+        throw badRequest("url is required and must be a non-empty string");
+      }
+      if (apiKey !== undefined && typeof apiKey !== "string") {
+        throw badRequest("apiKey must be a string when provided");
+      }
+
+      const normalizedUrl = normalizeNodeUrl(url);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), REMOTE_DISCOVERY_TIMEOUT_MS);
+
+      try {
+        const response = await fetch(`${normalizedUrl}/api/projects`, {
+          method: "GET",
+          headers: apiKey && apiKey.trim().length > 0 ? { Authorization: `Bearer ${apiKey}` } : undefined,
+          signal: controller.signal,
+        });
+
+        if (!response.ok) {
+          let upstreamMessage = `Remote node returned ${response.status} ${response.statusText}`;
+          try {
+            const payload = await response.json() as { error?: unknown };
+            if (typeof payload?.error === "string" && payload.error.trim()) {
+              upstreamMessage = payload.error.trim();
+            }
+          } catch {
+            // keep generic upstream message
+          }
+          throw new ApiError(response.status, upstreamMessage);
+        }
+
+        const rawBody = await response.json() as unknown;
+        if (!Array.isArray(rawBody) || !rawBody.every(isDiscoveredRemoteProject)) {
+          throw new ApiError(502, "Remote node returned malformed project discovery payload");
+        }
+
+        res.json({ projects: rawBody });
+      } catch (error) {
+        if (error instanceof ApiError) {
+          throw error;
+        }
+        if (error instanceof Error && error.name === "AbortError") {
+          throw new ApiError(504, "Remote node discovery request timed out");
+        }
+        throw new ApiError(502, `Unable to reach remote node: ${error instanceof Error ? error.message : String(error)}`);
+      } finally {
+        clearTimeout(timeoutId);
+      }
+    } catch (err: unknown) {
+      if (err instanceof ApiError) {
+        throw err;
+      }
+      rethrowAsApiError(err);
     }
   });
 

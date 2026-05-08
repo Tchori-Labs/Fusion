@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { EventEmitter } from "node:events";
 import type { Task } from "@fusion/core";
 import { request } from "../test-request.js";
@@ -100,6 +100,10 @@ function makeNode(overrides: Partial<Record<string, unknown>> = {}) {
 describe("Node routes", () => {
   const app = createServer(new MockStore() as any);
 
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     mockListNodes.mockResolvedValue([]);
@@ -161,6 +165,130 @@ describe("Node routes", () => {
       message: "Versions match",
     });
     mockListProjectNodePathMappingsForNode.mockResolvedValue([]);
+  });
+
+  describe("POST /api/nodes/discover-projects", () => {
+    it("returns normalized remote project discovery payload on success", async () => {
+      const fetchMock = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        json: async () => ([
+          {
+            id: "proj_1",
+            name: "Project One",
+            path: "/srv/project-one",
+            status: "active",
+            isolationMode: "in-process",
+          },
+        ]),
+      });
+      vi.stubGlobal("fetch", fetchMock);
+
+      const res = await request(
+        app,
+        "POST",
+        "/api/nodes/discover-projects",
+        JSON.stringify({ url: "https://node.example.com", apiKey: "secret" }),
+        { "Content-Type": "application/json" },
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({
+        projects: [
+          {
+            id: "proj_1",
+            name: "Project One",
+            path: "/srv/project-one",
+            status: "active",
+            isolationMode: "in-process",
+          },
+        ],
+      });
+      expect(fetchMock).toHaveBeenCalledWith(
+        "https://node.example.com/api/projects",
+        expect.objectContaining({
+          method: "GET",
+          headers: { Authorization: "Bearer secret" },
+          signal: expect.any(AbortSignal),
+        }),
+      );
+    });
+
+    it("returns upstream HTTP failure status and message", async () => {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+        ok: false,
+        status: 503,
+        statusText: "Service Unavailable",
+        json: async () => ({ error: "upstream down" }),
+      }));
+
+      const res = await request(
+        app,
+        "POST",
+        "/api/nodes/discover-projects",
+        JSON.stringify({ url: "https://node.example.com" }),
+        { "Content-Type": "application/json" },
+      );
+
+      expect(res.status).toBe(503);
+      expect(res.body).toEqual({ error: "upstream down" });
+    });
+
+    it("returns 401 when upstream rejects auth", async () => {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+        ok: false,
+        status: 401,
+        statusText: "Unauthorized",
+        json: async () => ({ error: "Invalid API key" }),
+      }));
+
+      const res = await request(
+        app,
+        "POST",
+        "/api/nodes/discover-projects",
+        JSON.stringify({ url: "https://node.example.com", apiKey: "wrong" }),
+        { "Content-Type": "application/json" },
+      );
+
+      expect(res.status).toBe(401);
+      expect(res.body).toEqual({ error: "Invalid API key" });
+    });
+
+    it("rejects malformed upstream payload", async () => {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        json: async () => ({ projects: [] }),
+      }));
+
+      const res = await request(
+        app,
+        "POST",
+        "/api/nodes/discover-projects",
+        JSON.stringify({ url: "https://node.example.com" }),
+        { "Content-Type": "application/json" },
+      );
+
+      expect(res.status).toBe(502);
+      expect(res.body).toEqual({ error: "Remote node returned malformed project discovery payload" });
+    });
+
+    it("returns 504 on timeout/unreachable abort", async () => {
+      vi.stubGlobal("fetch", vi.fn().mockRejectedValue(Object.assign(new Error("aborted"), { name: "AbortError" })));
+
+      const res = await request(
+        app,
+        "POST",
+        "/api/nodes/discover-projects",
+        JSON.stringify({ url: "https://node.example.com" }),
+        { "Content-Type": "application/json" },
+      );
+
+      expect(res.status).toBe(504);
+      expect(res.body).toEqual({ error: "Remote node discovery request timed out" });
+    });
   });
 
   it("GET /api/nodes/:id/path-mappings returns node mappings", async () => {

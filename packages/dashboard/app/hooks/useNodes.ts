@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import type { DockerNodeConfigInfo, NodeCreateInput, NodeInfo, NodeOnboardingInput, NodeUpdateInput } from "../api";
+import type { DockerNodeConfigInfo, NodeCreateInput, NodeInfo, NodeOnboardingInput, NodeUpdateInput, RemoteNodeProjectDiscoveryResult } from "../api";
 import {
   fetchDockerConfigDiff,
   fetchDockerNodeConfig,
@@ -9,6 +9,7 @@ import {
   updateNode,
   unregisterNode,
   checkNodeHealth,
+  discoverRemoteNodeProjects,
 } from "../api";
 import { persistNodeProjectPathMappings } from "../api-node";
 
@@ -24,6 +25,7 @@ export interface UseNodesResult {
   fetchDockerConfig: (nodeId: string) => Promise<DockerNodeConfigInfo | null>;
   patchDockerConfig: (nodeId: string, config: Partial<DockerNodeConfigInfo>) => Promise<DockerNodeConfigInfo>;
   fetchDockerDiff: (nodeId: string) => Promise<{ persistedVersion: number; deployedVersion: number | null; needsRecreate: boolean }>;
+  discoverRemoteProjects: (input: { url: string; apiKey?: string }) => Promise<RemoteNodeProjectDiscoveryResult>;
 }
 
 const POLL_INTERVAL_MS = 10000; // 10 seconds
@@ -188,6 +190,10 @@ export function useNodes(): UseNodesResult {
     return { persistedVersion: 0, deployedVersion: null, needsRecreate: false };
   }, []);
 
+  const discoverRemoteProjects = useCallback(async (input: { url: string; apiKey?: string }) => {
+    return discoverRemoteNodeProjects(input);
+  }, []);
+
   return {
     nodes,
     loading,
@@ -200,5 +206,6 @@ export function useNodes(): UseNodesResult {
     fetchDockerConfig,
     patchDockerConfig,
     fetchDockerDiff,
+    discoverRemoteProjects,
   };
 }

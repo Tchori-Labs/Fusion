@@ -31,6 +31,7 @@ export function NodesView({ addToast, onClose }: NodesViewProps) {
     healthCheck,
     patchDockerConfig,
     fetchDockerDiff,
+    discoverRemoteProjects,
   } = useNodes();
   const { projects, refresh: refreshProjects } = useProjects();
   const { syncStatusMap, pushSettings, pullSettings, syncAuth, trackNode, getAuthSyncState, getAuthProviders } = useNodeSettingsSync();
@@ -249,6 +250,7 @@ export function NodesView({ addToast, onClose }: NodesViewProps) {
         isOpen={addModalOpen}
         onClose={() => setAddModalOpen(false)}
         onSubmit={handleRegister}
+        onDiscoverRemoteProjects={discoverRemoteProjects}
         addToast={addToast}
         projects={projects}
       />

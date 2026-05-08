@@ -85,6 +85,10 @@ function makeUseNodesResult(overrides: Partial<ReturnType<typeof useNodes>> = {}
     update: vi.fn().mockResolvedValue(makeNode()),
     unregister: vi.fn().mockResolvedValue(undefined),
     healthCheck: vi.fn().mockResolvedValue(undefined),
+    fetchDockerConfig: vi.fn().mockResolvedValue(null),
+    patchDockerConfig: vi.fn().mockResolvedValue({}),
+    fetchDockerDiff: vi.fn().mockResolvedValue({ persistedVersion: 0, deployedVersion: null, needsRecreate: false }),
+    discoverRemoteProjects: vi.fn().mockResolvedValue({ projects: [] }),
     ...overrides,
   };
 }

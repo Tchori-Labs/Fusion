@@ -5548,6 +5548,18 @@ export interface NodeProjectMappingInput {
   path: string;
 }
 
+export interface RemoteNodeDiscoveredProject {
+  id: string;
+  name: string;
+  path: string;
+  status: "active" | "paused" | "errored" | "initializing";
+  isolationMode: "in-process" | "child-process";
+}
+
+export interface RemoteNodeProjectDiscoveryResult {
+  projects: RemoteNodeDiscoveredProject[];
+}
+
 /**
  * Node onboarding payload used by dashboard UI.
  *
@@ -5741,6 +5753,14 @@ export function connectDiscoveredNode(input: {
 /** Register a new node */
 export function registerNode(input: NodeCreateInput): Promise<NodeInfo> {
   return api<NodeInfo>("/nodes", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+/** Discover projects from a remote node before registering it. */
+export function discoverRemoteNodeProjects(input: { url: string; apiKey?: string }): Promise<RemoteNodeProjectDiscoveryResult> {
+  return api<RemoteNodeProjectDiscoveryResult>("/nodes/discover-projects", {
     method: "POST",
     body: JSON.stringify(input),
   });

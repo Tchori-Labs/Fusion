@@ -149,6 +149,37 @@
   gap: var(--space-sm);
 }
 
+.add-node-modal__discovery-actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.add-node-modal__discovery-state {
+  font-size: calc(var(--space-sm) + var(--space-xs) * 0.375);
+  color: var(--color-success);
+}
+
+.add-node-modal__discovered-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.add-node-modal__discovered-card {
+  padding: var(--space-sm);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.add-node-modal__discovered-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+}
+
 .add-node-modal__projects {
   display: flex;
   flex-direction: column;
@@ -202,5 +233,10 @@
 
   .add-node-modal__project-card {
     padding: var(--space-md);
+  }
+
+  .add-node-modal__discovered-row {
+    flex-direction: column;
+    align-items: flex-start;
   }
 }

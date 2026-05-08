@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { NodeProjectMappingInput, ProjectInfo } from "../api";
+import type { NodeProjectMappingInput, ProjectInfo, RemoteNodeDiscoveredProject, RemoteNodeProjectDiscoveryResult } from "../api";
 import { validateProjectPath } from "../utils/projectDetection";
 import type { ToastType } from "../hooks/useToast";
 import { useMobileScrollLock } from "../hooks/useMobileScrollLock";
@@ -32,6 +32,7 @@ interface AddNodeModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSubmit: (input: AddNodeInput) => Promise<void>;
+  onDiscoverRemoteProjects: (input: { url: string; apiKey?: string }) => Promise<RemoteNodeProjectDiscoveryResult>;
   addToast: (message: string, type?: ToastType) => void;
   projects: ProjectInfo[];
 }
@@ -71,7 +72,9 @@ function validateInput(input: AddNodeInput): FormErrors {
   return errors;
 }
 
-export function AddNodeModal({ isOpen, onClose, onSubmit, addToast, projects }: AddNodeModalProps) {
+type DiscoveryState = "idle" | "loading" | "success" | "error";
+
+export function AddNodeModal({ isOpen, onClose, onSubmit, onDiscoverRemoteProjects, addToast, projects }: AddNodeModalProps) {
   useMobileScrollLock(isOpen);
   const [name, setName] = useState("");
   const [type, setType] = useState<"local" | "remote">("local");
@@ -82,6 +85,9 @@ export function AddNodeModal({ isOpen, onClose, onSubmit, addToast, projects }: 
   const [selectedProjectPaths, setSelectedProjectPaths] = useState<Record<string, string>>({});
   const [errors, setErrors] = useState<FormErrors>({ projectMappings: {} });
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [discoveryState, setDiscoveryState] = useState<DiscoveryState>("idle");
+  const [discoveryError, setDiscoveryError] = useState<string | null>(null);
+  const [discoveredProjects, setDiscoveredProjects] = useState<RemoteNodeDiscoveredProject[]>([]);
 
   const resetForm = useCallback(() => {
     setName("");
@@ -93,8 +99,10 @@ export function AddNodeModal({ isOpen, onClose, onSubmit, addToast, projects }: 
     setSelectedProjectPaths({});
     setErrors({ projectMappings: {} });
     setIsSubmitting(false);
+    setDiscoveryState("idle");
+    setDiscoveryError(null);
+    setDiscoveredProjects([]);
   }, []);
-
   const closeModal = useCallback(() => {
     if (isSubmitting) return;
     resetForm();
@@ -130,6 +138,60 @@ export function AddNodeModal({ isOpen, onClose, onSubmit, addToast, projects }: 
     projectMappings: Object.entries(selectedProjectPaths).map(([projectId, path]) => ({ projectId, path: path.trim() })),
   }), [apiKey, apiKeyMode, maxConcurrent, name, selectedProjectPaths, type, url]);
 
+  const handleDiscoverProjects = useCallback(async () => {
+    if (isSubmitting || discoveryState === "loading") return;
+
+    const trimmedUrl = url.trim();
+    if (!trimmedUrl) {
+      setErrors((current) => ({ ...current, url: "URL is required for remote nodes" }));
+      return;
+    }
+
+    setDiscoveryState("loading");
+    setDiscoveryError(null);
+
+    try {
+      const response = await onDiscoverRemoteProjects({
+        url: trimmedUrl,
+        apiKey: apiKeyMode === "provide" && apiKey.trim().length > 0 ? apiKey : undefined,
+      });
+      setDiscoveredProjects(response.projects);
+      setDiscoveryState("success");
+
+      setSelectedProjectPaths((current) => {
+        if (Object.keys(current).length === 0) {
+          return current;
+        }
+        const next = { ...current };
+        for (const project of projects) {
+          if (!(project.id in next)) continue;
+          const matches = response.projects.filter((remoteProject) => remoteProject.name === project.name);
+          if (matches.length === 1) {
+            next[project.id] = matches[0].path;
+          }
+        }
+        return next;
+      });
+    } catch (error) {
+      setDiscoveryState("error");
+      setDiscoveredProjects([]);
+      setDiscoveryError(error instanceof Error ? error.message : "Failed to discover remote projects");
+    }
+  }, [apiKey, apiKeyMode, discoveryState, isSubmitting, onDiscoverRemoteProjects, projects, url]);
+
+  useEffect(() => {
+    if (type !== "remote") {
+      setDiscoveryState("idle");
+      setDiscoveryError(null);
+      setDiscoveredProjects([]);
+      return;
+    }
+
+    setDiscoveryState("idle");
+    setDiscoveryError(null);
+    setDiscoveredProjects([]);
+  }, [apiKey, apiKeyMode, type, url]);
+
   const handleSubmit = useCallback(async () => {
     if (isSubmitting) return;
 
@@ -145,6 +207,11 @@ export function AddNodeModal({ isOpen, onClose, onSubmit, addToast, projects }: 
       return;
     }
 
+    if (input.type === "remote" && discoveryState !== "success") {
+      setDiscoveryError("Discover remote projects before adding this node.");
+      return;
+    }
+
     setIsSubmitting(true);
 
     try {
@@ -157,7 +224,7 @@ export function AddNodeModal({ isOpen, onClose, onSubmit, addToast, projects }: 
     } finally {
       setIsSubmitting(false);
     }
-  }, [addToast, closeModal, input, isSubmitting, onSubmit]);
+  }, [addToast, closeModal, discoveryState, input, isSubmitting, onSubmit]);
 
   const toggleProjectSelection = (project: ProjectInfo) => {
     setSelectedProjectPaths((current) => {
@@ -165,6 +232,15 @@ export function AddNodeModal({ isOpen, onClose, onSubmit, addToast, projects }: 
         const { [project.id]: _removed, ...remaining } = current;
         return remaining;
       }
+
+      if (type === "remote" && discoveryState === "success") {
+        const matches = discoveredProjects.filter((remoteProject) => remoteProject.name === project.name);
+        if (matches.length === 1) {
+          return { ...current, [project.id]: matches[0].path };
+        }
+        return { ...current, [project.id]: "" };
+      }
+
       return { ...current, [project.id]: project.path };
     });
   };
@@ -268,6 +344,42 @@ export function AddNodeModal({ isOpen, onClose, onSubmit, addToast, projects }: 
                   />
                 </label>
               )}
+
+              <div className="add-node-modal__discovery-actions">
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  onClick={() => void handleDiscoverProjects()}
+                  disabled={isSubmitting || discoveryState === "loading"}
+                >
+                  {discoveryState === "loading" ? "Discovering..." : "Discover Remote Projects"}
+                </button>
+                {discoveryState === "success" && (
+                  <span className="add-node-modal__discovery-state" data-state="success">
+                    {discoveredProjects.length > 0 ? `Discovered ${discoveredProjects.length} remote project${discoveredProjects.length === 1 ? "" : "s"}.` : "No projects discovered on remote node."}
+                  </span>
+                )}
+                {discoveryState === "error" && discoveryError && (
+                  <span className="form-error add-node-modal__error">{discoveryError}</span>
+                )}
+                {discoveryState === "idle" && (
+                  <span className="add-node-modal__hint">Discover remote projects before adding this node.</span>
+                )}
+              </div>
+
+              {discoveryState === "success" && discoveredProjects.length > 0 && (
+                <div className="add-node-modal__discovered-list" aria-label="Discovered remote projects">
+                  {discoveredProjects.map((project) => (
+                    <div key={`${project.id}-${project.path}`} className="card add-node-modal__discovered-card">
+                      <div className="add-node-modal__discovered-row">
+                        <strong>{project.name}</strong>
+                        <span className="card-status-badge card-status-badge--in-review">{project.status}</span>
+                      </div>
+                      <div className="add-node-modal__hint">{project.path}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
@@ -311,6 +423,20 @@ export function AddNodeModal({ isOpen, onClose, onSubmit, addToast, projects }: 
                       {selected && (
                         <label className="add-node-modal__field">
                           <span>Path on this node</span>
+                          {type === "remote" && discoveryState === "success" && (
+                            <span className="add-node-modal__hint">
+                              {(() => {
+                                const matches = discoveredProjects.filter((remoteProject) => remoteProject.name === project.name);
+                                if (matches.length === 1) {
+                                  return `Remote-authoritative path discovered: ${matches[0].path}`;
+                                }
+                                if (matches.length > 1) {
+                                  return "Multiple remote projects matched this name. Enter the correct path manually.";
+                                }
+                                return "No exact remote name match. Enter this path manually.";
+                              })()}
+                            </span>
+                          )}
                           <input
                             className="input"
                             type="text"
