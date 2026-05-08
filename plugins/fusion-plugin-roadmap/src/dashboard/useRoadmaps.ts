@@ -12,8 +12,8 @@ import type {
   RoadmapWithHierarchy,
   RoadmapMissionPlanningHandoff,
   RoadmapFeatureTaskPlanningHandoff,
-} from "@fusion-plugin-examples/roadmap";
-import * as api from "../api";
+} from "../roadmap-types.js";
+import * as api from "./api.js";
 
 /**
  * A suggested milestone from AI generation with a stable local draft ID.

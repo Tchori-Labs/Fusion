@@ -359,7 +359,7 @@ export function Header({
   }, [overflowScripts]);
 
   const hasRoadmapsPluginView = useMemo(
-    () => pluginDashboardViews.some((entry) => entry.pluginId === "fusion-plugin-roadmap"),
+    () => pluginDashboardViews.some((entry) => entry.pluginId === "roadmap-planner"),
     [pluginDashboardViews],
   );
 
@@ -369,7 +369,7 @@ export function Header({
       experimentalFeatures?.researchView ||
       todosEnabled ||
       experimentalFeatures?.insights ||
-      (experimentalFeatures?.roadmap && !hasRoadmapsPluginView) ||
+
       showSkillsTab ||
       experimentalFeatures?.memoryView ||
       experimentalFeatures?.devServerView ||
@@ -1178,7 +1178,7 @@ export function Header({
               <>
                 <button
                   ref={viewOverflowTriggerRef}
-                  className={`view-toggle-btn${["research", "skills", "roadmaps", "insights", "memory", "dev-server", "devserver", "graph"].includes(view) || (experimentalFeatures?.evalsView && view === "evals") || (todosEnabled && todosOpen) || isPluginViewId(view) ? " active" : ""}`}
+                  className={`view-toggle-btn${["research", "skills", "insights", "memory", "dev-server", "devserver", "graph"].includes(view) || (experimentalFeatures?.evalsView && view === "evals") || (todosEnabled && todosOpen) || isPluginViewId(view) ? " active" : ""}`}
                   onClick={() => setIsViewOverflowOpen((prev) => !prev)}
                   title="More views"
                   aria-label="More views"
@@ -1237,19 +1237,7 @@ export function Header({
                         <span>Insights</span>
                       </button>
                     )}
-                    {experimentalFeatures?.roadmap && !hasRoadmapsPluginView && (
-                      <button
-                        className={`view-toggle-overflow-item${view === "roadmaps" ? " active" : ""}`}
-                        onClick={() => {
-                          onChangeView("roadmaps");
-                          setIsViewOverflowOpen(false);
-                        }}
-                        role="menuitem"
-                        data-testid="view-overflow-roadmaps"
-                      >
-                        <span>Roadmaps</span>
-                      </button>
-                    )}
+
                     {showSkillsTab && (
                       <button
                         className={`view-toggle-overflow-item${view === "skills" ? " active" : ""}`}

@@ -14,6 +14,8 @@ import type { Task, TaskDetail, WorkflowStep } from "@fusion/core";
 /** Tab identifiers for the task detail modal. Mirrors the dashboard's local enum. */
 export type DetailTaskTab = "definition" | "logs" | "changes" | "comments" | "model" | "workflow";
 
+export type PluginToastType = "success" | "error" | "warning" | "info";
+
 /** Runtime context passed to a plugin dashboard view component. */
 export interface PluginDashboardViewContext {
   projectId?: string;
@@ -21,6 +23,7 @@ export interface PluginDashboardViewContext {
   workflowSteps: WorkflowStep[];
   openTaskDetail: (task: Task | TaskDetail, initialTab?: DetailTaskTab) => void;
   renderTaskCard?: (task: Task | TaskDetail) => ReactNode;
+  addToast?: (message: string, type?: PluginToastType) => void;
 }
 
 /** Composite view ID format: `plugin:{pluginId}:{viewId}`. */

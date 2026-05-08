@@ -4,7 +4,6 @@ import { resolve } from "node:path";
 
 const EXPECTED_DOCUMENTED_VIEWS = new Set([
   "AgentsView",
-  "RoadmapsView",
   "NodesView",
   "ChatView",
   "MemoryView",
@@ -29,7 +28,6 @@ const EXPECTED_APP_LEVEL_VIEWS = new Set([
   "EvalsView",
   "NodesView",
   "ChatView",
-  "RoadmapsView",
   "SkillsView",
   "MemoryView",
   "DevServerView",
@@ -64,11 +62,11 @@ describe("AGENTS lazy-loaded views inventory", () => {
     const section = extractLazyLoadedSection(agentsDoc);
     const countMatch = section.match(/These\s+(\d+)\s+views\s+are lazy-loaded/);
     expect(countMatch).toBeTruthy();
-    expect(Number(countMatch?.[1])).toBe(16);
+    expect(Number(countMatch?.[1])).toBe(15);
 
     const documentedViews = extractBacktickedNamesFromBullets(section);
     expect(new Set(documentedViews)).toEqual(EXPECTED_DOCUMENTED_VIEWS);
-    expect(documentedViews).toHaveLength(16);
+    expect(documentedViews).toHaveLength(15);
 
     expect(section).toContain("`ResearchView`");
     expect(section).toContain("`TodoView`");

@@ -2,10 +2,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { ThemeMode } from "@fusion/core";
 import type { ProjectInfo } from "../api";
 import { getScopedItem, setScopedItem } from "../utils/projectStorage";
-import { isPluginViewId } from "../plugins/pluginViewRegistry";
+import { getPluginViewId, isPluginViewId, isPluginViewRegistered } from "../plugins/pluginViewRegistry";
 
 export type ViewMode = "overview" | "project";
-export type BuiltInTaskView = "board" | "list" | "graph" | "agents" | "missions" | "chat" | "documents" | "research" | "evals" | "roadmaps" | "skills" | "mailbox" | "insights" | "memory" | "devserver" | "dev-server";
+export type BuiltInTaskView = "board" | "list" | "graph" | "agents" | "missions" | "chat" | "documents" | "research" | "evals" | "skills" | "mailbox" | "insights" | "memory" | "devserver" | "dev-server";
 export type PluginTaskView = `plugin:${string}:${string}`;
 export type TaskView = BuiltInTaskView | PluginTaskView;
 
@@ -19,7 +19,7 @@ const BUILT_IN_TASK_VIEWS: readonly BuiltInTaskView[] = [
   "documents",
   "research",
   "evals",
-  "roadmaps",
+
   "skills",
   "mailbox",
   "insights",
@@ -36,8 +36,17 @@ function isTaskView(value: string | null): value is TaskView {
   return value !== null && (isBuiltInTaskView(value) || isPluginViewId(value));
 }
 
+const LEGACY_ROADMAPS_PLUGIN_VIEW = getPluginViewId("roadmap-planner", "roadmaps");
+
 function normalizeTaskView(value: TaskView): TaskView {
   return value === "devserver" ? "dev-server" : value;
+}
+
+function migrateLegacyRoadmapsView(value: string): TaskView {
+  if (value !== "roadmaps") {
+    return "board";
+  }
+  return isPluginViewRegistered("roadmap-planner", "roadmaps") ? LEGACY_ROADMAPS_PLUGIN_VIEW : "board";
 }
 
 interface UseViewStateOptions {
@@ -84,6 +93,7 @@ export function useViewState(options: UseViewStateOptions): UseViewStateResult {
 
   const [taskView, setTaskView] = useState<TaskView>(() => {
     const saved = getScopedItem("kb-dashboard-task-view");
+    if (saved === "roadmaps") return migrateLegacyRoadmapsView(saved);
     if (isTaskView(saved)) return saved;
     return "board";
   });
@@ -95,7 +105,9 @@ export function useViewState(options: UseViewStateOptions): UseViewStateResult {
 
   useEffect(() => {
     const saved = getScopedItem("kb-dashboard-task-view", currentProject?.id);
-    if (isTaskView(saved)) {
+    if (saved === "roadmaps") {
+      setTaskView(migrateLegacyRoadmapsView(saved));
+    } else if (isTaskView(saved)) {
       const preserveLegacyOnFirstScopedHydration =
         !hasHydratedScopedTaskViewRef.current && saved === "devserver";
 

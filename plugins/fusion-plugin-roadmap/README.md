@@ -4,17 +4,21 @@
 
 ## Plugin identity
 
-- Manifest id: `fusion-plugin-roadmap`
-- Route namespace: `/api/plugins/fusion-plugin-roadmap/*`
-- Dashboard view id: `plugin:fusion-plugin-roadmap:roadmaps`
+- Manifest id: `roadmap-planner`
+- Route namespace: `/api/plugins/roadmap-planner/*`
+- Dashboard view id: `plugin:roadmap-planner:roadmaps`
 
 ## Package layout
 
 - `manifest.json` — plugin metadata and dashboard view declaration
 - `src/index.ts` — plugin definition (`onSchemaInit`, routes, dashboard view metadata)
 - `src/server/index.ts` — backend server exports
-- `src/dashboard-view.tsx` — dashboard view entry export
-- `src/roadmap-types.ts` + `src/store/*` — roadmap domain ownership target (migrated in follow-up steps)
+- `src/dashboard-view.tsx` — dashboard view entry export for host registration
+- `src/dashboard/RoadmapsView.tsx` — plugin-owned roadmap planner page
+- `src/dashboard/useRoadmaps.ts` — plugin-owned roadmap CRUD/reorder/suggestions/handoff hook
+- `src/dashboard/RoadmapsView.css` — plugin-owned roadmap styles
+- `src/dashboard/api.ts` — plugin-local client for `/api/plugins/roadmap-planner/*`
+- `src/roadmap-types.ts` + `src/store/*` — roadmap domain types/store
 
 ## Exported surfaces
 
@@ -24,4 +28,4 @@
 
 ## Notes
 
-The plugin keeps a single canonical ID/path (`fusion-plugin-roadmap`). Do not introduce alternate route namespaces or plugin IDs for this feature.
+The plugin keeps a single canonical dashboard entrypoint (`./dashboard-view`) and accepts host-supplied dashboard context (`projectId`, optional `addToast`). Do not deep-import dashboard internals from this plugin.

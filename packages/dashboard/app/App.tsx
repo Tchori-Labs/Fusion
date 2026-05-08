@@ -50,6 +50,7 @@ import { useNavigationHistory } from "./hooks/useNavigationHistory";
 import { usePluginDashboardViews } from "./hooks/usePluginDashboardViews";
 import { PluginDashboardViewHost } from "./plugins/PluginDashboardViewHost";
 import { isPluginViewId } from "./plugins/pluginViewRegistry";
+import { registerBundledPluginViews } from "./plugins/registerBundledPluginViews";
 import { useProjectActions } from "./hooks/useProjectActions";
 import { useTaskHandlers } from "./hooks/useTaskHandlers";
 import { useRemoteNodeData } from "./hooks/useRemoteNodeData";
@@ -85,7 +86,7 @@ const ResearchView = lazy(() => import("./components/ResearchView").then((m) => 
 const EvalsView = lazy(() => import("./components/EvalsView").then((m) => ({ default: m.EvalsView })));
 const NodesView = lazy(() => import("./components/NodesView").then((m) => ({ default: m.NodesView })));
 const ChatView = lazy(() => import("./components/ChatView").then((m) => ({ default: m.ChatView })));
-const RoadmapsView = lazy(() => import("./components/RoadmapsView").then((m) => ({ default: m.RoadmapsView })));
+
 const SkillsView = lazy(() => import("./components/SkillsView").then((m) => ({ default: m.SkillsView })));
 const MemoryView = lazy(() => import("./components/MemoryView").then((m) => ({ default: m.MemoryView })));
 const DevServerView = lazy(() => import("./components/DevServerView").then((m) => ({ default: m.DevServerView })));
@@ -110,13 +111,15 @@ function prefetchLazyViews() {
     void import("./components/EvalsView");
     void import("./components/NodesView");
     void import("./components/ChatView");
-    void import("./components/RoadmapsView");
+
     void import("./components/SkillsView");
     void import("./components/MemoryView");
     void import("./components/DevServerView");
     void import("./components/TodoView");
   });
 }
+
+registerBundledPluginViews();
 
 const SETUP_WARNING_DISMISSED_KEY = "kb-setup-warning-dismissed";
 const ACTIVE_CHAT_SESSION_STORAGE_KEY = "kb-chat-active-session";
@@ -574,9 +577,6 @@ function AppInner() {
     if (taskView === "insights" && !insightsEnabled) {
       handleChangeTaskView("board");
     }
-    if (taskView === "roadmaps" && !roadmapEnabled) {
-      handleChangeTaskView("board");
-    }
     if (taskView === "agents" && !agentsEnabled) {
       handleChangeTaskView("board");
     }
@@ -592,7 +592,7 @@ function AppInner() {
     if (taskView === "evals" && !evalsEnabled) {
       handleChangeTaskView("board");
     }
-  }, [taskView, settingsLoaded, skillsEnabled, insightsEnabled, roadmapEnabled, handleChangeTaskView, agentsEnabled, memoryEnabled, devServerEnabled, researchEnabled, evalsEnabled, graphPluginTaskView]);
+  }, [taskView, settingsLoaded, skillsEnabled, insightsEnabled, handleChangeTaskView, agentsEnabled, memoryEnabled, devServerEnabled, researchEnabled, evalsEnabled, graphPluginTaskView]);
 
   // Auto-close nodes overlay if feature flag is toggled off while overlay is open
   useEffect(() => {
@@ -1047,6 +1047,7 @@ function AppInner() {
                   disableDrag={true}
                 />
               ),
+              addToast,
             }}
           />
         </PageErrorBoundary>
@@ -1092,18 +1093,6 @@ function AppInner() {
       );
     }
 
-    if (taskView === "roadmaps") {
-      if (!settingsLoaded || !roadmapEnabled) {
-        return null;
-      }
-      return (
-        <PageErrorBoundary>
-          <Suspense fallback={null}>
-            <RoadmapsView addToast={addToast} projectId={currentProject?.id} />
-          </Suspense>
-        </PageErrorBoundary>
-      );
-    }
 
     if (taskView === "missions") {
       return (

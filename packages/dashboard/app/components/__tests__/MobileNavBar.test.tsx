@@ -70,29 +70,28 @@ describe("MobileNavBar", () => {
     expect(screen.getByTestId("mobile-nav-tab-more")).toBeDefined();
   });
 
-  it("renders roadmaps tab when experimentalFeatures.roadmap is true", () => {
+  it("does not render legacy roadmaps tab when experimentalFeatures.roadmap is true", () => {
     render(<MobileNavBar {...createDefaultProps()} experimentalFeatures={{ roadmap: true }} />);
-    expect(screen.getByTestId("mobile-nav-tab-roadmaps")).toBeDefined();
+    expect(screen.queryByTestId("mobile-nav-tab-roadmaps")).toBeNull();
   });
 
-  it("keeps optional tabs within mobile top-level capacity by overflowing roadmaps into More", () => {
+  it("keeps skills available without rendering legacy roadmaps destinations", () => {
     render(<MobileNavBar {...createDefaultProps()} showSkillsTab={true} experimentalFeatures={{ roadmap: true }} />);
 
     expect(screen.getByTestId("mobile-nav-tab-skills")).toBeDefined();
     expect(screen.queryByTestId("mobile-nav-tab-roadmaps")).toBeNull();
 
     fireEvent.click(screen.getByTestId("mobile-nav-tab-more"));
-    expect(screen.getByTestId("mobile-more-item-roadmaps")).toBeDefined();
+    expect(screen.queryByTestId("mobile-more-item-roadmaps")).toBeNull();
   });
 
-  it("moves skills into More when roadmaps is the active optional top-level tab", () => {
-    render(<MobileNavBar {...createDefaultProps()} view="roadmaps" showSkillsTab={true} experimentalFeatures={{ roadmap: true }} />);
+  it("keeps skills top-level regardless of legacy roadmaps view value", () => {
+    render(<MobileNavBar {...createDefaultProps()} view="board" showSkillsTab={true} experimentalFeatures={{ roadmap: true }} />);
 
-    expect(screen.getByTestId("mobile-nav-tab-roadmaps")).toBeDefined();
-    expect(screen.queryByTestId("mobile-nav-tab-skills")).toBeNull();
+    expect(screen.getByTestId("mobile-nav-tab-skills")).toBeDefined();
 
     fireEvent.click(screen.getByTestId("mobile-nav-tab-more"));
-    expect(screen.getByTestId("mobile-more-item-skills")).toBeDefined();
+    expect(screen.queryByTestId("mobile-more-item-skills")).toBeNull();
   });
 
   it("does not render skills tab when showSkillsTab is false", () => {
@@ -388,10 +387,10 @@ describe("MobileNavBar", () => {
     expect(screen.getByTestId("mobile-more-item-settings")).toBeDefined();
   });
 
-  it("shows roadmaps in more sheet when experimentalFeatures.roadmap is true", () => {
+  it("does not show legacy roadmaps in more sheet when experimentalFeatures.roadmap is true", () => {
     render(<MobileNavBar {...createDefaultProps()} experimentalFeatures={{ roadmap: true }} />);
     fireEvent.click(screen.getByTestId("mobile-nav-tab-more"));
-    expect(screen.getByTestId("mobile-more-item-roadmaps")).toBeDefined();
+    expect(screen.queryByTestId("mobile-more-item-roadmaps")).toBeNull();
   });
 
   it("suppresses legacy roadmaps entries when roadmap plugin view is registered", () => {
@@ -401,7 +400,7 @@ describe("MobileNavBar", () => {
         experimentalFeatures={{ roadmap: true }}
         pluginDashboardViews={[
           {
-            pluginId: "fusion-plugin-roadmap",
+            pluginId: "roadmap-planner",
             view: { viewId: "roadmaps", label: "Roadmaps", componentPath: "./RoadmapsView", icon: "Map", placement: "primary" },
           },
         ]}

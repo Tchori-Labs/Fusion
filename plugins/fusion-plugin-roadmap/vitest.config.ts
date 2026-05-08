@@ -12,8 +12,12 @@ export default defineConfig({
     },
   },
   test: {
-    include: ["src/**/*.test.ts"],
-    setupFiles: [fileURLToPath(new URL("../../packages/core/src/__test-utils__/vitest-setup.ts", import.meta.url))],
+    include: ["src/**/__tests__/**/*.test.{ts,tsx}", "src/**/*.test.{ts,tsx}"],
+    environmentMatchGlobs: [["src/dashboard/__tests__/**", "jsdom"]],
+    setupFiles: [
+      fileURLToPath(new URL("../../packages/core/src/__test-utils__/vitest-setup.ts", import.meta.url)),
+      fileURLToPath(new URL("./src/dashboard/test-setup.ts", import.meta.url)),
+    ],
     globalSetup: [fileURLToPath(new URL("../../packages/core/src/__test-utils__/vitest-teardown.ts", import.meta.url))],
     pool: "threads",
     maxWorkers,

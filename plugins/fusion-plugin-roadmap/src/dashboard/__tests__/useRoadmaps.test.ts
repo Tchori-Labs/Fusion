@@ -1,10 +1,11 @@
+/* @vitest-environment jsdom */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import { useRoadmaps } from "../useRoadmaps";
-import * as api from "../../api";
+import * as api from "../api";
 
 // Mock the API module
-vi.mock("../../api", () => ({
+vi.mock("../api", () => ({
   fetchRoadmaps: vi.fn(),
   fetchRoadmap: vi.fn(),
   createRoadmap: vi.fn(),
@@ -41,7 +42,7 @@ const mockRoadmaps = [
   },
 ];
 
-const mockRoadmapHierarchy: import("@fusion/core").RoadmapWithHierarchy = {
+const mockRoadmapHierarchy: import("../../roadmap-types").RoadmapWithHierarchy = {
   id: "RM-001",
   title: "Q2 Roadmap",
   description: "Q2 product roadmap",
@@ -559,7 +560,7 @@ describe("useRoadmaps", () => {
     it("reorders features within a milestone with optimistic update", async () => {
       // This test requires multiple features to meaningfully test reordering
       // We'll create a custom hierarchy with multiple features
-      const multiFeatureHierarchy: import("@fusion/core").RoadmapWithHierarchy = {
+      const multiFeatureHierarchy: import("../../roadmap-types").RoadmapWithHierarchy = {
         ...mockRoadmapHierarchy,
         milestones: [
           {
@@ -600,7 +601,7 @@ describe("useRoadmaps", () => {
 
     it("rolls back on failure", async () => {
       // This test requires multiple features
-      const multiFeatureHierarchy: import("@fusion/core").RoadmapWithHierarchy = {
+      const multiFeatureHierarchy: import("../../roadmap-types").RoadmapWithHierarchy = {
         ...mockRoadmapHierarchy,
         milestones: [
           {

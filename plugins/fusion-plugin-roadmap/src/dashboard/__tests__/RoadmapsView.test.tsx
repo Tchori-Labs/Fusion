@@ -1,17 +1,19 @@
+/* @vitest-environment jsdom */
+import React from "react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { RoadmapsView } from "../RoadmapsView";
-import * as api from "../../api";
+import * as api from "../api";
 import type {
   Roadmap,
   RoadmapMilestone,
   RoadmapFeature,
   RoadmapWithHierarchy,
-} from "@fusion/core";
+} from "../../roadmap-types";
 
 // Mock the API module
-vi.mock("../../api", () => ({
+vi.mock("../api", () => ({
   fetchRoadmaps: vi.fn(),
   fetchRoadmap: vi.fn(),
   createRoadmap: vi.fn(),
@@ -33,7 +35,7 @@ vi.mock("../../api", () => ({
 // Mock lucide-react icons
 const mockConfirm = vi.fn();
 
-vi.mock("../../hooks/useConfirm", () => ({
+vi.mock("../useConfirm", () => ({
   useConfirm: () => ({ confirm: mockConfirm }),
 }));
 

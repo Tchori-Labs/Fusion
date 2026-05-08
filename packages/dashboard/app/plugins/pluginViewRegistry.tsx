@@ -1,19 +1,10 @@
-import type { Task, TaskDetail, WorkflowStep } from "@fusion/core";
+import type { PluginDashboardViewContext } from "./types";
 import { AlertTriangle } from "lucide-react";
 import { lazy, Suspense, type LazyExoticComponent, type ReactElement, type ReactNode } from "react";
 import { ErrorBoundary } from "../components/ErrorBoundary";
-import type { DetailTaskTab } from "../hooks/useModalManager";
 import "./pluginViewRegistry.css";
 
 export type PluginTaskView = `plugin:${string}:${string}`;
-
-export interface PluginDashboardViewContext {
-  projectId?: string;
-  tasks: Task[];
-  workflowSteps: WorkflowStep[];
-  openTaskDetail: (task: Task | TaskDetail, initialTab?: DetailTaskTab) => void;
-  renderTaskCard?: (task: Task | TaskDetail) => ReactNode;
-}
 
 type PluginViewComponent = LazyExoticComponent<({ context }: { context?: PluginDashboardViewContext }) => ReactElement>;
 
@@ -46,24 +37,14 @@ export function getPluginViewComponent(pluginId: string, viewId: string): Plugin
   return registry.get(getPluginViewId(pluginId, viewId)) ?? null;
 }
 
+export function isPluginViewRegistered(pluginId: string, viewId: string): boolean {
+  return registry.has(getPluginViewId(pluginId, viewId));
+}
+
 /** Test helper for clearing global registry state. */
 export function __test_clearPluginViewRegistry(): void {
   registry.clear();
-  registerBundledPluginViews();
 }
-
-function registerBundledPluginViews(): void {
-  registerPluginView(
-    "fusion-plugin-dependency-graph",
-    "graph",
-    lazy(async () => {
-      const mod = await import("@fusion-plugin-examples/dependency-graph/dashboard-view");
-      return { default: mod.DependencyGraphDashboardView };
-    }),
-  );
-}
-
-registerBundledPluginViews();
 
 function PluginViewUnavailable({ viewId }: { viewId: string }): ReactNode {
   return (

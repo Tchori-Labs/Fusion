@@ -27,7 +27,6 @@ import {
   Target,
   Terminal,
   Workflow,
-  Map,
   Zap,
 } from "lucide-react";
 import { fetchScripts } from "../api";
@@ -205,15 +204,12 @@ export function MobileNavBar({
 
   const planningHandler = activePlanningSessionCount > 0 && onResumePlanning ? onResumePlanning : onOpenPlanning;
 
-  const hasRoadmapsPluginView = pluginDashboardViews.some((entry) => entry.pluginId === "fusion-plugin-roadmap");
-  const roadmapEnabled = Boolean(experimentalFeatures?.roadmap) && !hasRoadmapsPluginView;
   const skillsEnabled = Boolean(showSkillsTab);
   const todoViewEnabled = Boolean(experimentalFeatures?.todoView);
 
   // Keep a maximum of one optional primary tab visible at once to preserve touch-target width.
   // Overflowed destinations remain available in the More sheet.
-  const showRoadmapsTopLevel = roadmapEnabled && (!skillsEnabled || view === "roadmaps");
-  const showSkillsTopLevel = skillsEnabled && (!roadmapEnabled || view !== "roadmaps");
+  const showSkillsTopLevel = skillsEnabled;
   const showSkillsInMore = skillsEnabled && !showSkillsTopLevel;
   const sortedPrimaryPluginViews = pluginDashboardViews
     .filter((entry) => entry.view.placement === "primary")
@@ -236,7 +232,6 @@ export function MobileNavBar({
     || view === "devserver"
     || view === "dev-server"
     || (todosOpen && todoViewEnabled)
-    || (view === "roadmaps" && !showRoadmapsTopLevel)
     || (view === "skills" && !showSkillsTopLevel)
     || view === "graph"
     || (isPluginViewId(view) && !topLevelPrimaryPluginViews.some((entry) => buildPluginTaskViewId(entry.pluginId, entry.view.viewId) === view));
@@ -338,19 +333,6 @@ export function MobileNavBar({
           </button>
         )}
 
-        {showRoadmapsTopLevel && (
-          <button
-            type="button"
-            className={`mobile-nav-tab${view === "roadmaps" ? " mobile-nav-tab--active" : ""}`}
-            data-testid="mobile-nav-tab-roadmaps"
-            role="tab"
-            aria-selected={view === "roadmaps"}
-            onClick={() => onChangeView("roadmaps")}
-          >
-            <Map />
-            <span className="mobile-nav-tab-label">Roadmaps</span>
-          </button>
-        )}
 
         {topLevelPrimaryPluginViews.map((entry) => {
           const pluginTaskView = buildPluginTaskViewId(entry.pluginId, entry.view.viewId);
@@ -635,17 +617,7 @@ export function MobileNavBar({
               </button>
             )}
 
-            {roadmapEnabled && (
-              <button
-                type="button"
-                className="mobile-more-item"
-                data-testid="mobile-more-item-roadmaps"
-                onClick={() => handleMoreAction(() => onChangeView("roadmaps"))}
-              >
-                <Map />
-                <span>Roadmaps</span>
-              </button>
-            )}
+
 
             {experimentalFeatures?.researchView && (
               <button

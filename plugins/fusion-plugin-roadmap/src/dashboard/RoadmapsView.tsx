@@ -1,10 +1,10 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import React, { useState, useCallback, useEffect, useRef } from "react";
 import { Plus, Pencil, Trash2, Check, X, GripVertical, Sparkles, Download, Copy, Loader, ArrowLeft, ChevronUp } from "lucide-react";
 import "./RoadmapsView.css";
-import type { ToastType } from "../hooks/useToast";
-import { useRoadmaps, type FeatureSuggestion, type MilestoneSuggestion, type SuggestionDraftPatch } from "../hooks/useRoadmaps";
-import { useViewportMode } from "../hooks/useViewportMode";
-import { useConfirm } from "../hooks/useConfirm";
+import type { ToastType } from "./types.js";
+import { useRoadmaps, type FeatureSuggestion, type MilestoneSuggestion, type SuggestionDraftPatch } from "./useRoadmaps.js";
+import { useViewportMode } from "./useViewportMode.js";
+import { useConfirm } from "./useConfirm.js";
 import type {
   Roadmap,
   RoadmapMilestone,
@@ -17,7 +17,7 @@ import type {
   RoadmapFeatureUpdateInput,
   RoadmapMissionPlanningHandoff,
   RoadmapFeatureTaskPlanningHandoff,
-} from "@fusion-plugin-examples/roadmap";
+} from "../roadmap-types.js";
 
 export interface RoadmapsViewProps {
   projectId?: string;

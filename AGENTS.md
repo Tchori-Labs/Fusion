@@ -607,9 +607,9 @@ The test config (`vitest.config.ts`) includes `test.css: { include: [/.+/] }` so
 
 ### Lazy-Loaded Heavy Views
 
-These 16 views are lazy-loaded via `React.lazy()` to manage bundle size:
+These 15 views are lazy-loaded via `React.lazy()` to manage bundle size:
 
-- `AgentsView`, `RoadmapsView`, `NodesView`, `ChatView`, `MemoryView`
+- `AgentsView`, `NodesView`, `ChatView`, `MemoryView`
 - `DevServerView`, `InsightsView`, `DocumentsView`, `SkillsView`, `ResearchView`, `EvalsView`, `TodoView`
 - `SetupWizardModal`, `PluginManager`, `PiExtensionsManager`, `AgentDetailView`
 
