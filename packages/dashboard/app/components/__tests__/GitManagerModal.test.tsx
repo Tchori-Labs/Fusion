@@ -1363,20 +1363,62 @@ describe("GitManagerModal", () => {
     });
   });
 
-  it("calls pullBranch when Pull button clicked", async () => {
+  it("calls pullBranch with rebase false when Pull button clicked", async () => {
     const user = userEvent.setup();
     render(
       <GitManagerModal isOpen={true} onClose={vi.fn()} tasks={mockTasks} addToast={mockAddToast} />
     );
     fireEvent.click(screen.getByRole("tab", { name: /remotes/i }));
 
-    // Wait for sync card and scope button search within it
     const syncCard = await screen.findByTestId("remote-sync-card");
-    const pullButton = within(syncCard).getByRole("button", { name: /pull/i });
+    const pullButton = within(syncCard).getByRole("button", { name: /^pull$/i });
     await user.click(pullButton);
 
     await waitFor(() => {
-      expect(pullBranch).toHaveBeenCalled();
+      expect(pullBranch).toHaveBeenCalledWith({ rebase: false }, undefined);
+    });
+  });
+
+  it("calls pullBranch with rebase true from pull options menu", async () => {
+    const user = userEvent.setup();
+    render(
+      <GitManagerModal isOpen={true} onClose={vi.fn()} tasks={mockTasks} addToast={mockAddToast} />
+    );
+    fireEvent.click(screen.getByRole("tab", { name: /remotes/i }));
+
+    const syncCard = await screen.findByTestId("remote-sync-card");
+    await user.click(within(syncCard).getByRole("button", { name: /pull options/i }));
+    await user.click(screen.getByRole("menuitem", { name: /pull --rebase/i }));
+
+    await waitFor(() => {
+      expect(pullBranch).toHaveBeenCalledWith({ rebase: true }, undefined);
+    });
+  });
+
+  it("closes pull options menu on outside click and Escape", async () => {
+    const user = userEvent.setup();
+    render(
+      <GitManagerModal isOpen={true} onClose={vi.fn()} tasks={mockTasks} addToast={mockAddToast} />
+    );
+    fireEvent.click(screen.getByRole("tab", { name: /remotes/i }));
+
+    const syncCard = await screen.findByTestId("remote-sync-card");
+    const pullOptionsButton = within(syncCard).getByRole("button", { name: /pull options/i });
+
+    await user.click(pullOptionsButton);
+    expect(screen.getByRole("menu", { name: /pull options menu/i })).toBeInTheDocument();
+
+    await user.click(document.body);
+    await waitFor(() => {
+      expect(screen.queryByRole("menu", { name: /pull options menu/i })).not.toBeInTheDocument();
+    });
+
+    await user.click(pullOptionsButton);
+    expect(screen.getByRole("menu", { name: /pull options menu/i })).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+    await waitFor(() => {
+      expect(screen.queryByRole("menu", { name: /pull options menu/i })).not.toBeInTheDocument();
     });
   });
 
@@ -2114,10 +2156,10 @@ describe("GitManagerModal", () => {
     });
 
     const syncCard = screen.getByTestId("remote-sync-card");
-    await user.click(within(syncCard).getByRole("button", { name: /pull/i }));
+    await user.click(within(syncCard).getByRole("button", { name: /^pull$/i }));
 
     await waitFor(() => {
-      expect(pullBranch).toHaveBeenCalled();
+      expect(pullBranch).toHaveBeenCalledWith({ rebase: false }, undefined);
       expect(fetchRemoteCommits).toHaveBeenCalledTimes(2);
       expect(screen.getByText("Remote commit after pull")).toBeInTheDocument();
       expect(screen.queryByText("Remote commit before pull")).not.toBeInTheDocument();
@@ -2126,13 +2168,18 @@ describe("GitManagerModal", () => {
 
   it("refreshes recent remote commits after push without reopening modal", async () => {
     const user = userEvent.setup();
-    (fetchRemoteCommits as any)
-      .mockResolvedValueOnce([
-        { hash: "rc10", shortHash: "rc10", message: "Remote commit before push", author: "Dev", date: "2026-01-01T00:00:00Z", parents: [] },
-      ])
-      .mockResolvedValueOnce([
+    let remoteCommitsCallCount = 0;
+    (fetchRemoteCommits as any).mockImplementation(() => {
+      remoteCommitsCallCount += 1;
+      if (remoteCommitsCallCount <= 1) {
+        return Promise.resolve([
+          { hash: "rc10", shortHash: "rc10", message: "Remote commit before push", author: "Dev", date: "2026-01-01T00:00:00Z", parents: [] },
+        ]);
+      }
+      return Promise.resolve([
         { hash: "rc11", shortHash: "rc11", message: "Remote commit after push", author: "Dev", date: "2026-01-02T00:00:00Z", parents: [] },
       ]);
+    });
 
     render(
       <GitManagerModal isOpen={true} onClose={vi.fn()} tasks={mockTasks} addToast={mockAddToast} />

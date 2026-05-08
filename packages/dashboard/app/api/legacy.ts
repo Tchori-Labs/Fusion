@@ -2358,9 +2358,18 @@ export function fetchRemote(remote?: string, projectId?: string): Promise<GitFet
 }
 
 /** Pull current branch */
-export function pullBranch(projectId?: string): Promise<GitPullResult> {
-  return api<GitPullResult>(withProjectId("/git/pull", projectId), {
+export function pullBranch(options?: { rebase?: boolean }, projectId?: string): Promise<GitPullResult>;
+export function pullBranch(projectId?: string): Promise<GitPullResult>;
+export function pullBranch(
+  optionsOrProjectId?: { rebase?: boolean } | string,
+  projectId?: string,
+): Promise<GitPullResult> {
+  const options = typeof optionsOrProjectId === "string" ? undefined : optionsOrProjectId;
+  const resolvedProjectId = typeof optionsOrProjectId === "string" ? optionsOrProjectId : projectId;
+
+  return api<GitPullResult>(withProjectId("/git/pull", resolvedProjectId), {
     method: "POST",
+    body: JSON.stringify({ rebase: options?.rebase ?? false }),
   });
 }
 

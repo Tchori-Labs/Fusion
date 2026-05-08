@@ -1159,7 +1159,7 @@ Git dashboard routes are registered in `register-git-github.ts`.
 | POST | `/api/git/branches/:name/checkout` | Checkout an existing branch. |
 | DELETE | `/api/git/branches/:name` | Delete a branch (`?force=true` allows deleting unmerged branches). |
 | POST | `/api/git/fetch` | Fetch from a remote (`remote` defaults to `origin`). |
-| POST | `/api/git/pull` | Pull the current branch and return structured conflict metadata on merge conflicts. |
+| POST | `/api/git/pull` | Pull the current branch (`rebase` boolean optional) and return structured conflict metadata on merge/rebase conflicts. |
 | POST | `/api/git/push` | Push the current branch. |
 | GET | `/api/git/stashes` | List stash entries. |
 | GET | `/api/git/stashes/:index/diff` | Return stash stat + patch for a validated stash index (404 when missing). |

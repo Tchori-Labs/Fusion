@@ -464,16 +464,21 @@ export interface GitPullResult {
   conflict?: boolean;
 }
 
-export async function pullGitBranch(cwd?: string): Promise<GitPullResult> {
+export async function pullGitBranch(cwd?: string, options?: { rebase?: boolean }): Promise<GitPullResult> {
+  const rebase = options?.rebase === true;
   try {
-    const output = await runGitCommand(["pull"], cwd, 30000);
-    return { success: true, message: output.trim() };
+    const output = await runGitCommand(rebase ? ["pull", "--rebase"] : ["pull"], cwd, 30000);
+    const message = output.trim();
+    if (message) {
+      return { success: true, message };
+    }
+    return { success: true, message: rebase ? "Pull completed (rebase)" : "Pull completed" };
   } catch (err: unknown) {
     if (err instanceof ApiError) {
       throw err;
     }
     const message = getCommandErrorMessage(err);
-    if (message.includes("CONFLICT") || message.includes("Merge conflict")) {
+    if (message.includes("CONFLICT") || message.includes("Merge conflict") || message.includes("could not apply")) {
       return { success: false, message: "Merge conflict detected. Resolve manually.", conflict: true };
     }
     throw new Error(message || "Pull failed");
@@ -1653,7 +1658,11 @@ export function registerGitGitHubRoutes(ctx: ApiRoutesContext): void {
       if (!(await isGitRepo(rootDir))) {
         throw badRequest("Not a git repository");
       }
-      const result = await pullGitBranch(rootDir);
+      const { rebase } = req.body ?? {};
+      if (rebase !== undefined && typeof rebase !== "boolean") {
+        throw badRequest("rebase must be a boolean");
+      }
+      const result = await pullGitBranch(rootDir, { rebase: rebase === true });
       if (result.conflict) {
         throw new ApiError(409, result.message ?? "Merge conflict detected. Resolve manually.", {
           ...result,

@@ -777,15 +777,16 @@ export function GitManagerModal({ isOpen, onClose, tasks: _tasks, addToast, proj
     }
   }, [addToast, projectId]);
 
-  const handlePull = useCallback(async () => {
+  const handlePull = useCallback(async (options?: { rebase?: boolean }) => {
     setRemoteLoading("pull");
     try {
-      const result = await pullBranch(projectId);
+      const result = await pullBranch(options, projectId);
       setLastRemoteResult(result);
       if (result.conflict) {
         addToast("Merge conflict detected. Resolve manually.", "error");
       } else {
-        addToast(result.message || "Pull completed", "success");
+        const fallbackMessage = options?.rebase ? "Pull --rebase completed" : "Pull completed";
+        addToast(result.message || fallbackMessage, "success");
       }
       const statusData = await fetchGitStatus(projectId);
       setStatus(statusData);
@@ -1909,7 +1910,7 @@ function RemotesPanel({
   remoteLoading: string | null;
   lastRemoteResult: GitFetchResult | GitPullResult | GitPushResult | null;
   onFetch: () => void;
-  onPull: () => void;
+  onPull: (options?: { rebase?: boolean }) => void;
   onPush: () => void;
   addToast: (message: string, type?: ToastType) => void;
   projectId?: string;
@@ -1933,6 +1934,8 @@ function RemotesPanel({
   const [editUrlValue, setEditUrlValue] = useState("");
   const [editNameValue, setEditNameValue] = useState("");
   const [showAddForm, setShowAddForm] = useState(false);
+  const [pullMenuOpen, setPullMenuOpen] = useState(false);
+  const pullSplitRef = useRef<HTMLDivElement | null>(null);
 
   // Ahead commits (local commits to push)
   const [aheadCommits, setAheadCommits] = useState<GitCommit[]>([]);
@@ -1947,6 +1950,38 @@ function RemotesPanel({
 
   // Derived state for selected remote
   const selectedRemoteData = remotes.find((r) => r.name === selectedRemote);
+
+  useEffect(() => {
+    if (remoteLoading !== null || loading) {
+      setPullMenuOpen(false);
+    }
+  }, [remoteLoading, loading]);
+
+  useEffect(() => {
+    if (!pullMenuOpen) {
+      return;
+    }
+
+    const handleDocumentClick = (event: MouseEvent) => {
+      if (!pullSplitRef.current?.contains(event.target as Node)) {
+        setPullMenuOpen(false);
+      }
+    };
+
+    const handleDocumentKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setPullMenuOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleDocumentClick);
+    document.addEventListener("keydown", handleDocumentKeyDown);
+
+    return () => {
+      document.removeEventListener("mousedown", handleDocumentClick);
+      document.removeEventListener("keydown", handleDocumentKeyDown);
+    };
+  }, [pullMenuOpen]);
 
   // Inline commit diff expansion (one per list context)
   const [expandedAheadCommit, setExpandedAheadCommit] = useState<string | null>(null);
@@ -2317,18 +2352,57 @@ function RemotesPanel({
                     )}
                     Fetch
                   </button>
-                  <button
-                    className="btn btn-primary"
-                    onClick={onPull}
-                    disabled={remoteLoading !== null || loading}
-                  >
-                    {remoteLoading === "pull" ? (
-                      <Loader2 size={14} className="spin" />
-                    ) : (
-                      <GitPullRequest size={14} />
-                    )}
-                    Pull
-                  </button>
+                  <div className="gm-pull-split" ref={pullSplitRef}>
+                    <button
+                      className="btn btn-primary gm-pull-split-main"
+                      onClick={() => {
+                        setPullMenuOpen(false);
+                        onPull({ rebase: false });
+                      }}
+                      disabled={remoteLoading !== null || loading}
+                    >
+                      {remoteLoading === "pull" ? (
+                        <Loader2 size={14} className="spin" />
+                      ) : (
+                        <GitPullRequest size={14} />
+                      )}
+                      Pull
+                    </button>
+                    <button
+                      className="btn btn-primary btn-icon gm-pull-split-toggle"
+                      onClick={() => setPullMenuOpen((open) => !open)}
+                      disabled={remoteLoading !== null || loading}
+                      aria-label="Pull options"
+                      aria-haspopup="menu"
+                      aria-expanded={pullMenuOpen}
+                    >
+                      <ChevronDown size={14} />
+                    </button>
+                    {pullMenuOpen ? (
+                      <div className="gm-pull-menu" role="menu" aria-label="Pull options menu">
+                        <button
+                          className="gm-pull-menu-item"
+                          role="menuitem"
+                          onClick={() => {
+                            setPullMenuOpen(false);
+                            onPull({ rebase: false });
+                          }}
+                        >
+                          Pull
+                        </button>
+                        <button
+                          className="gm-pull-menu-item"
+                          role="menuitem"
+                          onClick={() => {
+                            setPullMenuOpen(false);
+                            onPull({ rebase: true });
+                          }}
+                        >
+                          Pull --rebase
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
                   <button
                     className="btn btn-primary"
                     onClick={onPush}

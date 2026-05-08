@@ -438,7 +438,7 @@ describe("Git Management API", () => {
   });
 
   describe("pullBranch", () => {
-    it("sends POST to pull", async () => {
+    it("sends POST to pull with default rebase false", async () => {
       const result = { success: true, message: "Pulled 2 commits" };
       globalThis.fetch = vi.fn().mockReturnValue(mockFetchResponse(true, result));
 
@@ -448,6 +448,20 @@ describe("Git Management API", () => {
       expect(globalThis.fetch).toHaveBeenCalledWith("/api/git/pull", {
         headers: { "Content-Type": "application/json" },
         method: "POST",
+        body: JSON.stringify({ rebase: false }),
+      });
+    });
+
+    it("sends rebase true when requested", async () => {
+      const result = { success: true, message: "Rebased and pulled" };
+      globalThis.fetch = vi.fn().mockReturnValue(mockFetchResponse(true, result));
+
+      await pullBranch({ rebase: true });
+
+      expect(globalThis.fetch).toHaveBeenCalledWith("/api/git/pull", {
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+        body: JSON.stringify({ rebase: true }),
       });
     });
 
