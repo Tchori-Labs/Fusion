@@ -1123,7 +1123,22 @@ export class ProjectEngine {
 
   private internalEnqueueMerge(taskId: string): void {
     if (this.shuttingDown) return;
-    if (this.mergeActive.has(taskId)) return;
+    if (this.mergeActive.has(taskId)) {
+      // Distinguish "actually being processed" (queued or active) from a
+      // leaked entry. Leaks are dropped by reconcileStaleMergeActive() on the
+      // next 15s sweep, so we only log the genuinely-busy case at debug
+      // verbosity. Without this log the de-dup was invisible — a leaked
+      // entry made every subsequent enqueue silently no-op until the 15-min
+      // maintenance loop woke up.
+      const isActuallyLive =
+        this.mergeQueue.includes(taskId) || this.activeMergeTaskId === taskId;
+      if (!isActuallyLive) {
+        runtimeLog.warn(
+          `internalEnqueueMerge(${taskId}): skipped — mergeActive entry is leaked (not queued, not active). reconcileStaleMergeActive() will clear it on the next sweep.`,
+        );
+      }
+      return;
+    }
     this.mergeActive.add(taskId);
     this.mergeQueue.push(taskId);
     void this.drainMergeQueue().catch((err: unknown) => {
@@ -1758,17 +1773,49 @@ export class ProjectEngine {
           // Re-validate eligibility after the grace period — the task may
           // have been paused, moved, or had its merge blocked.
           const latestTask = await store.getTask(task.id).catch(() => null);
-          if (!latestTask) return;
-          if (latestTask.column !== "in-review") return;
-          if (latestTask.paused) return;
-          if (this.options.getTaskMergeBlocker?.(latestTask)) return;
+          if (!latestTask) {
+            runtimeLog.warn(`Auto-merge handoff (${task.id}): task disappeared during grace period`);
+            return;
+          }
+          if (latestTask.column !== "in-review") {
+            runtimeLog.log(`Auto-merge handoff (${task.id}) skipped: column changed to ${latestTask.column}`);
+            return;
+          }
+          if (latestTask.paused) {
+            runtimeLog.log(`Auto-merge handoff (${task.id}) skipped: task paused`);
+            return;
+          }
+          const blockerReason = this.options.getTaskMergeBlocker?.(latestTask);
+          if (blockerReason) {
+            runtimeLog.log(`Auto-merge handoff (${task.id}) skipped: ${blockerReason}`);
+            return;
+          }
           const settings = await store.getSettings();
-          if (settings.globalPause || settings.enginePaused) return;
-          if (!settings.autoMerge) return;
+          if (settings.globalPause || settings.enginePaused) {
+            runtimeLog.log(`Auto-merge handoff (${task.id}) skipped: ${settings.globalPause ? "globalPause" : "enginePaused"} active`);
+            return;
+          }
+          if (!settings.autoMerge) {
+            runtimeLog.log(`Auto-merge handoff (${task.id}) skipped: autoMerge disabled`);
+            return;
+          }
+          // Belt-and-braces: clear any stale mergeActive entry from a wedged
+          // prior attempt so this enqueue isn't silently no-op'd. The 15s
+          // sweep also reconciles via reconcileStaleMergeActive(), but waiting
+          // up to 15s for a fresh in-review task to start merging is the
+          // exact regression we're fixing.
+          if (
+            this.mergeActive.has(task.id) &&
+            !this.mergeQueue.includes(task.id) &&
+            this.activeMergeTaskId !== task.id
+          ) {
+            runtimeLog.warn(`Auto-merge handoff (${task.id}): clearing stale mergeActive before enqueue`);
+            this.mergeActive.delete(task.id);
+          }
           this.internalEnqueueMerge(task.id);
         } catch (err: unknown) {
           runtimeLog.warn(
-            `Auto-merge: failed to read settings for task:moved on ${task.id}: ${err instanceof Error ? err.message : String(err)}`,
+            `Auto-merge handoff (${task.id}) failed: ${err instanceof Error ? err.message : String(err)}`,
           );
         }
       }, MERGE_HANDOFF_GRACE_MS);

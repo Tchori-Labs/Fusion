@@ -1766,7 +1766,7 @@ describe("ProjectEngine swallowed error hardening", () => {
     await vi.advanceTimersByTimeAsync(500);
 
     expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining("Auto-merge: failed to read settings for task:moved on FN-001"),
+      expect.stringContaining("Auto-merge handoff (FN-001) failed: db locked"),
     );
 
     await engine.stop();
