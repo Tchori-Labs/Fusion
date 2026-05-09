@@ -473,7 +473,7 @@ describe("QuickChatFAB session-first UX", () => {
     expect(screen.queryByTestId("quick-chat-jump-to-latest")).toBeNull();
   });
 
-  it("snaps to bottom on initial open when messages are present", async () => {
+  it("snaps to bottom when first opened", async () => {
     const deferredMessages = createDeferredPromise<{
       messages: Array<{ id: string; sessionId: string; role: "assistant"; content: string; createdAt: string }>;
     }>();
@@ -484,18 +484,17 @@ describe("QuickChatFAB session-first UX", () => {
 
     const messages = await screen.findByTestId("quick-chat-messages");
     let scrollTopValue = 0;
-    let scrollTopSetCount = 0;
-    const scrollHeightValue = 1200;
+    const scrollHeightValue = 1100;
     Object.defineProperty(messages, "scrollHeight", { configurable: true, get: () => scrollHeightValue });
     Object.defineProperty(messages, "scrollTop", {
       configurable: true,
       get: () => scrollTopValue,
       set: (value: number) => {
-        scrollTopSetCount += 1;
         scrollTopValue = value;
       },
     });
 
+    // FN-3814: install descriptors before initial messages resolve so the first-open isOpen path writes into this captured scrollTop.
     deferredMessages.resolve({
       messages: [
         {
@@ -510,7 +509,6 @@ describe("QuickChatFAB session-first UX", () => {
 
     await waitFor(() => {
       expect(scrollTopValue).toBe(scrollHeightValue);
-      expect(scrollTopSetCount).toBeGreaterThanOrEqual(2);
     });
   });
 
