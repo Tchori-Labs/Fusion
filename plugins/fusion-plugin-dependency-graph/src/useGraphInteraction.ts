@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
-import type { LayoutOptions } from "./layout";
-import type { GraphPosition } from "./types";
+import type { LayoutOptions } from "./layout.js";
+import type { GraphPosition } from "./types.js";
 
 const MIN_ZOOM = 0.1;
 const MAX_ZOOM = 3;

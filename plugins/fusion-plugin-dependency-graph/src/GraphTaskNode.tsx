@@ -1,6 +1,6 @@
 import type { CSSProperties, ComponentProps, HTMLAttributes } from "react";
-import type { GraphPosition } from "./types";
-import { useNodeDrag } from "./hooks/useNodeDrag";
+import type { GraphPosition } from "./types.js";
+import { useNodeDrag } from "./hooks/useNodeDrag.js";
 import { TaskCard } from "@fusion/dashboard/app/components/TaskCard";
 import { isTaskStuck } from "@fusion/dashboard/app/utils/taskStuck";
 import "./GraphTaskNode.css";

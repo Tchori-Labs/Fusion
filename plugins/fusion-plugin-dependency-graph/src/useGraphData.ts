@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import type { Task } from "@fusion/core";
-import type { GraphData, GraphNode } from "./types";
+import type { GraphData, GraphNode } from "./types.js";
 
 export function useGraphData(tasks: Task[]): GraphData {
   return useMemo(() => {

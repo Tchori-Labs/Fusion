@@ -1,4 +1,4 @@
-import type { GraphEdge, GraphPosition } from "./types";
+import type { GraphEdge, GraphPosition } from "./types.js";
 import "./GraphHighlight.css";
 
 interface GraphEdgesProps {

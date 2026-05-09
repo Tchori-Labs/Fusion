@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { clearPositions, loadPositions, savePositions, type NodePositions } from "../utils/graphPositionStorage";
+import { clearPositions, loadPositions, savePositions, type NodePositions } from "../utils/graphPositionStorage.js";
 
 function filterVisiblePositions(positions: NodePositions, visibleTaskIds: Set<string>): NodePositions {
   const filtered: NodePositions = {};

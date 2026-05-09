@@ -1,7 +1,7 @@
 import type { Task, TaskDetail, WorkflowStep } from "@fusion/core";
 import type { PluginDashboardViewContext } from "@fusion/dashboard/app/plugins/types";
 import { createElement } from "react";
-import { DependencyGraph } from "./DependencyGraph";
+import { DependencyGraph } from "./DependencyGraph.js";
 
 function createWorkflowStepNameLookup(workflowSteps: WorkflowStep[] | undefined): ReadonlyMap<string, string> {
   return new Map((workflowSteps ?? []).map((step) => [step.id, step.name] as const));

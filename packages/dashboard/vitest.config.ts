@@ -53,6 +53,14 @@ export default defineConfig({
         __dirname,
         "../../plugins/fusion-plugin-paperclip-runtime/src/index.ts",
       ),
+      "@fusion-plugin-examples/dependency-graph/dashboard-view": resolve(
+        __dirname,
+        "../../plugins/fusion-plugin-dependency-graph/src/dashboard-view.tsx",
+      ),
+      "@fusion-plugin-examples/dependency-graph": resolve(
+        __dirname,
+        "../../plugins/fusion-plugin-dependency-graph/src/index.ts",
+      ),
     },
   },
   test: {

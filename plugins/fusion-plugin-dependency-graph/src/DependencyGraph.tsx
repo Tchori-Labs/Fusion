@@ -1,15 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Task } from "@fusion/core";
-import { GraphTaskNode } from "./GraphTaskNode";
-import { GraphToolbar } from "./GraphToolbar";
-import { GraphEdges } from "./edges";
-import { filterGraphTasks } from "./filters";
-import { computeAutoLayout } from "./layout";
-import { useGraphData } from "./useGraphData";
-import { useGraphInteraction } from "./useGraphInteraction";
-import { useDependencyChain } from "./hooks/useDependencyChain";
-import { useGraphPositions } from "./hooks/useGraphPositions";
-import { mergePositions, type NodePositions } from "./utils/graphPositionStorage";
+import { GraphTaskNode } from "./GraphTaskNode.js";
+import { GraphToolbar } from "./GraphToolbar.js";
+import { GraphEdges } from "./edges.js";
+import { filterGraphTasks } from "./filters.js";
+import { computeAutoLayout } from "./layout.js";
+import { useGraphData } from "./useGraphData.js";
+import { useGraphInteraction } from "./useGraphInteraction.js";
+import { useDependencyChain } from "./hooks/useDependencyChain.js";
+import { useGraphPositions } from "./hooks/useGraphPositions.js";
+import { mergePositions, type NodePositions } from "./utils/graphPositionStorage.js";
 import "./DependencyGraph.css";
 
 const NODE_WIDTH = 280;

@@ -1,7 +1,8 @@
-import { mkdtempSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdtempSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { PluginLoader, PluginStore } from "@fusion/core";
 import { afterEach, describe, expect, it } from "vitest";
 import plugin from "../index";
@@ -24,6 +25,7 @@ describe("dependency graph plugin index", () => {
     );
   });
 
+  // Vitest's resolver can mask extensionless-import issues in emitted dist files.
   it("is loadable through package exports", async () => {
     const entryModule = await import("@fusion-plugin-examples/dependency-graph");
     expect(entryModule.default?.manifest?.id).toBe("fusion-plugin-dependency-graph");
@@ -33,6 +35,29 @@ describe("dependency graph plugin index", () => {
 
     const viewModule = await import("@fusion-plugin-examples/dependency-graph/dashboard-view");
     expect(typeof viewModule.default).toBe("function");
+  });
+
+  const hasNodeImportPrereqs =
+    existsSync(join(process.cwd(), "dist/dashboard-view.js")) &&
+    existsSync(join(process.cwd(), "node_modules/@fusion/plugin-sdk/dist/index.js"));
+  const nodeImportTest = hasNodeImportPrereqs ? it : it.skip;
+  nodeImportTest("keeps built entrypoint imports Node-ESM-safe for relative specifiers", () => {
+    const script =
+      "Promise.all([" +
+      "import('./plugins/fusion-plugin-dependency-graph/dist/index.js')," +
+      "import('node:fs/promises').then((fs) => fs.readFile('./plugins/fusion-plugin-dependency-graph/dist/dashboard-view.js', 'utf8'))" +
+      "]).then(([root, dashboardViewSource]) => {" +
+      "if (root.default?.manifest?.id !== 'fusion-plugin-dependency-graph') process.exit(2);" +
+      "if (!dashboardViewSource.includes('from \\\"./DependencyGraph.js\\\"')) process.exit(3);" +
+      "}).catch((e) => { console.error(e?.code, e?.message); process.exit(1); });";
+
+    const repoRoot = resolve(process.cwd(), "../..");
+    const result = spawnSync(process.execPath, ["-e", script], {
+      cwd: repoRoot,
+      encoding: "utf8",
+    });
+
+    expect(result.status, `Node import check failed: ${result.stderr || result.stdout}`).toBe(0);
   });
 
   it("is loadable by PluginLoader without throwing", async () => {

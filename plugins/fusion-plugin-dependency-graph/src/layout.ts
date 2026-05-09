@@ -1,4 +1,4 @@
-import type { GraphData, GraphPosition } from "./types";
+import type { GraphData, GraphPosition } from "./types.js";
 
 export interface LayoutOptions {
   nodeWidth?: number;

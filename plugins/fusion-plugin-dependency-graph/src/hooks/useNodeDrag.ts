@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from "react";
-import type { GraphPosition } from "../types";
+import type { GraphPosition } from "../types.js";
 
 const DRAG_THRESHOLD_PX = 4;
 
