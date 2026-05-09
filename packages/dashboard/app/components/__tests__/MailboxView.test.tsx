@@ -169,6 +169,7 @@ function makeOutboxResponse(messages: Message[]) {
 describe("MailboxView", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    window.localStorage.clear();
     sseSubscriptions.length = 0;
     mockUseViewportMode.mockReturnValue("desktop");
     mockUseMobileKeyboard.mockReturnValue({
@@ -1538,6 +1539,80 @@ describe("MailboxView", () => {
     });
   });
 
+  describe("resizable split pane", () => {
+    it("renders a desktop resize handle with separator aria semantics", async () => {
+      mockUseViewportMode.mockReturnValue("desktop");
+      mockFetchInbox.mockResolvedValue(makeInboxResponse([mockMessage], 1));
+
+      render(<MailboxView {...defaultProps} projectId="proj-resize" />);
+
+      const handle = await screen.findByTestId("mailbox-split-resize-handle");
+      expect(handle.getAttribute("role")).toBe("separator");
+      expect(handle.getAttribute("aria-orientation")).toBe("vertical");
+      expect(Number(handle.getAttribute("aria-valuenow"))).toBeGreaterThan(0);
+    });
+
+    it("does not render the resize handle on mobile", async () => {
+      mockUseViewportMode.mockReturnValue("mobile");
+      mockFetchInbox.mockResolvedValue(makeInboxResponse([mockMessage], 1));
+
+      render(<MailboxView {...defaultProps} />);
+
+      await screen.findByTestId("mailbox-view");
+      expect(screen.queryByTestId("mailbox-split-resize-handle")).toBeNull();
+    });
+
+    it("supports keyboard resize and Home/End clamping", async () => {
+      mockUseViewportMode.mockReturnValue("desktop");
+      mockFetchInbox.mockResolvedValue(makeInboxResponse([mockMessage], 1));
+
+      render(<MailboxView {...defaultProps} projectId="proj-keys" />);
+
+      const handle = await screen.findByTestId("mailbox-split-resize-handle");
+      const initial = Number(handle.getAttribute("aria-valuenow"));
+
+      fireEvent.keyDown(handle, { key: "ArrowLeft" });
+      const afterLeft = Number(handle.getAttribute("aria-valuenow"));
+      expect(afterLeft).toBeLessThan(initial);
+
+      fireEvent.keyDown(handle, { key: "ArrowRight" });
+      const afterRight = Number(handle.getAttribute("aria-valuenow"));
+      expect(afterRight).toBeGreaterThanOrEqual(afterLeft);
+
+      fireEvent.keyDown(handle, { key: "Home" });
+      expect(Number(handle.getAttribute("aria-valuenow"))).toBe(280);
+
+      fireEvent.keyDown(handle, { key: "End" });
+      expect(Number(handle.getAttribute("aria-valuenow"))).toBeGreaterThanOrEqual(280);
+    });
+
+    it("persists and restores scoped mailbox sidebar width", async () => {
+      mockUseViewportMode.mockReturnValue("desktop");
+      mockFetchInbox.mockResolvedValue(makeInboxResponse([mockMessage], 1));
+
+      const projectId = "proj-persist";
+      const storageKey = `kb:${projectId}:kb-dashboard-mailbox-sidebar-width`;
+      window.localStorage.setItem(storageKey, "360");
+
+      const { unmount } = render(<MailboxView {...defaultProps} projectId={projectId} />);
+
+      const handle = await screen.findByTestId("mailbox-split-resize-handle");
+      expect(Number(handle.getAttribute("aria-valuenow"))).toBe(360);
+
+      fireEvent.keyDown(handle, { key: "ArrowRight" });
+      await waitFor(() => {
+        const savedWidth = Number(window.localStorage.getItem(storageKey));
+        expect(savedWidth).toBeGreaterThan(360);
+      });
+
+      unmount();
+      render(<MailboxView {...defaultProps} projectId={projectId} />);
+      const remountedHandle = await screen.findByTestId("mailbox-split-resize-handle");
+      const persistedWidth = Number(window.localStorage.getItem(storageKey));
+      expect(Number(remountedHandle.getAttribute("aria-valuenow"))).toBe(Math.round(persistedWidth));
+    });
+  });
+
   describe("mobile layout CSS regressions", () => {
     it("defines .mailbox-view base flex layout with min-height: 0", async () => {
       const fs = await import("fs");
@@ -1557,12 +1632,7 @@ describe("MailboxView", () => {
     it("defines desktop/tablet split-pane selectors under .mailbox-view scope", async () => {
       const css = loadAllAppCss();
 
-      const splitLayoutBlockMatch = css.match(/\.mailbox-view\s+\.mailbox-split-layout\s*\{([^}]*)\}/);
-      expect(splitLayoutBlockMatch).toBeTruthy();
-      const splitLayoutBlock = splitLayoutBlockMatch![1];
-      expect(splitLayoutBlock).toContain("display: grid;");
-      expect(splitLayoutBlock).toContain("min-height: 0;");
-      expect(splitLayoutBlock).toContain("grid-template-columns");
+      expect(css).toMatch(/\.mailbox-view\s+\.mailbox-split-layout\s*\{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*auto\s+auto\s+minmax\(0,\s*1fr\);[^}]*gap:\s*0;[^}]*min-height:\s*0;[^}]*\}/);
 
       const splitPaneBlockMatch = css.match(/\.mailbox-view\s+\.mailbox-split-list-pane,\s*\n\.mailbox-view\s+\.mailbox-split-detail-pane\s*\{([^}]*)\}/);
       expect(splitPaneBlockMatch).toBeTruthy();
@@ -1570,6 +1640,8 @@ describe("MailboxView", () => {
       expect(splitPaneBlock).toContain("overflow-y: auto;");
       expect(splitPaneBlock).toContain("border: var(--btn-border-width) solid var(--border);");
       expect(splitPaneBlock).toContain("background: var(--surface);");
+
+      expect(css).toMatch(/\.mailbox-view\s+\.mailbox-split-resize-handle\s*\{[^}]*cursor:\s*col-resize;[^}]*background:\s*color-mix\(in srgb,\s*var\(--border\)\s*70%,\s*transparent\);[^}]*\}/);
 
       const splitEmptyBlockMatch = css.match(/\.mailbox-view\s+\.mailbox-split-empty\s*\{([^}]*)\}/);
       expect(splitEmptyBlockMatch).toBeTruthy();
@@ -1594,14 +1666,16 @@ describe("MailboxView", () => {
       // Verify .mailbox-view selectors are in mobile section
       expect(mailboxMobileSection).toContain(".mailbox-view .mailbox-header");
       expect(mailboxMobileSection).toMatch(/\.mailbox-modal \.mailbox-header-actions,\s*\.mailbox-view \.mailbox-header-actions\s*\{[^}]*gap:\s*var\(--space-sm\);[^}]*\}/);
-      expect(mailboxMobileSection).toMatch(/\.mailbox-modal \.mailbox-header-actions \.btn,[^}]*\.mailbox-view \.mailbox-header-actions \.btn-icon\s*\{[^}]*min-height:\s*36px;[^}]*\}/);
-      expect(mailboxMobileSection).toMatch(/\.mailbox-modal \.mailbox-header-actions \.btn-icon,[^}]*\.mailbox-view \.mailbox-header-actions \.btn-icon\s*\{[^}]*min-width:\s*36px;[^}]*display:\s*inline-flex;[^}]*\}/);
+      expect(mailboxMobileSection).toMatch(/\.mailbox-modal \.mailbox-header-actions \.btn,[^}]*\.mailbox-view \.mailbox-header-actions \.btn-icon\s*\{[^}]*min-height:\s*2\.25rem;[^}]*\}/);
+      expect(mailboxMobileSection).toMatch(/\.mailbox-modal \.mailbox-header-actions \.btn-icon,[^}]*\.mailbox-view \.mailbox-header-actions \.btn-icon\s*\{[^}]*min-width:\s*2\.25rem;[^}]*display:\s*inline-flex;[^}]*\}/);
       expect(mailboxMobileSection).toContain(".mailbox-view .mailbox-tabs");
       expect(mailboxMobileSection).toContain(".mailbox-view .mailbox-content");
       expect(mailboxMobileSection).toContain(".mailbox-view .mailbox-split-layout");
       expect(mailboxMobileSection).toContain(".mailbox-view .mailbox-split-list-pane");
       expect(mailboxMobileSection).toContain(".mailbox-view .mailbox-split-detail-pane");
+      expect(mailboxMobileSection).toContain(".mailbox-view .mailbox-split-resize-handle");
       expect(mailboxMobileSection).toContain(".mailbox-view .mailbox-empty");
+      expect(mailboxMobileSection).toMatch(/\.mailbox-view\s+\.mailbox-split-resize-handle\s*\{[^}]*display:\s*none;[^}]*\}/);
     });
 
     it("uses mobile-specific values for .mailbox-view content and FAB", async () => {

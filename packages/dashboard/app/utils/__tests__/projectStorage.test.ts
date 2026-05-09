@@ -83,6 +83,7 @@ describe("projectStorage", () => {
         "kb-dashboard-selected-tasks",
         "kb-dashboard-list-selected-task",
         "kb-dashboard-list-sidebar-width",
+        "kb-dashboard-mailbox-sidebar-width",
         "kb-quick-entry-text",
         "kb-inline-create-text",
         "fn-agent-view",
@@ -101,7 +102,7 @@ describe("projectStorage", () => {
         "fusion-plugin-dependency-graph:positions",
       ]),
     );
-    expect(PROJECT_STORAGE_KEYS).toHaveLength(23);
+    expect(PROJECT_STORAGE_KEYS).toHaveLength(24);
   });
 
   it("stores branch filter values as scoped strings per project", () => {

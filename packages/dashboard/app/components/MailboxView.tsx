@@ -1,5 +1,5 @@
 import "./MailboxModal.css";
-import { useState, useEffect, useCallback, useMemo, type CSSProperties } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, type CSSProperties } from "react";
 import {
   Mail,
   Send,
@@ -38,6 +38,7 @@ import { MessageComposer } from "./MessageComposer";
 import { subscribeSse } from "../sse-bus";
 import { useViewportMode } from "../hooks/useViewportMode";
 import { useMobileKeyboard } from "../hooks/useMobileKeyboard";
+import { getScopedItem, setScopedItem } from "../utils/projectStorage";
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -50,6 +51,34 @@ interface MailboxViewProps {
   onUnreadCountChange?: (count: number) => void;
 }
 
+const MAILBOX_SIDEBAR_MIN_WIDTH = 280;
+const MAILBOX_SIDEBAR_MAX_RATIO = 0.65;
+const MAILBOX_SIDEBAR_KEYBOARD_STEP = 16;
+const MAILBOX_SIDEBAR_DEFAULT_WIDTH = 320;
+
+function getMailboxSidebarMaxWidth(containerWidth: number): number {
+  return Math.max(MAILBOX_SIDEBAR_MIN_WIDTH, containerWidth * MAILBOX_SIDEBAR_MAX_RATIO);
+}
+
+function clampMailboxSidebarWidth(width: number, containerWidth: number): number {
+  const maxWidth = getMailboxSidebarMaxWidth(containerWidth);
+  return Math.min(Math.max(width, MAILBOX_SIDEBAR_MIN_WIDTH), maxWidth);
+}
+
+function readMailboxSidebarWidth(projectId?: string): number {
+  try {
+    const saved = getScopedItem("kb-dashboard-mailbox-sidebar-width", projectId);
+    if (!saved) return MAILBOX_SIDEBAR_DEFAULT_WIDTH;
+    const parsed = Number(saved);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return parsed;
+    }
+  } catch {
+    // Invalid localStorage data - fall through to default
+  }
+
+  return MAILBOX_SIDEBAR_DEFAULT_WIDTH;
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -191,6 +220,8 @@ export function MailboxView({
   const viewportMode = useViewportMode();
   const isMobile = viewportMode === "mobile";
   const isSplitPane = !isMobile;
+  const [sidebarWidth, setSidebarWidth] = useState<number>(() => readMailboxSidebarWidth(projectId));
+  const splitLayoutRef = useRef<HTMLDivElement>(null);
   const { keyboardOverlap, viewportHeight, viewportOffsetTop, keyboardOpen } = useMobileKeyboard({ enabled: isMobile });
   const containerKeyboardStyle = useMemo<CSSProperties | undefined>(() => {
     if (!keyboardOpen) {
@@ -203,6 +234,75 @@ export function MailboxView({
       ...(viewportHeight != null ? { "--vv-height": `${viewportHeight}px` } : {}),
     } as CSSProperties;
   }, [keyboardOpen, keyboardOverlap, viewportHeight, viewportOffsetTop]);
+
+  useEffect(() => {
+    setSidebarWidth(readMailboxSidebarWidth(projectId));
+  }, [projectId]);
+
+  useEffect(() => {
+    if (!isSplitPane) return;
+    const containerWidth = splitLayoutRef.current?.clientWidth;
+    if (!containerWidth) return;
+
+    setSidebarWidth((current) => clampMailboxSidebarWidth(current, containerWidth));
+  }, [isSplitPane]);
+
+  useEffect(() => {
+    if (!isSplitPane) return;
+    try {
+      setScopedItem("kb-dashboard-mailbox-sidebar-width", String(sidebarWidth), projectId);
+    } catch {
+      // localStorage persistence is best-effort.
+    }
+  }, [isSplitPane, projectId, sidebarWidth]);
+
+  const handleSplitResizeStart = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    if (!isSplitPane) return;
+    event.preventDefault();
+    const container = splitLayoutRef.current;
+    if (!container) return;
+
+    const rect = container.getBoundingClientRect();
+    const onMouseMove = (moveEvent: MouseEvent) => {
+      const proposedWidth = moveEvent.clientX - rect.left;
+      setSidebarWidth(clampMailboxSidebarWidth(proposedWidth, rect.width));
+    };
+
+    const onMouseUp = () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+  }, [isSplitPane]);
+
+  const handleSplitResizeKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!isSplitPane) return;
+    const measuredWidth = splitLayoutRef.current?.clientWidth ?? 0;
+    const fallbackWidth = sidebarWidth / MAILBOX_SIDEBAR_MAX_RATIO + MAILBOX_SIDEBAR_KEYBOARD_STEP;
+    const containerWidth = Math.max(measuredWidth, fallbackWidth);
+
+    const maxWidth = getMailboxSidebarMaxWidth(containerWidth);
+
+    if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+      event.preventDefault();
+      const delta = event.key === "ArrowLeft" ? -MAILBOX_SIDEBAR_KEYBOARD_STEP : MAILBOX_SIDEBAR_KEYBOARD_STEP;
+      setSidebarWidth((current) => clampMailboxSidebarWidth(current + delta, containerWidth));
+      return;
+    }
+
+    if (event.key === "Home") {
+      event.preventDefault();
+      setSidebarWidth(MAILBOX_SIDEBAR_MIN_WIDTH);
+      return;
+    }
+
+    if (event.key === "End") {
+      event.preventDefault();
+      setSidebarWidth(maxWidth);
+    }
+  }, [isSplitPane, sidebarWidth]);
 
   // ── Data fetching ─────────────────────────────────────────────────────
 
@@ -1062,10 +1162,27 @@ export function MailboxView({
 
       <div className="mailbox-content" data-testid="mailbox-content">
         {isSplitPane ? (
-          <div className="mailbox-split-layout" data-testid="mailbox-split-layout">
-            <div className="mailbox-split-list-pane" data-testid="mailbox-split-list-pane">
+          <div className="mailbox-split-layout" data-testid="mailbox-split-layout" ref={splitLayoutRef}>
+            <div
+              className="mailbox-split-list-pane"
+              data-testid="mailbox-split-list-pane"
+              style={{ width: `${sidebarWidth}px` }}
+            >
               {renderListPane()}
             </div>
+            <div
+              className="mailbox-split-resize-handle"
+              data-testid="mailbox-split-resize-handle"
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="Resize message list pane"
+              tabIndex={0}
+              aria-valuemin={MAILBOX_SIDEBAR_MIN_WIDTH}
+              aria-valuemax={Math.round(getMailboxSidebarMaxWidth(splitLayoutRef.current?.clientWidth ?? sidebarWidth / MAILBOX_SIDEBAR_MAX_RATIO))}
+              aria-valuenow={Math.round(sidebarWidth)}
+              onMouseDown={handleSplitResizeStart}
+              onKeyDown={handleSplitResizeKeyDown}
+            />
             <div className="mailbox-split-detail-pane" data-testid="mailbox-split-detail-pane">
               {renderDetailPane()}
             </div>
