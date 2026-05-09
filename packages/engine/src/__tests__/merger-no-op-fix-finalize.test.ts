@@ -72,7 +72,7 @@ describe("commitOrAmendMergeWithFixes no-op finalize", () => {
       new Set<string>(),
     );
 
-    expect(result).toBe(true);
+    expect(result.ok).toBe(true);
     const committedFiles = git(dir, "git diff --name-only HEAD~1 HEAD").split("\n").filter(Boolean);
     expect(committedFiles).toContain("feature-a.ts");
   });
@@ -100,6 +100,7 @@ describe("commitOrAmendMergeWithFixes no-op finalize", () => {
       new Set<string>(),
     );
 
-    expect(result).toBe(false);
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe("unknown-phantom");
   });
 });

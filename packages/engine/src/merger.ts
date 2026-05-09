@@ -2558,8 +2558,9 @@ async function buildDeterministicMergeMessage(params: {
  * modified are staged. Any other dirty files in the working tree are left
  * untouched and a warning is emitted for each one.
  *
- * Returns true on a successful commit/amend. Never throws — errors are logged
- * and the function returns false (callers decide whether to abort the merge).
+ * Returns a structured result with `{ ok: true, reason: ... }` on success or
+ * `{ ok: false, reason: ... }` on failure. Never throws — errors are logged and
+ * callers decide whether to abort the merge based on the returned reason.
  *
  * @internal Exported for integration tests only — not part of the public API.
  */
