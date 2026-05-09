@@ -769,8 +769,10 @@ async function attemptInMergeVerificationFix(
   options: MergerOptions,
   mergeRunContext?: Pick<EngineRunContext, "runId" | "agentId">,
   fixAttemptNumber?: number,
-  _testCommand?: string,
-  _buildCommand?: string,
+  testCommand?: string,
+  buildCommand?: string,
+  testSource?: "explicit" | "inferred",
+  buildSource?: "explicit" | "inferred",
   fixModifiedFiles?: Set<string>,
 ): Promise<boolean> {
   // Snapshot the working tree before doing anything so the diff reflects only
@@ -834,7 +836,7 @@ Do not refactor, rename broadly, or make opportunistic improvements.
 1. Read the error output carefully to understand what is failing before editing anything
 2. Before assuming a code fix is needed, check whether the failure is caused by stale/missing build artifacts in a sibling workspace package — typical signatures: \`Failed to resolve import "./X.js"\` pointing into another package's \`dist/\`, \`Cannot find module\`, or \`ERR_MODULE_NOT_FOUND\` referencing a workspace-internal path. In that case, rebuild the affected package(s) (e.g. \`pnpm --filter <pkg> build\`, or \`pnpm --filter "<scope>/*" build\` for a group) and re-run verification before editing source files.
 3. Make targeted fixes to the failing code path
-4. After fixing, run the verification command to confirm the fix works
+4. After fixing, verify your changes keep both deterministic test and build commands passing
 5. Do NOT make any git commits — just fix the code
 6. You MAY modify any files needed to make the verification pass, including files unrelated to this task's original change. Pre-existing build/test breakage on the base branch is in scope: fix it. Prefer the smallest change that makes verification green.
 7. If you cannot fix the issue within scope, explain why and what evidence indicates a deeper/root problem`,
@@ -897,7 +899,7 @@ ${failureContext.output.slice(0, VERIFICATION_LOG_MAX_CHARS)}
 ## Instructions
 1. Read the error output and identify the root cause
 2. Make targeted fixes to resolve the failure
-3. Run the verification command \`${failureContext.command}\` to confirm your fix works
+3. Use \`${failureContext.command}\` while iterating, but ensure your final changes keep both deterministic test and build commands passing
 4. If the fix doesn't work, try a different approach
 5. Do NOT make any git commits`;
 
@@ -964,16 +966,24 @@ ${failureContext.output.slice(0, VERIFICATION_LOG_MAX_CHARS)}
         undefined,
         "merger",
       );
-      const reRunResult = await runVerificationCommand(
-        store,
-        rootDir,
-        taskId,
-        failureContext.command,
-        failureContext.type,
-        options.signal,
-      );
-
-      return reRunResult.success;
+      try {
+        await runDeterministicVerification(
+          store,
+          rootDir,
+          taskId,
+          testCommand,
+          buildCommand,
+          testSource,
+          buildSource,
+          options.signal,
+        );
+        return true;
+      } catch (error: unknown) {
+        if (error instanceof VerificationError) {
+          return false;
+        }
+        throw error;
+      }
     } finally {
       // Flush buffered output before disposal so fix-attempt activity is visible.
       await logger.flush();
@@ -4973,6 +4983,8 @@ export async function aiMergeTask(
                 fixAttempt,
                 effectiveTestCommand,
                 effectiveBuildCommand,
+                effectiveTestSource,
+                effectiveBuildSource,
                 verificationFixModifiedFiles,
               );
 
@@ -5090,6 +5102,8 @@ export async function aiMergeTask(
               fixAttempt,
               effectiveTestCommand,
               effectiveBuildCommand,
+              effectiveTestSource,
+              effectiveBuildSource,
               buildFixModifiedFiles,
             );
 
