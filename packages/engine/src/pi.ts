@@ -241,6 +241,17 @@ export async function promptWithFallback(session: AgentSession, prompt: string, 
       }
     }
 
+    const promptSectionRetry = await retryWithCompactedPromptSections(session, prompt, options);
+    if (promptSectionRetry.recovered) {
+      return;
+    }
+    if (promptSectionRetry.error) {
+      const retryMessage = promptSectionRetry.error instanceof Error ? promptSectionRetry.error.message : String(promptSectionRetry.error);
+      if (!isContextLimitError(retryMessage)) {
+        throw promptSectionRetry.error;
+      }
+    }
+
     piLog.warn("promptWithFallback: context limit error — attempting auto-compaction");
     await flushMemoryBeforeSessionCompaction(session);
     const compactResult = await compactSessionContext(session);
@@ -285,6 +296,10 @@ export const COMPACTION_FALLBACK_INSTRUCTIONS = [
 ].join(" ");
 
 const MAX_COMPACTED_PROMPT_MEMORY_CHARS = 8_000;
+const MAX_COMPACTED_SUBTASK_GUIDANCE_CHARS = 1_200;
+const MAX_COMPACTED_ATTACHMENTS_CHARS = 4_000;
+const MAX_COMPACTED_EXISTING_SPEC_CHARS = 4_000;
+const MAX_COMPACTED_USER_COMMENTS_CHARS = 2_000;
 
 function compactMarkdownMemorySection(sectionBody: string): string {
   const lines = sectionBody.split("\n");
@@ -347,6 +362,158 @@ function compactPromptMemory(prompt: string): string | null {
   return changed && compactedPrompt.length < prompt.length ? compactedPrompt : null;
 }
 
+function trimSubtaskSectionBody(body: string): string {
+  const paragraphs = body
+    .trim()
+    .split(/\n\s*\n/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+  const rawFirstParagraph = paragraphs[0] ?? "Subtask guidance omitted for context limits.";
+  const maxFirstParagraphChars = Math.max(200, MAX_COMPACTED_SUBTASK_GUIDANCE_CHARS - 200);
+  const firstParagraph = rawFirstParagraph.length > maxFirstParagraphChars
+    ? `${rawFirstParagraph.slice(0, maxFirstParagraphChars)}…`
+    : rawFirstParagraph;
+  return [
+    firstParagraph,
+    "",
+    "Follow the project's standard subtask split rules.",
+  ].join("\n");
+}
+
+function compactAttachmentSectionBody(body: string): string {
+  if (body.length <= MAX_COMPACTED_ATTACHMENTS_CHARS) {
+    return body.trim();
+  }
+
+  const lines = body.split("\n");
+  const kept: string[] = [];
+  let inFence = false;
+  let fenceHasContent = false;
+
+  for (const line of lines) {
+    if (/^```/.test(line.trim())) {
+      if (!inFence) {
+        inFence = true;
+        fenceHasContent = false;
+        continue;
+      }
+      inFence = false;
+      if (fenceHasContent) {
+        kept.push("```", "_... attachment body trimmed ..._", "```");
+      }
+      continue;
+    }
+
+    if (inFence) {
+      fenceHasContent = true;
+      continue;
+    }
+
+    kept.push(line);
+  }
+
+  return kept.join("\n").trim();
+}
+
+function compactExistingSpecificationSectionBody(body: string): string {
+  const trimmed = body.trim();
+  if (trimmed.length <= MAX_COMPACTED_EXISTING_SPEC_CHARS) {
+    return trimmed;
+  }
+
+  const head = trimmed.slice(0, Math.floor(MAX_COMPACTED_EXISTING_SPEC_CHARS / 2));
+  const tail = trimmed.slice(-Math.floor(MAX_COMPACTED_EXISTING_SPEC_CHARS / 2));
+  return `${head}\n\n_... existing specification middle trimmed ..._\n\n${tail}`;
+}
+
+function compactUserCommentsSectionBody(body: string): string {
+  const trimmed = body.trim();
+  if (trimmed.length <= MAX_COMPACTED_USER_COMMENTS_CHARS) {
+    return trimmed;
+  }
+
+  const lines = trimmed.split("\n");
+  const commentLines = lines.filter((line) => /^- \*\*\[[^\]]+\]\*\*/.test(line));
+  const staticLines = lines.filter((line) => !/^- \*\*\[[^\]]+\]\*\*/.test(line));
+  const sortedComments = [...commentLines].sort((a, b) => {
+    const aDate = a.match(/^- \*\*\[([^\]]+)\]\*\*/)?.[1] ?? "";
+    const bDate = b.match(/^- \*\*\[([^\]]+)\]\*\*/)?.[1] ?? "";
+    return bDate.localeCompare(aDate);
+  });
+
+  const kept: string[] = [];
+  let used = staticLines.join("\n").length;
+  for (const line of sortedComments) {
+    const next = used + line.length + 1;
+    if (next > MAX_COMPACTED_USER_COMMENTS_CHARS) {
+      break;
+    }
+    kept.push(line);
+    used = next;
+  }
+
+  const trimmedCount = Math.max(0, commentLines.length - kept.length);
+  return [
+    ...staticLines,
+    "",
+    ...kept,
+    ...(trimmedCount > 0 ? ["", `_... ${trimmedCount} earlier comments trimmed ..._`] : []),
+  ].join("\n").trim();
+}
+
+function compactLargePromptSections(prompt: string): string | null {
+  const sectionPattern = /(^|\n)(## (?:Subtask Consideration|Subtask Breakdown Requested|Attachments|Existing Specification|User Comments)\n)([\s\S]*?)(?=\n## [^#]|\n# [^#]|$)/g;
+  let changed = false;
+
+  const compactedPrompt = prompt.replace(sectionPattern, (match, prefix: string, heading: string, body: string) => {
+    const headingName = heading.trim().replace(/^##\s+/, "");
+    const trimmedBody = body.trim();
+
+    const maxByHeading: Record<string, number> = {
+      "Subtask Consideration": MAX_COMPACTED_SUBTASK_GUIDANCE_CHARS,
+      "Subtask Breakdown Requested": MAX_COMPACTED_SUBTASK_GUIDANCE_CHARS,
+      Attachments: MAX_COMPACTED_ATTACHMENTS_CHARS,
+      "Existing Specification": MAX_COMPACTED_EXISTING_SPEC_CHARS,
+      "User Comments": MAX_COMPACTED_USER_COMMENTS_CHARS,
+    };
+
+    const maxChars = maxByHeading[headingName] ?? MAX_COMPACTED_PROMPT_MEMORY_CHARS;
+    if (trimmedBody.length <= maxChars) {
+      return match;
+    }
+
+    let compactedBody = trimmedBody;
+    if (headingName === "Subtask Consideration" || headingName === "Subtask Breakdown Requested") {
+      compactedBody = trimSubtaskSectionBody(trimmedBody);
+    } else if (headingName === "Attachments") {
+      compactedBody = compactAttachmentSectionBody(trimmedBody);
+    } else if (headingName === "Existing Specification") {
+      compactedBody = compactExistingSpecificationSectionBody(trimmedBody);
+    } else if (headingName === "User Comments") {
+      compactedBody = compactUserCommentsSectionBody(trimmedBody);
+    }
+
+    const finalBody = [
+      compactedBody,
+      "",
+      `<!-- Section trimmed from ${trimmedBody.length} characters to fit context window. -->`,
+    ].join("\n").trim();
+
+    if (finalBody.length >= trimmedBody.length) {
+      return match;
+    }
+
+    changed = true;
+    return `${prefix}${heading}${finalBody}`;
+  });
+
+  return changed && compactedPrompt.length < prompt.length ? compactedPrompt : null;
+}
+
+export const __testOnlyPromptCompaction = {
+  compactLargePromptSections,
+};
+
 async function retryWithCompactedPromptMemory(
   session: AgentSession,
   prompt: string,
@@ -368,6 +535,31 @@ async function retryWithCompactedPromptMemory(
   } catch (err: unknown) {
     const errorMessage = err instanceof Error ? err.message : String(err);
     piLog.error(`promptWithFallback: retry after prompt-memory compaction failed: ${errorMessage}`);
+    return { recovered: false, error: err };
+  }
+}
+
+async function retryWithCompactedPromptSections(
+  session: AgentSession,
+  prompt: string,
+  options?: unknown,
+): Promise<{ recovered: boolean; error?: unknown }> {
+  const compactedPrompt = compactLargePromptSections(prompt);
+  if (!compactedPrompt) {
+    return { recovered: false };
+  }
+
+  piLog.log(
+    `promptWithFallback: retrying with compacted prompt sections (${prompt.length} → ${compactedPrompt.length} chars)`,
+  );
+
+  try {
+    await promptSessionAndCheck(session, compactedPrompt, options);
+    piLog.log("promptWithFallback: prompt completed after section compaction");
+    return { recovered: true };
+  } catch (err: unknown) {
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    piLog.error(`promptWithFallback: retry after section compaction failed: ${errorMessage}`);
     return { recovered: false, error: err };
   }
 }
@@ -1610,6 +1802,17 @@ export async function createFnAgent(options: AgentOptions): Promise<AgentResult>
           }
         }
 
+        const promptSectionRetry = await retryWithCompactedPromptSections(activeSession, prompt, promptOptions);
+        if (promptSectionRetry.recovered) {
+          return;
+        }
+        if (promptSectionRetry.error) {
+          const retryMessage = promptSectionRetry.error instanceof Error ? promptSectionRetry.error.message : String(promptSectionRetry.error);
+          if (!isContextLimitError(retryMessage)) {
+            throw promptSectionRetry.error;
+          }
+        }
+
         piLog.warn("promptWithFallback: context limit error — attempting auto-compaction");
         await flushMemoryBeforeSessionCompaction(activeSession);
         const compactResult = await compactSessionContext(activeSession);
@@ -1661,6 +1864,17 @@ export async function createFnAgent(options: AgentOptions): Promise<AgentResult>
             const retryMessage = promptMemoryRetry.error instanceof Error ? promptMemoryRetry.error.message : String(promptMemoryRetry.error);
             if (!isContextLimitError(retryMessage)) {
               throw promptMemoryRetry.error;
+            }
+          }
+
+          const promptSectionRetry = await retryWithCompactedPromptSections(fallbackSession, prompt, promptOptions);
+          if (promptSectionRetry.recovered) {
+            return;
+          }
+          if (promptSectionRetry.error) {
+            const retryMessage = promptSectionRetry.error instanceof Error ? promptSectionRetry.error.message : String(promptSectionRetry.error);
+            if (!isContextLimitError(retryMessage)) {
+              throw promptSectionRetry.error;
             }
           }
 
