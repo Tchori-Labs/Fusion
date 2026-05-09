@@ -184,7 +184,13 @@ export async function runVerificationCommand(
     const child = spawn(command, {
       cwd,
       stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env },
+      env: {
+        ...process.env,
+        // Corepack otherwise prompts interactively before fetching a pinned
+        // packageManager version, which hangs the non-TTY child until the
+        // hard timeout. Disable the prompt so it proceeds (or errors fast).
+        COREPACK_ENABLE_DOWNLOAD_PROMPT: "0",
+      },
       shell: true,
     });
 

@@ -60,7 +60,13 @@ export async function execWithProcessGroup(
       shell: true,
       detached: useProcessGroup,
       stdio: ["ignore", "pipe", "pipe"],
-      ...(options.env !== undefined && { env: { ...process.env, ...options.env } }),
+      env: {
+        ...process.env,
+        // Corepack otherwise prompts interactively before fetching a pinned
+        // packageManager version, hanging the non-TTY child until timeout.
+        COREPACK_ENABLE_DOWNLOAD_PROMPT: "0",
+        ...(options.env ?? {}),
+      },
     });
 
     let stdout = "";
