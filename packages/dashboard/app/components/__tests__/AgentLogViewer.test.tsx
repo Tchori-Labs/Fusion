@@ -1386,6 +1386,30 @@ describe("AgentLogViewer", () => {
       expect(toggle.getAttribute("aria-label")).toBe("Switch to plain text mode");
     });
 
+    it("FN-3847: uses accent text color for pressed markdown/tools toggles", () => {
+      window.localStorage.setItem("fn-agent-log-markdown", "true");
+      window.localStorage.setItem("fn-agent-log-tool-output", "true");
+      const entries = [makeEntry({ text: "hello" })];
+      const { container } = render(<AgentLogViewer entries={entries} loading={false} />);
+
+      const markdownToggle = container.querySelector("[data-testid='agent-log-mode-toggle']") as HTMLButtonElement;
+      const toolsToggle = container.querySelector("[data-testid='agent-log-tool-output-toggle']") as HTMLButtonElement;
+      const fullscreenToggle = container.querySelector("[data-testid='agent-log-fullscreen-toggle']") as HTMLButtonElement;
+
+      expect(markdownToggle.getAttribute("aria-pressed")).toBe("true");
+      expect(toolsToggle.getAttribute("aria-pressed")).toBe("true");
+
+      const markdownColor = getComputedStyle(markdownToggle).color;
+      const toolsColor = getComputedStyle(toolsToggle).color;
+      const unpressedColor = getComputedStyle(fullscreenToggle).color;
+
+      // Contract: unpressed toggles keep the shared muted button color, pressed toggles switch to accent foreground.
+      expect(markdownColor.length).toBeGreaterThan(0);
+      expect(toolsColor.length).toBeGreaterThan(0);
+      expect(markdownColor).toBe(toolsColor);
+      expect(markdownColor).not.toBe(unpressedColor);
+    });
+
     it("switches to plain text mode when clicked", () => {
       const entries = [makeEntry({ text: "**bold** and *italic*" })];
       const { container } = render(<AgentLogViewer entries={entries} loading={false} />);
