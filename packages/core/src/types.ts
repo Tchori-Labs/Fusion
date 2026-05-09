@@ -1223,6 +1223,14 @@ export interface Task {
   checkedOutBy?: string;
   /** ISO-8601 timestamp when the checkout lease was acquired. */
   checkedOutAt?: string;
+  /** Node ID currently owning the checkout lease. */
+  checkoutNodeId?: string;
+  /** Owning run/session ID for the checkout lease when known. */
+  checkoutRunId?: string;
+  /** ISO-8601 timestamp of the last successful lease renewal heartbeat. */
+  checkoutLeaseRenewedAt?: string;
+  /** Monotonically increasing lease generation used to prevent stale reclaim attempts. */
+  checkoutLeaseEpoch?: number;
   /** Path to the persisted agent session file, enabling pause/resume without
    *  losing conversation context. Set when execution starts; cleared on
    *  completion or terminal failure. */

@@ -595,6 +595,34 @@ export class TaskExecutor {
   /** Set of ephemeral spawned agent IDs with in-flight cleanup (prevents duplicate deletion attempts). */
   private pendingEphemeralDeletions = new Set<string>();
 
+  private async renewTaskLease(
+    taskId: string,
+    agentId: string,
+    leaseEpoch: number,
+    nodeId: string,
+    runId: string | undefined,
+  ): Promise<void> {
+    const renewedAt = new Date().toISOString();
+    if (this.options.agentStore) {
+      await this.options.agentStore.checkoutTask(
+        agentId,
+        taskId,
+        {
+          nodeId,
+          runId,
+          leaseEpoch,
+          renewedAt,
+        },
+        this.currentRunContext,
+      );
+      return;
+    }
+    await this.store.updateTask(taskId, {
+      checkoutRunId: runId ?? null,
+      checkoutLeaseRenewedAt: renewedAt,
+    });
+  }
+
   private async finalizeAlreadyReviewedTask(taskId: string): Promise<"merged" | "blocked" | "missing"> {
     const latestTask = await this.store.getTask(taskId);
     if (!latestTask || latestTask.column !== "in-review") {
@@ -3136,6 +3164,17 @@ export class TaskExecutor {
           lastAssignedAgentId: detail.assignedAgentId ?? null,
         });
 
+        let leaseRenewalTimer: ReturnType<typeof setInterval> | undefined;
+        if (detail.assignedAgentId && detail.checkedOutBy === detail.assignedAgentId) {
+          const leaseEpoch = detail.checkoutLeaseEpoch ?? 0;
+          const checkoutNodeId = detail.checkoutNodeId ?? detail.effectiveNodeId ?? detail.nodeId ?? "local";
+          const runId = this.currentRunContext?.runId;
+          await this.renewTaskLease(task.id, detail.assignedAgentId, leaseEpoch, checkoutNodeId, runId).catch(() => {});
+          leaseRenewalTimer = setInterval(() => {
+            void this.renewTaskLease(task.id, detail.assignedAgentId!, leaseEpoch, checkoutNodeId, runId).catch(() => {});
+          }, 30_000);
+        }
+
         // Register with stuck task detector for heartbeat monitoring
         stuckDetector?.trackTask(task.id, session);
         executorLog.log(`${task.id}: session registered (model=${describeModel(session)}, stuckDetector=${!!stuckDetector})`);
@@ -3559,6 +3598,9 @@ export class TaskExecutor {
             }
           }
         } finally {
+          if (leaseRenewalTimer) {
+            clearInterval(leaseRenewalTimer);
+          }
           this.activeSessions.delete(task.id);
           stuckDetector?.untrackTask(task.id);
           await agentLogger.flush();

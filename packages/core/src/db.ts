@@ -226,7 +226,13 @@ CREATE TABLE IF NOT EXISTS tasks (
   sourceSessionId TEXT,
   sourceMessageId TEXT,
   sourceParentTaskId TEXT,
-  sourceMetadata TEXT
+  sourceMetadata TEXT,
+  checkedOutBy TEXT,
+  checkedOutAt TEXT,
+  checkoutNodeId TEXT,
+  checkoutRunId TEXT,
+  checkoutLeaseRenewedAt TEXT,
+  checkoutLeaseEpoch INTEGER DEFAULT 0
 );
 
 -- Config table (single row with project settings)
@@ -1459,6 +1465,10 @@ export class Database {
       this.applyMigration(20, () => {
         this.addColumnIfMissing("tasks", "checkedOutBy", "TEXT");
         this.addColumnIfMissing("tasks", "checkedOutAt", "TEXT");
+        this.addColumnIfMissing("tasks", "checkoutNodeId", "TEXT");
+        this.addColumnIfMissing("tasks", "checkoutRunId", "TEXT");
+        this.addColumnIfMissing("tasks", "checkoutLeaseRenewedAt", "TEXT");
+        this.addColumnIfMissing("tasks", "checkoutLeaseEpoch", "INTEGER DEFAULT 0");
       });
     }
 

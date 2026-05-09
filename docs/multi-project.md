@@ -34,6 +34,7 @@ Per-project task data remains in each repo’s `.fusion/fusion.db`.
 Peer/mesh coordination spans core + engine, with startup ownership in CLI process entrypoints:
 - `NodeDiscovery` and `NodeConnection` in `@fusion/core` handle discovery and remote node connectivity/auth primitives.
 - `PeerExchangeService` in `@fusion/engine` coordinates node-to-node sync/exchange workflows.
+- `MeshLeaseManager` in `@fusion/engine` is the single authority for stale lease detection and abandoned-work recovery across nodes.
 - Canonical replication semantics live in [`docs/shared-mesh-protocol.md`](./shared-mesh-protocol.md). That protocol separates strongly coordinated shared state from append-only streams, queued replay classes, and node-local runtime state.
 - Distributed task-ID allocation is one strongly coordinated shared-state path: reserve/commit/abort are coordinator-mediated writes, and cluster-wide committed task totals come from allocator `committedClusterTaskCount` state (not per-node local task counts).
 - `runServe()` and `runDashboard()` (CLI) own process-level mesh service lifecycle:
@@ -41,6 +42,14 @@ Peer/mesh coordination spans core + engine, with startup ownership in CLI proces
   - call `CentralCore.startDiscovery()` only after the HTTP server is listening and the real bound port is known
   - stop peer exchange + discovery on shutdown
 - `InProcessRuntime` remains project-scoped (scheduler/executor/heartbeat/missions) and does **not** start mesh services, which avoids one peer-exchange instance per project.
+
+## Mesh lease recovery in multi-node execution
+
+Task ownership is shared as persisted lease metadata (`checkedOutBy`, `checkedOutAt`, `checkoutNodeId`, `checkoutRunId`, `checkoutLeaseRenewedAt`, `checkoutLeaseEpoch`) through the canonical mesh sync payloads.
+
+When a node disappears or stops renewing ownership, recovery is routed only through `MeshLeaseManager.recoverAbandonedLease(...)`. The manager releases ownership only after staleness checks pass and no active local executor session exists for the task. Recovery then bumps `checkoutLeaseEpoch`, clears owner fields, logs the abandonment reason, and returns the task to scheduler-visible work.
+
+This fencing prevents double-claims: a restarted or delayed stale owner cannot reclaim work using older epoch state once recovery has advanced the lease generation.
 
 ## Registering and Managing Projects
 

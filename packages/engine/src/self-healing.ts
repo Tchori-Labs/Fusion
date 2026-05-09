@@ -18,6 +18,7 @@ import { promisify } from "node:util";
 import { existsSync, readdirSync, rmSync, statSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { getTaskMergeBlocker, isEphemeralAgent, type AgentStore, type TaskStore, type Settings, type Task, type MergeDetails } from "@fusion/core";
+import type { MeshLeaseManager } from "./mesh-lease-manager.js";
 import { createLogger } from "./logger.js";
 import { getRegisteredWorktreePaths, scanIdleWorktrees, scanOrphanedBranches } from "./worktree-pool.js";
 
@@ -29,6 +30,8 @@ export interface SelfHealingOptions {
   rootDir: string;
   /** Optional AgentStore for agent-level self-healing checks. */
   agentStore?: AgentStore;
+  /** Canonical stale-lease recovery manager. */
+  leaseManager?: MeshLeaseManager;
   /**
    * Callback to recover a completed task that is stuck in in-progress.
    * Called by the periodic maintenance cycle when it detects a task whose
@@ -1490,6 +1493,18 @@ export class SelfHealingManager {
           const reason = hadWorktree
             ? "worktree exists but no active session"
             : "missing worktree/session";
+
+          if (this.options.leaseManager && task.checkedOutBy) {
+            const leaseRecovered = await this.options.leaseManager.recoverAbandonedLease(
+              task.id,
+              `orphaned execution: ${reason}`,
+              { preserveProgress: true },
+            );
+            if (leaseRecovered) {
+              recovered++;
+              continue;
+            }
+          }
 
           // Reset steps whose work was never committed before clearing the worktree
           await this.resetStepsIfWorkLost(task);

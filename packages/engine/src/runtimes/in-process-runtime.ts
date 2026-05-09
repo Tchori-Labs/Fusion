@@ -33,6 +33,7 @@ import { runtimeLog } from "../logger.js";
 import { StuckTaskDetector } from "../stuck-task-detector.js";
 import type { UsageLimitPauser } from "../usage-limit-detector.js";
 import { SelfHealingManager } from "../self-healing.js";
+import { MeshLeaseManager } from "../mesh-lease-manager.js";
 import { PluginRunner } from "../plugin-runner.js";
 import { MissionAutopilot } from "../mission-autopilot.js";
 import { MissionExecutionLoop } from "../mission-execution-loop.js";
@@ -91,6 +92,7 @@ export class InProcessRuntime
   private stuckTaskDetector?: StuckTaskDetector;
   private usageLimitPauser?: UsageLimitPauser;
   private selfHealingManager?: SelfHealingManager;
+  private leaseManager?: MeshLeaseManager;
   private agentStore?: AgentStore;
   private heartbeatMonitor?: HeartbeatMonitor;
   private triggerScheduler?: HeartbeatTriggerScheduler;
@@ -285,6 +287,12 @@ export class InProcessRuntime
           })
         : undefined;
 
+      this.leaseManager = new MeshLeaseManager({
+        taskStore: this.taskStore,
+        agentStore: this.agentStore,
+        getExecutingTaskIds: () => this.executor?.getExecutingTaskIds() ?? new Set<string>(),
+      });
+
       this.scheduler = new Scheduler(this.taskStore, {
         maxConcurrent: this.config.maxConcurrent,
         maxWorktrees: this.config.maxWorktrees,
@@ -292,6 +300,7 @@ export class InProcessRuntime
         missionStore,
         missionAutopilot,
         missionExecutionLoop,
+        leaseManager: this.leaseManager,
         onTaskFailed: (taskId) => {
           if (missionAutopilot) {
             void missionAutopilot.handleTaskFailure(taskId);
@@ -623,6 +632,7 @@ export class InProcessRuntime
         evictStaleTriageProcessing: () => this.triageProcessor?.evictStaleProcessing() ?? new Set<string>(),
         enqueueMerge: this.mergeEnqueuer ? (taskId: string) => this.mergeEnqueuer?.(taskId) : undefined,
         getActiveMergeTaskId: () => this.activeMergeTaskIdProvider?.() ?? null,
+        leaseManager: this.leaseManager,
       });
       this.selfHealingManager.start();
       this.stuckTaskDetector.start();

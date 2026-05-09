@@ -54,6 +54,13 @@ import {
 } from "./types.js";
 import type { RunMutationContext } from "./types.js";
 import type { TaskStore } from "./store.js";
+
+interface CheckoutLeaseContext {
+  nodeId?: string;
+  runId?: string;
+  leaseEpoch?: number;
+  renewedAt?: string;
+}
 import { computeAccessState } from "./agent-permissions.js";
 import { canAgentTakeImplementationTask, formatRoleMismatchReason } from "./agent-role-policy.js";
 import { resolveEffectiveAgentPermissionPolicy } from "./agent-permission-policy.js";
@@ -1341,7 +1348,7 @@ export class AgentStore extends EventEmitter {
     }
 
     try {
-      await this.checkoutTask(agentId, taskId, runContext);
+      await this.checkoutTask(agentId, taskId, undefined, runContext);
     } catch (error) {
       if (error instanceof CheckoutConflictError) {
         return { ok: false, reason: "checkout_conflict", task };
@@ -1359,7 +1366,12 @@ export class AgentStore extends EventEmitter {
    * Acquire a checkout lease for a task.
    * Throws CheckoutConflictError when another agent already holds the lease.
    */
-  async checkoutTask(agentId: string, taskId: string, runContext?: RunMutationContext): Promise<Task> {
+  async checkoutTask(
+    agentId: string,
+    taskId: string,
+    leaseContext?: CheckoutLeaseContext,
+    runContext?: RunMutationContext,
+  ): Promise<Task> {
     if (!this.taskStore) {
       throw new Error("TaskStore not configured for checkout operations");
     }
@@ -1378,11 +1390,30 @@ export class AgentStore extends EventEmitter {
       throw new CheckoutConflictError(taskId, task.checkedOutBy, agentId);
     }
 
-    if (task.checkedOutBy === agentId) {
-      return task;
+    const nextEpoch = leaseContext?.leaseEpoch ?? task.checkoutLeaseEpoch ?? 0;
+    const nextRenewedAt = leaseContext?.renewedAt ?? new Date().toISOString();
+    const existingNodeId = task.checkoutNodeId;
+    const existingEpoch = task.checkoutLeaseEpoch ?? 0;
+
+    if (
+      task.checkedOutBy === agentId
+      && existingNodeId === (leaseContext?.nodeId ?? existingNodeId)
+      && existingEpoch === nextEpoch
+    ) {
+      return this.taskStore.updateTask(taskId, {
+        checkoutRunId: leaseContext?.runId ?? task.checkoutRunId ?? null,
+        checkoutLeaseRenewedAt: nextRenewedAt,
+      });
     }
 
-    const updated = await this.taskStore.updateTask(taskId, { checkedOutBy: agentId });
+    const updated = await this.taskStore.updateTask(taskId, {
+      checkedOutBy: agentId,
+      checkedOutAt: task.checkedOutBy === agentId ? task.checkedOutAt : undefined,
+      checkoutNodeId: leaseContext?.nodeId ?? null,
+      checkoutRunId: leaseContext?.runId ?? null,
+      checkoutLeaseRenewedAt: nextRenewedAt,
+      checkoutLeaseEpoch: nextEpoch,
+    });
     await this.taskStore.logEntry(taskId, `Checked out by agent ${agentId}`, undefined, runContext);
     return updated;
   }
@@ -1408,7 +1439,13 @@ export class AgentStore extends EventEmitter {
       return task;
     }
 
-    const updated = await this.taskStore.updateTask(taskId, { checkedOutBy: null });
+    const updated = await this.taskStore.updateTask(taskId, {
+      checkedOutBy: null,
+      checkedOutAt: null,
+      checkoutNodeId: null,
+      checkoutRunId: null,
+      checkoutLeaseRenewedAt: null,
+    });
     await this.taskStore.logEntry(taskId, `Released by agent ${agentId}`, undefined, runContext);
     return updated;
   }
@@ -1421,7 +1458,14 @@ export class AgentStore extends EventEmitter {
       throw new Error("TaskStore not configured for checkout operations");
     }
 
-    const updated = await this.taskStore.updateTask(taskId, { checkedOutBy: null });
+    const updated = await this.taskStore.updateTask(taskId, {
+      checkedOutBy: null,
+      checkedOutAt: null,
+      checkoutNodeId: null,
+      checkoutRunId: null,
+      checkoutLeaseRenewedAt: null,
+      checkoutLeaseEpoch: null,
+    });
     await this.taskStore.logEntry(taskId, "Checkout force-released", undefined, runContext);
     return updated;
   }

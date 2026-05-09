@@ -591,6 +591,27 @@ Implemented in `agent-heartbeat.ts`:
 ### Node/mesh runtime services
 - `NodeHealthMonitor` (`node-health-monitor.ts`) — remote node liveness/metrics checks
 - `PeerExchangeService` (`peer-exchange-service.ts`) — peer sync orchestration
+- `MeshLeaseManager` (`mesh-lease-manager.ts`) — canonical abandoned-lease detection + recovery path
+
+### Mesh task lease ownership and recovery
+
+Task ownership is persisted in shared task metadata so all nodes agree on one canonical lease view. The persisted lease fields are:
+
+- `checkedOutBy` — owning agent id (compatibility field)
+- `checkedOutAt` — lease acquisition timestamp (compatibility field)
+- `checkoutNodeId` — owning node id
+- `checkoutRunId` — active owning heartbeat/executor run id when known
+- `checkoutLeaseRenewedAt` — last successful lease renewal timestamp
+- `checkoutLeaseEpoch` — monotonic fencing generation used to reject stale owners after recovery
+
+`AgentStore.checkoutTask()` remains the compatibility entrypoint for ownership claims, but lease replacement is fenced by epoch semantics: only the same live owner can renew idempotently, and stale owner replacement is performed only through the recovery path.
+
+`MeshLeaseManager.recoverAbandonedLease(taskId, reason, context)` is the single canonical abandoned-work path used by scheduler/self-healing/runtime orchestration. Recovery validates staleness, bumps `checkoutLeaseEpoch`, clears active-owner fields, logs the reason, and re-queues work for scheduler visibility.
+
+A lease is recoverable only when there is **no active local executor session for that task** and either:
+
+1. the owning node is `offline` or `error`, or
+2. the owner heartbeat/run age exceeds `max(agentHeartbeatTimeoutMs * 2, 120_000)` measured against the most recent lease renewal timestamp.
 - Canonical replication/write-coordination contract: [`docs/shared-mesh-protocol.md`](./shared-mesh-protocol.md)
   - Defines protocol versioning, write classes, quorum/ack semantics, lease epochs/fencing, offline queue/replay, reconciliation outcomes, restart recovery hooks, and degraded-read staleness metadata.
   - Existing `/api/mesh/sync` and settings-sync payloads remain the active exchange primitives while follow-on runtime tasks implement full v1 coordinator/quorum behavior.

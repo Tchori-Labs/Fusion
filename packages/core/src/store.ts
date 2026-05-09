@@ -121,6 +121,10 @@ interface TaskRow {
   sourceMetadata: string | null;
   checkedOutBy: string | null;
   checkedOutAt: string | null;
+  checkoutNodeId: string | null;
+  checkoutRunId: string | null;
+  checkoutLeaseRenewedAt: string | null;
+  checkoutLeaseEpoch: number | null;
 }
 
 /** Database row shape for the task_documents table. */
@@ -831,6 +835,10 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       sourceMetadata: fromJson<Record<string, unknown>>(row.sourceMetadata) ?? undefined,
       checkedOutBy: row.checkedOutBy || undefined,
       checkedOutAt: row.checkedOutAt || undefined,
+      checkoutNodeId: row.checkoutNodeId || undefined,
+      checkoutRunId: row.checkoutRunId || undefined,
+      checkoutLeaseRenewedAt: row.checkoutLeaseRenewedAt || undefined,
+      checkoutLeaseEpoch: row.checkoutLeaseEpoch ?? undefined,
     };
   }
 
@@ -1060,7 +1068,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       "breakIntoSubtasks", "enabledWorkflowSteps", "modifiedFiles",
       "missionId", "sliceId", "assignedAgentId", "pausedByAgentId", "assigneeUserId", "nodeId", "effectiveNodeId", "effectiveNodeSource",
       "sourceType", "sourceAgentId", "sourceRunId", "sourceSessionId", "sourceMessageId", "sourceParentTaskId", "sourceMetadata",
-      "checkedOutBy", "checkedOutAt",
+      "checkedOutBy", "checkedOutAt", "checkoutNodeId", "checkoutRunId", "checkoutLeaseRenewedAt", "checkoutLeaseEpoch",
       // `log` is fetched in slim mode so the server can aggregate
       // `timedExecutionMs` from `[timing] … in <N>ms` entries before
       // returning. The log itself is stripped from the response —
@@ -1109,7 +1117,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       "breakIntoSubtasks", "enabledWorkflowSteps", "modifiedFiles",
       "missionId", "sliceId", "assignedAgentId", "pausedByAgentId", "assigneeUserId", "nodeId", "effectiveNodeId", "effectiveNodeSource",
       "sourceType", "sourceAgentId", "sourceRunId", "sourceSessionId", "sourceMessageId", "sourceParentTaskId", "sourceMetadata",
-      "checkedOutBy", "checkedOutAt",
+      "checkedOutBy", "checkedOutAt", "checkoutNodeId", "checkoutRunId", "checkoutLeaseRenewedAt", "checkoutLeaseEpoch",
     ];
 
     const limitedLog = `
@@ -1150,9 +1158,9 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         dependencies, steps, log, attachments, steeringComments,
         comments, review, reviewState, workflowStepResults, prInfo, issueInfo,
         sourceIssueProvider, sourceIssueRepository, sourceIssueExternalIssueId, sourceIssueNumber, sourceIssueUrl,
-        mergeDetails, breakIntoSubtasks, enabledWorkflowSteps, modifiedFiles, missionId, sliceId, assignedAgentId, pausedByAgentId, assigneeUserId, nodeId, effectiveNodeId, effectiveNodeSource, sourceType, sourceAgentId, sourceRunId, sourceSessionId, sourceMessageId, sourceParentTaskId, sourceMetadata, checkedOutBy, checkedOutAt
+        mergeDetails, breakIntoSubtasks, enabledWorkflowSteps, modifiedFiles, missionId, sliceId, assignedAgentId, pausedByAgentId, assigneeUserId, nodeId, effectiveNodeId, effectiveNodeSource, sourceType, sourceAgentId, sourceRunId, sourceSessionId, sourceMessageId, sourceParentTaskId, sourceMetadata, checkedOutBy, checkedOutAt, checkoutNodeId, checkoutRunId, checkoutLeaseRenewedAt, checkoutLeaseEpoch
       ) VALUES (
-        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
       )
       ON CONFLICT(id) DO UPDATE SET
         title = excluded.title,
@@ -1237,7 +1245,11 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         sourceParentTaskId = excluded.sourceParentTaskId,
         sourceMetadata = excluded.sourceMetadata,
         checkedOutBy = excluded.checkedOutBy,
-        checkedOutAt = excluded.checkedOutAt
+        checkedOutAt = excluded.checkedOutAt,
+        checkoutNodeId = excluded.checkoutNodeId,
+        checkoutRunId = excluded.checkoutRunId,
+        checkoutLeaseRenewedAt = excluded.checkoutLeaseRenewedAt,
+        checkoutLeaseEpoch = excluded.checkoutLeaseEpoch
     `).run(
       task.id,
       task.title ?? null,
@@ -1323,6 +1335,10 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       toJsonNullable(task.sourceMetadata),
       task.checkedOutBy ?? null,
       task.checkedOutAt ?? null,
+      task.checkoutNodeId ?? null,
+      task.checkoutRunId ?? null,
+      task.checkoutLeaseRenewedAt ?? null,
+      task.checkoutLeaseEpoch ?? 0,
     );
     this.db.bumpLastModified();
   }
@@ -3287,7 +3303,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
 
   async updateTask(
     id: string,
-    updates: { title?: string; description?: string; priority?: TaskPriority | null; prompt?: string; worktree?: string | null; status?: string | null; dependencies?: string[]; steps?: import("./types.js").TaskStep[]; currentStep?: number; blockedBy?: string | null; assignedAgentId?: string | null; pausedByAgentId?: string | null; assigneeUserId?: string | null; nodeId?: string | null; effectiveNodeId?: string | null; effectiveNodeSource?: string | null; checkedOutBy?: string | null; checkedOutAt?: string | null; paused?: boolean; baseBranch?: string | null; branch?: string | null; executionStartBranch?: string | null; baseCommitSha?: string | null; size?: "S" | "M" | "L"; reviewLevel?: number; executionMode?: import("./types.js").ExecutionMode | null; mergeRetries?: number; workflowStepRetries?: number; stuckKillCount?: number | null; postReviewFixCount?: number | null; recoveryRetryCount?: number | null; taskDoneRetryCount?: number | null; verificationFailureCount?: number | null; mergeConflictBounceCount?: number | null; nextRecoveryAt?: string | null; enabledWorkflowSteps?: string[]; modelProvider?: string | null; modelId?: string | null; validatorModelProvider?: string | null; validatorModelId?: string | null; planningModelProvider?: string | null; planningModelId?: string | null; thinkingLevel?: string | null; error?: string | null; summary?: string | null; sessionFile?: string | null; executionStartedAt?: string | null; executionCompletedAt?: string | null; review?: import("./types.js").TaskReview | null; reviewState?: import("./types.js").TaskReviewState | null; workflowStepResults?: import("./types.js").WorkflowStepResult[] | null; mergeDetails?: import("./types.js").MergeDetails | null; sourceIssue?: import("./types.js").TaskSourceIssue | null; tokenUsage?: import("./types.js").TaskTokenUsage | null; modifiedFiles?: string[] | null; missionId?: string | null; sliceId?: string | null },
+    updates: { title?: string; description?: string; priority?: TaskPriority | null; prompt?: string; worktree?: string | null; status?: string | null; dependencies?: string[]; steps?: import("./types.js").TaskStep[]; currentStep?: number; blockedBy?: string | null; assignedAgentId?: string | null; pausedByAgentId?: string | null; assigneeUserId?: string | null; nodeId?: string | null; effectiveNodeId?: string | null; effectiveNodeSource?: string | null; checkedOutBy?: string | null; checkedOutAt?: string | null; checkoutNodeId?: string | null; checkoutRunId?: string | null; checkoutLeaseRenewedAt?: string | null; checkoutLeaseEpoch?: number | null; paused?: boolean; baseBranch?: string | null; branch?: string | null; executionStartBranch?: string | null; baseCommitSha?: string | null; size?: "S" | "M" | "L"; reviewLevel?: number; executionMode?: import("./types.js").ExecutionMode | null; mergeRetries?: number; workflowStepRetries?: number; stuckKillCount?: number | null; postReviewFixCount?: number | null; recoveryRetryCount?: number | null; taskDoneRetryCount?: number | null; verificationFailureCount?: number | null; mergeConflictBounceCount?: number | null; nextRecoveryAt?: string | null; enabledWorkflowSteps?: string[]; modelProvider?: string | null; modelId?: string | null; validatorModelProvider?: string | null; validatorModelId?: string | null; planningModelProvider?: string | null; planningModelId?: string | null; thinkingLevel?: string | null; error?: string | null; summary?: string | null; sessionFile?: string | null; executionStartedAt?: string | null; executionCompletedAt?: string | null; review?: import("./types.js").TaskReview | null; reviewState?: import("./types.js").TaskReviewState | null; workflowStepResults?: import("./types.js").WorkflowStepResult[] | null; mergeDetails?: import("./types.js").MergeDetails | null; sourceIssue?: import("./types.js").TaskSourceIssue | null; tokenUsage?: import("./types.js").TaskTokenUsage | null; modifiedFiles?: string[] | null; missionId?: string | null; sliceId?: string | null },
     runContext?: RunMutationContext,
   ): Promise<Task> {
     return this.withTaskLock(id, async () => {
@@ -3424,10 +3440,35 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       if (updates.checkedOutBy === null) {
         task.checkedOutBy = undefined;
         task.checkedOutAt = undefined;
+        task.checkoutNodeId = undefined;
+        task.checkoutRunId = undefined;
+        task.checkoutLeaseRenewedAt = undefined;
       } else if (updates.checkedOutBy !== undefined) {
         task.checkedOutBy = updates.checkedOutBy;
-        // Auto-set checkedOutAt when acquiring a lease (use provided value or generate timestamp)
-        task.checkedOutAt = updates.checkedOutAt ?? new Date().toISOString();
+        task.checkedOutAt = updates.checkedOutAt ?? task.checkedOutAt ?? new Date().toISOString();
+        task.checkoutNodeId = updates.checkoutNodeId ?? task.checkoutNodeId;
+        task.checkoutRunId = updates.checkoutRunId ?? task.checkoutRunId;
+        task.checkoutLeaseRenewedAt = updates.checkoutLeaseRenewedAt ?? task.checkoutLeaseRenewedAt ?? task.checkedOutAt;
+      }
+      if (updates.checkoutNodeId === null) {
+        task.checkoutNodeId = undefined;
+      } else if (updates.checkoutNodeId !== undefined && updates.checkedOutBy === undefined) {
+        task.checkoutNodeId = updates.checkoutNodeId;
+      }
+      if (updates.checkoutRunId === null) {
+        task.checkoutRunId = undefined;
+      } else if (updates.checkoutRunId !== undefined && updates.checkedOutBy === undefined) {
+        task.checkoutRunId = updates.checkoutRunId;
+      }
+      if (updates.checkoutLeaseRenewedAt === null) {
+        task.checkoutLeaseRenewedAt = undefined;
+      } else if (updates.checkoutLeaseRenewedAt !== undefined && updates.checkedOutBy === undefined) {
+        task.checkoutLeaseRenewedAt = updates.checkoutLeaseRenewedAt;
+      }
+      if (updates.checkoutLeaseEpoch === null) {
+        task.checkoutLeaseEpoch = undefined;
+      } else if (updates.checkoutLeaseEpoch !== undefined) {
+        task.checkoutLeaseEpoch = updates.checkoutLeaseEpoch;
       }
       if (updates.paused !== undefined) task.paused = updates.paused || undefined;
       if (updates.baseBranch === null) {

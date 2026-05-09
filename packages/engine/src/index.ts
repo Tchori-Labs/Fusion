@@ -17,6 +17,7 @@ export { TriageProcessor, type TriageProcessorOptions } from "./triage.js";
 export { TaskExecutor, type TaskExecutorOptions } from "./executor.js";
 export { collectTaskEvaluationEvidence } from "./evaluator-evidence.js";
 export { Scheduler, type SchedulerOptions } from "./scheduler.js";
+export { MeshLeaseManager, type MeshLeaseManagerOptions, type LeaseRecoveryContext } from "./mesh-lease-manager.js";
 export { MissionAutopilot, type MissionAutopilotOptions } from "./mission-autopilot.js";
 export { MissionExecutionLoop, type MissionExecutionLoopOptions, type ValidationResult, loopLog } from "./mission-execution-loop.js";
 export { aiMergeTask, type MergerOptions } from "./merger.js";

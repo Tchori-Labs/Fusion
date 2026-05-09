@@ -11755,6 +11755,34 @@ describe("RunMutationContext", () => {
   });
 
   describe("shared mesh snapshots", () => {
+    it("persists and replicates extended lease metadata", async () => {
+      const task = await store.createTask({ description: "lease snapshot task" });
+      await store.updateTask(task.id, {
+        checkedOutBy: "agent-1",
+        checkedOutAt: "2026-05-01T00:00:00.000Z",
+        checkoutNodeId: "node-a",
+        checkoutRunId: "run-1",
+        checkoutLeaseRenewedAt: "2026-05-01T00:01:00.000Z",
+        checkoutLeaseEpoch: 7,
+      });
+
+      const snapshot = await store.getTaskMetadataSnapshot();
+      const replicated = snapshot.payload.tasks.find((entry) => entry.id === task.id);
+
+      expect(replicated).toMatchObject({
+        checkedOutBy: "agent-1",
+        checkedOutAt: "2026-05-01T00:00:00.000Z",
+        checkoutNodeId: "node-a",
+        checkoutRunId: "run-1",
+        checkoutLeaseRenewedAt: "2026-05-01T00:01:00.000Z",
+        checkoutLeaseEpoch: 7,
+      });
+
+      await store.updateTask(task.id, { checkedOutBy: null, checkoutLeaseEpoch: 8 });
+      const released = await store.getTask(task.id);
+      expect(released).toMatchObject({ checkedOutBy: undefined, checkoutLeaseEpoch: 8 });
+    });
+
     it("exports and reapplies task/activity/audit snapshots deterministically", async () => {
       const task = await store.createTask({ description: "snapshot task" });
       await store.updateTask(task.id, { worktree: "/tmp/fn-worktree", executionStartBranch: "fn/base" });

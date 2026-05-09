@@ -20,6 +20,7 @@ import { evaluateSpecStaleness, getPromptPath } from "./spec-staleness.js";
 import { resolveEffectiveNode } from "./effective-node.js";
 import { applyUnavailableNodePolicy } from "./node-routing-policy.js";
 import type { NodeDispatchValidationResult } from "./node-dispatch-validation.js";
+import type { MeshLeaseManager } from "./mesh-lease-manager.js";
 
 /**
  * Check whether two sets of file scope paths overlap.
@@ -117,6 +118,8 @@ export interface SchedulerOptions {
   prMonitor?: PrMonitor;
   /** Optional MissionStore for slice activation and auto-advance */
   missionStore?: MissionStore;
+  /** Optional lease manager used to recover stale checkout leases before scheduling. */
+  leaseManager?: MeshLeaseManager;
   /** Optional MissionAutopilot for autonomous mission progression */
   missionAutopilot?: import("./mission-autopilot.js").MissionAutopilot;
   /**
@@ -675,6 +678,18 @@ export class Scheduler {
 
       for (const taskId of ordered) {
         const task = tasks.find((t) => t.id === taskId)!;
+
+        if (task.checkedOutBy && this.options.leaseManager) {
+          const recovered = await this.options.leaseManager.recoverAbandonedLease(
+            task.id,
+            "scheduler detected stale todo lease",
+            { preserveProgress: true },
+          );
+          if (!recovered) {
+            await this.store.updateTask(task.id, { status: "queued" });
+            continue;
+          }
+        }
 
         // Check all deps are satisfied (done, in-review, or archived)
         const unmetDeps = task.dependencies.filter((depId) => {

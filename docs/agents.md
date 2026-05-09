@@ -850,6 +850,8 @@ Implementation tasks require an agent with `role: "executor"`.
 
 ## Heartbeat Monitoring and Trigger Scheduling
 
+Heartbeat/executor ownership now actively renews persisted task lease metadata while work is running (`checkoutLeaseRenewedAt` plus owner node/run context). Abandonment recovery is fenced by `checkoutLeaseEpoch` and executed only through `MeshLeaseManager.recoverAbandonedLease(...)`, so stale owners cannot reclaim tasks after recovery.
+
 Fusion's `HeartbeatTriggerScheduler` supports five trigger types:
 
 - `timer` — periodic wake based on heartbeat interval
