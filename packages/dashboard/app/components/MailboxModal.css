@@ -649,10 +649,28 @@
 
 .mailbox-view .mailbox-split-layout {
   display: grid;
-  grid-template-columns: minmax(17.5rem, 38%) minmax(0, 1fr);
-  gap: var(--space-lg);
+  grid-template-columns: auto auto minmax(0, 1fr);
+  gap: 0;
   height: 100%;
   min-height: 0;
+}
+
+.mailbox-view .mailbox-split-resize-handle {
+  width: var(--space-sm);
+  cursor: col-resize;
+  background: color-mix(in srgb, var(--border) 70%, transparent);
+  transition: background var(--transition-fast);
+  border-radius: var(--radius-sm);
+}
+
+.mailbox-view .mailbox-split-resize-handle:hover,
+.mailbox-view .mailbox-split-resize-handle:focus-visible {
+  background: color-mix(in srgb, var(--todo) 35%, transparent);
+}
+
+.mailbox-view .mailbox-split-resize-handle:focus-visible {
+  box-shadow: var(--focus-ring-strong);
+  outline: none;
 }
 
 .mailbox-view .mailbox-split-list-pane,
@@ -855,6 +873,10 @@
   .mailbox-view .mailbox-split-layout {
     display: block;
     height: auto;
+  }
+
+  .mailbox-view .mailbox-split-resize-handle {
+    display: none;
   }
 
   .mailbox-view .mailbox-split-list-pane,
