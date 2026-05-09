@@ -64,7 +64,33 @@
 
 .memory-view-content {
   flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.memory-working-tab,
+.memory-insights-tab,
+.memory-engines-tab {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
   overflow-y: auto;
+}
+
+.memory-editor-section {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+
+.memory-editor-form-group {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .memory-editor-container {
@@ -73,7 +99,15 @@
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  height: calc(100vh - var(--header-height) - 180px);
+  flex: 1 1 auto;
+  min-height: calc(var(--space-xl) * 13 + var(--space-xs) * 2);
+}
+
+.memory-insights-editor-layout {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
 }
 
 .memory-category-section {
@@ -417,7 +451,7 @@
   }
 
   .memory-editor-container {
-    height: calc(100vh - var(--header-height) - var(--mobile-nav-height) - 200px);
+    min-height: calc(var(--space-xl) * 10);
   }
 
   .memory-stats-row {

@@ -477,7 +477,7 @@ export function MemoryView({ projectId, addToast }: MemoryViewProps) {
                     </div>
                   )}
 
-                  <div className="form-group">
+                  <div className="form-group memory-editor-form-group">
                     <label>{selectedMemoryFile?.label || "Memory Editor"}</label>
                     <small>{selectedLayerDescription}</small>
                     <div className="memory-editor-container">
@@ -696,7 +696,7 @@ export function MemoryView({ projectId, addToast }: MemoryViewProps) {
               </div>
             ) : editingInsights ? (
               // Raw editor mode
-              <>
+              <div className="memory-insights-editor-layout">
                 <div className="memory-editor-container">
                   <FileEditor
                     content={insightsEditorContent ?? ""}
@@ -721,7 +721,7 @@ export function MemoryView({ projectId, addToast }: MemoryViewProps) {
                     Save Insights
                   </button>
                 </div>
-              </>
+              </div>
             ) : !insightsExists || parsedCategories.length === 0 ? (
               // Empty state
               <div className="memory-empty-state">

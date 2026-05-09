@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryView } from "../MemoryView";
+import { loadAllAppCssBaseOnly } from "../../test/cssFixture";
 
 const mockUseMemoryData = vi.fn();
 
@@ -306,5 +307,15 @@ describe("MemoryView", () => {
     render(<MemoryView addToast={vi.fn()} />);
 
     expect(screen.queryByRole("button", { name: "Dream Now" })).not.toBeInTheDocument();
+  });
+});
+
+describe("MemoryView CSS contract", () => {
+  it("uses flex sizing for the memory editor and keeps flex-chain min-height guards", async () => {
+    const css = await loadAllAppCssBaseOnly();
+
+    expect(css).not.toMatch(/\.memory-editor-container\s*\{[^}]*height\s*:\s*calc\(100vh/i);
+    expect(css).toMatch(/\.memory-editor-container\s*\{[^}]*flex\s*:\s*1\s+1\s+auto;[^}]*min-height\s*:/);
+    expect(css).toMatch(/\.memory-view-content\s*\{[^}]*min-height\s*:\s*0\s*;/);
   });
 });
