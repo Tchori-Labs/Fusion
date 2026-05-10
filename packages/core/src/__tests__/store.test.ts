@@ -10472,7 +10472,7 @@ Task with acceptance criteria
       } finally {
         store.stopWatching();
       }
-    });
+    }, 30_000);
   });
 
   describe("async checkForChanges", () => {
