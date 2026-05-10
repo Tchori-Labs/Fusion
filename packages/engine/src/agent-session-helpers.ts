@@ -163,6 +163,28 @@ export function resolvePlanningSessionModel(
   };
 }
 
+export function resolveMergerSessionModel(
+  settings: Partial<Settings> | undefined,
+  assignedAgentRuntimeConfig?: Record<string, unknown>,
+): { provider: string | undefined; modelId: string | undefined } {
+  const assignedRuntimeModel = extractRuntimeModel(assignedAgentRuntimeConfig);
+  if (assignedRuntimeModel.provider && assignedRuntimeModel.modelId) {
+    return assignedRuntimeModel;
+  }
+
+  if (settings?.defaultProviderOverride && settings.defaultModelIdOverride) {
+    return {
+      provider: settings.defaultProviderOverride,
+      modelId: settings.defaultModelIdOverride,
+    };
+  }
+
+  return {
+    provider: settings?.defaultProvider,
+    modelId: settings?.defaultModelId,
+  };
+}
+
 /**
  * Create an agent session using runtime resolution.
  *

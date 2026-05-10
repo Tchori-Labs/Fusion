@@ -53,7 +53,7 @@ import {
 } from "@fusion/core";
 import { describeModel, promptWithFallback } from "./pi.js";
 import { accumulateSessionTokenUsage } from "./session-token-usage.js";
-import { createResolvedAgentSession, extractRuntimeHint } from "./agent-session-helpers.js";
+import { createResolvedAgentSession, extractRuntimeHint, resolveMergerSessionModel } from "./agent-session-helpers.js";
 import { createFallbackModelObserver } from "./fallback-model-observer.js";
 import { buildSessionSkillContext } from "./session-skill-context.js";
 import type { WorktreePool } from "./worktree-pool.js";
@@ -820,6 +820,7 @@ async function attemptInMergeVerificationFix(
       ? await agentStoreWithGetAgent.getAgent(assignedAgentId).catch(() => null)
       : null;
     const mergerRuntimeHint = extractRuntimeHint(assignedAgent?.runtimeConfig);
+    const mergerSessionModel = resolveMergerSessionModel(settings, assignedAgent?.runtimeConfig);
     const { session } = await createResolvedAgentSession({
       sessionPurpose: "merger",
       runtimeHint: mergerRuntimeHint,
@@ -846,12 +847,8 @@ Do not refactor, rename broadly, or make opportunistic improvements.
       onThinking: logger.onThinking,
       onToolStart: logger.onToolStart,
       onToolEnd: logger.onToolEnd,
-      defaultProvider: settings.defaultProviderOverride && settings.defaultModelIdOverride
-        ? settings.defaultProviderOverride
-        : settings.defaultProvider,
-      defaultModelId: settings.defaultProviderOverride && settings.defaultModelIdOverride
-        ? settings.defaultModelIdOverride
-        : settings.defaultModelId,
+      defaultProvider: mergerSessionModel.provider,
+      defaultModelId: mergerSessionModel.modelId,
       fallbackProvider: settings.fallbackProvider,
       fallbackModelId: settings.fallbackModelId,
       defaultThinkingLevel: settings.defaultThinkingLevel,
@@ -1919,6 +1916,7 @@ async function runAiAgentForAutostashConflict(params: {
     ? await agentStoreWithGetAgent.getAgent(assignedAgentId).catch(() => null)
     : null;
   const mergerRuntimeHint = extractRuntimeHint(assignedAgent?.runtimeConfig);
+  const mergerSessionModel = resolveMergerSessionModel(settings, assignedAgent?.runtimeConfig);
 
   const systemPrompt = `You are an autostash-conflict resolution agent running after a Fusion merge has already committed on the main branch.
 
@@ -1962,12 +1960,8 @@ ${fileList}
     onThinking: agentLogger.onThinking,
     onToolStart: agentLogger.onToolStart,
     onToolEnd: agentLogger.onToolEnd,
-    defaultProvider: settings.defaultProviderOverride && settings.defaultModelIdOverride
-      ? settings.defaultProviderOverride
-      : settings.defaultProvider,
-    defaultModelId: settings.defaultProviderOverride && settings.defaultModelIdOverride
-      ? settings.defaultModelIdOverride
-      : settings.defaultModelId,
+    defaultProvider: mergerSessionModel.provider,
+    defaultModelId: mergerSessionModel.modelId,
     fallbackProvider: settings.fallbackProvider,
     fallbackModelId: settings.fallbackModelId,
     defaultThinkingLevel: settings.defaultThinkingLevel,
@@ -2290,6 +2284,7 @@ async function runAiAgentForAutostashHardFail(params: {
     ? await agentStoreWithGetAgent.getAgent(assignedAgentId).catch(() => null)
     : null;
   const mergerRuntimeHint = extractRuntimeHint(assignedAgent?.runtimeConfig);
+  const mergerSessionModel = resolveMergerSessionModel(settings, assignedAgent?.runtimeConfig);
 
   const systemPrompt = `You are an autostash hard-failure recovery agent for the Fusion merger.
 
@@ -2343,12 +2338,8 @@ ${fileList}
     onThinking: agentLogger.onThinking,
     onToolStart: agentLogger.onToolStart,
     onToolEnd: agentLogger.onToolEnd,
-    defaultProvider: settings.defaultProviderOverride && settings.defaultModelIdOverride
-      ? settings.defaultProviderOverride
-      : settings.defaultProvider,
-    defaultModelId: settings.defaultProviderOverride && settings.defaultModelIdOverride
-      ? settings.defaultModelIdOverride
-      : settings.defaultModelId,
+    defaultProvider: mergerSessionModel.provider,
+    defaultModelId: mergerSessionModel.modelId,
     fallbackProvider: settings.fallbackProvider,
     fallbackModelId: settings.fallbackModelId,
     defaultThinkingLevel: settings.defaultThinkingLevel,
@@ -4143,6 +4134,7 @@ async function resolveComplexRebaseConflictsWithAi(
     pluginRunner?: import("./plugin-runner.js").PluginRunner;
     signal?: AbortSignal;
     runtimeHint?: string;
+    assignedAgentRuntimeConfig?: Record<string, unknown>;
     onSession?: (session: { dispose: () => void }) => void;
   },
 ): Promise<void> {
@@ -4171,6 +4163,7 @@ You are assisting with a paused \`git pull --rebase\`.
   });
 
   throwIfAborted(options?.signal, taskId);
+  const mergerSessionModel = resolveMergerSessionModel(settings, options?.assignedAgentRuntimeConfig);
   const { session } = await createResolvedAgentSession({
     sessionPurpose: "merger",
     runtimeHint: options?.runtimeHint,
@@ -4182,12 +4175,8 @@ You are assisting with a paused \`git pull --rebase\`.
     onThinking: agentLogger.onThinking,
     onToolStart: agentLogger.onToolStart,
     onToolEnd: agentLogger.onToolEnd,
-    defaultProvider: settings.defaultProviderOverride && settings.defaultModelIdOverride
-      ? settings.defaultProviderOverride
-      : settings.defaultProvider,
-    defaultModelId: settings.defaultProviderOverride && settings.defaultModelIdOverride
-      ? settings.defaultModelIdOverride
-      : settings.defaultModelId,
+    defaultProvider: mergerSessionModel.provider,
+    defaultModelId: mergerSessionModel.modelId,
     fallbackProvider: settings.fallbackProvider,
     fallbackModelId: settings.fallbackModelId,
     defaultThinkingLevel: settings.defaultThinkingLevel,
@@ -4241,6 +4230,7 @@ async function resolveRebaseConflictSet(
     onAgentText?: (delta: string) => void;
     signal?: AbortSignal;
     runtimeHint?: string;
+    assignedAgentRuntimeConfig?: Record<string, unknown>;
     onSession?: (session: { dispose: () => void }) => void;
   },
 ): Promise<void> {
@@ -4289,6 +4279,7 @@ async function pullWithRebaseAndResolveConflicts(
     onAgentText?: (delta: string) => void;
     signal?: AbortSignal;
     runtimeHint?: string;
+    assignedAgentRuntimeConfig?: Record<string, unknown>;
     onSession?: (session: { dispose: () => void }) => void;
   },
 ): Promise<void> {
@@ -4385,6 +4376,7 @@ export async function pushToRemoteAfterMerge(
     onAgentText?: (delta: string) => void;
     signal?: AbortSignal;
     runtimeHint?: string;
+    assignedAgentRuntimeConfig?: Record<string, unknown>;
     onSession?: (session: { dispose: () => void }) => void;
   },
 ): Promise<{ pushed: boolean; error?: string }> {
@@ -5891,6 +5883,7 @@ export async function aiMergeTask(
         onAgentText: options.onAgentText,
         signal: options.signal,
         runtimeHint: pushRuntimeHint,
+        assignedAgentRuntimeConfig: pushAssignedAgent?.runtimeConfig,
         onSession: options.onSession,
       });
       if (pushResult.pushed) {
@@ -6833,6 +6826,7 @@ async function runAiAgentForCommit(params: AiAgentParams): Promise<{ success: bo
     ? await agentStoreWithGetAgent.getAgent(assignedAgentId).catch(() => null)
     : null;
   const mergerRuntimeHint = extractRuntimeHint(assignedAgent?.runtimeConfig);
+  const mergerSessionModel = resolveMergerSessionModel(settings, assignedAgent?.runtimeConfig);
 
   const { session } = await createResolvedAgentSession({
     sessionPurpose: "merger",
@@ -6846,12 +6840,8 @@ async function runAiAgentForCommit(params: AiAgentParams): Promise<{ success: bo
     onThinking: agentLogger.onThinking,
     onToolStart: agentLogger.onToolStart,
     onToolEnd: agentLogger.onToolEnd,
-    defaultProvider: settings.defaultProviderOverride && settings.defaultModelIdOverride
-      ? settings.defaultProviderOverride
-      : settings.defaultProvider,
-    defaultModelId: settings.defaultProviderOverride && settings.defaultModelIdOverride
-      ? settings.defaultModelIdOverride
-      : settings.defaultModelId,
+    defaultProvider: mergerSessionModel.provider,
+    defaultModelId: mergerSessionModel.modelId,
     fallbackProvider: settings.fallbackProvider,
     fallbackModelId: settings.fallbackModelId,
     defaultThinkingLevel: settings.defaultThinkingLevel,

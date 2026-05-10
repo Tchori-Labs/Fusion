@@ -493,9 +493,10 @@ Fusion uses a dual-scope model settings system with five lanes. Global settings 
 
 ### Merger model
 
-1. Project `defaultProviderOverride` + `defaultModelIdOverride`
-2. Global `defaultProvider` + `defaultModelId`
-3. Automatic provider/model resolution
+1. Assigned durable agent runtime model (`runtimeConfig.model` or `runtimeConfig.modelProvider` + `runtimeConfig.modelId`) when both provider and model ID are set
+2. Project `defaultProviderOverride` + `defaultModelIdOverride`
+3. Global `defaultProvider` + `defaultModelId`
+4. Automatic provider/model resolution
 
 ### Title summarization model
 
