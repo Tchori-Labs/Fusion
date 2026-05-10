@@ -24,7 +24,6 @@ import {
   Activity,
   FileText,
   RefreshCw,
-  AlertCircle,
 } from "lucide-react";
 import type { ToastType } from "../hooks/useToast";
 import { useViewportMode } from "../hooks/useViewportMode";
@@ -174,6 +173,28 @@ const validationStateColors: Record<string, { bg: string; text: string }> = {
 };
 
 const featureRetryBudgetMax = 3;
+const missionInterviewListStatuses: ReadonlySet<AiSessionSummary["status"]> = new Set([
+  "generating",
+  "awaiting_input",
+  "error",
+]);
+
+function getInterviewStatusLabel(status: AiSessionSummary["status"]): string {
+  switch (status) {
+    case "generating":
+      return "Generating plan";
+    case "awaiting_input":
+      return "Awaiting input";
+    case "error":
+      return "Needs retry";
+    default:
+      return status;
+  }
+}
+
+function getInterviewActionLabel(status: AiSessionSummary["status"]): string {
+  return status === "error" ? "Retry interview" : "Resume interview";
+}
 
 /** Get the plan state for a milestone (derived from interviewState) */
 function getMilestonePlanState(interviewState?: string): "not_started" | "planned" | "needs_update" {
@@ -576,7 +597,7 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
     fetchAiSessions(projectId).then((sessions) => {
       if (cancelled) return;
       const pending = sessions.filter(
-        (s) => s.type === "mission_interview" && (s.status === "awaiting_input" || s.status === "error"),
+        (s) => s.type === "mission_interview" && missionInterviewListStatuses.has(s.status),
       );
       setPendingInterviewSessions(pending);
     }).catch((err) => {
@@ -3472,6 +3493,53 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
     );
   };
 
+  const handleResumeInterviewSession = (sessionId: string) => {
+    setLocalResumeSessionId(sessionId);
+    setShowInterviewModal(true);
+  };
+
+  const renderInterviewSessionItems = () => pendingInterviewSessions.map((session) => {
+    const isErrored = session.status === "error";
+    const isGenerating = session.status === "generating";
+
+    return (
+      <div
+        key={session.id}
+        className="mission-list__item mission-list__item--interview"
+        onClick={() => handleResumeInterviewSession(session.id)}
+      >
+        <div className="mission-list__item-content">
+          <div className="mission-list__item-header">
+            <Sparkles size={16} className="mission-list__item-icon" />
+            <span className="mission-list__item-title">{session.title || "Mission interview"}</span>
+          </div>
+          <div className="mission-list__item-tags">
+            <span className={`mission-status-badge mission-status-badge--sm mission-interview-status mission-interview-status--${session.status}`}>
+              {getInterviewStatusLabel(session.status)}
+            </span>
+          </div>
+          <p className="mission-list__item-description">
+            {isGenerating
+              ? "Generating mission hierarchy from interview context."
+              : isErrored
+                ? "Interview hit an error. Retry from this list item."
+                : "Interview is waiting for your next response."}
+          </p>
+        </div>
+        <div className="mission-list__item-actions" onClick={(event) => event.stopPropagation()}>
+          <button
+            className={`mission-icon-btn ${isErrored ? "mission-icon-btn--danger" : "mission-icon-btn--success"}`}
+            onClick={() => handleResumeInterviewSession(session.id)}
+            title={getInterviewActionLabel(session.status)}
+            aria-label={getInterviewActionLabel(session.status)}
+          >
+            {isGenerating ? <Loader2 size={14} className="spinner" /> : isErrored ? <RefreshCw size={14} /> : <Sparkles size={14} />}
+          </button>
+        </div>
+      </div>
+    );
+  });
+
   const renderMissionListItems = () => missions.map((mission) => {
     const m = mission;
     const isSelected = selectedMission?.id === m.id;
@@ -3657,8 +3725,9 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
                 </div>
               )}
 
-              {/* Mission items */}
+              {/* Mission and interview items */}
               {renderMissionListItems()}
+              {renderInterviewSessionItems()}
 
               {/* Edit mission form */}
               {editingMissionId && (
@@ -3730,32 +3799,6 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
 
               {!isCreatingMission && (
                 <div className="mission-list__footer">
-                  {pendingInterviewSessions.length > 0 && (
-                    <div className="mission-resume-prompt">
-                      <AlertCircle size={16} />
-                      <span>
-                        {pendingInterviewSessions.length === 1
-                          ? `Resume "${pendingInterviewSessions[0].title}"?`
-                          : `${pendingInterviewSessions.length} interview sessions pending`}
-                      </span>
-                      <div className="mission-list__resume-actions">
-                        {pendingInterviewSessions.map((s) => (
-                          <button
-                            key={s.id}
-                            className="mission-add-btn"
-                            onClick={() => {
-                              setLocalResumeSessionId(s.id);
-                              setShowInterviewModal(true);
-                              setPendingInterviewSessions([]);
-                            }}
-                          >
-                            {s.status === "error" ? <RefreshCw size={14} /> : <Sparkles size={14} />}
-                            {s.status === "error" ? "Retry" : "Resume"}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
                   {showBottomPlanButton && (
                     <div className="mission-list__footer-actions">
                       <button className="mission-add-btn" onClick={() => setShowInterviewModal(true)}>

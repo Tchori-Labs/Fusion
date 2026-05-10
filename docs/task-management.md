@@ -389,6 +389,7 @@ Tracking behavior is controlled per task:
 - `task.githubTracking.repoOverride` optionally forces a specific target repo (`owner/repo`).
 - In the dashboard **Task Detail** modal, eligible existing tasks (`triage`, `todo`, `in-progress`, `in-review`) always show GitHub tracking controls so tracking can be enabled, disabled, or retargeted without reopening the task in a creation flow.
 - Clearing the Task Detail repo override stores `null`, which reverts repo resolution to project/global defaults.
+- Explicit task-level enablement is honored even when project/global GitHub tracking defaults are unset. If `enabled: true` and the repo resolves at task scope (for example via `repoOverride`), Fusion still attempts create-time tracking-issue creation.
 
 Repository resolution order:
 

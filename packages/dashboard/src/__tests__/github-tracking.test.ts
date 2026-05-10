@@ -148,6 +148,19 @@ describe("maybeCreateTrackingIssue", () => {
     expect(createIssueMock).toHaveBeenCalledWith(expect.objectContaining({ owner, repo }));
   });
 
+  it("creates a tracking issue from explicit task override when defaults are unset", async () => {
+     const linkGithubIssue = vi.fn();
+
+     await maybeCreateTrackingIssue(buildTask({ githubTracking: { enabled: true, repoOverride: "task/repo" } }), {
+       taskStore: { linkGithubIssue, recordActivity: vi.fn() } as any,
+       projectSettings: {},
+       globalSettings: {},
+       logger: console,
+     });
+
+     expect(createIssueMock).toHaveBeenCalledWith(expect.objectContaining({ owner: "task", repo: "repo" }));
+   });
+
   it("skips creation when tracking is on but no repo is configured", async () => {
     const result = await maybeCreateTrackingIssue(buildTask({ githubTracking: { enabled: true } }), {
       taskStore: { recordActivity: vi.fn() } as any,
