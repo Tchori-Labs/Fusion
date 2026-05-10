@@ -82,13 +82,13 @@ In **Settings → Notifications**, use **Test message notification** to exercise
 > Mesh lifecycle note: settings sync is executed by the process-level `PeerExchangeService` started by `fn serve`/`fn dashboard`. `InProcessRuntime` does not instantiate settings-sync mesh services per project.
 | `dashboardCurrentProjectIdByNode` | `Record<string, string>` | `undefined` | Map of node ID to last-selected project ID. Use key `"local"` for the local node. Persists project context across browser restarts and PWA sessions. |
 | `persistAgentToolOutput` | `boolean` | `true` | Controls whether detailed `detail` payloads are persisted for `tool`, `tool_result`, and `tool_error` agent log entries. When disabled, tool timeline rows are still recorded, but verbose payloads are omitted. |
-| `researchGlobalDefaults` | `ResearchGlobalDefaults` | `{ searchProvider: undefined, synthesisProvider: undefined, synthesisModelId: undefined, enabledSources: { webSearch: true, pageFetch: true, github: false, localDocs: true, llmSynthesis: true }, maxSourcesPerRun: 20, defaultExportFormat: "markdown" }` | Global Research defaults shared by all projects. Project overrides come from `researchSettings`. |
+| `researchGlobalDefaults` | `ResearchGlobalDefaults` | `{ searchProvider: "builtin", synthesisProvider: undefined, synthesisModelId: undefined, enabledSources: { webSearch: true, pageFetch: true, github: false, localDocs: true, llmSynthesis: true }, maxSourcesPerRun: 20, defaultExportFormat: "markdown" }` | Global Research defaults shared by all projects. Web search defaults to the built-in WebSearch/WebFetch-backed provider; project overrides come from `researchSettings`. |
 | `researchGlobalEnabled` | `boolean` | `true` | Enable or disable the research subsystem globally. When false, dashboard/API/CLI/agent entrypoints reject new runs. |
 | `researchGlobalMaxConcurrentRuns` | `number` | `3` | Maximum concurrent research runs across all projects. |
 | `researchGlobalDefaultTimeout` | `number` | `300000` | Default timeout for end-to-end research runs in milliseconds (5 minutes). |
 | `researchGlobalMaxSourcesPerRun` | `number` | `20` | Maximum number of sources per research run. |
 | `researchGlobalMaxSynthesisRounds` | `number` | `2` | Maximum synthesis rounds per research run. |
-| `researchGlobalWebSearchProvider` | `"searxng" \| "brave" \| "google" \| "tavily" \| "none"` | `"none"` | Web search backend for research. Default: `"none"` (disabled). |
+| `researchGlobalWebSearchProvider` | `"builtin" \| "searxng" \| "brave" \| "google" \| "tavily" \| "none"` | `"builtin"` | Web search backend for research. Default: `"builtin"` (uses agent-native WebSearch/WebFetch tools with no API key requirement). |
 | `researchGlobalSearxngUrl` | `string` | `undefined` | SearXNG instance URL (required when provider is `"searxng"`). |
 | `researchGlobalBraveApiKey` | `string` | `undefined` | Brave Search API key (required when provider is `"brave"`). |
 | `researchGlobalGoogleSearchApiKey` | `string` | `undefined` | Google Custom Search API key (required when provider is `"google"`). |
@@ -312,7 +312,7 @@ When that flag is disabled, the Settings modal also hides both Research sections
 Research failures are normalized to a shared error-code contract (`FEATURE_DISABLED`, `MISSING_CREDENTIALS`, `PROVIDER_UNAVAILABLE`, `RATE_LIMITED`, `PROVIDER_TIMEOUT`, `RUN_CANCELLED`, `RETRY_EXHAUSTED`, `INVALID_TRANSITION`, `NON_RETRYABLE_PROVIDER_ERROR`, `INTERNAL_ERROR`) with retryability metadata so dashboard, API, CLI, and agent tooling show consistent recovery guidance.
 
 Recovery entrypoints in the dashboard:
-- **Settings → Research Defaults**: fix missing default provider configuration and provider-level readiness.
+- **Settings → Research Defaults**: choose between builtin web search (default) or optional external provider configuration.
 - **Settings → Authentication**: repair missing provider credentials (`MISSING_CREDENTIALS`).
 - **Settings → Research (project)**: re-enable project research or source toggles when runs are blocked by project settings.
 - **Settings → Experimental Features**: enable `researchView` when Research surfaces or `fn_research_*` tools report feature-disabled.

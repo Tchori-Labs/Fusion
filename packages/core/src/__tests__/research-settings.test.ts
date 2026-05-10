@@ -95,6 +95,14 @@ describe("resolveResearchSettings", () => {
     expect(resolved.searchProvider).toBe("brave");
   });
 
+  it("honors explicit legacy global search provider opt-out", () => {
+    const resolved = resolveResearchSettings({
+      researchGlobalWebSearchProvider: "none",
+    });
+
+    expect(resolved.searchProvider).toBe("none");
+  });
+
   it("supports null-as-delete semantics for researchSettings object", () => {
     const resolved = resolveResearchSettings({
       researchGlobalDefaults: {
@@ -123,6 +131,7 @@ describe("resolveResearchSettings", () => {
     expect(fromLegacyGlobalTimeout.limits.maxConcurrentRuns).toBe(9);
 
     const hardcodedFallback = resolveResearchSettings({});
+    expect(hardcodedFallback.searchProvider).toBe("builtin");
     expect(hardcodedFallback.limits.maxDurationMs).toBe(300000);
     expect(hardcodedFallback.limits.requestTimeoutMs).toBe(30000);
     expect(hardcodedFallback.defaultExportFormat).toBe("markdown");

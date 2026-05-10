@@ -104,7 +104,7 @@ export const DEFAULT_GLOBAL_SETTINGS = {
   researchGlobalDefaultTimeout: 300000,
   researchGlobalMaxSourcesPerRun: 20,
   researchGlobalMaxSynthesisRounds: 2,
-  researchGlobalWebSearchProvider: "none",
+  researchGlobalWebSearchProvider: "builtin",
   researchGlobalSearxngUrl: undefined,
   researchGlobalBraveApiKey: undefined,
   researchGlobalGoogleSearchApiKey: undefined,

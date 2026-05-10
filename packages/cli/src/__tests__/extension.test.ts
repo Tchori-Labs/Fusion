@@ -1445,6 +1445,31 @@ describe("fn pi extension (runnable structured-output regression slice)", () => 
   });
 
   describe("research tools", () => {
+    it("fn_research_run treats builtin as configured when no provider is explicitly set", async () => {
+      const store = new TaskStore(tmpDir);
+      await store.init();
+      await store.updateGlobalSettings({
+        researchGlobalEnabled: true,
+        experimentalFeatures: { researchView: true } as Record<string, boolean>,
+      });
+      await store.updateSettings({
+        researchEnabled: true,
+        researchSettings: { enabled: true },
+      });
+
+      const tool = api.tools.get("fn_research_run")!;
+      const result = await tool.execute(
+        "research-run-builtin",
+        { query: "builtin default" },
+        undefined,
+        undefined,
+        makeCtx(tmpDir),
+      );
+
+      expect(result.details.setup).toBeNull();
+      expect(result.details.status).toBe("queued");
+    });
+
     it("fn_research_list status parameter matches RESEARCH_RUN_STATUSES", () => {
       const tool = api.tools.get("fn_research_list") as any;
       const statusSchema = tool.parameters.properties.status;

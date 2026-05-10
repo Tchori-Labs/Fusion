@@ -4150,32 +4150,108 @@ export function SettingsModal({
         );
       }
       case "research-global": {
-        const providerStatuses = authProviders.filter((provider) => provider.id === "brave" || provider.id === "tavily");
-        const hasMissingResearchCredential = providerStatuses.some((provider) => !provider.authenticated);
-        const hasSearchProvider = Boolean(form.researchGlobalDefaults?.searchProvider?.trim());
+        const resolvedProvider =
+          form.researchGlobalWebSearchProvider ??
+          form.researchGlobalDefaults?.searchProvider ??
+          "builtin";
+        const externalProvider =
+          resolvedProvider === "searxng" ||
+          resolvedProvider === "brave" ||
+          resolvedProvider === "google" ||
+          resolvedProvider === "tavily" ||
+          resolvedProvider === "none";
+        const selectedCredentialProvider =
+          resolvedProvider === "brave" || resolvedProvider === "tavily" ? resolvedProvider : null;
+        const hasMissingResearchCredential = selectedCredentialProvider
+          ? authProviders.some((provider) => provider.id === selectedCredentialProvider && !provider.authenticated)
+          : false;
+
+        const setSearchProvider = (provider: Settings["researchGlobalWebSearchProvider"]) => {
+          setForm((current) => ({
+            ...current,
+            researchGlobalWebSearchProvider: provider,
+            researchGlobalDefaults: {
+              ...(current.researchGlobalDefaults ?? {}),
+              searchProvider: provider,
+            },
+          }));
+        };
 
         return (
           <>
             {renderScopeBanner()}
             <h4 className="settings-section-heading">Research Defaults</h4>
             <div className="form-group">
-              <label htmlFor="research-global-search-provider">Default Search Provider</label>
-              <input
-                id="research-global-search-provider"
-                className="input"
-                value={form.researchGlobalDefaults?.searchProvider ?? ""}
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    researchGlobalDefaults: {
-                      ...(current.researchGlobalDefaults ?? {}),
-                      searchProvider: event.target.value || undefined,
-                    },
-                  }))
-                }
-                placeholder="tavily"
-              />
+              <label htmlFor="research-global-provider-builtin" className="checkbox-label">
+                <input
+                  id="research-global-provider-builtin"
+                  type="radio"
+                  name="research-global-search-provider"
+                  checked={!externalProvider}
+                  onChange={() => setSearchProvider("builtin")}
+                />
+                Built-in (uses agent web tools)
+              </label>
+              <small>
+                Searches and fetches use the agent's native WebSearch/WebFetch tools. No API key required.
+              </small>
             </div>
+            <details className="settings-option-details">
+              <summary>Advanced — external search providers</summary>
+              <div className="form-group">
+                <label htmlFor="research-global-search-provider-advanced">Search Provider</label>
+                <select
+                  id="research-global-search-provider-advanced"
+                  className="input"
+                  value={externalProvider ? resolvedProvider : "searxng"}
+                  onChange={(event) =>
+                    setSearchProvider(event.target.value as Settings["researchGlobalWebSearchProvider"])
+                  }
+                >
+                  <option value="searxng">SearXNG</option>
+                  <option value="brave">Brave</option>
+                  <option value="google">Google Custom Search</option>
+                  <option value="tavily">Tavily</option>
+                  <option value="none">None (disable web search)</option>
+                </select>
+              </div>
+              <div className="form-group">
+                <label htmlFor="research-global-searxng-url">SearXNG URL</label>
+                <input
+                  id="research-global-searxng-url"
+                  className="input"
+                  value={form.researchGlobalSearxngUrl ?? ""}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      researchGlobalSearxngUrl: event.target.value || undefined,
+                    }))
+                  }
+                  placeholder="https://searx.example.com"
+                />
+              </div>
+              <div className="form-group">
+                <label htmlFor="research-global-google-cx">Google Search CX</label>
+                <input
+                  id="research-global-google-cx"
+                  className="input"
+                  value={form.researchGlobalGoogleSearchCx ?? ""}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      researchGlobalGoogleSearchCx: event.target.value || undefined,
+                    }))
+                  }
+                  placeholder="custom-search-engine-id"
+                />
+              </div>
+              <div className="settings-empty-state" role="note">
+                Configure Brave, Tavily, and Google API keys in Authentication.
+                <button type="button" className="btn btn-sm" onClick={() => setActiveSection("authentication")}>
+                  Open Authentication Settings
+                </button>
+              </div>
+            </details>
             <div className="form-group">
               <label htmlFor="research-global-max-sources">Default Max Sources Per Run</label>
               <input
@@ -4195,14 +4271,9 @@ export function SettingsModal({
                 }
               />
             </div>
-            {!hasSearchProvider && (
-              <div className="settings-empty-state" role="alert">
-                Research defaults are incomplete: choose a default search provider before running research.
-              </div>
-            )}
             {hasMissingResearchCredential && (
               <div className="settings-empty-state" role="alert">
-                Missing credentials for one or more research providers.
+                Missing credentials for the selected research provider.
                 <button type="button" className="btn btn-sm" onClick={() => setActiveSection("authentication")}>
                   Open Authentication
                 </button>

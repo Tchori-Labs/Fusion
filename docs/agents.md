@@ -307,11 +307,11 @@ Expected behavior and boundaries:
 - Agents should use research only when repository/local context is insufficient
 - Queries should stay narrow and task-scoped; avoid open-ended exploration
 - When `experimentalFeatures.researchView` is disabled, sessions do not register `fn_research_*` tools and prompts do not advertise research capabilities
-- If the research surface is enabled but provider setup is incomplete, tools return actionable `setup` responses instead of crashing
+- If the research surface is enabled but an explicitly selected external provider is misconfigured (or web search is explicitly disabled), tools return actionable `setup` responses instead of crashing
 - Durable conclusions should be persisted with `fn_task_document_write` (for example, `key="research"`)
 - Research runs require the project engine to be running for processing; `fn_research_run` creates the run but does not block for completion unless `wait_for_completion` is set
 
-For the full research workflow, provider setup, CLI commands, and API reference, see the [Research guide](./research.md).
+For the full research workflow, builtin-default behavior, optional external provider setup, CLI commands, and API reference, see the [Research guide](./research.md).
 
 ## Built-In Agent Prompt Templates
 

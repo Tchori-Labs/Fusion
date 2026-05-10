@@ -109,6 +109,17 @@ describe("ResearchView", () => {
     mockUseResearch.mockReturnValue(baseHookValue);
   });
 
+  it("renders run form in default zero-config state", async () => {
+    mockFetchSettings.mockResolvedValue({});
+    mockFetchAuthStatus.mockResolvedValue({ providers: [] });
+
+    render(<ResearchView projectId="p1" />);
+
+    expect(await screen.findByLabelText("Query")).toBeInTheDocument();
+    expect(screen.queryByText(/Research defaults are incomplete/i)).not.toBeInTheDocument();
+    expect(screen.queryByTestId("research-state-unavailable")).not.toBeInTheDocument();
+  });
+
   it("shows authentication setup state when required credentials are missing", async () => {
     mockFetchSettings.mockResolvedValue(configuredResearchSettings);
     render(<ResearchView projectId="p1" />);
@@ -120,6 +131,21 @@ describe("ResearchView", () => {
     mockFetchAuthStatus.mockResolvedValue({ providers: [{ id: "openrouter", type: "api_key", authenticated: true }] });
     render(<ResearchView projectId="p1" />);
     expect(await screen.findByTestId("research-state-empty")).toBeInTheDocument();
+  });
+
+  it("shows friendly web-search disabled state when provider is none", async () => {
+    const onOpenSettings = vi.fn();
+    mockFetchSettings.mockResolvedValue({ researchGlobalWebSearchProvider: "none" });
+    mockFetchAuthStatus.mockResolvedValue({ providers: [] });
+
+    render(<ResearchView projectId="p1" onOpenSettings={onOpenSettings} />);
+
+    expect(await screen.findByTestId("research-state-web-search-disabled")).toHaveTextContent(
+      "Web search is disabled. Page Fetch, Local Docs, GitHub and LLM Synthesis still work.",
+    );
+    expect(screen.getByRole("checkbox", { name: "Web Search" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Re-enable Web Search" }));
+    expect(onOpenSettings).toHaveBeenCalledWith("research-global");
   });
 
   it("renders selected run details, citations, and history", async () => {
@@ -331,24 +357,6 @@ describe("ResearchView", () => {
     expect(onOpenSettings).toHaveBeenCalledWith("research-project");
   });
 
-  it("shows incomplete defaults setup CTA routed to global research settings", async () => {
-    mockFetchSettings.mockResolvedValue({
-      researchSettings: { enabled: true },
-      researchGlobalDefaults: {
-        searchProvider: "tavily",
-        synthesisProvider: undefined,
-        synthesisModelId: undefined,
-        maxSourcesPerRun: 20,
-      },
-    });
-    mockFetchAuthStatus.mockResolvedValue({ providers: [{ id: "tavily", type: "api_key", authenticated: true }] });
-
-    const onOpenSettings = vi.fn();
-    render(<ResearchView projectId="p1" onOpenSettings={onOpenSettings} />);
-    expect(await screen.findByText(/Research defaults are incomplete/i)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Open Settings" }));
-    expect(onOpenSettings).toHaveBeenCalledWith("research-global");
-  });
 
   it("shows authentication CTA when provider credentials are missing", async () => {
     mockFetchSettings.mockResolvedValue({

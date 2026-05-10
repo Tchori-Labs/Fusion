@@ -82,6 +82,21 @@ describe("research commands", () => {
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("Created research run"));
   });
 
+  it("creates a run when provider is unset by defaulting to builtin", async () => {
+    storeMock.getSettings.mockResolvedValueOnce({ researchSettings: { enabled: true } });
+    resolveResearchSettingsMock.mockReturnValueOnce({
+      enabled: true,
+      searchProvider: "builtin",
+      limits: { maxConcurrentRuns: 2, maxSourcesPerRun: 5, requestTimeoutMs: 1000, maxDurationMs: 5000 },
+    });
+    providerRegistryMock.mockReturnValueOnce({ getAvailableProviders: () => ["web-search"], getProvider: () => ({ type: "web-search" }) });
+
+    await runResearchCreate({ query: "hello builtin" });
+
+    expect(orchestratorMock.createRun).toHaveBeenCalled();
+    expect(errorSpy).not.toHaveBeenCalled();
+  });
+
   it("lists runs as json", async () => {
     await runResearchList({ json: true, status: "completed", limit: 3 });
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('"runs"'));

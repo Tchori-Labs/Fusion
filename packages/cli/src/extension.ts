@@ -218,20 +218,20 @@ async function getResearchAvailability(store: TaskStore): Promise<{ ok: boolean;
     return { ok: false, code: "feature-disabled", message: "Research is disabled in settings." };
   }
 
-  const backend = (resolved.searchProvider as string | undefined) ?? settings.researchGlobalWebSearchProvider;
-  const configured = backend === "searxng"
-    ? Boolean(settings.researchGlobalSearxngUrl)
-    : backend === "brave"
-      ? Boolean(settings.researchGlobalBraveApiKey)
-      : backend === "google"
-        ? Boolean(settings.researchGlobalGoogleSearchApiKey && settings.researchGlobalGoogleSearchCx)
-        : backend === "tavily"
-          ? Boolean(settings.researchGlobalTavilyApiKey)
-          : false;
-
-  if (!backend) {
-    return { ok: false, code: "provider-unavailable", message: "Research provider is not configured. Set research provider credentials in Settings." };
-  }
+  const backend = (resolved.searchProvider as string | undefined) ?? settings.researchGlobalWebSearchProvider ?? "builtin";
+  const configured = backend === "builtin"
+    ? true
+    : backend === "none"
+      ? false
+      : backend === "searxng"
+        ? Boolean(settings.researchGlobalSearxngUrl)
+        : backend === "brave"
+          ? Boolean(settings.researchGlobalBraveApiKey)
+          : backend === "google"
+            ? Boolean(settings.researchGlobalGoogleSearchApiKey && settings.researchGlobalGoogleSearchCx)
+            : backend === "tavily"
+              ? Boolean(settings.researchGlobalTavilyApiKey)
+              : false;
 
   if (!configured) {
     return { ok: false, code: "missing-credentials", message: `Missing credentials for ${backend}. Add provider keys in Authentication and verify Research defaults.` };

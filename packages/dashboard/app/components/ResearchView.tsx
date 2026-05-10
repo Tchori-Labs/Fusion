@@ -57,6 +57,7 @@ export function ResearchView({ projectId, addToast, onOpenSettings, readinessVer
   } = useResearch({ projectId });
   const [query, setQuery] = useState("");
   const [effectiveSettings, setEffectiveSettings] = useState(() => resolveResearchSettings(undefined));
+  const [rawSettings, setRawSettings] = useState<Partial<Settings>>({});
   const [authProviders, setAuthProviders] = useState<Array<{ id: string; authenticated: boolean }>>([]);
   const [submitting, setSubmitting] = useState(false);
   const [selectedProviders, setSelectedProviders] = useState<ResearchProviderOption[]>([]);
@@ -64,7 +65,13 @@ export function ResearchView({ projectId, addToast, onOpenSettings, readinessVer
   const [modalState, setModalState] = useState<null | { mode: "create" | "enrich"; findingId: string }>(null);
 
   const providerOptions = availability.supportedProviders ?? DEFAULT_PROVIDERS;
-  const isProviderEnabled = (provider: ResearchProviderOption) => effectiveSettings.enabledSources[PROVIDER_TO_SOURCE_KEY[provider]];
+  const selectedSearchProvider = effectiveSettings.searchProvider;
+  const isProviderEnabled = (provider: ResearchProviderOption) => {
+    if (provider === "web-search" && selectedSearchProvider === "none") {
+      return false;
+    }
+    return effectiveSettings.enabledSources[PROVIDER_TO_SOURCE_KEY[provider]];
+  };
 
   useEffect(() => {
     const enabledProviders = providerOptions.filter((provider) => isProviderEnabled(provider));
@@ -85,6 +92,7 @@ export function ResearchView({ projectId, addToast, onOpenSettings, readinessVer
     ])
       .then(([settings, authStatus]) => {
         if (cancelled) return;
+        setRawSettings(settings);
         setEffectiveSettings(resolveResearchSettings(settings));
         setAuthProviders(
           authStatus.providers
@@ -119,11 +127,7 @@ export function ResearchView({ projectId, addToast, onOpenSettings, readinessVer
 
   const supportedExportFormats = availability.supportedExportFormats ?? ["markdown", "json", "html"];
 
-  const selectedSearchProvider = effectiveSettings.searchProvider;
-  const needsSearchProvider = effectiveSettings.enabledSources.webSearch && !selectedSearchProvider;
-  const needsSynthesisModel =
-    effectiveSettings.enabledSources.llmSynthesis &&
-    (!effectiveSettings.synthesisProvider || !effectiveSettings.synthesisModelId);
+  const webSearchExplicitlyDisabled = rawSettings.researchGlobalWebSearchProvider === "none" || selectedSearchProvider === "none";
   const apiKeyProviderAuth = useMemo(() => new Map(authProviders.map((provider) => [provider.id, provider.authenticated])), [authProviders]);
   const requiredCredentialProviders = useMemo(() => {
     const required = new Set<string>();
@@ -152,12 +156,8 @@ export function ResearchView({ projectId, addToast, onOpenSettings, readinessVer
         settingsSection: "research-project" as SectionId,
       };
     }
-    if (needsSearchProvider || needsSynthesisModel) {
-      return {
-        reason: "Research defaults are incomplete.",
-        details: "Select the required provider/model defaults in Research settings.",
-        settingsSection: "research-global" as SectionId,
-      };
+    if (webSearchExplicitlyDisabled) {
+      return null;
     }
     if (missingCredentialProvider) {
       return {
@@ -167,7 +167,7 @@ export function ResearchView({ projectId, addToast, onOpenSettings, readinessVer
       };
     }
     return null;
-  }, [availability.available, availability.reason, availability.setupInstructions, effectiveSettings.enabled, missingCredentialProvider, needsSearchProvider, needsSynthesisModel]);
+  }, [availability.available, availability.reason, availability.setupInstructions, effectiveSettings.enabled, missingCredentialProvider, webSearchExplicitlyDisabled]);
 
   const runAction = async (key: string, action: () => Promise<unknown>, successMessage: string) => {
     setActionLoading(key);
@@ -255,6 +255,17 @@ export function ResearchView({ projectId, addToast, onOpenSettings, readinessVer
           </div>
         </div>
       ) : (
+      <>
+        {webSearchExplicitlyDisabled ? (
+          <div className="research-view__state card" data-testid="research-state-web-search-disabled">
+            <p>Web search is disabled. Page Fetch, Local Docs, GitHub and LLM Synthesis still work.</p>
+            <div className="research-view__actions">
+              <button className="btn btn-primary" type="button" onClick={() => onOpenSettings?.("research-global")}>
+                Re-enable Web Search
+              </button>
+            </div>
+          </div>
+        ) : null}
       <div className="research-view__layout">
         <aside className="research-view__sidebar card">
           <div className="research-view__form">
@@ -433,6 +444,7 @@ export function ResearchView({ projectId, addToast, onOpenSettings, readinessVer
           </div>
         </div>
       </div>
+      </>
       )}
       {selectedRun && modalState && (() => {
         const findingIndex = selectedRun.results?.findings?.findIndex((entry, idx) => {

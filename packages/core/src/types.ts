@@ -1449,7 +1449,7 @@ export interface DaemonTokenSettings {
  * The dashboard UI shows these under a "Global" section.
  */
 /** Web search backend for auto-research provider. */
-export type WebSearchBackend = "searxng" | "brave" | "google" | "tavily" | "none";
+export type WebSearchBackend = "builtin" | "searxng" | "brave" | "google" | "tavily" | "none";
 
 export interface ResearchEnabledSources {
   webSearch: boolean;
@@ -1767,7 +1767,7 @@ export interface GlobalSettings {
   /** Default maximum number of synthesis rounds per run.
    *  Default: 2. */
   researchGlobalMaxSynthesisRounds?: number;
-  /** Web search backend for auto-research. Default: "none" (disabled). */
+  /** Web search backend for auto-research. Default: "builtin". */
   researchGlobalWebSearchProvider?: WebSearchBackend;
   /** SearXNG instance URL (required when researchGlobalWebSearchProvider is "searxng"). */
   researchGlobalSearxngUrl?: string;

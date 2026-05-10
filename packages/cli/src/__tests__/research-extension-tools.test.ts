@@ -88,6 +88,24 @@ describe("research extension tools", () => {
     expect(retryResult.details.setup.code).toBe("feature-disabled");
   });
 
+  it("treats builtin as configured when no provider is explicitly set", async () => {
+    const store = new TaskStore(tmpDir);
+    await store.init();
+    await store.updateGlobalSettings({
+      experimentalFeatures: { researchView: true } as Record<string, boolean>,
+      researchGlobalEnabled: true,
+    });
+    await store.updateSettings({
+      researchSettings: { enabled: true },
+    });
+
+    const runTool = api.tools.get("fn_research_run")!;
+    const result = await runTool.execute("call-builtin", { query: "fusion" }, undefined, undefined, makeCtx(tmpDir));
+
+    expect(result.details.setup).toBeNull();
+    expect(result.details.status).toBe("queued");
+  });
+
   it("returns actionable missing-credentials response", async () => {
     const store = new TaskStore(tmpDir);
     await store.init();

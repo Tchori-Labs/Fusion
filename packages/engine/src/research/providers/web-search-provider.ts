@@ -1,6 +1,7 @@
 import type { ResearchProviderConfig, ResearchSource, WebSearchBackend } from "@fusion/core";
 import type { ResearchProvider } from "../../research-step-runner.js";
 import { createLogger } from "../../logger.js";
+import { createFnAgent, promptWithFallback } from "../../pi.js";
 import { ResearchProviderError } from "../types.js";
 
 const log = createLogger("research:web-search");
@@ -15,6 +16,9 @@ export interface WebSearchProviderOptions {
   maxResults?: number;
   timeoutMs?: number;
   userAgent?: string;
+  projectRoot?: string;
+  defaultProvider?: string;
+  defaultModelId?: string;
 }
 
 const DEFAULT_MAX_RESULTS = 10;
@@ -29,7 +33,8 @@ export class WebSearchProvider implements ResearchProvider {
   constructor(private readonly options: WebSearchProviderOptions = {}) {}
 
   isConfigured(): boolean {
-    const backend = this.options.backend ?? "none";
+    const backend = this.options.backend ?? "builtin";
+    if (backend === "builtin") return true;
     if (backend === "none") return false;
     if (backend === "searxng") return Boolean(this.options.searxngUrl);
     if (backend === "brave") return Boolean(this.options.braveApiKey);
@@ -39,7 +44,7 @@ export class WebSearchProvider implements ResearchProvider {
   }
 
   async search(query: string, config: ResearchProviderConfig = {}, signal?: AbortSignal): Promise<ResearchSource[]> {
-    const backend = this.options.backend ?? "none";
+    const backend = this.options.backend ?? "builtin";
     if (!this.isConfigured()) return [];
 
     const maxResults = Number(config.maxResults ?? this.options.maxResults ?? DEFAULT_MAX_RESULTS);
@@ -48,6 +53,7 @@ export class WebSearchProvider implements ResearchProvider {
     const requestSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
 
     const results = await this.withHttpRetry(async () => {
+      if (backend === "builtin") return this.searchBuiltin(query, maxResults, requestSignal);
       if (backend === "searxng") return this.searchSearxng(query, maxResults, requestSignal);
       if (backend === "brave") return this.searchBrave(query, maxResults, requestSignal);
       if (backend === "google") return this.searchGoogle(query, maxResults, requestSignal);
@@ -75,6 +81,76 @@ export class WebSearchProvider implements ResearchProvider {
     _signal?: AbortSignal,
   ): Promise<{ content: string; metadata: Record<string, unknown> }> {
     return { content: "", metadata: {} };
+  }
+
+  private async searchBuiltin(query: string, maxResults: number, signal: AbortSignal) {
+    if (!this.options.projectRoot) {
+      throw new ResearchProviderError({
+        providerType: "web-search",
+        code: "provider-unavailable",
+        message: "Built-in web search requires a project root",
+      });
+    }
+
+    try {
+      const { session } = await createFnAgent({
+        cwd: this.options.projectRoot,
+        tools: "readonly",
+        builtinToolsAllowlist: ["WebSearch", "WebFetch"],
+        systemPrompt: "You return concise web search results as JSON.",
+        defaultProvider: this.options.defaultProvider,
+        defaultModelId: this.options.defaultModelId,
+      });
+
+      try {
+        const prompt = [
+          `Run WebSearch for the query: ${query}`,
+          `Return at most ${maxResults} results as strict JSON with this shape only:`,
+          '{"results": [{"url": "string", "title": "string", "snippet": "string"}]}',
+          "Do not include commentary.",
+        ].join("\n");
+
+        await Promise.race([
+          promptWithFallback(session, prompt),
+          new Promise<never>((_, reject) => {
+            signal.addEventListener(
+              "abort",
+              () =>
+                reject(
+                  new ResearchProviderError({
+                    providerType: "web-search",
+                    code: signal.reason instanceof Error && signal.reason.name === "TimeoutError" ? "timeout" : "abort",
+                    message: signal.reason instanceof Error && signal.reason.name === "TimeoutError" ? "Search timed out" : "Search aborted",
+                  }),
+                ),
+              { once: true },
+            );
+          }),
+        ]);
+
+        const assistantText = extractAssistantText(session);
+        if (!assistantText) {
+          throw new ResearchProviderError({
+            providerType: "web-search",
+            code: "provider-unavailable",
+            message: "No builtin search response received",
+          });
+        }
+
+        const parsed = parseBuiltinResults(assistantText);
+        return parsed.results.slice(0, maxResults);
+      } finally {
+        session.dispose();
+      }
+    } catch (error) {
+      if (error instanceof ResearchProviderError) throw error;
+      throw new ResearchProviderError({
+        providerType: "web-search",
+        code: "provider-unavailable",
+        message: error instanceof Error ? error.message : "Built-in search failed",
+        cause: error,
+      });
+    }
   }
 
   private async searchSearxng(query: string, maxResults: number, signal: AbortSignal) {
@@ -254,6 +330,46 @@ export class WebSearchProvider implements ResearchProvider {
         cause: error,
       });
     }
+  }
+}
+
+function extractAssistantText(session: { state?: { messages?: Array<{ role?: string; content?: unknown }> } }): string | undefined {
+  const messages = session.state?.messages;
+  if (!Array.isArray(messages)) return undefined;
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const msg = messages[i];
+    if (msg.role !== "assistant") continue;
+    if (typeof msg.content === "string" && msg.content.trim()) return msg.content;
+    if (Array.isArray(msg.content)) {
+      for (const part of msg.content) {
+        if (typeof part === "object" && part && "text" in part && typeof (part as { text?: unknown }).text === "string") {
+          return (part as { text: string }).text;
+        }
+      }
+    }
+  }
+  return undefined;
+}
+
+function parseBuiltinResults(text: string): { results: Array<{ url: string; title: string; snippet: string }> } {
+  const jsonBlock = text.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1] ?? text;
+  try {
+    const parsed = JSON.parse(jsonBlock) as { results?: Array<{ url?: unknown; title?: unknown; snippet?: unknown }> };
+    const results = (parsed.results ?? [])
+      .filter((entry) => typeof entry.url === "string")
+      .map((entry) => ({
+        url: entry.url as string,
+        title: typeof entry.title === "string" ? entry.title : (entry.url as string),
+        snippet: typeof entry.snippet === "string" ? entry.snippet : "",
+      }));
+    return { results };
+  } catch (error) {
+    throw new ResearchProviderError({
+      providerType: "web-search",
+      code: "provider-unavailable",
+      message: "Built-in search returned malformed JSON",
+      cause: error,
+    });
   }
 }
 

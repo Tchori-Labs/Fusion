@@ -3042,9 +3042,9 @@ describe("SettingsModal", () => {
       await waitForSettingsModalReady();
       await openResearchGlobalSection();
 
-      const searchInput = await screen.findByLabelText("Default Search Provider");
-      await userEvent.clear(searchInput);
-      await userEvent.type(searchInput, "tavily");
+      await userEvent.click(screen.getByText(/Advanced — external search providers/i));
+      const providerSelect = await screen.findByLabelText("Search Provider");
+      fireEvent.change(providerSelect, { target: { value: "tavily" } });
       await userEvent.click(screen.getByText("Save"));
 
       await waitFor(() => {
@@ -3098,7 +3098,7 @@ describe("SettingsModal", () => {
       expect(await screen.findByText("Research max concurrent runs must be at least 1.")).toBeInTheDocument();
     });
 
-    it("shows incomplete research defaults guidance when no search provider is set", async () => {
+    it("shows builtin research provider guidance by default", async () => {
       mockFetchSettings.mockResolvedValueOnce({
         ...defaultSettings,
         experimentalFeatures: { researchView: true },
@@ -3109,7 +3109,27 @@ describe("SettingsModal", () => {
       await waitForSettingsModalReady();
       await openResearchGlobalSection();
 
-      expect(await screen.findByText(/Research defaults are incomplete/i)).toBeInTheDocument();
+      expect(await screen.findByText(/Built-in \(uses agent web tools\)/i)).toBeInTheDocument();
+      expect(screen.queryByText(/Research defaults are incomplete/i)).not.toBeInTheDocument();
+    });
+
+    it("keeps external provider settings collapsed by default and reveals on expand", async () => {
+      mockFetchSettings.mockResolvedValueOnce({
+        ...defaultSettings,
+        experimentalFeatures: { researchView: true },
+      });
+
+      renderModal();
+      await waitForSettingsModalReady();
+      await openResearchGlobalSection();
+
+      const details = screen.getByText(/Advanced — external search providers/i).closest("details");
+      expect(details).not.toHaveAttribute("open");
+
+      await userEvent.click(screen.getByText(/Advanced — external search providers/i));
+      expect(details).toHaveAttribute("open");
+      expect(await screen.findByLabelText("SearXNG URL")).toBeInTheDocument();
+      expect(screen.getByText(/Open Authentication Settings/i)).toBeInTheDocument();
     });
 
     it("shows missing credentials warning and routes CTA to Authentication", async () => {
@@ -3131,7 +3151,7 @@ describe("SettingsModal", () => {
       await waitForSettingsModalReady();
       await openResearchGlobalSection();
 
-      expect(await screen.findByText(/Missing credentials for one or more research providers/i)).toBeInTheDocument();
+      expect(await screen.findByText(/Missing credentials for the selected research provider/i)).toBeInTheDocument();
       await userEvent.click(screen.getByRole("button", { name: "Open Authentication" }));
       expect(await screen.findByRole("heading", { name: "Authentication" })).toBeInTheDocument();
     });

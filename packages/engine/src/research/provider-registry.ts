@@ -47,6 +47,8 @@ export class ResearchProviderRegistry {
     const maxResults = Number(this.settings.researchGlobalMaxSearchResults ?? 10);
     const fetchTimeoutMs = Number(this.settings.researchGlobalFetchTimeoutMs ?? 30_000);
     const userAgent = this.settings.researchGlobalUserAgent ?? "FusionResearchBot/1.0";
+    const synthesisProvider = this.settings.researchGlobalDefaults?.synthesisProvider ?? this.settings.defaultProvider;
+    const synthesisModelId = this.settings.researchGlobalDefaults?.synthesisModelId ?? this.settings.defaultModelId;
 
     this.providers = new Map<ResearchProviderType, ResearchProvider>([
       [
@@ -61,6 +63,9 @@ export class ResearchProviderRegistry {
           maxResults,
           timeoutMs: fetchTimeoutMs,
           userAgent,
+          projectRoot: this.projectRoot,
+          defaultProvider: synthesisProvider,
+          defaultModelId: synthesisModelId,
         }),
       ],
       ["page-fetch", new PageFetchProvider({ timeoutMs: fetchTimeoutMs, userAgent })],
@@ -79,13 +84,8 @@ export class ResearchProviderRegistry {
 
   private resolveSearchBackend(): WebSearchBackend {
     const explicit = this.settings.researchGlobalWebSearchProvider;
-    if (explicit && explicit !== "none") return explicit;
-
-    if (this.settings.researchGlobalSearxngUrl) return "searxng";
-    if (this.settings.researchGlobalTavilyApiKey) return "tavily";
-    if (this.settings.researchGlobalBraveApiKey) return "brave";
-    if (this.settings.researchGlobalGoogleSearchApiKey && this.settings.researchGlobalGoogleSearchCx) return "google";
-    return "none";
+    if (explicit) return explicit;
+    return "builtin";
   }
 }
 
