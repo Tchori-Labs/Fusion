@@ -1,8 +1,6 @@
 import { once } from "node:events";
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { TaskStore } from "@fusion/core";
-import { createServer } from "@fusion/dashboard";
 
 export type RuntimeSource = "embedded-local" | "external-cli" | "none";
 export type RuntimeState = "stopped" | "starting" | "running" | "error";
@@ -36,10 +34,12 @@ export interface LocalRuntimeManagerOptions {
 }
 
 async function createStoreDefault(rootDir: string): Promise<TaskStoreLike> {
+  const { TaskStore } = await import("@fusion/core");
   return new TaskStore(rootDir) as TaskStoreLike;
 }
 
 async function createDashboardServerDefault(store: TaskStoreLike): Promise<Server> {
+  const { createServer } = await import("@fusion/dashboard");
   return createServer(store).listen(0);
 }
 
