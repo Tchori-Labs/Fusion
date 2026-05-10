@@ -47,6 +47,11 @@
   color: var(--color-error);
 }
 
+.executor-status-bar__segment--fanout {
+  color: var(--color-warning);
+  min-width: 0;
+}
+
 /* Colored dot indicator */
 /* Colored dot indicator */
 .executor-status-bar__indicator {
@@ -91,6 +96,10 @@
   background: var(--in-review);
 }
 
+.executor-status-bar__indicator--fanout {
+  background: var(--color-warning);
+}
+
 /* Numeric count display */
 .executor-status-bar__count {
   font-family: var(--font-mono);
@@ -119,6 +128,15 @@
   font-weight: 600;
   color: var(--text-dim);
   line-height: 1;
+}
+
+.executor-status-bar__fanout-summary {
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-weight: 600;
+  max-width: 20ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Separator between count and max */
@@ -257,6 +275,9 @@
 
 /* Responsive: collapse on small screens */
 @media (max-width: 768px) {
+  .executor-status-bar__fanout-summary {
+    max-width: 14ch;
+  }
   /* Update the footer height token for mobile - must be on the wrapper, not on :root */
   .project-content--with-footer {
     --executor-footer-height: calc(var(--space-lg) * 2 + var(--space-xs));

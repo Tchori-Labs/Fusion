@@ -27,6 +27,12 @@ export type TaskPriority = (typeof TASK_PRIORITIES)[number];
 export const DEFAULT_TASK_PRIORITY: TaskPriority = "normal";
 
 /**
+ * Dashboard high-fan-out blocker threshold. A blocker is considered high impact
+ * when at least this many active todo tasks are waiting on it.
+ */
+export const HIGH_FANOUT_BLOCKER_TODO_THRESHOLD = 5;
+
+/**
  * Execution mode for task implementation.
  * Controls how the executor agent approaches the task:
  * - "standard": Full execution with complete review workflow (default)

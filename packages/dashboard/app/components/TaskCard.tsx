@@ -2,7 +2,14 @@ import "./TaskCard.css";
 import { memo, useCallback, useState, useRef, useEffect, useMemo } from "react";
 import { Link, Clock, Layers, Pencil, ChevronDown, Folder, Target, Bot, Trash2, RotateCw, Zap, GitBranch } from "lucide-react";
 import type { Task, TaskDetail, Column, PrInfo, IssueInfo, TaskPriority } from "@fusion/core";
-import { COLUMN_LABELS, DEFAULT_TASK_PRIORITY, TASK_PRIORITIES, VALID_TRANSITIONS, getErrorMessage } from "@fusion/core";
+import {
+  COLUMN_LABELS,
+  DEFAULT_TASK_PRIORITY,
+  HIGH_FANOUT_BLOCKER_TODO_THRESHOLD,
+  TASK_PRIORITIES,
+  VALID_TRANSITIONS,
+  getErrorMessage,
+} from "@fusion/core";
 import { fetchTaskDetail, uploadAttachment, fetchMission, fetchAgent } from "../api";
 import { GitHubBadge } from "./GitHubBadge";
 import { pickPreferredBadge } from "./TaskCardBadge";
@@ -406,6 +413,7 @@ function areTaskCardPropsEqual(previous: TaskCardProps, next: TaskCardProps): bo
     previous.disableDrag === next.disableDrag &&
     previous.fanout?.totalCount === next.fanout?.totalCount &&
     previous.fanout?.activeTodoCount === next.fanout?.activeTodoCount &&
+    previous.fanout?.isHighFanout === next.fanout?.isHighFanout &&
     areTaskDependenciesEqual(previous.fanout?.dependentIds ?? [], next.fanout?.dependentIds ?? []) &&
     areTaskDependenciesEqual(previous.fanout?.staleBlockedByDependentIds ?? [], next.fanout?.staleBlockedByDependentIds ?? []) &&
     previousTask.id === nextTask.id &&
@@ -1640,12 +1648,14 @@ function TaskCardComponent({
           )}
           {fanout && fanout.totalCount > 0 && (
             <span
-              className={`card-fanout-badge${fanout.staleBlockedByDependentIds.length > 0 ? " card-fanout-badge--stale" : ""}`}
-              data-tooltip={`Blocking ${fanout.totalCount} task(s); ${fanout.activeTodoCount} waiting in todo`}
+              className={`card-fanout-badge${fanout.staleBlockedByDependentIds.length > 0 ? " card-fanout-badge--stale" : ""}${fanout.isHighFanout ? " card-fanout-badge--high-impact" : ""}`}
+              data-tooltip={`Blocking ${fanout.totalCount} active task(s); ${fanout.activeTodoCount} waiting in todo${fanout.isHighFanout ? ` (high fan-out threshold: ${HIGH_FANOUT_BLOCKER_TODO_THRESHOLD})` : ""}`}
             >
               <GitBranch size={12} style={{ verticalAlign: "middle" }} />
               <span>
-                Blocks <span className="card-fanout-count">{fanout.totalCount}</span>
+                {fanout.isHighFanout ? "High fan-out" : "Blocks"}{" "}
+                <span className="card-fanout-count">{fanout.totalCount}</span>
+                {fanout.isHighFanout ? ` (${fanout.activeTodoCount} todo)` : ""}
                 {fanout.staleBlockedByDependentIds.length > 0 ? ` (${fanout.staleBlockedByDependentIds.length} stale)` : ""}
               </span>
             </span>

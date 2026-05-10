@@ -16,6 +16,21 @@ const mockUseExecutorStats = useExecutorStats as ReturnType<typeof vi.fn>;
 /** Minimal empty task list used by tests that mock the hook. */
 const emptyTasks: any[] = [];
 
+function makeTask(id: string, column: string, overrides: Record<string, unknown> = {}) {
+  return {
+    id,
+    description: `Task ${id}`,
+    column,
+    dependencies: [],
+    steps: [],
+    currentStep: 0,
+    log: [],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    ...overrides,
+  };
+}
+
 describe("ExecutorStatusBar", () => {
   const defaultStats: ExecutorStats = {
     runningTaskCount: 2,
@@ -51,6 +66,44 @@ describe("ExecutorStatusBar", () => {
       expect(statusBar).toHaveTextContent("Blocked");
       expect(statusBar).toHaveTextContent("Queued");
       expect(statusBar).toHaveTextContent("In Review");
+      expect(statusBar).not.toHaveTextContent("High Fan-out");
+    });
+
+    it("shows highest high fan-out blocker summary with stable tie-break ordering", () => {
+      const tasks = [
+        makeTask("FN-010", "in-progress"),
+        makeTask("FN-002", "in-review"),
+        makeTask("FN-101", "todo", { dependencies: ["FN-010"] }),
+        makeTask("FN-102", "todo", { dependencies: ["FN-010"] }),
+        makeTask("FN-103", "todo", { dependencies: ["FN-010"] }),
+        makeTask("FN-104", "todo", { dependencies: ["FN-010"] }),
+        makeTask("FN-105", "todo", { dependencies: ["FN-010"] }),
+        makeTask("FN-201", "todo", { dependencies: ["FN-002"] }),
+        makeTask("FN-202", "todo", { dependencies: ["FN-002"] }),
+        makeTask("FN-203", "todo", { dependencies: ["FN-002"] }),
+        makeTask("FN-204", "todo", { dependencies: ["FN-002"] }),
+        makeTask("FN-205", "todo", { dependencies: ["FN-002"] }),
+      ];
+
+      render(<ExecutorStatusBar tasks={tasks} />);
+
+      const statusBar = screen.getByRole("status");
+      expect(statusBar).toHaveTextContent("High Fan-out");
+      expect(statusBar).toHaveTextContent("FN-002 · 5 todo");
+    });
+
+    it("does not show high fan-out summary for ordinary chains below threshold", () => {
+      const tasks = [
+        makeTask("FN-500", "in-progress"),
+        makeTask("FN-501", "todo", { dependencies: ["FN-500"] }),
+        makeTask("FN-502", "todo", { dependencies: ["FN-500"] }),
+        makeTask("FN-503", "todo", { dependencies: ["FN-500"] }),
+        makeTask("FN-504", "todo", { dependencies: ["FN-500"] }),
+      ];
+
+      render(<ExecutorStatusBar tasks={tasks} />);
+
+      expect(screen.getByRole("status")).not.toHaveTextContent("High Fan-out");
     });
 
     it("displays running task count", () => {

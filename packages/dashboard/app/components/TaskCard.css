@@ -432,6 +432,18 @@
   padding-inline: calc(var(--space-xs) / 2);
 }
 
+.card-fanout-badge--high-impact {
+  color: var(--color-warning);
+  background: color-mix(in srgb, var(--color-warning) 16%, transparent);
+  border-radius: var(--radius-pill);
+  padding-inline: var(--space-xs);
+  font-weight: 600;
+}
+
+.card-fanout-badge--high-impact .card-fanout-count {
+  color: var(--text);
+}
+
 .card-scope-badge[data-tooltip]:hover::after,
 .card-fanout-badge[data-tooltip]:hover::after {
   content: attr(data-tooltip);
@@ -439,7 +451,7 @@
   bottom: 100%;
   left: 50%;
   transform: translateX(-50%);
-  background: var(--bg-card);
+  background: var(--card);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -543,6 +555,10 @@
 @media (max-width: 768px) {
   .card-agent-badge-text {
     display: none;
+  }
+
+  .card-fanout-badge--high-impact {
+    padding-inline: calc(var(--space-xs) / 2);
   }
 }
 

@@ -409,15 +409,17 @@ Inspect task definition, logs, review feedback, comments, documents, workflow ou
 
 ### Identifying high-impact blockers
 
-Use the `Blocks N` badge on task cards to spot blockers with high downstream impact:
+Use blocker fan-out signals on task cards and in the footer status bar to spot blockers with high downstream impact:
 
 - `Blocks N` counts active downstream dependents in `triage`, `todo`, `in-progress`, or `in-review`.
+- A card is escalated to **High fan-out** when it has at least **5 active `todo` dependents** (`activeTodoCount >= 5`).
+- Done and archived downstream tasks remain visible for debugging context but do **not** count toward the 5-todo alert threshold.
 - The badge tooltip shows total active dependents plus how many are currently waiting in `todo`.
-- Open a task to the **Blocking** section in Task Detail to view each downstream dependent and click through quickly.
 - `(stale)` markers mean the dependent is blocked through `blockedBy` and matches stale conditions that `clearStaleBlockedBy` self-healing should clear automatically.
 - Stale `dependencies[]` links are shown for awareness but are not auto-cleared by `clearStaleBlockedBy`.
+- The executor footer shows the current worst high fan-out blocker (in-progress/in-review only), ranked by highest todo fan-out, then highest total fan-out, then stable task ID order.
 
-Recommended workflow: when a blocker has high fan-out, prioritize unblocking first (reassign, split, or resolve immediately) before lower-impact tasks.
+Recommended workflow: ordinary chains stay as `Blocks N` so noise stays low; when a blocker crosses the 5-todo threshold, prioritize unblocking first (reassign, split, or resolve immediately) before lower-impact tasks.
 
 ### Logs → Agent Log view
 

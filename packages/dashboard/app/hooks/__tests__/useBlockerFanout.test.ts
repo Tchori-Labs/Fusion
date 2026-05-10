@@ -41,6 +41,7 @@ describe("computeBlockerFanoutMap", () => {
       activeTodoCount: 1,
       dependentIds: ["FN-2"],
       staleBlockedByDependentIds: [],
+      isHighFanout: false,
     });
   });
 
@@ -56,6 +57,7 @@ describe("computeBlockerFanoutMap", () => {
       activeTodoCount: 1,
       dependentIds: ["FN-2", "FN-3"],
       staleBlockedByDependentIds: [],
+      isHighFanout: false,
     });
   });
 
@@ -72,6 +74,7 @@ describe("computeBlockerFanoutMap", () => {
       activeTodoCount: 1,
       dependentIds: ["FN-2", "FN-3", "FN-4"],
       staleBlockedByDependentIds: [],
+      isHighFanout: false,
     });
   });
 
@@ -86,6 +89,7 @@ describe("computeBlockerFanoutMap", () => {
       activeTodoCount: 2,
       dependentIds: ["FN-2", "FN-3"],
       staleBlockedByDependentIds: ["FN-3"],
+      isHighFanout: false,
     });
   });
 
@@ -126,6 +130,46 @@ describe("computeBlockerFanoutMap", () => {
       activeTodoCount: 2,
       dependentIds: ["D1", "D2", "D3", "D4"],
       staleBlockedByDependentIds: [],
+      isHighFanout: false,
+    });
+  });
+
+  it("flags blockers with at least 5 active todo dependents as high fan-out", () => {
+    const tasks = [
+      createTask("B", "in-progress"),
+      createTask("D1", "todo", { dependencies: ["B"] }),
+      createTask("D2", "todo", { dependencies: ["B"] }),
+      createTask("D3", "todo", { blockedBy: "B" }),
+      createTask("D4", "todo", { blockedBy: "B" }),
+      createTask("D5", "todo", { dependencies: ["B"] }),
+      createTask("DONE", "done", { dependencies: ["B"] }),
+    ];
+
+    expect(computeBlockerFanoutMap(tasks).get("B")).toEqual({
+      totalCount: 5,
+      activeTodoCount: 5,
+      dependentIds: ["D1", "D2", "D3", "D4", "D5", "DONE"],
+      staleBlockedByDependentIds: [],
+      isHighFanout: true,
+    });
+  });
+
+  it("does not flag ordinary fan-out chains below threshold", () => {
+    const tasks = [
+      createTask("B", "in-review"),
+      createTask("D1", "todo", { dependencies: ["B"] }),
+      createTask("D2", "todo", { blockedBy: "B" }),
+      createTask("D3", "todo", { dependencies: ["B"] }),
+      createTask("D4", "todo", { dependencies: ["B"] }),
+      createTask("ARCH", "archived", { dependencies: ["B"] }),
+    ];
+
+    expect(computeBlockerFanoutMap(tasks).get("B")).toEqual({
+      totalCount: 4,
+      activeTodoCount: 4,
+      dependentIds: ["D1", "D2", "D3", "D4", "ARCH"],
+      staleBlockedByDependentIds: [],
+      isHighFanout: false,
     });
   });
 

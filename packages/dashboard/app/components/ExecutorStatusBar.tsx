@@ -1,7 +1,8 @@
 import "./ExecutorStatusBar.css";
 import { useMemo, useState } from "react";
-import type { Task } from "@fusion/core";
+import { HIGH_FANOUT_BLOCKER_TODO_THRESHOLD, type Task } from "@fusion/core";
 import { AlertTriangle, Clock, Folder, Pause, Play, Zap } from "lucide-react";
+import { computeBlockerFanoutMap } from "../hooks/useBlockerFanout";
 import { useExecutorStats } from "../hooks/useExecutorStats";
 import type { ExecutorState, AiSessionSummary } from "../api";
 import { BackgroundTasksIndicator } from "./BackgroundTasksIndicator";
@@ -86,6 +87,30 @@ export function ExecutorStatusBar({ tasks, projectId, taskStuckTimeoutMs, backgr
   const stateDisplay = useMemo(() => getStateDisplay(stats.executorState), [stats.executorState]);
 
   const relativeTime = useMemo(() => formatRelativeTime(stats.lastActivityAt), [stats.lastActivityAt]);
+
+  const highestFanoutBlocker = useMemo(() => {
+    const fanoutMap = computeBlockerFanoutMap(tasks);
+    const candidates = tasks
+      .filter((task) => task.column === "in-progress" || task.column === "in-review")
+      .map((task) => {
+        const fanout = fanoutMap.get(task.id);
+        if (!fanout || !fanout.isHighFanout) return null;
+        return {
+          id: task.id,
+          activeTodoCount: fanout.activeTodoCount,
+          totalCount: fanout.totalCount,
+          staleCount: fanout.staleBlockedByDependentIds.length,
+        };
+      })
+      .filter((entry): entry is { id: string; activeTodoCount: number; totalCount: number; staleCount: number } => Boolean(entry))
+      .sort((a, b) => {
+        if (b.activeTodoCount !== a.activeTodoCount) return b.activeTodoCount - a.activeTodoCount;
+        if (b.totalCount !== a.totalCount) return b.totalCount - a.totalCount;
+        return a.id.localeCompare(b.id, "en", { numeric: true, sensitivity: "base" });
+      });
+
+    return candidates[0] ?? null;
+  }, [tasks]);
 
   const StateIcon = stateDisplay.icon;
 
@@ -186,6 +211,23 @@ export function ExecutorStatusBar({ tasks, projectId, taskStuckTimeoutMs, backgr
         <span className="executor-status-bar__label">In Review</span>
         <span className="executor-status-bar__count">{stats.inReviewCount}</span>
       </div>
+
+      {highestFanoutBlocker && (
+        <>
+          <span className="executor-status-bar__divider" aria-hidden="true" />
+          <div className="executor-status-bar__segment executor-status-bar__segment--fanout">
+            <span className="executor-status-bar__indicator executor-status-bar__indicator--fanout executor-status-bar__indicator--active" aria-hidden="true" />
+            <span className="executor-status-bar__label">High Fan-out</span>
+            <span
+              className="executor-status-bar__fanout-summary"
+              title={`Top blocker ${highestFanoutBlocker.id}: ${highestFanoutBlocker.activeTodoCount} todo waiting (threshold ${HIGH_FANOUT_BLOCKER_TODO_THRESHOLD}), ${highestFanoutBlocker.totalCount} active total`}
+            >
+              {highestFanoutBlocker.id} · {highestFanoutBlocker.activeTodoCount} todo
+              {highestFanoutBlocker.staleCount > 0 ? ` · ${highestFanoutBlocker.staleCount} stale` : ""}
+            </span>
+          </div>
+        </>
+      )}
 
       {currentProjectPath && onOpenProjectDirectory && (
         <>

@@ -1,11 +1,12 @@
 import { useMemo } from "react";
-import type { Task } from "@fusion/core";
+import { HIGH_FANOUT_BLOCKER_TODO_THRESHOLD, type Task } from "@fusion/core";
 
 export interface BlockerFanoutEntry {
   totalCount: number;
   activeTodoCount: number;
   dependentIds: string[];
   staleBlockedByDependentIds: string[];
+  isHighFanout: boolean;
 }
 
 // Keep in sync with packages/engine/src/self-healing.ts
@@ -91,6 +92,7 @@ export function computeBlockerFanoutMap(tasks: Task[]): Map<string, BlockerFanou
       activeTodoCount: entry.activeTodoCount,
       dependentIds: entry.dependentIds,
       staleBlockedByDependentIds,
+      isHighFanout: entry.activeTodoCount >= HIGH_FANOUT_BLOCKER_TODO_THRESHOLD,
     });
   }
 

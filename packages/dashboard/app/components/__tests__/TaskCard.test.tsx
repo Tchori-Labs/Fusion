@@ -194,7 +194,7 @@ describe("TaskCard", () => {
     rerender(
       <TaskCard
         task={makeTask({ column: "todo" })}
-        fanout={{ totalCount: 0, activeTodoCount: 0, dependentIds: [], staleBlockedByDependentIds: [] }}
+        fanout={{ totalCount: 0, activeTodoCount: 0, dependentIds: [], staleBlockedByDependentIds: [], isHighFanout: false }}
         onOpenDetail={noop}
         addToast={noop}
       />,
@@ -207,7 +207,7 @@ describe("TaskCard", () => {
     render(
       <TaskCard
         task={makeTask({ column: "in-progress" })}
-        fanout={{ totalCount: 7, activeTodoCount: 4, dependentIds: ["FN-002"], staleBlockedByDependentIds: [] }}
+        fanout={{ totalCount: 7, activeTodoCount: 4, dependentIds: ["FN-002"], staleBlockedByDependentIds: [], isHighFanout: false }}
         onOpenDetail={noop}
         addToast={noop}
       />,
@@ -216,14 +216,14 @@ describe("TaskCard", () => {
     const badge = screen.getByText("Blocks").closest(".card-fanout-badge") as HTMLElement;
     expect(badge).not.toBeNull();
     expect(badge.textContent).toContain("Blocks 7");
-    expect(badge.getAttribute("data-tooltip")).toBe("Blocking 7 task(s); 4 waiting in todo");
+    expect(badge.getAttribute("data-tooltip")).toBe("Blocking 7 active task(s); 4 waiting in todo");
   });
 
   it("applies stale fan-out modifier when stale blockedBy dependents exist", () => {
     const { container } = render(
       <TaskCard
         task={makeTask({ column: "in-progress" })}
-        fanout={{ totalCount: 3, activeTodoCount: 1, dependentIds: ["FN-003"], staleBlockedByDependentIds: ["FN-003"] }}
+        fanout={{ totalCount: 3, activeTodoCount: 1, dependentIds: ["FN-003"], staleBlockedByDependentIds: ["FN-003"], isHighFanout: false }}
         onOpenDetail={noop}
         addToast={noop}
       />,
@@ -232,6 +232,34 @@ describe("TaskCard", () => {
     const badge = container.querySelector(".card-fanout-badge") as HTMLElement;
     expect(badge.className).toContain("card-fanout-badge--stale");
     expect(badge.textContent).toContain("(1 stale)");
+  });
+
+  it("escalates only threshold-crossing fan-out badges", () => {
+    const { rerender } = render(
+      <TaskCard
+        task={makeTask({ column: "in-progress" })}
+        fanout={{ totalCount: 8, activeTodoCount: 5, dependentIds: ["FN-003"], staleBlockedByDependentIds: [], isHighFanout: true }}
+        onOpenDetail={noop}
+        addToast={noop}
+      />,
+    );
+
+    let badge = document.querySelector(".card-fanout-badge--high-impact") as HTMLElement;
+    expect(badge).not.toBeNull();
+    expect(badge.textContent).toContain("High fan-out");
+    expect(badge.textContent).toContain("(5 todo)");
+
+    rerender(
+      <TaskCard
+        task={makeTask({ column: "in-progress" })}
+        fanout={{ totalCount: 8, activeTodoCount: 4, dependentIds: ["FN-003"], staleBlockedByDependentIds: [], isHighFanout: false }}
+        onOpenDetail={noop}
+        addToast={noop}
+      />,
+    );
+
+    badge = screen.getByText("Blocks").closest(".card-fanout-badge") as HTMLElement;
+    expect(badge).not.toHaveClass("card-fanout-badge--high-impact");
   });
 
   it("shows plain paused label when pausedByAgentId is not set", () => {
