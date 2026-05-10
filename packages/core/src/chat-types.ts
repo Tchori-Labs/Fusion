@@ -19,6 +19,23 @@ export type ChatMessageRole = "user" | "assistant" | "system";
  * A chat session between a user and an agent.
  * Contains metadata about the conversation and references to the model used.
  */
+export interface ChatInFlightToolCall {
+  toolName: string;
+  args?: Record<string, unknown>;
+  isError: boolean;
+  result?: unknown;
+  status: "running" | "completed";
+}
+
+export interface ChatInFlightGenerationState {
+  status: "generating";
+  streamingText: string;
+  streamingThinking: string;
+  toolCalls: ChatInFlightToolCall[];
+  replayFromEventId: number;
+  updatedAt: string;
+}
+
 export interface ChatSession {
   id: string;
   /** Session routing kind; legacy sessions default to direct */
@@ -51,6 +68,8 @@ export interface ChatSession {
    * for sessions that have never produced an assistant reply.
    */
   cliSessionFile: string | null;
+  /** Durable in-flight assistant snapshot used to recover streaming UI after refresh. */
+  inFlightGeneration: ChatInFlightGenerationState | null;
 }
 
 /**

@@ -912,6 +912,7 @@ export const MIGRATION_ONLY_TABLE_SCHEMAS: Record<string, Record<string, string>
     createdAt: "TEXT NOT NULL",
     updatedAt: "TEXT NOT NULL",
     cliSessionFile: "TEXT",
+    inFlightGeneration: "TEXT",
   },
   chat_messages: {
     id: "TEXT PRIMARY KEY",
@@ -1828,7 +1829,8 @@ export class Database {
             modelProvider TEXT,
             modelId TEXT,
             createdAt TEXT NOT NULL,
-            updatedAt TEXT NOT NULL
+            updatedAt TEXT NOT NULL,
+            inFlightGeneration TEXT
           )
         `);
         this.db.exec(`CREATE INDEX IF NOT EXISTS idxChatSessionsAgentId ON chat_sessions(agentId)`);

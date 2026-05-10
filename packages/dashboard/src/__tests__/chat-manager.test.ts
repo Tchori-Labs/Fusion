@@ -63,6 +63,7 @@ const mockChatStore = {
   getMessages: vi.fn(),
   updateSession: vi.fn(),
   setCliSessionFile: vi.fn(),
+  setInFlightGeneration: vi.fn(),
 };
 
 const mockAgentStore = {
@@ -355,6 +356,32 @@ describe("ChatManager.sendMessage", () => {
     );
     expect(assistantCall).toBeDefined();
     expect(assistantCall?.[1].content).toBe("Hello world!");
+  });
+
+  it("persists and clears durable in-flight generation snapshots during streaming", async () => {
+    let onTextCb: ((delta: string) => void) | undefined;
+
+    __setCreateFnAgent(async (options: any) => {
+      onTextCb = options.onText;
+      return {
+        session: {
+          prompt: vi.fn().mockImplementation(async () => {
+            onTextCb?.("chunk");
+          }),
+          dispose: vi.fn(),
+          state: { messages: [{ role: "assistant", content: "chunk" }] },
+        },
+      };
+    });
+
+    const chatManager = createChatManager();
+    await chatManager.sendMessage("chat-001", "Hello");
+
+    expect(mockChatStore.setInFlightGeneration).toHaveBeenCalledWith(
+      "chat-001",
+      expect.objectContaining({ status: "generating" }),
+    );
+    expect(mockChatStore.setInFlightGeneration).toHaveBeenLastCalledWith("chat-001", null);
   });
 
   it("broadcasts done with persisted assistant message snapshot", async () => {

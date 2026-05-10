@@ -2028,6 +2028,47 @@ describe("useChat", () => {
       expect(result.current.streamingToolCalls).toHaveLength(1);
     });
 
+    it("hydrates durable in-flight snapshot and resumes from replay point", async () => {
+      const session = {
+        ...makeSession({ id: "session-001", agentId: "agent-001" }),
+        isGenerating: true,
+        inFlightGeneration: {
+          status: "generating" as const,
+          streamingText: "partial text",
+          streamingThinking: "partial thinking",
+          toolCalls: [{ toolName: "read", status: "running" as const, isError: false }],
+          replayFromEventId: 41,
+          updatedAt: "2026-04-08T00:00:00.000Z",
+        },
+      };
+      mockFetchChatSessions.mockResolvedValueOnce({ sessions: [session] });
+      mockFetchChatMessages.mockResolvedValue({ messages: [] });
+
+      const { result } = renderHook(() => useChat("proj-123"));
+
+      await waitFor(() => {
+        expect(result.current.sessions).toHaveLength(1);
+      });
+
+      act(() => {
+        result.current.selectSession("session-001");
+      });
+
+      await waitFor(() => {
+        expect(result.current.isStreaming).toBe(true);
+        expect(result.current.streamingText).toBe("partial text");
+        expect(result.current.streamingThinking).toBe("partial thinking");
+        expect(result.current.streamingToolCalls).toHaveLength(1);
+      });
+
+      expect(mockAttachChatStream).toHaveBeenCalledWith(
+        "session-001",
+        expect.any(Object),
+        "proj-123",
+        { lastEventId: 41 },
+      );
+    });
+
     it("sets isStreaming=true when selecting a session with isGenerating=true", async () => {
       const session = { ...makeSession({ id: "session-001", agentId: "agent-001" }), isGenerating: true };
       mockFetchChatSessions.mockResolvedValueOnce({ sessions: [session] });

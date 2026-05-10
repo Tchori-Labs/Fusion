@@ -890,6 +890,8 @@ export type {
 export type {
   ChatSessionStatus,
   ChatMessageRole,
+  ChatInFlightToolCall,
+  ChatInFlightGenerationState,
   ChatSession,
   ChatSessionSummary,
   EnrichedChatSession,

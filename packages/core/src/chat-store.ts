@@ -25,6 +25,7 @@ import type {
   ChatSessionUpdateInput,
   ChatMessagesFilter,
   ChatRoom,
+  ChatInFlightGenerationState,
   ChatRoomCreateInput,
   ChatRoomMember,
   ChatRoomMessage,
@@ -82,6 +83,7 @@ interface ChatSessionRow {
   createdAt: string;
   updatedAt: string;
   cliSessionFile: string | null;
+  inFlightGeneration: string | null;
 }
 
 /** Database row shape for chat_messages. */
@@ -156,6 +158,7 @@ export class ChatStore extends EventEmitter<ChatStoreEvents> {
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
       cliSessionFile: row.cliSessionFile ?? null,
+      inFlightGeneration: fromJson<ChatInFlightGenerationState>(row.inFlightGeneration) ?? null,
     };
   }
 
@@ -248,11 +251,12 @@ export class ChatStore extends EventEmitter<ChatStoreEvents> {
       createdAt: now,
       updatedAt: now,
       cliSessionFile: null,
+      inFlightGeneration: null,
     };
 
     this.db.prepare(`
-      INSERT INTO chat_sessions (id, agentId, title, status, projectId, modelProvider, modelId, createdAt, updatedAt)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO chat_sessions (id, agentId, title, status, projectId, modelProvider, modelId, createdAt, updatedAt, inFlightGeneration)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       session.id,
       session.agentId,
@@ -263,6 +267,7 @@ export class ChatStore extends EventEmitter<ChatStoreEvents> {
       session.modelId,
       session.createdAt,
       session.updatedAt,
+      null,
     );
 
     this.db.bumpLastModified();
@@ -457,6 +462,20 @@ export class ChatStore extends EventEmitter<ChatStoreEvents> {
       .prepare("UPDATE chat_sessions SET cliSessionFile = ? WHERE id = ?")
       .run(cliSessionFile, id);
     this.db.bumpLastModified();
+  }
+
+  setInFlightGeneration(id: string, inFlightGeneration: ChatInFlightGenerationState | null): ChatSession | undefined {
+    const existing = this.getSession(id);
+    if (!existing) return undefined;
+
+    this.db
+      .prepare("UPDATE chat_sessions SET inFlightGeneration = ? WHERE id = ?")
+      .run(toJsonNullable(inFlightGeneration), id);
+
+    const updated = this.getSession(id)!;
+    this.db.bumpLastModified();
+    this.emit("chat:session:updated", updated);
+    return updated;
   }
 
   /**

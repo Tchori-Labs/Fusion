@@ -71,6 +71,7 @@ describe("ChatStore", () => {
         expect(session.modelId).toBeNull();
         expect(session.createdAt).toBeTruthy();
         expect(session.updatedAt).toBeTruthy();
+        expect(session.inFlightGeneration).toBeNull();
       });
 
       it("stores all provided fields", () => {
@@ -342,6 +343,27 @@ describe("ChatStore", () => {
         expect(updated!.title).toBeNull();
         expect(updated!.modelProvider).toBeNull();
         expect(updated!.modelId).toBeNull();
+      });
+    });
+
+    describe("setInFlightGeneration", () => {
+      it("persists and clears in-flight generation snapshot", () => {
+        const session = createTestSession(store);
+
+        const updated = store.setInFlightGeneration(session.id, {
+          status: "generating",
+          streamingText: "partial",
+          streamingThinking: "thinking",
+          toolCalls: [{ toolName: "read", isError: false, status: "running" }],
+          replayFromEventId: 12,
+          updatedAt: new Date().toISOString(),
+        });
+
+        expect(updated?.inFlightGeneration?.streamingText).toBe("partial");
+        expect(store.getSession(session.id)?.inFlightGeneration?.replayFromEventId).toBe(12);
+
+        store.setInFlightGeneration(session.id, null);
+        expect(store.getSession(session.id)?.inFlightGeneration).toBeNull();
       });
     });
 

@@ -259,7 +259,9 @@ Intentional exclusions from shared snapshots:
 - `ChatStore` (`packages/core/src/chat-store.ts`) and `chat-types.ts` provide session-oriented chat state (`chat_sessions`, `chat_messages` tables)
 - Dashboard chat UX lives in `packages/dashboard/app/components/ChatView.tsx` and hooks `useChat.ts` / `useQuickChat.ts`
 - Main `useChat` session restore/recovery must not reset the active thread during session-list refresh or `chat:session:updated` metadata churn while a response is in flight.
-- When the active session is still generating after reload/reconnect (`isGenerating: true`), `useChat` keeps recovery streaming state alive ("Connecting…") until the assistant output is observed via SSE or reloaded from messages.
+- `chat_sessions.inFlightGeneration` stores a durable JSON snapshot while generation is active: latest streamed text/thinking, tool-call state, and `replayFromEventId` for SSE resume.
+- `ChatManager.sendMessage()` updates that snapshot during streaming (debounced) and clears it on done/error/cancel so stale partial state does not survive completion.
+- When the active session is still generating after reload/reconnect (`isGenerating: true`), `useChat`/`useQuickChat` hydrate the UI from `inFlightGeneration` immediately, then reconnect `/api/chat/sessions/:id/stream` with `Last-Event-ID = replayFromEventId` to avoid re-appending already-known deltas.
 - Chat message submission uses SSE streaming responses from dashboard chat routes.
 - Main-chat optimistic user sends are reconciled against persisted SSE user echoes by content + temp-id replacement, so one user send cannot survive as a duplicate history entry after stream completion.
 - `streamChatResponse()` must flush trailing buffered SSE data on EOF even without a final newline, so terminal `done`/`error` events are not dropped at chunk boundaries.

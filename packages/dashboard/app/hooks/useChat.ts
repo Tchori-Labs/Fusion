@@ -13,7 +13,7 @@ import {
 } from "../api";
 import { subscribeSse } from "../sse-bus";
 import { getScopedItem, setScopedItem, removeScopedItem } from "../utils/projectStorage";
-import type { Agent, ChatMessage } from "@fusion/core";
+import type { Agent, ChatInFlightGenerationState, ChatMessage } from "@fusion/core";
 
 const ACTIVE_SESSION_STORAGE_KEY = "kb-chat-active-session";
 
@@ -29,6 +29,7 @@ export interface ChatSessionInfo {
   lastMessagePreview?: string;
   lastMessageAt?: string;
   isGenerating?: boolean;
+  inFlightGeneration?: ChatInFlightGenerationState | null;
 }
 
 // Re-export shared chat types so existing consumers (`import { ChatMessageInfo } from "../hooks/useChat"`)
@@ -330,12 +331,17 @@ export function useChat(
     setIsStreaming(false);
   }, []);
 
-  const attachIfGenerating = useCallback((sessionId: string) => {
+  const attachIfGenerating = useCallback((sessionId: string, inFlightGeneration?: ChatInFlightGenerationState | null) => {
     if (streamRef.current || !sessionId) {
       return true;
     }
 
     cancelledByUserRef.current = false;
+    if (inFlightGeneration) {
+      setStreamingText(inFlightGeneration.streamingText);
+      setStreamingThinking(inFlightGeneration.streamingThinking);
+      setStreamingToolCalls(inFlightGeneration.toolCalls);
+    }
     setIsStreaming(true);
 
     const { handlers } = createChatStreamHandlers({
@@ -375,7 +381,11 @@ export function useChat(
       },
     });
 
-    const stream = attachChatStream(sessionId, handlers, projectId);
+    const stream = attachChatStream(sessionId, handlers, projectId, {
+      ...(typeof inFlightGeneration?.replayFromEventId === "number"
+        ? { lastEventId: inFlightGeneration.replayFromEventId }
+        : {}),
+    });
     streamRef.current = stream;
     return true;
   }, [addToast, loadMessages, projectId]);
@@ -414,8 +424,7 @@ export function useChat(
       // all streaming state. Showing "Connecting…" immediately tells the
       // user the AI is still working.
       if (session?.isGenerating) {
-        setStreamingText("");
-        attachIfGenerating(session.id);
+        attachIfGenerating(session.id, session.inFlightGeneration);
       }
 
       // Persist active session to localStorage
@@ -691,7 +700,7 @@ export function useChat(
     if (!activeSessionRef.current?.isGenerating) return;
 
     if (!streamRef.current) {
-      attachIfGenerating(activeSessionRef.current.id);
+      attachIfGenerating(activeSessionRef.current.id, activeSessionRef.current.inFlightGeneration);
     }
 
     if (!isStreamingRef.current || streamRef.current || !activeSessionRef.current) return;
@@ -750,8 +759,7 @@ export function useChat(
       if (activeSessionRef.current?.id === updatedSession.id) {
         setActiveSession(updatedSession);
         if (updatedSession.isGenerating && !streamRef.current) {
-          setStreamingText("");
-          attachIfGenerating(updatedSession.id);
+          attachIfGenerating(updatedSession.id, updatedSession.inFlightGeneration);
         }
       }
     };

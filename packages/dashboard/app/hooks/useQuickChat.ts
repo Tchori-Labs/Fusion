@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ChatMessage, EnrichedChatSession } from "@fusion/core";
+import type { ChatInFlightGenerationState, ChatMessage, EnrichedChatSession } from "@fusion/core";
 import {
   fetchResumeChatSession,
   fetchChatSessions,
@@ -269,12 +269,17 @@ export function useQuickChat(
     [projectId],
   );
 
-  const attachIfGenerating = useCallback((sessionId: string) => {
+  const attachIfGenerating = useCallback((sessionId: string, inFlightGeneration?: ChatInFlightGenerationState | null) => {
     if (streamRef.current || !sessionId) {
       return true;
     }
 
     cancelledByUserRef.current = false;
+    if (inFlightGeneration) {
+      setStreamingText(inFlightGeneration.streamingText);
+      setStreamingThinking(inFlightGeneration.streamingThinking);
+      setStreamingToolCalls(inFlightGeneration.toolCalls);
+    }
     setIsStreaming(true);
 
     const { handlers } = createChatStreamHandlers({
@@ -318,7 +323,11 @@ export function useQuickChat(
       },
     });
 
-    streamRef.current = attachChatStream(sessionId, handlers, projectId);
+    streamRef.current = attachChatStream(sessionId, handlers, projectId, {
+      ...(typeof inFlightGeneration?.replayFromEventId === "number"
+        ? { lastEventId: inFlightGeneration.replayFromEventId }
+        : {}),
+    });
     return true;
   }, [addToast, projectId]);
 
@@ -349,8 +358,7 @@ export function useQuickChat(
           // After a reload/HMR, the server keeps generating but the UI loses
           // all streaming state. Show the "Connecting…" indicator immediately.
           if (existingSession.isGenerating) {
-            setStreamingText("");
-            attachIfGenerating(existingSession.id);
+            attachIfGenerating(existingSession.id, existingSession.inFlightGeneration);
           }
         } else {
           const newSession = await createSessionForTarget(target);
@@ -409,7 +417,7 @@ export function useQuickChat(
     if (!activeSession?.isGenerating) return;
 
     if (!streamRef.current) {
-      attachIfGenerating(activeSession.id);
+      attachIfGenerating(activeSession.id, activeSession.inFlightGeneration);
     }
 
     if (!isStreamingRef.current || streamRef.current || !activeSession) return;
@@ -524,8 +532,7 @@ export function useQuickChat(
     resetTransientComposerState();
     setActiveSession(session);
     if (session.isGenerating) {
-      setStreamingText("");
-      attachIfGenerating(session.id);
+      attachIfGenerating(session.id, session.inFlightGeneration);
     }
   }, [attachIfGenerating, resetTransientComposerState]);
 

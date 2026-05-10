@@ -17,6 +17,7 @@ import type {
   AgentStore,
   ChatMention,
   ChatAttachment,
+  ChatInFlightGenerationState,
   ChatStore,
   ChatSession,
   ChatSessionCreateInput,
@@ -136,6 +137,7 @@ const MAX_MESSAGES_PER_IP_PER_MINUTE = 30;
 /** Maximum file size for # mentions (50KB). Files larger than this are skipped. */
 const MAX_REFERENCED_FILE_SIZE = 50 * 1024;
 const ROOM_AMBIENT_MAX_RESPONDERS = 5;
+const IN_FLIGHT_PERSIST_DEBOUNCE_MS = 200;
 
 function formatAttachmentSize(size: number): string {
   if (size < 1024) return `${size}B`;
@@ -489,6 +491,7 @@ export function getRateLimitResetTime(ip: string): Date | null {
 export class ChatManager {
   private agentStoreReady?: Promise<void>;
   private generationCounter = 0;
+  private inFlightPersistTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private activeGenerations = new Map<string, {
     abortController: AbortController;
     agentResult?: AgentResult;
@@ -506,6 +509,28 @@ export class ChatManager {
     private getSettings?: () => Promise<Pick<Settings, "fallbackProvider" | "fallbackModelId" | "defaultProvider" | "defaultModelId"> | undefined> | Pick<Settings, "fallbackProvider" | "fallbackModelId" | "defaultProvider" | "defaultModelId"> | undefined,
     private messageStore?: MessageStore,
   ) {}
+
+  private queueInFlightGenerationPersist(sessionId: string, snapshot: ChatInFlightGenerationState | null): void {
+    const existingTimer = this.inFlightPersistTimers.get(sessionId);
+    if (existingTimer) {
+      clearTimeout(existingTimer);
+    }
+
+    const timer = setTimeout(() => {
+      this.inFlightPersistTimers.delete(sessionId);
+      this.chatStore.setInFlightGeneration(sessionId, snapshot);
+    }, IN_FLIGHT_PERSIST_DEBOUNCE_MS);
+    this.inFlightPersistTimers.set(sessionId, timer);
+  }
+
+  private flushInFlightGenerationPersist(sessionId: string, snapshot: ChatInFlightGenerationState | null): void {
+    const existingTimer = this.inFlightPersistTimers.get(sessionId);
+    if (existingTimer) {
+      clearTimeout(existingTimer);
+      this.inFlightPersistTimers.delete(sessionId);
+    }
+    this.chatStore.setInFlightGeneration(sessionId, snapshot);
+  }
 
   private async getChatModelSettings(): Promise<{
     fallbackProvider?: string;
@@ -1004,6 +1029,7 @@ export class ChatManager {
     let agentResult: AgentResult | undefined;
     let accumulatedThinking = "";
     let accumulatedText = "";
+    let lastStreamEventId = 0;
     type ToolCallRecord = {
       toolName: string;
       args?: Record<string, unknown>;
@@ -1016,6 +1042,36 @@ export class ChatManager {
       | { primaryModel: string; fallbackModel: string; triggerPoint: "session-creation" | "prompt-time" }
       | undefined;
 
+    const persistInFlightSnapshot = (): void => {
+      const runningToolCalls = [...pendingToolStarts.entries()].flatMap(([toolName, starts]) =>
+        starts.map((start) => ({
+          toolName,
+          args: start.args,
+          isError: false,
+          result: undefined,
+          status: "running" as const,
+        })),
+      );
+
+      this.queueInFlightGenerationPersist(sessionId, {
+        status: "generating",
+        streamingText: accumulatedText,
+        streamingThinking: accumulatedThinking,
+        toolCalls: [
+          ...toolCallsAccum.map((toolCall) => ({
+            toolName: toolCall.toolName,
+            args: toolCall.args,
+            isError: toolCall.isError,
+            result: toolCall.result,
+            status: "completed" as const,
+          })),
+          ...runningToolCalls,
+        ],
+        replayFromEventId: lastStreamEventId,
+        updatedAt: new Date().toISOString(),
+      });
+    };
+
     try {
       // Validate session exists
       if (!session) {
@@ -1025,6 +1081,15 @@ export class ChatManager {
         }, broadcastOptions);
         return;
       }
+
+      this.flushInFlightGenerationPersist(sessionId, {
+        status: "generating",
+        streamingText: "",
+        streamingThinking: "",
+        toolCalls: [],
+        replayFromEventId: 0,
+        updatedAt: new Date().toISOString(),
+      });
 
       const hasMentionCandidates = /@[\w-]+/.test(content);
       const mentionAgents = hasMentionCandidates ? await this.listAgentsForMentions() : [];
@@ -1039,6 +1104,7 @@ export class ChatManager {
           attachments,
         });
       } catch (err) {
+        this.flushInFlightGenerationPersist(sessionId, null);
         chatStreamManager.broadcast(sessionId, {
           type: "error",
           data: `Failed to save message: ${err instanceof Error ? err.message : "Unknown error"}`,
@@ -1202,27 +1268,30 @@ export class ChatManager {
         },
         onThinking: (delta: string) => {
           accumulatedThinking += delta;
-          chatStreamManager.broadcast(sessionId, {
+          lastStreamEventId = chatStreamManager.broadcast(sessionId, {
             type: "thinking",
             data: delta,
           }, broadcastOptions);
+          persistInFlightSnapshot();
         },
         onText: (delta: string) => {
           accumulatedText += delta;
-          chatStreamManager.broadcast(sessionId, {
+          lastStreamEventId = chatStreamManager.broadcast(sessionId, {
             type: "text",
             data: delta,
           }, broadcastOptions);
+          persistInFlightSnapshot();
         },
         onToolStart: (name: string, args?: Record<string, unknown>) => {
           const pendingForTool = pendingToolStarts.get(name) ?? [];
           pendingForTool.push({ toolName: name, args });
           pendingToolStarts.set(name, pendingForTool);
 
-          chatStreamManager.broadcast(sessionId, {
+          lastStreamEventId = chatStreamManager.broadcast(sessionId, {
             type: "tool_start",
             data: { toolName: name, args },
           }, broadcastOptions);
+          persistInFlightSnapshot();
         },
         onToolEnd: (name: string, isError: boolean, result?: unknown) => {
           const pendingForTool = pendingToolStarts.get(name);
@@ -1238,10 +1307,11 @@ export class ChatManager {
             result,
           });
 
-          chatStreamManager.broadcast(sessionId, {
+          lastStreamEventId = chatStreamManager.broadcast(sessionId, {
             type: "tool_end",
             data: { toolName: name, isError, result },
           }, broadcastOptions);
+          persistInFlightSnapshot();
         },
       };
 
@@ -1326,6 +1396,8 @@ export class ChatManager {
         metadata: Object.keys(assistantMetadata).length > 0 ? assistantMetadata : undefined,
       });
 
+      this.flushInFlightGenerationPersist(sessionId, null);
+
       // Broadcast done event with persisted assistant snapshot so clients can
       // render completion even when incremental text deltas were absent.
       chatStreamManager.broadcast(sessionId, {
@@ -1347,6 +1419,7 @@ export class ChatManager {
       }, broadcastOptions);
     } catch (err) {
       if (abortController.signal.aborted) {
+        this.flushInFlightGenerationPersist(sessionId, null);
         chatStreamManager.broadcast(sessionId, {
           type: "error",
           data: "Generation cancelled",
@@ -1373,6 +1446,8 @@ export class ChatManager {
           diagnostics.error(`Failed to persist partial response for session ${sessionId}:`, persistErr);
         }
       }
+
+      this.flushInFlightGenerationPersist(sessionId, null);
 
       chatStreamManager.broadcast(sessionId, {
         type: "error",
@@ -1426,6 +1501,8 @@ export class ChatManager {
         diagnostics.error(`Error disposing agent session during cancellation:`, err);
       }
     }
+
+    this.flushInFlightGenerationPersist(sessionId, null);
 
     chatStreamManager.broadcast(sessionId, {
       type: "error",
