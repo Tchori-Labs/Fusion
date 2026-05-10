@@ -216,6 +216,8 @@ On task completion, the scheduler calls `MissionExecutionLoop.processTaskOutcome
 3. Fire AI validator agent against contract assertions
 4. Record `MissionValidatorRun` with per-assertion results
 
+Validation runs are internal mission-loop operations: Fusion does **not** create visible `🔍 Validate:` board tasks for single-feature validation.
+
 ```typescript
 interface MissionValidatorRun {
   id: string;

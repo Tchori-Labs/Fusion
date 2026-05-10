@@ -19,7 +19,7 @@ All skill/extension tool invocations in this catalog use the public `fn_*` names
 | `fn_task_attach` | Attach a file to a task. Supports images (png, jpg, gif, webp) and text files (txt, log, json, yaml, yml, toml, csv, xml). |
 | `fn_task_pause` | Pause a task — stops all automated agent and scheduler interaction for this task. |
 | `fn_task_unpause` | Unpause a task — resumes automated agent and scheduler interaction. |
-| `fn_task_retry` | Retry a failed task — clears the error state. Tasks in other columns move to todo; tasks in in-review stay in-place for auto-merge retry. |
+| `fn_task_retry` | Retry a failed task — clears the error state. Non-review failures move to todo; in-review execution failures move to todo preserving progress; in-review merge failures stay in-place for auto-merge retry. |
 | `fn_task_duplicate` | Duplicate an existing task, creating a fresh copy in planning. Copies the title and description but resets all execution state. The AI planning agent will replan the new task. |
 | `fn_task_refine` | Request a refinement of a completed or in-review task. Creates a new follow-up task in planning that references the original task as a dependency. Use this when a done or in-review task needs additional work, improvements, or follow-up changes. |
 | `fn_task_archive` | Archive a done task (move from done → archived). Archived tasks are preserved for historical reference but moved out of the main board view. |

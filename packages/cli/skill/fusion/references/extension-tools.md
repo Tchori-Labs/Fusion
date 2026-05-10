@@ -75,7 +75,7 @@ Unpause a task — resumes automated agent and scheduler interaction.
 
 ### fn_task_retry
 
-Retry a failed task — clears the error state. Tasks in other columns move to todo; tasks in in-review stay in-place for auto-merge retry.
+Retry a failed task — clears the error state. Non-review failures move to todo; in-review execution failures move to todo preserving progress; in-review merge failures stay in-place for auto-merge retry.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|

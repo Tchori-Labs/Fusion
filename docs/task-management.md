@@ -92,6 +92,7 @@ Fusion task columns:
 3. **in-progress** — executor active in isolated worktree
 4. **in-review** — implementation complete; awaiting finalization
    - If merge/finalization hits a terminal error, tasks can remain in `in-review` with `status: "failed"` for explicit follow-up. This state is intentionally preserved by recovery (not auto-bounced to `todo`).
+   - Retry behavior splits by step completion: `in-review` tasks with incomplete steps (`pending`/`in-progress`) are treated as execution failures and retried back to `todo` with `preserveProgress: true`; `in-review` tasks with all steps `done` are treated as merge/finalization failures and stay in `in-review` with merge retry state reset.
    - Self-healing can still auto-finalize retry-exhausted failed review tasks when it can prove their branch content already landed on the merge target, so already-merged work does not deadlock in `in-review`.
 5. **done** — merged/finalized
 6. **archived** — preserved history, optionally cleaned from filesystem

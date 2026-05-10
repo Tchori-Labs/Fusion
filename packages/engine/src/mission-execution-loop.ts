@@ -224,8 +224,6 @@ export class MissionExecutionLoop extends EventEmitter {
 
     loopLog.log(`Processing task outcome for ${taskId}`);
 
-    // Track the validation board task ID (created later if there are assertions)
-    let validationTaskId: string | undefined;
 
     try {
       // Find the feature linked to this task
@@ -254,35 +252,10 @@ export class MissionExecutionLoop extends EventEmitter {
       this.activeValidations.add(feature.id);
 
       try {
-        // Resolve mission context for creating the validation board task
-        const featureSlice = this.missionStore.getSlice(feature.sliceId);
-        const featureMilestone = featureSlice ? this.missionStore.getMilestone(featureSlice.milestoneId) : undefined;
-        const missionId = featureMilestone?.missionId;
+        loopLog.log(`Running internal validation for feature ${feature.id} — no board task created (policy: docs/task-authoring-standards.md §5)`);
 
-        // Create a visible board task for this validation run
-        const validationTask = await this.taskStore.createTask({
-          title: `🔍 Validate: ${feature.title}`,
-          description: `Validating implementation for feature "${feature.title}" against ${assertions.length} contract assertion(s).\n\nFeature: ${feature.id}\nSlice: ${feature.sliceId}\nAssertions: ${assertions.map(a => a.title).join(", ")}`,
-          column: "in-progress",
-          missionId,
-          sliceId: feature.sliceId,
-          source: {
-            sourceType: "automation",
-            sourceMetadata: {
-              missionId,
-              featureId: feature.id,
-              sliceId: feature.sliceId,
-            },
-          },
-        });
-        validationTaskId = validationTask.id;
-
-        // Mark as validation task so scheduler/stuck-detector skip it
-        await this.taskStore.updateTask(validationTaskId, { status: "mission-validation" });
-        loopLog.log(`Created validation board task ${validationTaskId} for feature ${feature.id}`);
-
-        // Start the validator run, linked to the board task
-        const run = this.missionStore.startValidatorRun(feature.id, "task_completion", validationTaskId);
+        // Start the validator run (no board task per docs/task-authoring-standards.md §5)
+        const run = this.missionStore.startValidatorRun(feature.id, "task_completion");
         loopLog.log(`Started validator run ${run.id} for feature ${feature.id}`);
 
         // Run the validation
@@ -290,31 +263,19 @@ export class MissionExecutionLoop extends EventEmitter {
 
         // Handle the result
         if (result.status === "pass") {
-          await this.handleValidationPass(feature.id, run.id, result.summary, validationTaskId);
+          await this.handleValidationPass(feature.id, run.id, result.summary, undefined);
         } else if (result.status === "fail") {
-          await this.handleValidationFail(feature.id, run.id, result, validationTaskId);
+          await this.handleValidationFail(feature.id, run.id, result, undefined);
         } else if (result.status === "blocked") {
-          await this.handleValidationBlocked(feature.id, run.id, result.blockedReason, validationTaskId);
+          await this.handleValidationBlocked(feature.id, run.id, result.blockedReason, undefined);
         } else if (result.status === "error") {
-          await this.handleValidationError(feature.id, run.id, result.summary, validationTaskId);
+          await this.handleValidationError(feature.id, run.id, result.summary, undefined);
         }
       } finally {
         this.activeValidations.delete(feature.id);
       }
     } catch (err) {
       loopLog.error(`Error processing task outcome for ${taskId}:`, err);
-      // Move the validation task to in-review if it exists
-      if (validationTaskId) {
-        try {
-          await this.taskStore.updateTask(validationTaskId, {
-            error: err instanceof Error ? err.message : String(err),
-            summary: "Validation failed unexpectedly",
-          });
-          await this.taskStore.moveTask(validationTaskId, "in-review");
-        } catch (moveErr) {
-          loopLog.error(`Failed to move validation task ${validationTaskId} on error:`, moveErr);
-        }
-      }
       // Don't crash the loop - log and continue
     }
   }

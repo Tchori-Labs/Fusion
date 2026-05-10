@@ -472,7 +472,7 @@ describe("MissionExecutionLoop", () => {
       );
     });
 
-    it("creates validation board task when feature has assertions", async () => {
+    it("does NOT create a board task for single-feature validation", async () => {
       const feature = createMockFeature({ loopState: "implementing", taskId: "FN-001", sliceId: "SL-001" });
       missionStore._setFeature(feature);
       taskStore._setTask({ id: "FN-001", title: "Test", description: "Test task", log: [] });
@@ -490,17 +490,11 @@ describe("MissionExecutionLoop", () => {
 
       await loop.processTaskOutcome("FN-001");
 
-      // Should create a validation board task
-      expect(taskStore.createTask).toHaveBeenCalledWith(
-        expect.objectContaining({
-          title: expect.stringContaining("Validate:"),
-          column: "in-progress",
-          sliceId: "SL-001",
-        }),
-      );
+      expect(taskStore.createTask).toHaveBeenCalledTimes(0);
+      expect(missionStore.startValidatorRun).toHaveBeenCalledWith("F-001", "task_completion");
     });
 
-    it("sets validation task status to mission-validation", async () => {
+    it("does NOT set mission-validation status on any task", async () => {
       const feature = createMockFeature({ loopState: "implementing", taskId: "FN-001", sliceId: "SL-001" });
       missionStore._setFeature(feature);
       taskStore._setTask({ id: "FN-001", title: "Test", description: "Test task", log: [] });
@@ -518,14 +512,13 @@ describe("MissionExecutionLoop", () => {
 
       await loop.processTaskOutcome("FN-001");
 
-      // Should update the task status to mission-validation
-      expect(taskStore.updateTask).toHaveBeenCalledWith(
+      expect(taskStore.updateTask).not.toHaveBeenCalledWith(
         expect.any(String),
         expect.objectContaining({ status: "mission-validation" }),
       );
     });
 
-    it("passes taskId to startValidatorRun", async () => {
+    it("calls startValidatorRun without a board task ID", async () => {
       const feature = createMockFeature({ loopState: "implementing", taskId: "FN-001", sliceId: "SL-001" });
       missionStore._setFeature(feature);
       taskStore._setTask({ id: "FN-001", title: "Test", description: "Test task", log: [] });
@@ -533,8 +526,6 @@ describe("MissionExecutionLoop", () => {
       missionStore.listAssertionsForFeature = vi.fn().mockReturnValue([
         { id: "CA-1", milestoneId: "MS-001", title: "Test assertion", assertion: "Should work", status: "pending" as const, orderIndex: 0, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
       ]);
-      // Make createTask return a predictable ID
-      taskStore.createTask = vi.fn().mockResolvedValue({ id: "KB-999" });
 
       loop = new MissionExecutionLoop({
         taskStore: taskStore as any,
@@ -545,11 +536,9 @@ describe("MissionExecutionLoop", () => {
 
       await loop.processTaskOutcome("FN-001");
 
-      // Should pass the created task ID to startValidatorRun
       expect(missionStore.startValidatorRun).toHaveBeenCalledWith(
         "F-001",
         "task_completion",
-        "KB-999",
       );
     });
   });

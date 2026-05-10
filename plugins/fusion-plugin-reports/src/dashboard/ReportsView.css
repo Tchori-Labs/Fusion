@@ -23,14 +23,14 @@
 .reports-detail-body { display: flex; flex-direction: column; gap: var(--space-sm); }
 .reports-detail-meta {
   color: var(--text-muted);
-  font-size: 0.875rem;
+  font-size: calc(var(--space-sm) + (var(--space-xs) * 1.5));
 }
 .reports-detail-sections {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-sm);
 }
-.reports-detail iframe, .reports-compare iframe { width: 100%; min-height: 20rem; border: var(--btn-border-width) solid var(--border); border-radius: var(--radius-md); background: var(--surface); }
+.reports-detail iframe, .reports-compare iframe { width: 100%; min-height: calc(var(--space-2xl) * 10); border: var(--btn-border-width) solid var(--border); border-radius: var(--radius-md); background: var(--surface); }
 .reports-empty {
   align-items: center;
   display: flex;
@@ -45,7 +45,7 @@
   margin: 0;
 }
 .reports-compare {
-  width: min(100%, 64rem);
+  width: min(100%, calc(var(--space-2xl) * 32));
   max-height: min(100%, calc(100dvh - var(--space-2xl)));
   overflow: auto;
   display: flex;

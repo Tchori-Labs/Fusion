@@ -1693,6 +1693,73 @@ describe("fn pi extension (runnable structured-output regression slice)", () => 
     });
   });
 
+  describe("fn_task_retry", () => {
+    it("moves execution-failed in-review task (incomplete steps) to todo preserving progress", async () => {
+      const store = new TaskStore(tmpDir);
+      await store.init();
+
+      const task = await store.createTask({
+        title: "execution-failed task",
+        description: "test",
+        column: "todo",
+      });
+      await store.updateTask(task.id, {
+        steps: [
+          { name: "Step 0", status: "done" },
+          { name: "Step 1", status: "in-progress" },
+          { name: "Step 2", status: "pending" },
+        ],
+      });
+      await store.moveTask(task.id, "in-progress");
+      await store.moveTask(task.id, "in-review");
+      await store.updateTask(task.id, { status: "failed", error: "429 rate limited" });
+
+      const retryTool = api.tools.get("fn_task_retry")!;
+      const result = await retryTool.execute("retry-exec", { id: task.id }, undefined, undefined, makeCtx(tmpDir));
+
+      expect(result.isError).toBeFalsy();
+      expect(result.details.newColumn).toBe("todo");
+
+      const updated = await store.getTask(task.id);
+      expect(updated?.column).toBe("todo");
+      expect(updated?.status).toBeFalsy();
+      expect(updated?.error).toBeFalsy();
+      expect(updated?.steps[1].status).toBe("in-progress");
+    });
+
+    it("keeps merge-failed in-review task (all steps done) in in-review and resets merge state", async () => {
+      const store = new TaskStore(tmpDir);
+      await store.init();
+
+      const task = await store.createTask({
+        title: "merge-failed task",
+        description: "test",
+        column: "todo",
+      });
+      await store.updateTask(task.id, {
+        steps: [
+          { name: "Step 0", status: "done" },
+          { name: "Step 1", status: "done" },
+        ],
+      });
+      await store.moveTask(task.id, "in-progress");
+      await store.moveTask(task.id, "in-review");
+      await store.updateTask(task.id, { status: "failed", error: "merge conflict", mergeRetries: 3 });
+
+      const retryTool = api.tools.get("fn_task_retry")!;
+      const result = await retryTool.execute("retry-merge", { id: task.id }, undefined, undefined, makeCtx(tmpDir));
+
+      expect(result.isError).toBeFalsy();
+      expect(result.details.newColumn).toBe("in-review");
+
+      const updated = await store.getTask(task.id);
+      expect(updated?.column).toBe("in-review");
+      expect(updated?.status).toBeFalsy();
+      expect(updated?.error).toBeFalsy();
+      expect(updated?.mergeRetries).toBe(0);
+    });
+  });
+
   describe("fn_list_agents", () => {
     it("returns agent list", async () => {
       await seedAgent(tmpDir, { name: "alpha-agent" });
