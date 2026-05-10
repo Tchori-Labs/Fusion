@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import type { Database } from "@fusion/core";
+import type { ApprovalDecision, ApprovalState } from "../approval.js";
 import type { CombinedReview } from "../review-types.js";
 import {
   type Report,
@@ -27,6 +28,8 @@ interface ReportRow {
   publishedAt: string | null;
   archivedAt: string | null;
   failureReason: string | null;
+  approval_state: ApprovalState;
+  approval_history: string;
   draftMarkdown: string | null;
   renderedHtmlPath: string | null;
   rendered_html: string | null;
@@ -76,6 +79,8 @@ export class ReportStore extends EventEmitter<ReportStoreEvents> {
       publishedAt: null,
       archivedAt: null,
       failureReason: null,
+      approvalState: "not_required",
+      approvalHistory: [],
       draftMarkdown: input.draftMarkdown ?? null,
       renderedHtmlPath: null,
       renderedHtml: null,
@@ -92,11 +97,13 @@ export class ReportStore extends EventEmitter<ReportStoreEvents> {
           id, cadence, periodStart, periodEnd, title, status,
           generationStartedAt, generationCompletedAt, reviewStartedAt, reviewCompletedAt,
           approvedAt, approvedBy, publishedAt, archivedAt, failureReason,
+          approval_state, approval_history,
           draftMarkdown, renderedHtmlPath, rendered_html, rendered_html_generated_at, metadataJson, combinedReviewJson, createdAt, updatedAt
         ) VALUES (
           @id, @cadence, @periodStart, @periodEnd, @title, @status,
           @generationStartedAt, @generationCompletedAt, @reviewStartedAt, @reviewCompletedAt,
           @approvedAt, @approvedBy, @publishedAt, @archivedAt, @failureReason,
+          @approvalState, @approvalHistory,
           @draftMarkdown, @renderedHtmlPath, @renderedHtml, @renderedHtmlGeneratedAt, @metadataJson, @combinedReviewJson, @createdAt, @updatedAt
         )
       `).run(this.toDbParams(report, true));
@@ -164,6 +171,13 @@ export class ReportStore extends EventEmitter<ReportStoreEvents> {
       renderedHtml: patch.renderedHtml ?? current.renderedHtml,
       renderedHtmlGeneratedAt: patch.renderedHtmlGeneratedAt ?? current.renderedHtmlGeneratedAt,
       failureReason: patch.failureReason ?? current.failureReason,
+      approvalState: patch.approvalState ?? current.approvalState,
+      approvalHistory: patch.approvalHistory ?? current.approvalHistory,
+      status: patch.status ?? current.status,
+      approvedAt: patch.approvedAt ?? current.approvedAt,
+      approvedBy: patch.approvedBy ?? current.approvedBy,
+      publishedAt: patch.publishedAt ?? current.publishedAt,
+      reviewCompletedAt: patch.reviewCompletedAt ?? current.reviewCompletedAt,
       updatedAt: new Date().toISOString(),
     };
 
@@ -269,6 +283,8 @@ export class ReportStore extends EventEmitter<ReportStoreEvents> {
       publishedAt: row.publishedAt,
       archivedAt: row.archivedAt,
       failureReason: row.failureReason,
+      approvalState: row.approval_state,
+      approvalHistory: this.parseApprovalHistory(row.approval_history),
       draftMarkdown: row.draftMarkdown,
       renderedHtmlPath: row.renderedHtmlPath,
       renderedHtml: row.rendered_html,
@@ -297,6 +313,8 @@ export class ReportStore extends EventEmitter<ReportStoreEvents> {
           publishedAt = @publishedAt,
           archivedAt = @archivedAt,
           failureReason = @failureReason,
+          approval_state = @approvalState,
+          approval_history = @approvalHistory,
           draftMarkdown = @draftMarkdown,
           renderedHtmlPath = @renderedHtmlPath,
           rendered_html = @renderedHtml,
@@ -329,6 +347,8 @@ export class ReportStore extends EventEmitter<ReportStoreEvents> {
       publishedAt: report.publishedAt,
       archivedAt: report.archivedAt,
       failureReason: report.failureReason,
+      approvalState: report.approvalState,
+      approvalHistory: JSON.stringify(report.approvalHistory ?? []),
       draftMarkdown: report.draftMarkdown,
       renderedHtmlPath: report.renderedHtmlPath,
       renderedHtml: report.renderedHtml,
@@ -355,6 +375,16 @@ export class ReportStore extends EventEmitter<ReportStoreEvents> {
       return JSON.parse(json) as CombinedReview;
     } catch {
       return null;
+    }
+  }
+
+  private parseApprovalHistory(json: string | null): ApprovalDecision[] {
+    if (!json) return [];
+    try {
+      const parsed = JSON.parse(json);
+      return Array.isArray(parsed) ? parsed as ApprovalDecision[] : [];
+    } catch {
+      return [];
     }
   }
 }

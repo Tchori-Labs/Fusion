@@ -116,6 +116,39 @@ Indexes:
 
 `failed` and `archived` are allowed from any non-terminal state. Idempotent transitions (`from === to`) are no-ops.
 
+### Approval + publish lifecycle (FN-3787)
+
+A parallel `approvalState` gate now controls human/approver decisions before distribution:
+
+`review_complete` entry:
+- `approvalRequired=false, autoPublishOnApproval=false` → `approvalState=approved`, `status=approved`
+- `approvalRequired=false, autoPublishOnApproval=true` → `approvalState=published`, `status=published`
+- `approvalRequired=true` → `approvalState=awaiting_approval`, `status=review_complete`
+
+Decision transitions:
+- `awaiting_approval --approve--> approved` (or directly `published` when `autoPublishOnApproval=true`)
+- `awaiting_approval --reject--> rejected`
+- `approved --publish--> published`
+
+Backfilled legacy rows use `approvalState=not_required` and are non-actionable.
+
+Authorization rules:
+- When `approvalRequired=true` and `approverAgentIds` is non-empty, only listed approver agent IDs may approve/reject/publish.
+- When `approvalRequired=true` and `approverAgentIds=[]`, any human dashboard user is allowed; agents are not.
+- `publishTargets` records publish intent metadata when a report reaches `published`.
+
+### Share-ready summary blocks (FN-3787)
+
+Approved/published reports can produce deterministic share artifacts via `GET /reports/:id/share-blocks`:
+- `plainText`: compact paste-ready summary
+- `markdown`: heading/bullets + report link
+- `slack`: mrkdwn-friendly summary
+- `emailHtml`: inline-styled HTML snippet for email clients
+
+`share-blocks` is intentionally locked (409) until `approvalState` is `approved` or `published`.
+
+> Email HTML styling exemption: `emailHtml` deliberately uses inline style attributes and hardcoded hex colors for email-client compatibility; dashboard design-token CSS rules do not apply to this serialized output format.
+
 ### ReportStore API
 
 - `createReport(input)`

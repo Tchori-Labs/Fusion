@@ -1,4 +1,5 @@
 import type { ReportRecord } from "./types.js";
+import type { ShareBlocks } from "../share-blocks.js";
 
 const BASE = "/api/plugins/reports";
 
@@ -50,4 +51,35 @@ export function getReportPreviewHtml(id: string, projectId?: string): Promise<st
 
 export function getReportExportUrl(id: string, projectId?: string): string {
   return `${BASE}/reports/${encodeURIComponent(id)}/export.html${qp({ projectId })}`;
+}
+
+export async function approveReport(id: string, note?: string): Promise<ReportRecord> {
+  const data = await request<{ report: ReportRecord }>(`/reports/${encodeURIComponent(id)}/approve`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(note ? { note } : {}),
+  });
+  return data.report;
+}
+
+export async function rejectReport(id: string, note?: string): Promise<ReportRecord> {
+  const data = await request<{ report: ReportRecord }>(`/reports/${encodeURIComponent(id)}/reject`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(note ? { note } : {}),
+  });
+  return data.report;
+}
+
+export async function publishReport(id: string): Promise<ReportRecord> {
+  const data = await request<{ report: ReportRecord }>(`/reports/${encodeURIComponent(id)}/publish`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: "{}",
+  });
+  return data.report;
+}
+
+export async function getShareBlocks(id: string): Promise<ShareBlocks> {
+  return request<ShareBlocks>(`/reports/${encodeURIComponent(id)}/share-blocks`);
 }

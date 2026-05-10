@@ -20,6 +20,8 @@ function report(overrides: Partial<Report> = {}): Report {
     publishedAt: null,
     archivedAt: null,
     failureReason: null,
+    approvalState: "not_required",
+    approvalHistory: [],
     draftMarkdown: null,
     renderedHtmlPath: null,
     renderedHtml: null,

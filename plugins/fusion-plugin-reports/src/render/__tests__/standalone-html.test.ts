@@ -19,6 +19,8 @@ function createRecord(metadata: Record<string, unknown> = {}): Report {
     publishedAt: null,
     archivedAt: null,
     failureReason: null,
+    approvalState: "not_required",
+    approvalHistory: [],
     draftMarkdown: null,
     renderedHtmlPath: null,
     renderedHtml: null,

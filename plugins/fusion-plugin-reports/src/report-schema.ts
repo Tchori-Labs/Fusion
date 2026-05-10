@@ -1,5 +1,12 @@
 import type { Database } from "@fusion/core";
 
+function addColumnIfMissing(db: Database, table: string, column: string, ddl: string): boolean {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+  if (columns.some((entry) => entry.name === column)) return false;
+  db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl}`);
+  return true;
+}
+
 export function ensureReportSchema(db: Database): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS reports (
@@ -18,6 +25,8 @@ export function ensureReportSchema(db: Database): void {
       publishedAt TEXT,
       archivedAt TEXT,
       failureReason TEXT,
+      approval_state TEXT NOT NULL DEFAULT 'not_required',
+      approval_history TEXT NOT NULL DEFAULT '[]',
       draftMarkdown TEXT,
       renderedHtmlPath TEXT,
       rendered_html TEXT,
@@ -38,12 +47,23 @@ export function ensureReportSchema(db: Database): void {
       ON reports(periodStart, periodEnd, id);
   `);
 
-  const columns = db.prepare("PRAGMA table_info(reports)").all() as Array<{ name: string }>;
-  const names = new Set(columns.map((column) => column.name));
-  if (!names.has("rendered_html")) {
-    db.exec("ALTER TABLE reports ADD COLUMN rendered_html TEXT");
-  }
-  if (!names.has("rendered_html_generated_at")) {
-    db.exec("ALTER TABLE reports ADD COLUMN rendered_html_generated_at TEXT");
-  }
+  addColumnIfMissing(db, "reports", "rendered_html", "TEXT");
+  addColumnIfMissing(db, "reports", "rendered_html_generated_at", "TEXT");
+  addColumnIfMissing(db, "reports", "approval_state", "TEXT NOT NULL DEFAULT 'not_required'");
+  addColumnIfMissing(db, "reports", "approval_history", "TEXT NOT NULL DEFAULT '[]'");
+
+  db.exec(`
+    UPDATE reports
+    SET approval_state = 'published',
+        publishedAt = COALESCE(publishedAt, generationCompletedAt)
+    WHERE status = 'published';
+
+    UPDATE reports
+    SET approval_state = 'published'
+    WHERE status = 'approved';
+
+    UPDATE reports
+    SET approval_state = 'not_required'
+    WHERE status = 'review_complete';
+  `);
 }

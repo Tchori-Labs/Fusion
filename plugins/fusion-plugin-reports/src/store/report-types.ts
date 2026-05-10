@@ -1,3 +1,4 @@
+import type { ApprovalDecision, ApprovalState } from "../approval.js";
 import type { CombinedReview } from "../review-types.js";
 
 export type ReportCadence = "daily" | "weekly" | "monthly" | "quarterly" | "manual";
@@ -28,6 +29,8 @@ export interface Report {
   publishedAt: string | null;
   archivedAt: string | null;
   failureReason: string | null;
+  approvalState: ApprovalState;
+  approvalHistory: ApprovalDecision[];
   draftMarkdown: string | null;
   renderedHtmlPath: string | null;
   renderedHtml: string | null;
@@ -47,7 +50,7 @@ export interface ReportCreateInput {
   draftMarkdown?: string;
 }
 
-export type ReportUpdateInput = Partial<Pick<Report, "title" | "draftMarkdown" | "renderedHtmlPath" | "renderedHtml" | "renderedHtmlGeneratedAt" | "metadata" | "failureReason">>;
+export type ReportUpdateInput = Partial<Pick<Report, "title" | "draftMarkdown" | "renderedHtmlPath" | "renderedHtml" | "renderedHtmlGeneratedAt" | "metadata" | "failureReason" | "approvalState" | "approvalHistory" | "status" | "approvedAt" | "approvedBy" | "publishedAt" | "reviewCompletedAt">>;
 
 export interface ReportListFilter {
   cadence?: ReportCadence;

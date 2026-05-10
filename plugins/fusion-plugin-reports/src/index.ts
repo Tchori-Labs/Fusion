@@ -1,13 +1,21 @@
 import type { PluginContext } from "@fusion/core";
 import { definePlugin } from "@fusion/plugin-sdk";
+import { initializeApprovalState } from "./approval.js";
 import { runReviewPanel } from "./review-panel.js";
 import { ensureReportSchema } from "./report-schema.js";
+import { createReportApprovalRoutes } from "./routes/report-approval-routes.js";
 import { createReportExportRoutes } from "./routes/report-export-routes.js";
 import { createReportListRoutes } from "./routes/report-list-routes.js";
 import type { CombinedReview, ReviewPanelMember, RunReviewPanelInput } from "./review-types.js";
+import {
+  getApprovalRequired,
+  getApproverAgentIds,
+  getAutoPublishOnApproval,
+  getPublishTargets,
+  settingsSchema,
+} from "./settings.js";
 import type { ReportCadence, ReportCreateInput } from "./store/report-types.js";
 import { ReportStore } from "./store/report-store.js";
-import { settingsSchema } from "./settings.js";
 export { ReportsDashboardView } from "./dashboard-view.js";
 
 const plugin = definePlugin({
@@ -24,7 +32,7 @@ const plugin = definePlugin({
   hooks: {
     onSchemaInit: ensureReportSchema,
   },
-  routes: [...createReportListRoutes(), ...createReportExportRoutes()],
+  routes: [...createReportListRoutes(), ...createReportExportRoutes(), ...createReportApprovalRoutes()],
   dashboardViews: [
     {
       viewId: "reports",
@@ -87,7 +95,26 @@ export async function runGeneratedReportReview(input: RunGeneratedReportReviewIn
     cwd: input.cwd,
   }, ctx);
 
-  store.attachReview(report.id, combinedReview);
+  const reviewed = store.attachReview(report.id, combinedReview);
+
+  const nextApprovalState = initializeApprovalState(reviewed.status, {
+    approvalRequired: getApprovalRequired(ctx.settings),
+    autoPublishOnApproval: getAutoPublishOnApproval(ctx.settings),
+    approverAgentIds: getApproverAgentIds(ctx.settings),
+    publishTargets: getPublishTargets(ctx.settings),
+  });
+
+  if (nextApprovalState !== "not_required") {
+    const now = new Date().toISOString();
+    store.updateReport(report.id, {
+      approvalState: nextApprovalState,
+      ...(nextApprovalState === "approved"
+        ? { status: "approved", approvedAt: now, approvedBy: "system" }
+        : {}),
+      ...(nextApprovalState === "published" ? { status: "published", publishedAt: now } : {}),
+    });
+  }
+
   return combinedReview;
 }
 
