@@ -1760,7 +1760,14 @@ export async function createFnAgent(options: AgentOptions): Promise<AgentResult>
     // Sort tools alphabetically by name for deterministic ordering.
     // Prompt caching requires the tool list to be byte-identical across
     // sessions — reordering breaks cache prefix matching.
+    // Exception: fn_heartbeat_done must remain last (stable terminal signal
+    // required by the heartbeat executor — see agent-heartbeat.ts).
     customToolList.sort((a, b) => a.name.localeCompare(b.name));
+    const heartbeatDoneIdx = customToolList.findIndex((t) => t.name === "fn_heartbeat_done");
+    if (heartbeatDoneIdx >= 0 && heartbeatDoneIdx < customToolList.length - 1) {
+      const [doneTool] = customToolList.splice(heartbeatDoneIdx, 1);
+      customToolList.push(doneTool);
+    }
     // Last-chance abort hook. Fires *here* — after every awaited setup step
     // in createFnAgent (provider registration, worktree validation, resource
     // loader reload) and immediately before the actual LLM session spawn.
