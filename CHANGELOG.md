@@ -2,6 +2,107 @@
 
 User-facing release notes aggregated across all packages. This file is auto-synced from each `packages/*/CHANGELOG.md` by `scripts/release.mjs` — do not edit by hand.
 
+## 0.26.0
+
+### @fusion/dashboard
+
+#### Patch Changes
+
+- @fusion/core@0.26.0
+- @fusion/engine@0.26.0
+- @fusion-plugin-examples/dependency-graph@0.1.15
+- @fusion-plugin-examples/roadmap@0.1.3
+- @fusion-plugin-examples/cursor-runtime@0.1.3
+- @fusion-plugin-examples/droid-runtime@0.1.10
+- @fusion-plugin-examples/hermes-runtime@0.2.34
+- @fusion-plugin-examples/openclaw-runtime@0.2.34
+- @fusion-plugin-examples/paperclip-runtime@0.2.34
+
+### @fusion/desktop
+
+#### Patch Changes
+
+- @fusion/core@0.26.0
+- @fusion/dashboard@0.26.0
+
+### @fusion/engine
+
+#### Patch Changes
+
+- @fusion/core@0.26.0
+- @fusion/pi-claude-cli@0.26.0
+
+### @fusion/plugin-sdk
+
+#### Patch Changes
+
+- @fusion/core@0.26.0
+
+### @runfusion/fusion
+
+#### Minor Changes
+
+- 8c71516: Show downstream blocker fan-out count on the board so high-impact blockers are visible at a glance.
+
+#### Patch Changes
+
+- 6240afe: Fix merger autostash lifecycle cleanup to drop primary and race-rescue stashes on terminal paths, and add startup/periodic stale autostash sweeping with a configurable max-age threshold.
+- 7e8541b: Add stash recovery APIs and dashboard surface for listing, diffing, applying, and safely dropping orphaned merger autostashes.
+- 6cab8f9: Create a tracking GitHub issue when a Fusion task is created with GitHub tracking enabled. Default is OFF; no GitHub calls are made when tracking is disabled.
+- 56c232a: GitHub tracking issues now use the format `[FN-XXXX] Title` for the title and a short plaintext summary prefixed with `Fusion task: FN-XXXX` for the body. The full task prompt is never included and no hyperlink back to Fusion is added.
+- ebab75e: Fusion now posts a short comment on the linked GitHub tracking issue when a tracked task moves to in-progress or done. Comments include the Fusion task ID as plain text and never link back to the Fusion app.
+- 4450257: Fusion now closes the linked GitHub tracking issue when a tracked task moves to done, and reopens it when the task moves back to an active column. Done → archived leaves the issue closed. Failures are recorded in the task activity log and never block the move.
+- 8e9cd1a: Expose per-task GitHub tracking controls in task creation/editing and task detail, including repo override handling, linked-issue display, and manual unlink flow.
+- 860d183: GitHub tracking lifecycle now strictly honors the project-level `githubAuthMode`. Token mode requires `githubAuthToken` (or `GITHUB_TOKEN`); gh-cli mode requires an authenticated `gh` CLI. The previous opportunistic fallback no longer applies to tracking issue creation/comments/state sync flows (legacy PR/import flows are unchanged).
+- d74197e: Generalize the SQLite schema self-heal pass to reconcile missing columns for every critical table on `Database.init()`, not just `tasks`.
+
+  This prevents legacy or drifted databases from hitting `no such column: <X>` regressions after new column additions, and adds architecture lint coverage to ensure new `CREATE TABLE` definitions are always included in schema-compatibility coverage.
+
+- 4051dab: Merger sessions now honor the assigned agent's `runtimeConfig.model` before falling back to project/global defaults, matching executor and planning lanes.
+- d25e8cb: Research now works out of the box using the agent's built-in `WebSearch`/`WebFetch` tools. External search providers (SearXNG, Brave, Google, Tavily) are now optional advanced configuration.
+- bcb79d8: Honor task-configured merge targets across CLI and merge completion paths, including PR creation base branch selection and merge metadata resolution.
+- 50fdea6: Fix `fn_task_update` (and `fn_task_create`) silently failing with "Agent not found" when callers pass an empty string or the literal string `"null"` to clear a task's agent assignment. Empty/whitespace strings and `"null"` are now normalized to a clear-assignment signal, matching the dashboard `PATCH /api/tasks/:id` contract. JSON `null` continues to work as before.
+- 46efd00: Add per-task GitHub tracking fields (enabled flag, optional repo override,
+  linked issue metadata) to the Task contract and SQLite store. No user-visible
+  behavior yet; surfaced by FN-3870+.
+- 00b35b8: Restore ListView bulk-delete: select multiple tasks and delete them together, with archived selections skipped automatically and a per-task force-delete prompt for dependency conflicts.
+- ff9fb55: Improve stale dependency unblocking so todo tasks are released promptly when their blocker reaches done or archived, and ensure startup recovery runs the stale `blockedBy` sweep once on boot to repair previously stuck rows. This complements the existing periodic self-heal pass, reducing unblock latency and automatically repairing incidents like dependents remaining blocked after a completed task.
+- eea4def: Fix agent sidebar action buttons (Run Now, Pause, Details) overflowing on narrow agent cards by collapsing them to icon-only controls in the sidebar context.
+- da101ef: Fix bundled Dependency Graph plugin reliability in the dashboard. Built-in plugin view registration now uses literal-specifier lazy imports so production bundles can resolve and load the bundled graph/roadmap dashboard views instead of falling back to an unavailable placeholder. Plugin install mode now resolves bundled plugin paths server-side when relative `./plugins/...` inputs do not exist under the current working directory, so installing built-in plugins from Settings works reliably across runtime locations.
+- 4ccef83: Fix triage planning model selection so project/task planning settings are passed to runtime using the correct default model keys.
+- 772c9f6: Hide Chat Rooms behind the `chatRooms` experimental flag. By default, Chat now shows direct-chat-only UI; re-enable rooms via **Settings → Experimental Features → Chat Rooms**.
+- f1ece4b: Bundle and auto-install the cli-printing-press plugin with the published CLI.
+- 5b15f45: Fix scheduler `blockedBy` propagation so dependency-unblocked todo tasks are not re-pointed to unrelated overlap blockers, and extend stale-blocker recovery to clear corrupted `blockedBy` rows that no longer match unresolved dependencies.
+
+### runfusion.ai
+
+#### Patch Changes
+
+- Updated dependencies [6240afe]
+- Updated dependencies [7e8541b]
+- Updated dependencies [6cab8f9]
+- Updated dependencies [56c232a]
+- Updated dependencies [ebab75e]
+- Updated dependencies [4450257]
+- Updated dependencies [8e9cd1a]
+- Updated dependencies [860d183]
+- Updated dependencies [d74197e]
+- Updated dependencies [4051dab]
+- Updated dependencies [d25e8cb]
+- Updated dependencies [bcb79d8]
+- Updated dependencies [50fdea6]
+- Updated dependencies [46efd00]
+- Updated dependencies [00b35b8]
+- Updated dependencies [ff9fb55]
+- Updated dependencies [8c71516]
+- Updated dependencies [eea4def]
+- Updated dependencies [da101ef]
+- Updated dependencies [4ccef83]
+- Updated dependencies [772c9f6]
+- Updated dependencies [f1ece4b]
+- Updated dependencies [5b15f45]
+  - @runfusion/fusion@0.26.0
+
 ## 0.25.0
 
 ### @fusion/dashboard
@@ -4113,6 +4214,14 @@ for reference.
 - Updated dependencies [25d44e1]
 - Updated dependencies [a2ed6d0]
   - @runfusion/fusion@0.1.0
+
+## 0.11.10
+
+### @fusion/droid-cli
+
+#### Patch Changes
+
+- @fusion-plugin-examples/droid-runtime@0.1.10
 
 ## 0.11.9
 
