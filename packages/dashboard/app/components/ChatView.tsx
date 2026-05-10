@@ -551,6 +551,12 @@ function NewChatDialog({ projectId, onClose, onCreate }: NewChatDialogProps) {
 
 type CopyFeedbackState = "success" | "error" | null;
 
+interface RoomContext {
+  roomId: string;
+  roomName: string;
+  memberIds: ReadonlySet<string>;
+}
+
 interface ChatMessageItemProps {
   message: ChatMessageInfo;
   /**
@@ -572,6 +578,7 @@ interface ChatMessageItemProps {
   activeModelProvider: string | null;
   activeSessionId: string | null;
   mentionAgentsByName: Map<string, Agent>;
+  roomContext: RoomContext | null;
   copyAction?: ReactNode;
 }
 
@@ -588,6 +595,7 @@ const ChatMessageItem = memo(function ChatMessageItem({
   activeModelProvider,
   activeSessionId,
   mentionAgentsByName,
+  roomContext,
   copyAction,
 }: ChatMessageItemProps) {
   const isAssistantMessage = message.role === "assistant";
@@ -606,8 +614,15 @@ const ChatMessageItem = memo(function ChatMessageItem({
       const normalizedName = rawName.replace(/_/g, " ").toLowerCase();
       const mentionedAgent = mentionAgentsByName.get(normalizedName);
       if (mentionedAgent) {
+        const isNonMember = Boolean(roomContext && !roomContext.memberIds.has(mentionedAgent.id));
+        const nonMemberLabel = isNonMember ? `Not a member of ${roomContext?.roomName}` : undefined;
         parts.push(
-          <span key={`${mentionedAgent.id}-${start}`} className="chat-mention-chip">
+          <span
+            key={`${mentionedAgent.id}-${start}`}
+            className={`chat-mention-chip${isNonMember ? " chat-mention-chip--non-member" : ""}`}
+            title={nonMemberLabel}
+            aria-label={nonMemberLabel}
+          >
             @{mentionedAgent.name.replace(/\s+/g, "_")}
           </span>,
         );
@@ -619,7 +634,7 @@ const ChatMessageItem = memo(function ChatMessageItem({
     }
     if (lastIndex < content.length) parts.push(content.slice(lastIndex));
     return parts.length === 0 ? content : parts;
-  }, [isAssistantMessage, message.content, mentionAgentsByName]);
+  }, [isAssistantMessage, message.content, mentionAgentsByName, roomContext]);
 
   const renderedAttachments = useMemo<ReactNode>(() => {
     const attachments = message.attachments;
@@ -869,10 +884,31 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
 
   const mentionAgents = useMemo(() => Array.from(agentsMap.values()), [agentsMap]);
 
-  const filteredMentionAgents = useMemo(
-    () => mentionAgents.filter((agent) => matchesAgentMentionFilter(agent.name, mentionFilter)),
-    [mentionAgents, mentionFilter],
-  );
+  const roomContext = useMemo<RoomContext | null>(() => {
+    if (!chatRoomsEnabled || chatScope !== "rooms" || !rooms.activeRoom) {
+      return null;
+    }
+    return {
+      roomId: rooms.activeRoom.id,
+      roomName: rooms.activeRoom.name,
+      memberIds: new Set(rooms.activeRoomMembers.map((member) => member.agentId)),
+    };
+  }, [chatRoomsEnabled, chatScope, rooms.activeRoom, rooms.activeRoomMembers]);
+
+  const filteredMentionAgents = useMemo(() => {
+    const matchingAgents = mentionAgents.filter((agent) => matchesAgentMentionFilter(agent.name, mentionFilter));
+    if (!roomContext) {
+      return matchingAgents;
+    }
+
+    const memberAgents = matchingAgents.filter((agent) => roomContext.memberIds.has(agent.id));
+    if (mentionFilter.trim().length === 0) {
+      return memberAgents;
+    }
+
+    const otherAgents = matchingAgents.filter((agent) => !roomContext.memberIds.has(agent.id));
+    return [...memberAgents, ...otherAgents];
+  }, [mentionAgents, mentionFilter, roomContext]);
 
   const mentionAgentsByName = useMemo(() => {
     const byName = new Map<string, Agent>();
@@ -2103,6 +2139,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
                         activeModelProvider={null}
                         activeSessionId={rooms.activeRoom?.id ?? null}
                         mentionAgentsByName={mentionAgentsByName}
+                        roomContext={roomContext}
                       />
                     );
                   })
@@ -2127,6 +2164,16 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
                     onKeyDown={handleInputKeyDown}
                     rows={1}
                     data-testid="chat-input"
+                  />
+                  <AgentMentionPopup
+                    agents={mentionAgents}
+                    filter={mentionFilter}
+                    highlightedIndex={mentionHighlightIndex}
+                    visible={mentionPopupVisible}
+                    onSelect={handleMentionSelect}
+                    position="below"
+                    roomMemberIds={roomContext?.memberIds}
+                    roomName={roomContext?.roomName}
                   />
                 </div>
                 <button
@@ -2204,6 +2251,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
                   activeModelProvider={activeModelProvider}
                   activeSessionId={activeSession?.id ?? null}
                   mentionAgentsByName={mentionAgentsByName}
+                  roomContext={null}
                   copyAction={showProviderResponseCopy && message.role === "assistant" ? renderCopyAction(message.id, message.content) : undefined}
                 />
               ))}
@@ -2259,6 +2307,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
                   activeModelProvider={activeModelProvider}
                   activeSessionId={activeSession?.id ?? null}
                   mentionAgentsByName={mentionAgentsByName}
+                  roomContext={null}
                   copyAction={showProviderResponseCopy && message.role === "assistant" ? renderCopyAction(message.id, message.content) : undefined}
                 />
               ))}
@@ -2399,6 +2448,8 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
                   visible={mentionPopupVisible}
                   onSelect={handleMentionSelect}
                   position="below"
+                  roomMemberIds={roomContext?.memberIds}
+                  roomName={roomContext?.roomName}
                 />
                 <FileMentionPopup
                   visible={fileMention.mentionActive && !mentionPopupVisible}

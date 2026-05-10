@@ -746,6 +746,7 @@ Key server capabilities:
   - `POST /api/chat/rooms/:id/messages/:messageId/attachments` records attachment metadata on an existing room message
   - Error contract follows existing API patterns: `400` validation failures, `404` missing resources, `409` duplicate-slug conflicts, `503` when chat store is unavailable
   - SSE fan-out on `/api/events` now includes: `chat:room:created`, `chat:room:updated`, `chat:room:deleted`, `chat:room:member:added`, `chat:room:member:removed`, `chat:room:message:added`, `chat:room:message:updated`, `chat:room:message:deleted`
+  - **Room test coverage (planned):** FN-3812 tracks the contract-first test matrix for room creation/switching, persisted history, mention routing, and hybrid responder behavior. See `.fusion/tasks/FN-3812/test-plan.md` plus scaffold files: `packages/core/src/__tests__/chat-store.rooms.test.ts`, `packages/dashboard/src/__tests__/chat.rooms.test.ts`, `packages/dashboard/src/__tests__/chat-routes.rooms.test.ts`, and `packages/dashboard/app/components/__tests__/ChatView.rooms.test.tsx`.
 - **Task log stream**: `/api/tasks/:id/logs/stream` (`server.ts`)
   - SSE endpoint for live task log streaming with project scope resolution
 - **Dev-server stream**: `/api/dev-server/logs/stream` (`dev-server-routes.ts`)

@@ -33,6 +33,11 @@ interface PendingAttachment {
   previewUrl: string;
 }
 
+interface QuickChatRoomContext {
+  roomName: string;
+  memberIds: ReadonlySet<string>;
+}
+
 interface QuickChatFABProps {
   projectId?: string;
   addToast: (msg: string, type?: "success" | "error" | "warning") => void;
@@ -50,6 +55,8 @@ interface QuickChatFABProps {
   onToggleFavorite?: (provider: string) => void;
   /** Called when user toggles a model's favorite status */
   onToggleModelFavorite?: (modelId: string) => void;
+  /** Optional room context for member-aware mention UX */
+  roomContext?: QuickChatRoomContext | null;
 }
 
 interface ParsedModelSelection {
@@ -752,6 +759,7 @@ interface QuickChatMessageItemProps {
   message: ChatMessageInfo;
   forcePlain: boolean;
   mentionAgentsByName: Map<string, Agent>;
+  roomContext: QuickChatRoomContext | null;
   onToggleRender: (id: string) => void;
 }
 
@@ -761,6 +769,7 @@ const QuickChatMessageItem = memo(function QuickChatMessageItem({
   message,
   forcePlain,
   mentionAgentsByName,
+  roomContext,
   onToggleRender,
 }: QuickChatMessageItemProps) {
   const isSent = message.role === "user";
@@ -779,8 +788,15 @@ const QuickChatMessageItem = memo(function QuickChatMessageItem({
       const normalizedName = rawName.replace(/_/g, " ").toLowerCase();
       const mentionedAgent = mentionAgentsByName.get(normalizedName);
       if (mentionedAgent) {
+        const isNonMember = Boolean(roomContext && !roomContext.memberIds.has(mentionedAgent.id));
+        const nonMemberLabel = isNonMember ? `Not a member of ${roomContext?.roomName}` : undefined;
         parts.push(
-          <span key={`${mentionedAgent.id}-${start}`} className="chat-mention-chip">
+          <span
+            key={`${mentionedAgent.id}-${start}`}
+            className={`chat-mention-chip${isNonMember ? " chat-mention-chip--non-member" : ""}`}
+            title={nonMemberLabel}
+            aria-label={nonMemberLabel}
+          >
             @{mentionedAgent.name.replace(/\s+/g, "_")}
           </span>,
         );
@@ -792,7 +808,7 @@ const QuickChatMessageItem = memo(function QuickChatMessageItem({
     }
     if (lastIndex < content.length) parts.push(content.slice(lastIndex));
     return parts.length === 0 ? content : parts;
-  }, [isSent, message.content, mentionAgentsByName]);
+  }, [isSent, message.content, mentionAgentsByName, roomContext]);
 
   const assistantBody = useMemo<ReactNode>(() => {
     if (isSent) return null;
@@ -844,6 +860,7 @@ export function QuickChatFAB({
   favoriteModels = [],
   onToggleFavorite,
   onToggleModelFavorite,
+  roomContext = null,
 }: QuickChatFABProps) {
   const { agents } = useAgents(projectId);
   // Internal state for uncontrolled mode, controlled state when open prop is provided
@@ -1345,10 +1362,20 @@ export function QuickChatFAB({
     return matchingSkills.slice(0, 10);
   }, [discoveredSkills, skillFilter]);
 
-  const filteredMentionAgents = useMemo(
-    () => agents.filter((agent) => matchesAgentMentionFilter(agent.name, mentionFilter)),
-    [agents, mentionFilter],
-  );
+  const filteredMentionAgents = useMemo(() => {
+    const matchingAgents = agents.filter((agent) => matchesAgentMentionFilter(agent.name, mentionFilter));
+    if (!roomContext) {
+      return matchingAgents;
+    }
+
+    const memberAgents = matchingAgents.filter((agent) => roomContext.memberIds.has(agent.id));
+    if (mentionFilter.trim().length === 0) {
+      return memberAgents;
+    }
+
+    const otherAgents = matchingAgents.filter((agent) => !roomContext.memberIds.has(agent.id));
+    return [...memberAgents, ...otherAgents];
+  }, [agents, mentionFilter, roomContext]);
 
   const mentionAgentsByName = useMemo(() => {
     const byName = new Map<string, Agent>();
@@ -2349,6 +2376,7 @@ export function QuickChatFAB({
                     message={message}
                     forcePlain={message.role !== "user" && plainTextMessageIds.has(message.id)}
                     mentionAgentsByName={mentionAgentsByName}
+                    roomContext={roomContext}
                     onToggleRender={toggleMessageRenderMode}
                   />
                 ))}
@@ -2402,6 +2430,7 @@ export function QuickChatFAB({
                     message={message}
                     forcePlain={message.role !== "user" && plainTextMessageIds.has(message.id)}
                     mentionAgentsByName={mentionAgentsByName}
+                    roomContext={roomContext}
                     onToggleRender={toggleMessageRenderMode}
                   />
                 ))}
@@ -2593,6 +2622,8 @@ export function QuickChatFAB({
                 visible={mentionPopupVisible}
                 onSelect={handleMentionSelect}
                 position="above"
+                roomMemberIds={roomContext?.memberIds}
+                roomName={roomContext?.roomName}
               />
               <FileMentionPopup
                 visible={fileMention.mentionActive && !mentionPopupVisible}

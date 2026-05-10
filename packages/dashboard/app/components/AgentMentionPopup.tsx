@@ -17,6 +17,10 @@ interface AgentMentionPopupProps {
   onSelect: (agent: Agent) => void;
   /** Positioning anchor: "above" | "below" the input */
   position?: "above" | "below";
+  /** Room-member ids when mentioning from a room context */
+  roomMemberIds?: ReadonlySet<string>;
+  /** Optional room name for room section labels */
+  roomName?: string;
 }
 
 export function AgentMentionPopup({
@@ -26,8 +30,23 @@ export function AgentMentionPopup({
   visible,
   onSelect,
   position = "below",
+  roomMemberIds,
+  roomName,
 }: AgentMentionPopupProps) {
   const filteredAgents = useMemo(() => agents.filter((agent) => matchesAgentMentionFilter(agent.name, filter)), [agents, filter]);
+
+  const roomMode = Boolean(roomMemberIds);
+  const showOtherSection = roomMode && filter.trim().length > 0;
+
+  const memberAgents = useMemo(
+    () => roomMode ? filteredAgents.filter((agent) => roomMemberIds?.has(agent.id)) : filteredAgents,
+    [filteredAgents, roomMemberIds, roomMode],
+  );
+  const otherAgents = useMemo(
+    () => roomMode ? filteredAgents.filter((agent) => !roomMemberIds?.has(agent.id)) : [],
+    [filteredAgents, roomMemberIds, roomMode],
+  );
+  const visibleAgents = showOtherSection ? [...memberAgents, ...otherAgents] : memberAgents;
 
   if (!visible) {
     return null;
@@ -40,25 +59,60 @@ export function AgentMentionPopup({
       role="listbox"
       aria-label="Agent mention suggestions"
     >
-      {filteredAgents.length === 0 ? (
+      {visibleAgents.length === 0 ? (
         <div className="agent-mention-empty">No agents found</div>
       ) : (
-        filteredAgents.map((agent, index) => (
-          <button
-            key={agent.id}
-            type="button"
-            className={`agent-mention-item${index === highlightedIndex ? " agent-mention-item--highlighted" : ""}`}
-            data-testid={`agent-mention-item-${agent.id}`}
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={() => onSelect(agent)}
-            role="option"
-            aria-selected={index === highlightedIndex}
-          >
-            <AgentAvatar agent={agent} size={20} />
-            <span className="agent-mention-name">{agent.name}</span>
-            <span className="agent-mention-role">{agent.role}</span>
-          </button>
-        ))
+        <>
+          {roomMode && (
+            <div className="agent-mention-section-header" data-testid="agent-mention-members-header">
+              {roomName ? `Members of #${roomName}` : "Room members"}
+            </div>
+          )}
+          {memberAgents.map((agent, index) => (
+            <button
+              key={agent.id}
+              type="button"
+              className={`agent-mention-item${index === highlightedIndex ? " agent-mention-item--highlighted" : ""}`}
+              data-testid={`agent-mention-item-${agent.id}`}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => onSelect(agent)}
+              role="option"
+              aria-selected={index === highlightedIndex}
+            >
+              <AgentAvatar agent={agent} size={20} />
+              {roomMode && <span className="status-dot agent-mention-member-dot" aria-label="Room member" />}
+              <span className="agent-mention-name">{agent.name}</span>
+              <span className="agent-mention-role">{agent.role}</span>
+            </button>
+          ))}
+          {roomMode && !showOtherSection && otherAgents.length > 0 && (
+            <div className="agent-mention-hint" data-testid="agent-mention-other-hint">Type to search other agents</div>
+          )}
+          {roomMode && showOtherSection && otherAgents.length > 0 && (
+            <>
+              <div className="agent-mention-section-header" data-testid="agent-mention-others-header">Other agents</div>
+              {otherAgents.map((agent, index) => {
+                const globalIndex = memberAgents.length + index;
+                return (
+                  <button
+                    key={agent.id}
+                    type="button"
+                    className={`agent-mention-item${globalIndex === highlightedIndex ? " agent-mention-item--highlighted" : ""}`}
+                    data-testid={`agent-mention-item-${agent.id}`}
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => onSelect(agent)}
+                    role="option"
+                    aria-selected={globalIndex === highlightedIndex}
+                  >
+                    <AgentAvatar agent={agent} size={20} />
+                    <span className="agent-mention-name">{agent.name}</span>
+                    <span className="agent-mention-role">{agent.role}</span>
+                  </button>
+                );
+              })}
+            </>
+          )}
+        </>
       )}
     </div>
   );

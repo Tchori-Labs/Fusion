@@ -593,6 +593,32 @@ describe("QuickChatFAB session-first UX", () => {
     }
   });
 
+  it("renders non-member mention chips when roomContext is provided", async () => {
+    mockFetchChatMessages.mockResolvedValueOnce({
+      messages: [
+        {
+          id: "msg-room-mention",
+          sessionId: "session-model",
+          role: "user",
+          content: "Check with @Agent_Two",
+          createdAt: new Date().toISOString(),
+        },
+      ],
+    });
+
+    render(
+      <QuickChatFAB
+        addToast={vi.fn()}
+        projectId="proj-1"
+        roomContext={{ roomName: "engineering", memberIds: new Set(["agent-001"]) }}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("quick-chat-fab"));
+
+    const nonMemberChip = await screen.findByText("@Agent_Two", { selector: ".chat-mention-chip--non-member" });
+    expect(nonMemberChip).toHaveAttribute("title", "Not a member of engineering");
+  });
+
   it("FN-3884: snaps to bottom when switching sessions while open", async () => {
     mockFetchChatMessages
       .mockResolvedValueOnce({ messages: [{ id: "msg-1", sessionId: "session-model", role: "assistant", content: "A", createdAt: new Date().toISOString() }] })

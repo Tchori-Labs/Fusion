@@ -16,11 +16,15 @@ import * as useChatModule from "../../hooks/useChat";
 import type { UseChatReturn, ChatSessionInfo, ChatMessageInfo, ToolCallInfo } from "../../hooks/useChat";
 import * as apiModule from "../../api";
 import { _resetInitialViewportHeight } from "../../hooks/useMobileKeyboard";
+import * as useChatRoomsModule from "../../hooks/useChatRooms";
+import type { UseChatRoomsResult } from "../../hooks/useChatRooms";
 
 // Mock the hooks
 vi.mock("../../hooks/useChat");
+vi.mock("../../hooks/useChatRooms");
 
 const mockUseChat = vi.mocked(useChatModule.useChat);
+const mockUseChatRooms = vi.mocked(useChatRoomsModule.useChatRooms);
 const mockFetchDiscoveredSkills = vi.mocked(apiModule.fetchDiscoveredSkills);
 const mockCreateObjectURL = vi.fn();
 const mockRevokeObjectURL = vi.fn();
@@ -120,6 +124,21 @@ const defaultChatState: UseChatReturn = {
   agentsMap: new Map(),
 };
 
+const defaultRoomsState: UseChatRoomsResult = {
+  rooms: [],
+  roomsLoading: false,
+  roomsError: null,
+  activeRoom: null,
+  activeRoomMembers: [],
+  messages: [],
+  messagesLoading: false,
+  selectRoom: vi.fn(),
+  createRoom: vi.fn(),
+  deleteRoom: vi.fn(),
+  sendRoomMessage: vi.fn(),
+  refreshRooms: vi.fn(),
+};
+
 const activeSessionFixture: ChatSessionInfo = {
   id: "session-001",
   agentId: "agent-001",
@@ -150,6 +169,11 @@ function setupMockChat(overrides: Partial<UseChatReturn> = {}) {
   mockUseChat.mockReturnValue(state);
 }
 
+function setupMockRooms(overrides: Partial<UseChatRoomsResult> = {}) {
+  const state: UseChatRoomsResult = { ...defaultRoomsState, ...overrides };
+  mockUseChatRooms.mockReturnValue(state);
+}
+
 function ensureMatchMedia() {
   if (!window.matchMedia) {
     Object.defineProperty(window, "matchMedia", {
@@ -177,6 +201,7 @@ function mockViewportMode(mode: "mobile" | "desktop") {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  setupMockRooms();
   mockFetchDiscoveredSkills.mockResolvedValue([]);
   mockCreateObjectURL.mockImplementation((file: File) => `blob:${file.name}`);
   Object.defineProperty(URL, "createObjectURL", { value: mockCreateObjectURL, writable: true });
@@ -1293,6 +1318,49 @@ describe("ChatView", () => {
 
       expect(textarea.value).toBe("@Alpha ");
       expect(screen.queryByTestId("agent-mention-popup")).not.toBeInTheDocument();
+    });
+
+    it("uses room member ordering in popup and marks non-member mention chips in room messages", async () => {
+      setupMockChat({ activeSession: activeSessionFixture, messages: [] });
+      setupMockRooms({
+        activeRoom: {
+          id: "room-001",
+          slug: "engineering",
+          name: "engineering",
+          createdBy: "agent-001",
+          status: "active",
+          createdAt: "2026-04-08T00:00:00.000Z",
+          updatedAt: "2026-04-08T00:00:00.000Z",
+        },
+        activeRoomMembers: [
+          { roomId: "room-001", agentId: "agent-001", role: "member", addedAt: "2026-04-08T00:00:00.000Z" },
+        ],
+        messages: [
+          {
+            id: "room-msg-1",
+            roomId: "room-001",
+            role: "user",
+            content: "Ping @Beta",
+            senderAgentId: "agent-001",
+            metadata: null,
+            attachments: [],
+            mentions: ["agent-002"],
+            createdAt: "2026-04-08T00:00:00.000Z",
+          },
+        ],
+      });
+
+      render(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
+
+      await userEvent.click(screen.getByTestId("chat-sidebar-scope-rooms"));
+      const textarea = screen.getByTestId("chat-input");
+      await userEvent.type(textarea, "@");
+
+      expect(await screen.findByTestId("agent-mention-members-header")).toBeInTheDocument();
+      expect(screen.queryByTestId("agent-mention-others-header")).not.toBeInTheDocument();
+
+      const nonMemberChip = screen.getByText("@Beta", { selector: ".chat-mention-chip--non-member" });
+      expect(nonMemberChip).toHaveAttribute("title", "Not a member of engineering");
     });
 
     it("renders assistant mentions as plain text in markdown mode", async () => {

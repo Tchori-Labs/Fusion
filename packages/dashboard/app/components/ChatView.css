@@ -1438,3 +1438,24 @@
     max-width: 50%;
   }
 }
+
+.chat-mention-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: var(--space-xs) var(--space-sm);
+  margin: 0 var(--space-xs);
+  background: color-mix(in srgb, var(--todo) 14%, transparent);
+  color: var(--todo);
+  border: var(--btn-border-width, 1px) solid color-mix(in srgb, var(--todo) 30%, transparent);
+  border-radius: var(--radius-pill);
+  font-size: calc(var(--space-sm) + var(--space-xs) * 0.5);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.chat-mention-chip--non-member {
+  background: color-mix(in srgb, var(--color-warning) 12%, transparent);
+  color: var(--text-muted);
+  border-color: color-mix(in srgb, var(--color-warning) 35%, transparent);
+}
