@@ -347,6 +347,21 @@ Features:
 
 For module-level behavior and API surfaces, see [Dev Server modules](./dev-server-modules.md).
 
+## Stash Recovery View
+
+Stash Recovery view helps recover orphaned merger autostashes (`fusion-merger-autostash:*`) left behind when merge restore could not fully complete.
+
+Navigation:
+- Desktop: **Header → More views → Stash Recovery**
+- Mobile: **More** sheet → **Stash Recovery**
+
+Features:
+- Lists orphaned stash entries grouped by source task ID (or **Unknown source** when unavailable)
+- Inspect diff output for any orphaned stash before taking action
+- Apply a stash to recover changes, or drop a stash with confirmation to permanently remove it
+
+For API endpoints, see [architecture.md](./architecture.md).
+
 ## Plugin Manager
 
 Plugin management lives in **Settings → Plugins → Fusion Plugins**.
