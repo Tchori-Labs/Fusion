@@ -49,6 +49,7 @@ The dashboard supports mission planning workflows where you can:
 - Break work into milestones/slices/features
 - Associate features to executable tasks
 - Track progress at each layer
+- Resume in-progress mission interview sessions directly from the main missions list (generating, awaiting input, or error) before a mission record is created
 
 ### Auto-Generated Assertions
 

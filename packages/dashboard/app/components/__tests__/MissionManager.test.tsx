@@ -55,6 +55,8 @@ vi.mock("lucide-react", () => ({
   Loader2: ({ className }: any) => <span data-testid="loader-icon" className={className}>Loader</span>,
   Link: () => <span data-testid="link-icon">Link</span>,
   Unlink: () => <span data-testid="unlink-icon">Unlink</span>,
+  ArrowLeft: () => <span data-testid="arrow-left-icon">ArrowLeft</span>,
+  ArrowRight: () => <span data-testid="arrow-right-icon">ArrowRight</span>,
   Play: () => <span data-testid="play-icon">Play</span>,
   Square: () => <span data-testid="square-icon">Square</span>,
   Sparkles: () => <span data-testid="sparkles-icon">Sparkles</span>,
@@ -1646,6 +1648,130 @@ describe("MissionManager", () => {
 
     await waitFor(() => {
       expect(screen.queryByText("Plan Mission with AI")).not.toBeInTheDocument();
+    });
+  });
+
+  it("shows in-progress interview sessions in the main mission list without footer resume duplication", async () => {
+    mockFetchAiSessions.mockResolvedValueOnce([
+      {
+        id: "session-awaiting",
+        type: "mission_interview",
+        status: "awaiting_input",
+        title: "Payment workflow planning",
+        projectId: null,
+        lockedByTab: null,
+        updatedAt: "2026-01-03T00:00:00.000Z",
+      },
+      {
+        id: "session-generating",
+        type: "mission_interview",
+        status: "generating",
+        title: "Analytics mission drafting",
+        projectId: null,
+        lockedByTab: null,
+        updatedAt: "2026-01-04T00:00:00.000Z",
+      },
+      {
+        id: "session-error",
+        type: "mission_interview",
+        status: "error",
+        title: "SRE guardrails",
+        projectId: null,
+        lockedByTab: null,
+        updatedAt: "2026-01-05T00:00:00.000Z",
+      },
+      {
+        id: "session-complete",
+        type: "mission_interview",
+        status: "complete",
+        title: "Should not render",
+        projectId: null,
+        lockedByTab: null,
+        updatedAt: "2026-01-06T00:00:00.000Z",
+      },
+    ]);
+    mockFetchAiSession.mockResolvedValue({
+      id: "session-awaiting",
+      type: "mission_interview",
+      status: "awaiting_input",
+      title: "Payment workflow planning",
+      inputPayload: JSON.stringify({ missionGoal: "Payment workflow planning" }),
+      conversationHistory: "[]",
+      currentQuestion: JSON.stringify({
+        question: "Which payment providers should be supported first?",
+        kind: "text",
+        key: "provider_scope",
+      }),
+      result: null,
+      thinkingOutput: "",
+      error: null,
+      projectId: null,
+      createdAt: "2026-01-03T00:00:00.000Z",
+      updatedAt: "2026-01-03T00:00:00.000Z",
+    });
+    globalThis.fetch = createFetchMock();
+
+    render(<MissionManager isOpen={true} onClose={vi.fn()} addToast={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Build Auth System")).toBeInTheDocument();
+      expect(screen.getByText("Payment workflow planning")).toBeInTheDocument();
+      expect(screen.getByText("Analytics mission drafting")).toBeInTheDocument();
+      expect(screen.getByText("SRE guardrails")).toBeInTheDocument();
+    });
+
+    expect(screen.queryByText("Should not render")).not.toBeInTheDocument();
+    expect(screen.queryByText(/interview sessions pending/i)).not.toBeInTheDocument();
+
+    const awaitingInterviewRow = screen.getByText("Payment workflow planning").closest(".mission-list__item");
+    expect(awaitingInterviewRow).toBeTruthy();
+    fireEvent.click(within(awaitingInterviewRow as HTMLElement).getByLabelText("Resume interview"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Plan Mission with AI")).toBeInTheDocument();
+    });
+  });
+
+  it("exposes retry action for errored interview sessions from the mission list", async () => {
+    mockFetchAiSessions.mockResolvedValueOnce([
+      {
+        id: "session-error",
+        type: "mission_interview",
+        status: "error",
+        title: "Mission in error",
+        projectId: null,
+        lockedByTab: null,
+        updatedAt: "2026-01-05T00:00:00.000Z",
+      },
+    ]);
+    mockFetchAiSession.mockResolvedValue({
+      id: "session-error",
+      type: "mission_interview",
+      status: "error",
+      title: "Mission in error",
+      inputPayload: "{}",
+      conversationHistory: "[]",
+      currentQuestion: null,
+      result: null,
+      thinkingOutput: "",
+      error: "Planning failed",
+      projectId: null,
+      createdAt: "2026-01-05T00:00:00.000Z",
+      updatedAt: "2026-01-05T00:00:00.000Z",
+    });
+    globalThis.fetch = createFetchMock();
+
+    render(<MissionManager isOpen={true} onClose={vi.fn()} addToast={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Retry interview")).toBeInTheDocument();
+      expect(screen.getByText("Needs retry")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByLabelText("Retry interview"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Plan Mission with AI")).toBeInTheDocument();
     });
   });
 

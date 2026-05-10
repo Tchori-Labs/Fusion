@@ -1,4 +1,10 @@
-import type { GlobalSettings, ProjectSettings, Task, TaskStore } from "@fusion/core";
+import {
+  resolveTaskGithubTracking,
+  type GlobalSettings,
+  type ProjectSettings,
+  type Task,
+  type TaskStore,
+} from "@fusion/core";
 import type { CreatedIssue } from "./github.js";
 import { GitHubClient } from "./github.js";
 import { resolveGithubTrackingAuth } from "./github-auth.js";
@@ -84,24 +90,17 @@ export type MaybeCreateTrackingIssueReason =
   | "auth_gh_not_authenticated"
   | "auth_invalid_mode";
 
-function parseRepo(value: string | undefined): { owner: string; repo: string } | null {
-  if (!value) return null;
-  const trimmed = value.trim();
-  const [owner, repo, ...rest] = trimmed.split("/");
-  if (!owner || !repo || rest.length > 0) return null;
-  return { owner, repo };
-}
-
 export async function maybeCreateTrackingIssue(
   task: Task,
   deps: MaybeCreateTrackingIssueDeps,
 ): Promise<{ created: false; reason: MaybeCreateTrackingIssueReason } | { created: true; issue: CreatedIssue }> {
   const tracking = task.githubTracking;
-  if (tracking?.enabled !== true) {
+  const resolvedTracking = resolveTaskGithubTracking(task, deps.projectSettings, deps.globalSettings);
+  if (!resolvedTracking.enabled) {
     return { created: false, reason: "tracking_disabled" };
   }
 
-  if (tracking.issue) {
+  if (tracking?.issue) {
     return { created: false, reason: "issue_already_linked" };
   }
 
@@ -109,10 +108,7 @@ export async function maybeCreateTrackingIssue(
     return { created: false, reason: "github_import_source" };
   }
 
-  const repo =
-    parseRepo(tracking.repoOverride) ??
-    parseRepo(deps.projectSettings.githubTrackingDefaultRepo) ??
-    parseRepo(deps.globalSettings.githubTrackingDefaultRepo);
+  const repo = resolvedTracking.repo;
 
   if (!repo) {
     deps.logger?.warn?.(`[github-tracking] No repo configured for ${task.id}`);

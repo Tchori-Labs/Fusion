@@ -209,6 +209,8 @@ function createMockStore(overrides: Partial<TaskStore> = {}): TaskStore {
     deleteTaskDocument: vi.fn().mockResolvedValue(undefined),
     updatePrInfo: vi.fn().mockResolvedValue(undefined),
     updateIssueInfo: vi.fn().mockResolvedValue(undefined),
+    linkGithubIssue: vi.fn().mockResolvedValue(undefined),
+    recordActivity: vi.fn().mockResolvedValue(undefined),
     getRootDir: vi.fn().mockReturnValue("/fake/root"),
     getDistributedTaskIdAllocator: vi.fn().mockReturnValue({
       reserveDistributedTaskId: vi.fn().mockResolvedValue({ reservationId: "res-1", taskId: "FN-7001" }),
@@ -678,6 +680,41 @@ describe("POST /tasks", () => {
         settings: { autoSummarizeTitles: undefined },
       }),
     );
+  });
+
+  it("attempts tracking issue creation for explicit task-level override when defaults are unset", async () => {
+    const createIssueSpy = vi.spyOn(GitHubClient.prototype, "createIssue").mockResolvedValue({
+      owner: "task",
+      repo: "repo",
+      number: 42,
+      htmlUrl: "https://github.com/task/repo/issues/42",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({ githubAuthMode: "token", githubAuthToken: "tok" });
+    const linkGithubIssue = store.linkGithubIssue as ReturnType<typeof vi.fn>;
+    const recordActivity = store.recordActivity as ReturnType<typeof vi.fn>;
+    (store.createTask as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...FAKE_TASK_DETAIL,
+      githubTracking: { enabled: true, repoOverride: "task/repo" },
+    });
+
+    const res = await REQUEST(
+      buildApp(),
+      "POST",
+      "/api/tasks",
+      JSON.stringify({
+        description: "Track this task",
+        githubTracking: { enabled: true, repoOverride: "task/repo" },
+      }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(201);
+    expect(createIssueSpy).toHaveBeenCalledWith(expect.objectContaining({ owner: "task", repo: "repo" }));
+    expect(linkGithubIssue).toHaveBeenCalledWith("FN-001", expect.objectContaining({ owner: "task", repo: "repo", number: 42 }));
+    expect(recordActivity).toHaveBeenCalledWith(expect.objectContaining({ metadata: expect.objectContaining({ type: "github-issue-created" }) }));
+    createIssueSpy.mockRestore();
   });
 
   it("uses distributed allocator flow when reserved-id create is available", async () => {
