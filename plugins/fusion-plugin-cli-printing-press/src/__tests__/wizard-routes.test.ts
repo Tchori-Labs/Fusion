@@ -1,0 +1,41 @@
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
+import { createCliPrintingPressRoutes } from "../routes/wizard-routes";
+import type { ServiceDraft } from "../wizard/types";
+
+function makeDraft(): ServiceDraft {
+  const now = new Date().toISOString();
+  return { id: "", name: "Demo", slug: "demo", description: "", baseUrl: "https://example.com", transport: "http", endpoints: [{ id: "e1", name: "Ping", method: "GET", path: "/ping" }], credential: { kind: "none" }, createdAt: now, updatedAt: now };
+}
+
+function route(method: string, path: string) {
+  const found = createCliPrintingPressRoutes().find((entry) => entry.method === method && entry.path === path);
+  if (!found) throw new Error(`missing route ${method} ${path}`);
+  return found;
+}
+
+describe("wizard routes", () => {
+  it("handles create/get/delete lifecycle", async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), "cli-printing-press-routes-"));
+    const ctx = { taskStore: { getRootDir: () => rootDir } } as any;
+
+    const createRes = await route("POST", "/drafts").handler({ params: {}, body: makeDraft() }, ctx);
+    expect(createRes.status).toBe(201);
+    const id = (createRes.body as { id: string }).id;
+
+    const getRes = await route("GET", "/drafts/:id").handler({ params: { id } }, ctx);
+    expect(getRes.status).toBe(200);
+
+    const missRes = await route("GET", "/drafts/:id").handler({ params: { id: "missing" } }, ctx);
+    expect(missRes.status).toBe(404);
+
+    const invalidRes = await route("POST", "/drafts").handler({ params: {}, body: { ...makeDraft(), slug: "Bad Slug" } }, ctx);
+    expect(invalidRes.status).toBe(400);
+    expect((invalidRes.body as { errors: Record<string, string> }).errors.slug).toBeTruthy();
+
+    const deleteRes = await route("DELETE", "/drafts/:id").handler({ params: { id } }, ctx);
+    expect(deleteRes.status).toBe(204);
+  });
+});

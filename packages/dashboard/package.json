@@ -79,6 +79,7 @@
     "@fusion-plugin-examples/openclaw-runtime": "workspace:*",
     "@fusion-plugin-examples/droid-runtime": "workspace:*",
     "@fusion-plugin-examples/cursor-runtime": "workspace:*",
+    "@fusion-plugin-examples/cli-printing-press": "workspace:*",
     "@fusion-plugin-examples/paperclip-runtime": "workspace:*",
     "@fusion/core": "workspace:*",
     "@fusion/engine": "workspace:*",

@@ -35,6 +35,12 @@ describe("pluginViewRegistry", () => {
     expect(getPluginViewComponent("plugin-b", "missing")).toBeNull();
   });
 
+  it("resolves cli printing press wizard entries", () => {
+    const View = lazy(async () => ({ default: () => <div>Wizard</div> }));
+    registerPluginView("fusion-plugin-cli-printing-press", "wizard", View);
+    expect(getPluginViewComponent("fusion-plugin-cli-printing-press", "wizard")).toBe(View);
+  });
+
   it("keeps all registered plugin views discoverable by key iteration", () => {
     const ViewA = lazy(async () => ({ default: () => <div>A</div> }));
     const ViewB = lazy(async () => ({ default: () => <div>B</div> }));

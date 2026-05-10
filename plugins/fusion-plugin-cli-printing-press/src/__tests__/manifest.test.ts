@@ -1,9 +1,9 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import { validatePluginManifest } from "@fusion/core";
 import plugin from "../index.js";
 import manifestJson from "../../manifest.json" with { type: "json" };
 
-describe("cli-printing-press plugin stub (FN-3762)", () => {
+describe("cli-printing-press plugin", () => {
   it("registers with the correct manifest id", () => {
     expect(plugin.manifest.id).toBe("fusion-plugin-cli-printing-press");
   });
@@ -13,8 +13,16 @@ describe("cli-printing-press plugin stub (FN-3762)", () => {
     expect(validation.valid).toBe(true);
   });
 
-  it("has no routes or dashboardViews in the stub", () => {
-    expect(plugin.routes).toBeUndefined();
-    expect(plugin.dashboardViews).toBeUndefined();
+  it("registers the wizard dashboard view", () => {
+    expect(plugin.dashboardViews).toEqual([
+      {
+        viewId: "wizard",
+        label: "Create Service CLI",
+        componentPath: "./dashboard-view",
+        icon: "Wand2",
+        placement: "primary",
+        order: 60,
+      },
+    ]);
   });
 });

@@ -1,14 +1,27 @@
 import { definePlugin } from "@fusion/plugin-sdk";
+import { createCliPrintingPressRoutes } from "./routes/wizard-routes.js";
 
 const plugin = definePlugin({
   manifest: {
     id: "fusion-plugin-cli-printing-press",
     name: "CLI Printing Press",
     version: "0.1.0",
-    description: "Generate and manage CLIs for external services using cli-printing-press",
+    description: "Guided wizard for drafting external service CLI definitions",
   },
   state: "installed",
   hooks: {},
+  routes: createCliPrintingPressRoutes(),
+  dashboardViews: [
+    {
+      viewId: "wizard",
+      label: "Create Service CLI",
+      componentPath: "./dashboard-view",
+      icon: "Wand2",
+      placement: "primary",
+      order: 60,
+    },
+  ],
 });
 
 export default plugin;
+export { CliPrintingPressWizardView } from "./dashboard-view.js";

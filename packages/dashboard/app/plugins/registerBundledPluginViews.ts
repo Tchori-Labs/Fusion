@@ -37,6 +37,18 @@ async function loadRoadmapView(): Promise<{ default: PluginViewComponent }> {
   return { default: component as PluginViewComponent };
 }
 
+async function loadCliPrintingPressWizardView(): Promise<{ default: PluginViewComponent }> {
+  const moduleId = "@fusion-plugin-examples/cli-printing-press/dashboard-view";
+  const exportName = "CliPrintingPressWizardView";
+  const mod = await import("@fusion-plugin-examples/cli-printing-press/dashboard-view") as unknown as Record<string, ComponentType<{ context?: PluginDashboardViewContext }>>;
+  const component = mod[exportName];
+  if (!component) {
+    console.warn(`[plugin-views] Missing export ${exportName} from ${moduleId}`);
+    return { default: createMissingPluginView(moduleId, exportName) };
+  }
+  return { default: component as PluginViewComponent };
+}
+
 export function registerBundledPluginViews(): void {
   if (registered) return;
   registered = true;
@@ -51,6 +63,12 @@ export function registerBundledPluginViews(): void {
     "roadmap-planner",
     "roadmaps",
     lazy(loadRoadmapView),
+  );
+
+  registerPluginView(
+    "fusion-plugin-cli-printing-press",
+    "wizard",
+    lazy(loadCliPrintingPressWizardView),
   );
 }
 

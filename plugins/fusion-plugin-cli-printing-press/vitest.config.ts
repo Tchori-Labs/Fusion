@@ -6,17 +6,13 @@ const maxWorkers = computeMaxWorkers();
 
 export default defineConfig({
   resolve: {
-    alias: [
-      { find: "@fusion/core", replacement: fileURLToPath(new URL("../../packages/core/src/index.ts", import.meta.url)) },
-      {
-        find: "@fusion/plugin-sdk",
-        replacement: fileURLToPath(new URL("../../packages/plugin-sdk/src/index.ts", import.meta.url)),
-      },
-    ],
+    alias: {
+      "@fusion/core": fileURLToPath(new URL("../../packages/core/src/index.ts", import.meta.url)),
+      "@fusion/plugin-sdk": fileURLToPath(new URL("../../packages/plugin-sdk/src/index.ts", import.meta.url)),
+      "@fusion/dashboard": fileURLToPath(new URL("../../packages/dashboard/app/index.ts", import.meta.url)),
+    },
   },
   test: {
-    include: ["src/**/*.test.{ts,tsx}"],
-    environment: "node",
     setupFiles: [fileURLToPath(new URL("../../packages/core/src/__test-utils__/vitest-setup.ts", import.meta.url))],
     globalSetup: [fileURLToPath(new URL("../../packages/core/src/__test-utils__/vitest-teardown.ts", import.meta.url))],
     pool: "threads",

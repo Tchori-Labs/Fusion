@@ -8,6 +8,10 @@
     ".": {
       "types": "./src/index.ts",
       "import": "./src/index.ts"
+    },
+    "./dashboard-view": {
+      "types": "./src/dashboard-view.tsx",
+      "import": "./src/dashboard-view.tsx"
     }
   },
   "scripts": {
@@ -16,10 +20,20 @@
   },
   "dependencies": {
     "@fusion/core": "workspace:*",
-    "@fusion/plugin-sdk": "workspace:*"
+    "@fusion/dashboard": "workspace:*",
+    "@fusion/plugin-sdk": "workspace:*",
+    "express": "^5.1.0",
+    "lucide-react": "^0.542.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.2.4"
   },
   "devDependencies": {
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/express": "^5.0.5",
     "@types/node": "^25.5.2",
+    "@types/react": "^19.0.0",
     "typescript": "^5.7.0",
     "vitest": "^3.2.4"
   }
