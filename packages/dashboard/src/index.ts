@@ -16,6 +16,7 @@ export { maybeCreateTrackingIssue, type MaybeCreateTrackingIssueDeps } from "./g
 export { rateLimit, RATE_LIMITS, type RateLimitOptions } from "./rate-limit.js";
 export { GitHubPollingService, type GitHubPollingServiceOptions, type TaskWatchInput, type WatchedBadgeType } from "./github-poll.js";
 export { GitHubIssueCommentService, DEFAULT_COMMENT_TEMPLATE } from "./github-issue-comment.js";
+export { GitHubTrackingCommentService, formatTrackingComment } from "./github-tracking-comments.js";
 export { getCliPackageVersion, resolveCliPackageVersionInfo, type CliPackageVersionInfo } from "./cli-package-version.js";
 export {
   ApiError,

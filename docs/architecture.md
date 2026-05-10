@@ -1242,6 +1242,8 @@ When a task is created, Fusion only attempts GitHub issue creation if per-task t
 
 When Fusion does create a tracking issue, it formats the title as `[FN-XXXX] Task title` and sends a short plain-text body prefixed with `Fusion task: FN-XXXX`. The body is a bounded summary snippet (not full task prompt content), and Fusion does not include any hyperlink back to the local dashboard.
 
+When a tracked task later moves to `in-progress` or `done`, Fusion posts one short lifecycle comment on the linked tracking issue. These comments include the Fusion task ID as plain text (`Fusion task: FN-XXXX`) and never link back to the Fusion app. No comment is posted for any other transition.
+
 ### Worktree model
 - Each active task runs in isolated worktree under `.worktrees/*`
 - Executor creates branches like `fusion/{task-id}` (`executor.ts`)
