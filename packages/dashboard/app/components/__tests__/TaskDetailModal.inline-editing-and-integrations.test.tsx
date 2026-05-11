@@ -853,6 +853,36 @@ describe("TaskDetailModal", () => {
       expect(prioritySelect.value).toBe("normal");
     });
 
+    it("renders priority select and execution mode toggle together and keeps both interactive", async () => {
+      const { updateTask } = await import("../../api");
+      const mockUpdate = vi.mocked(updateTask);
+      mockUpdate
+        .mockResolvedValueOnce(makeTask({ id: "FN-001", column: "todo", priority: "urgent", executionMode: "standard" }) as Task)
+        .mockResolvedValueOnce(makeTask({ id: "FN-001", column: "todo", priority: "urgent", executionMode: "fast" }) as Task);
+
+      render(
+        <TaskDetailModal
+          task={makeTask({ id: "FN-001", column: "todo", priority: "high", executionMode: "standard" })}
+          onClose={noop}
+          onMoveTask={noopMove}
+          onDeleteTask={noopDelete}
+          onMergeTask={noopMerge}
+          onOpenDetail={noopOpenDetail}
+          addToast={noop}
+        />,
+      );
+
+      fireEvent.change(screen.getByRole("combobox", { name: "Task priority" }), {
+        target: { value: "urgent" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Execution mode: standard" }));
+
+      await waitFor(() => {
+        expect(mockUpdate).toHaveBeenNthCalledWith(1, "FN-001", { priority: "urgent" }, undefined);
+        expect(mockUpdate).toHaveBeenNthCalledWith(2, "FN-001", { executionMode: "fast" }, undefined);
+      });
+    });
+
     it("updates priority inline and propagates successful save", async () => {
       const { updateTask } = await import("../../api");
       const mockUpdate = vi.mocked(updateTask);

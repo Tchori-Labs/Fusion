@@ -430,10 +430,38 @@ describe("TaskDetailModal", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Review" }));
     expect(await screen.findByText("CHANGES_REQUESTED")).toBeTruthy();
-    expect(screen.getByText("changes requested review is active")).toBeTruthy();
+    expect(screen.getByText(/No review items yet\./i)).toBeTruthy();
   });
 
   describe("inline execution mode toggle", () => {
+    it("keeps inline priority and execution controls aligned with shared sizing and gap", () => {
+      render(
+        <TaskDetailModal
+          task={makeTask({ column: "todo", priority: "high", executionMode: "fast" })}
+          onClose={noop}
+          onMoveTask={noopMove}
+          onDeleteTask={noopDelete}
+          onMergeTask={noopMerge}
+          onOpenDetail={noopOpenDetail}
+          addToast={noop}
+        />,
+      );
+
+      const controls = screen.getByTestId("detail-meta-inline-controls");
+      const priorityControl = screen.getByRole("combobox", { name: "Task priority" });
+      const priorityChip = priorityControl.closest(".detail-priority-chip") as HTMLElement;
+      const modeToggle = screen.getByRole("button", { name: "Execution mode: fast" });
+
+      const controlsStyle = getComputedStyle(controls);
+      const priorityStyle = getComputedStyle(priorityChip);
+      const modeStyle = getComputedStyle(modeToggle);
+
+      expect(controlsStyle.gap).not.toBe("");
+      expect(controlsStyle.gap).not.toBe("normal");
+      expect(priorityStyle.minHeight).toBe(modeStyle.minHeight);
+      expect(priorityStyle.minHeight).not.toBe("0px");
+    });
+
     it("renders standard mode as an unpressed toggle", () => {
       render(
         <TaskDetailModal

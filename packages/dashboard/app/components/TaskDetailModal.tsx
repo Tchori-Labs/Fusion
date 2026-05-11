@@ -1956,39 +1956,41 @@ export function TaskDetailContent({
                 );
               })()}
               <div className="detail-meta">
-                <label
-                  className={`card-priority-badge card-priority-badge--${inlinePriority} detail-priority-chip ${isSavingInlinePriority ? "detail-priority-chip--saving" : ""}`}
-                >
-                  <span>Priority:</span>
-                  <select
-                    className="detail-priority-select"
-                    value={inlinePriority}
-                    onChange={(event) => {
-                      void handleInlinePriorityChange(event.target.value);
-                    }}
-                    disabled={isSavingInlinePriority}
-                    aria-label="Task priority"
+                <div className="detail-meta-inline-controls" data-testid="detail-meta-inline-controls">
+                  <label
+                    className={`card-priority-badge card-priority-badge--${inlinePriority} detail-priority-chip ${isSavingInlinePriority ? "detail-priority-chip--saving" : ""}`}
                   >
-                    {TASK_PRIORITIES.map((priorityOption) => (
-                      <option key={priorityOption} value={priorityOption}>
-                        {priorityOption}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <button
-                  type="button"
-                  className={`btn btn-sm detail-execution-mode-toggle ${inlineExecutionMode === "fast" ? "detail-execution-mode-toggle--fast" : ""} ${isSavingInlineExecutionMode ? "detail-execution-mode-toggle--saving" : ""}`}
-                  onClick={() => {
-                    void handleInlineExecutionModeToggle();
-                  }}
-                  disabled={isSavingInlineExecutionMode}
-                  aria-label={`Execution mode: ${inlineExecutionMode}`}
-                  aria-pressed={inlineExecutionMode === "fast"}
-                >
-                  <Zap aria-hidden="true" />
-                  <span>{inlineExecutionMode === "fast" ? "Fast" : "Standard"}</span>
-                </button>
+                    <span>Priority:</span>
+                    <select
+                      className="detail-priority-select"
+                      value={inlinePriority}
+                      onChange={(event) => {
+                        void handleInlinePriorityChange(event.target.value);
+                      }}
+                      disabled={isSavingInlinePriority}
+                      aria-label="Task priority"
+                    >
+                      {TASK_PRIORITIES.map((priorityOption) => (
+                        <option key={priorityOption} value={priorityOption}>
+                          {priorityOption}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <button
+                    type="button"
+                    className={`btn btn-sm detail-execution-mode-toggle ${inlineExecutionMode === "fast" ? "detail-execution-mode-toggle--fast" : ""} ${isSavingInlineExecutionMode ? "detail-execution-mode-toggle--saving" : ""}`}
+                    onClick={() => {
+                      void handleInlineExecutionModeToggle();
+                    }}
+                    disabled={isSavingInlineExecutionMode}
+                    aria-label={`Execution mode: ${inlineExecutionMode}`}
+                    aria-pressed={inlineExecutionMode === "fast"}
+                  >
+                    <Zap aria-hidden="true" />
+                    <span>{inlineExecutionMode === "fast" ? "Fast" : "Standard"}</span>
+                  </button>
+                </div>
                 {provenanceDisplay && (
                   <div className="detail-provenance">
                     <GitBranch aria-hidden="true" />
