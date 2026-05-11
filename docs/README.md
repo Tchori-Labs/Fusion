@@ -63,7 +63,11 @@ For a full walkthrough (installation, onboarding, first task, and daily workflow
 | [Plugin Management](./plugin-management.md) | End-user guide for discovering, installing, enabling, configuring, updating, uninstalling, and troubleshooting Fusion plugins |
 | [Plugin Authoring](./PLUGIN_AUTHORING.md) | Developer guide for building Fusion plugins (manifest, SDK hooks, routes, UI/runtime contributions) |
 | [Even Realities Glasses Plugin](../plugins/fusion-plugin-even-realities-glasses/README.md) | Task-focused Even Realities glasses bridge with quick capture, polling notifications, and agent actions |
+| [Reports Plugin](./plugins/reports.md) | Reports plugin rendering, export, standalone HTML generation, and section configuration |
+| [Even Realities Plugin API](./even-realities-plugin-api.md) | Even Realities plugin API endpoint reference and test coverage matrix |
 | [Memory Plugin Contract](./memory-plugin-contract.md) | Pluggable memory backend architecture, interface contract, and migration strategy |
+| [CLI Printing Press Design](./design/cli-printing-press-plugin.md) | Fusion integration architecture for the CLI printing press plugin (FN-3762) |
+| [CLI Printing Press Research](./research/cli-printing-press.md) | Upstream architecture and integration research for the CLI printing press generator (FN-3761) |
 
 ### Audit Reports
 | Report | Description |
@@ -80,6 +84,8 @@ For a full walkthrough (installation, onboarding, first task, and daily workflow
 | [Skipped Test Inventory](./skipped-test-inventory.md) | Current intentional test-skip inventory and reconciliation status for older skip follow-ups |
 | [Dev Server Module Boundary Audit](./dev-server-module-boundary-audit.md) | Boundary/ownership audit for parallel `dev-server-*` vs `devserver-*` dashboard modules and FN-2212 prioritization guidance |
 | [Dashboard Load Performance](./performance/dashboard-load.md) | SQLite index analysis and optimization for dashboard boot path queries |
+| [CLI Printing Press Plugin Design](./design/cli-printing-press-plugin.md) | Architecture design for the CLI printing press bundled plugin (FN-3762) |
+| [CLI Printing Press Research](./research/cli-printing-press.md) | Upstream `cli-printing-press` analysis and Fusion integration mapping (FN-3761) |
 
 ## External Resources
 
