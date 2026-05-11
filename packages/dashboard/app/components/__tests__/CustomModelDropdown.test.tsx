@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -34,6 +36,18 @@ describe("CustomModelDropdown", () => {
     const wrapperRuleMatch = css.match(/\.model-combobox-search-wrapper\s*\{[^}]*\}/);
     expect(wrapperRuleMatch).toBeTruthy();
     expect(wrapperRuleMatch![0]).toContain("background: var(--surface);");
+  });
+
+  it("keeps CustomModelDropdown.css scoped to .model-combobox selectors", () => {
+    const css = readFileSync(
+      resolve(__dirname, "../CustomModelDropdown.css"),
+      "utf-8",
+    );
+
+    expect(css).not.toMatch(/(^|\n)\s*:root\[data-theme="light"\]/);
+    expect(css).not.toMatch(/(^|\n)\s*\[data-theme="light"\]\s+\.(modal-overlay|btn-primary|toast-success)/);
+    expect(css).not.toMatch(/(^|\n)\s*\.theme-selector\s*\{/);
+    expect(css).not.toMatch(/(^|\n)\s*html\s*\*/);
   });
 
   it("renders the open dropdown in a portal attached to document.body", async () => {

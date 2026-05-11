@@ -435,9 +435,191 @@ html {
   --surface-muted: color-mix(in srgb, var(--surface) 97%, var(--text) 3%);
   --surface-emphasis: color-mix(in srgb, var(--surface) 95%, var(--text) 5%);
   --surface-hover-strong: color-mix(in srgb, var(--surface) 94%, var(--text) 6%);
+  --bg: #ffffff;
+  --surface: #f6f8fa;
+  --card: #ffffff;
+  --card-hover: #f3f4f6;
+  --bg-secondary: #f6f8fa;
+  --bg-tertiary: #eaeef2;
+  --border: #d0d7de;
+  --text: #1f2328;
+  --text-muted: #656d76;
+  --text-dim: #8c959f;
+  --triage: #9a6700;
+  --todo: #0969da;
+  --in-progress: #00bcd4;
+  --in-progress-rgb: 0, 188, 212;
+  --in-review: #1a7f37;
+  --done: #6e7781;
+  --color-success: #1a7f37;
+  --color-error: #cf222e;
+  --color-muted: #6e7781;
+  --color-warning: #9a6700;
+  --executor-status-error-bg: color-mix(in srgb, var(--color-error) 6%, transparent);
+  --status-color-added: #1a7f37;
+  --status-color-modified: #0969da;
+  --status-color-deleted: #cf222e;
+  --status-color-unknown: #6e7781;
+  --shadow-sm: 0 1px 2px color-mix(in srgb, var(--text) 8%, transparent);
+  --shadow-md: 0 4px 6px color-mix(in srgb, var(--text) 12%, transparent);
+  --shadow-lg: 0 4px 24px color-mix(in srgb, var(--text) 15%, transparent);
+  --shadow-glow: 0 0 8px color-mix(in srgb, var(--todo) 18%, transparent);
+  --glow-success: 0 0 8px color-mix(in srgb, var(--color-success) 30%, transparent);
+  --glow-warning: 0 0 8px color-mix(in srgb, var(--color-warning) 30%, transparent);
+  --glow-danger: 0 0 8px color-mix(in srgb, var(--color-error) 30%, transparent);
+  --focus-ring: 0 0 0 2px color-mix(in srgb, var(--todo) 12%, transparent);
+  --focus-ring-strong: 0 0 0 2px color-mix(in srgb, var(--todo) 24%, transparent);
+  --cta-bg: #1a7f37;
+  --cta-border: #1f883d;
+  --cta-text: #fff;
+  --cta-bg-hover: #1f883d;
+  --cta-border-hover: #2ea043;
+  --cta-glow: 0 0 8px color-mix(in srgb, var(--color-success) 30%, transparent);
+  --color-info: #0969da;
+  --ws-pre-merge: #2563eb;
+  --ws-post-merge: #0d9488;
+  --ws-info: #0891b2;
+  --ws-warning: #a16207;
+  --ws-success: #16a34a;
+  --ws-error: #dc2626;
+  --ws-error-dark: #b91c1c;
+  --ws-teal: #0d9488;
+  --ws-quality: #2563eb;
+  --ws-security: #dc2626;
+  --color-error-dark: #a40e26;
   --status-error-bg: color-mix(in srgb, var(--color-error-dark) 15%, transparent);
   --status-error-bg-deep: color-mix(in srgb, var(--color-error-dark) 20%, transparent);
+  --logo-accent: var(--todo);
+  --accent: #6a4fa0;
+  --log-tool-bg: color-mix(in srgb, var(--accent) 6%, transparent);
+  --log-success-bg: color-mix(in srgb, var(--color-success) 5%, transparent);
+  --log-error-bg: color-mix(in srgb, var(--color-error) 5%, transparent);
+  --shadow: var(--shadow-lg);
+  --fab-text: #fff;
+  --autopilot-icon: #ca8a04;
+  --autopilot-shadow: color-mix(in srgb, var(--color-success) 40%, transparent);
+  --terminal-bg: #f6f8fa;
+  --badge-mission-text: #7c3aed;
+  --badge-mission-text-hover: #8b5cf6;
+  --badge-mission-bg: color-mix(in srgb, var(--badge-mission-text) 12%, transparent);
+  --badge-mission-bg-hover: color-mix(in srgb, var(--badge-mission-text-hover) 22%, transparent);
+  --event-error-text: #dc2626;
+  --event-state-text: #2563eb;
+  --event-task-text: #059669;
+  --event-slice-text: #d97706;
+  --event-autopilot-text: #9333ea;
+  --event-error-bg: color-mix(in srgb, var(--event-error-text) 12%, transparent);
+  --event-state-bg: color-mix(in srgb, var(--event-state-text) 12%, transparent);
+  --event-task-bg: color-mix(in srgb, var(--event-task-text) 12%, transparent);
+  --event-slice-bg: color-mix(in srgb, var(--event-slice-text) 12%, transparent);
+  --event-autopilot-bg: color-mix(in srgb, var(--event-autopilot-text) 12%, transparent);
+  --toggle-checked-bg: color-mix(in srgb, var(--color-success) 15%, transparent);
+  --meta-badge-bg: color-mix(in srgb, var(--color-success) 8%, transparent);
+  --star-idle: #9ca3af;
+  --star-active: #d97706;
 }
+
+html,
+html *,
+html *::before,
+html *::after {
+  transition:
+    background-color var(--transition-normal),
+    color var(--transition-normal),
+    border-color var(--transition-normal),
+    box-shadow var(--transition-normal);
+}
+
+html .card.dragging,
+html .card.dragging *,
+html .list-row.dragging,
+html .list-row.dragging *,
+html .column.drag-over,
+html .column.drag-over * {
+  transition: none !important;
+}
+
+[data-theme="light"] .modal-overlay,
+[data-theme="light"] .agent-detail-overlay,
+[data-theme="light"] .agent-dialog-overlay,
+[data-theme="light"] .chat-new-dialog-backdrop {
+  background: color-mix(in srgb, var(--text) 50%, transparent);
+}
+
+[data-theme="light"] .modal-header {
+  background: color-mix(in srgb, var(--surface) 80%, transparent);
+}
+
+[data-theme="light"] .modal-actions {
+  background: color-mix(in srgb, var(--surface) 60%, transparent);
+}
+
+[data-theme="light"] .settings-sidebar {
+  background: color-mix(in srgb, var(--surface) 60%, transparent);
+}
+
+[data-theme="light"] .toast-success {
+  background: var(--cta-bg);
+}
+
+[data-theme="light"] .toast-error {
+  background: var(--color-error-dark);
+}
+
+[data-theme="light"] .toast-info {
+  background: var(--color-info);
+}
+
+[data-theme="light"] .btn-task-create,
+[data-theme="light"] .btn-primary {
+  background: var(--cta-bg);
+  border-color: var(--cta-border);
+}
+
+[data-theme="light"] .btn-task-create:hover,
+[data-theme="light"] .btn-primary:hover {
+  background: var(--cta-bg-hover);
+  border-color: var(--cta-border-hover);
+  box-shadow: var(--cta-glow);
+}
+
+[data-theme="light"] .btn-danger {
+  background: var(--color-error);
+  border-color: var(--color-error-dark);
+}
+
+[data-theme="light"] .btn-danger:hover {
+  background: var(--color-error-dark);
+  box-shadow: var(--glow-danger);
+}
+
+[data-theme="light"] .btn-warning {
+  background: var(--triage);
+  border-color: color-mix(in srgb, var(--triage) 70%, black);
+}
+
+[data-theme="light"] .btn-warning:hover {
+  background: color-mix(in srgb, var(--triage) 70%, black);
+  box-shadow: var(--glow-warning);
+}
+
+[data-theme="light"] .btn-secondary {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+[data-theme="light"] .btn-secondary:hover {
+  background: var(--card-hover);
+  border-color: var(--text-muted);
+}
+[data-theme="light"] .btn-secondary:active {
+  transform: scale(0.97);
+}
+[data-theme="light"] .btn-secondary:focus-visible {
+  box-shadow: var(--focus-ring-strong);
+  border-color: var(--todo);
+}
+
 
 /* -------------------------------------------------------------------------
  * Runtime provider settings card — unified layout used by Hermes / OpenClaw /

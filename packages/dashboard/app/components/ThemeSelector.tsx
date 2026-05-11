@@ -1,3 +1,4 @@
+import "./ThemeSelector.css";
 import { useCallback } from "react";
 import { Sun, Moon, Monitor } from "lucide-react";
 import type { ThemeMode, ColorTheme } from "@fusion/core";
