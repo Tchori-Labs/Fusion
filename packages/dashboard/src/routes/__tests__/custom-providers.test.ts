@@ -29,6 +29,7 @@ vi.mock("@fusion/core", async () => {
 
 vi.mock("@fusion/engine", () => ({
   createFnAgent: vi.fn(async () => ({ session: { state: { messages: [] }, prompt: vi.fn(), dispose: vi.fn() } })),
+  createResolvedAgentSession: vi.fn(async () => ({ session: { state: { messages: [] }, prompt: vi.fn(), dispose: vi.fn() } })),
   promptWithFallback: vi.fn(),
 }));
 

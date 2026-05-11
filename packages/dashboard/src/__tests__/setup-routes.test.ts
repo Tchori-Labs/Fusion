@@ -45,6 +45,13 @@ vi.mock("@fusion/engine", () => ({
       dispose: vi.fn(),
     },
   })),
+  createResolvedAgentSession: vi.fn(async () => ({
+    session: {
+      state: { messages: [] as Array<{ role: string; content: string }> },
+      prompt: vi.fn(),
+      dispose: vi.fn(),
+    },
+  })),
   AgentReflectionService: class {
     async generateReflection(): Promise<never> { throw new Error("Reflection service unavailable"); }
     async buildReflectionContext(): Promise<never> { throw new Error("Reflection service unavailable"); }

@@ -190,6 +190,10 @@ describe("Chat HTTP + SSE routes — rooms (FN-3805..FN-3811 contract)", () => {
     const persisted = chatStore.getRoomMessage(messageId);
     expect(persisted?.content).toBe("hello @agent_room");
 
+    const assistantMessages = chatStore.getRoomMessages(roomId).filter((entry) => entry.role === "assistant");
+    expect(assistantMessages).toHaveLength(1);
+    expect(assistantMessages[0]).toMatchObject({ senderAgentId: "agent-room" });
+
     const invalidSender = await request(
       appWithRoomReplies,
       "POST",

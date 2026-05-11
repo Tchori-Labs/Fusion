@@ -1,4 +1,5 @@
 import type { ChatAttachment, ChatRoomCreateInput, ChatRoomStatus, ChatRoomUpdateInput } from "@fusion/core";
+import { RoomReplyGenerationError } from "../chat.js";
 import { ApiError, badRequest, internalError, notFound } from "../api-error.js";
 import { rateLimit, RATE_LIMITS } from "../rate-limit.js";
 import type { ApiRoutesContext } from "./types.js";
@@ -265,6 +266,9 @@ export function registerChatRoomRoutes(ctx: ApiRoutesContext): void {
       res.status(201).json({ message: result.userMessage });
     } catch (err: unknown) {
       if (err instanceof ApiError) throw err;
+      if (err instanceof RoomReplyGenerationError) {
+        throw new ApiError(502, err.message);
+      }
       rethrowAsApiError(err, "Failed to create chat room message");
     }
   });

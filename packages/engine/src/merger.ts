@@ -36,7 +36,6 @@ import {
   getTaskMergeBlocker,
   normalizeMergeConflictStrategy,
   resolveTaskMergeTarget,
-  resolveProjectDefaultModel,
   resolveTitleSummarizerSettingsModel,
   resolveAgentPrompt,
   summarizeCommitBody,
@@ -7741,28 +7740,6 @@ If issues are found that need attention, describe them clearly and include concr
   });
 
   try {
-    const defaultModel = resolveProjectDefaultModel(settings);
-    const stepProvider = workflowStep.modelProvider || defaultModel.provider;
-    const stepModelId = workflowStep.modelId || defaultModel.modelId;
-    const useOverride = !!(workflowStep.modelProvider && workflowStep.modelId);
-
-    // Post-merge step agents inherit merger instructions
-    let postMergeInstructions = "";
-    if (mergeOptions.agentStore) {
-      try {
-        const agents = await mergeOptions.agentStore.listAgents({ role: "merger" });
-        for (const agent of agents) {
-          if (agent.instructionsText || agent.instructionsPath) {
-            postMergeInstructions = await resolveAgentInstructions(agent, rootDir);
-            break;
-          }
-        }
-      } catch {
-        // Graceful fallback
-      }
-    }
-    const postMergeSystemPrompt = buildSystemPromptWithInstructions(systemPrompt, postMergeInstructions);
-
     // Build skill selection context for post-merge session
     let postMergeSkillContext = undefined;
     let taskForSkillContext: Awaited<ReturnType<typeof store.getTask>> | null = null;
@@ -7788,6 +7765,28 @@ If issues are found that need attention, describe them clearly and include concr
     const assignedAgent = assignedAgentId && agentStoreWithGetAgent
       ? await agentStoreWithGetAgent.getAgent(assignedAgentId).catch(() => null)
       : null;
+    const mergerSessionModel = resolveMergerSessionModel(settings, assignedAgent?.runtimeConfig);
+    const stepProvider = workflowStep.modelProvider || mergerSessionModel.provider;
+    const stepModelId = workflowStep.modelId || mergerSessionModel.modelId;
+    const useOverride = !!(workflowStep.modelProvider && workflowStep.modelId);
+
+    // Post-merge step agents inherit merger instructions
+    let postMergeInstructions = "";
+    if (mergeOptions.agentStore) {
+      try {
+        const agents = await mergeOptions.agentStore.listAgents({ role: "merger" });
+        for (const agent of agents) {
+          if (agent.instructionsText || agent.instructionsPath) {
+            postMergeInstructions = await resolveAgentInstructions(agent, rootDir);
+            break;
+          }
+        }
+      } catch {
+        // Graceful fallback
+      }
+    }
+    const postMergeSystemPrompt = buildSystemPromptWithInstructions(systemPrompt, postMergeInstructions);
+
     const mergerRuntimeHint = extractRuntimeHint(assignedAgent?.runtimeConfig);
     const { session } = await createResolvedAgentSession({
       sessionPurpose: "merger",

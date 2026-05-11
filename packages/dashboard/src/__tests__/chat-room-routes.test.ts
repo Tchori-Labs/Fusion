@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ChatStore, Database } from "@fusion/core";
 import { request } from "../test-request.js";
+import { RoomReplyGenerationError } from "../chat.js";
 
 class MockStore {
   constructor(private readonly rootDir: string, private readonly db: Database) {}
@@ -188,6 +189,62 @@ describe("Chat Room API Routes", () => {
       { "content-type": "application/json" },
     );
     expect(emptyContent.status).toBe(400);
+  });
+
+  it("surfaces room responder failures instead of returning silent success", async () => {
+    const { createServer } = await import("../server.js");
+    const appWithFailingRoomReplies = createServer(store as any, {
+      chatStore,
+      chatManager: {
+        sendRoomMessage: async () => {
+          throw new Error("Failed to generate room replies for room room-1: agent-a: Room responder returned an empty reply");
+        },
+      } as any,
+    });
+
+    const createRoomRes = await request(appWithFailingRoomReplies, "POST", "/api/chat/rooms", JSON.stringify({ name: "Product" }), {
+      "content-type": "application/json",
+    });
+    const roomId = (createRoomRes.body as any).room.id as string;
+
+    const postRes = await request(
+      appWithFailingRoomReplies,
+      "POST",
+      `/api/chat/rooms/${roomId}/messages`,
+      JSON.stringify({ content: "hello world" }),
+      { "content-type": "application/json" },
+    );
+
+    expect(postRes.status).toBe(500);
+    expect(JSON.stringify(postRes.body)).toContain("Failed to generate room replies");
+  });
+
+  it("surfaces deterministic room-reply generation failures", async () => {
+    const { createServer } = await import("../server.js");
+    const failingApp = createServer(store as any, {
+      chatStore,
+      chatManager: {
+        sendRoomMessage: async (_roomId: string) => {
+          throw new RoomReplyGenerationError("No active room responders available", _roomId);
+        },
+      } as any,
+    });
+
+    const createRoomRes = await request(failingApp, "POST", "/api/chat/rooms", JSON.stringify({ name: "Product" }), {
+      "content-type": "application/json",
+    });
+    const roomId = (createRoomRes.body as any).room.id as string;
+
+    const postRes = await request(
+      failingApp,
+      "POST",
+      `/api/chat/rooms/${roomId}/messages`,
+      JSON.stringify({ content: "hello world" }),
+      { "content-type": "application/json" },
+    );
+
+    expect(postRes.status).toBe(502);
+    expect((postRes.body as any).error).toContain("No active room responders available");
   });
 
   it("deletes messages and supports pagination", async () => {

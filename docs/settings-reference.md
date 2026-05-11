@@ -530,6 +530,8 @@ When heartbeat has both (1) and (2-5), the runtime model is used as primary and 
 3. Global `defaultProvider` + `defaultModelId`
 4. Automatic provider/model resolution
 
+For post-merge prompt workflow steps, explicit step-level `modelProvider` + `modelId` overrides take precedence over the merger lane above.
+
 ### Title summarization model
 
 Used for task title auto-summarization and (when enabled) AI merge commit summaries.

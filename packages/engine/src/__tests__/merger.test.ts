@@ -5196,6 +5196,159 @@ describe("aiMergeTask — post-merge workflow steps", () => {
     expect(store.moveTask).toHaveBeenCalledWith("FN-050", "done");
   });
 
+  it("uses assigned agent runtime model for post-merge prompt step when workflow step has no override", async () => {
+    const store = createMockStore();
+    (store as any).getWorkflowStep = vi.fn().mockResolvedValue({
+      id: "WS-001",
+      name: "Post-merge Notify",
+      description: "Send notifications after merge",
+      prompt: "Check merged code.",
+      phase: "post-merge",
+      mode: "prompt",
+      enabled: true,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    const baseTask = {
+      id: "FN-050",
+      title: "Test task",
+      description: "Test",
+      column: "in-review",
+      dependencies: [],
+      worktree: "/tmp/root/.worktrees/KB-050",
+      steps: [],
+      currentStep: 0,
+      log: [],
+      assignedAgentId: "agent-001",
+      enabledWorkflowSteps: ["WS-001"],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    store.getTask = vi.fn().mockResolvedValue({ ...baseTask, prompt: "# test" });
+
+    await aiMergeTask(store, "/tmp/root", "FN-050", {
+      agentStore: {
+        listAgents: vi.fn().mockResolvedValue([]),
+        getAgent: vi.fn().mockResolvedValue({
+          id: "agent-001",
+          runtimeConfig: {
+            model: "anthropic/claude-3-5-sonnet-20241022",
+          },
+        }),
+      } as any,
+    });
+
+    const postMergeAgentCall = mockedCreateFnAgent.mock.calls.find(
+      (c: any) => c[0]?.systemPrompt?.includes("post-merge workflow step agent"),
+    );
+    expect(postMergeAgentCall?.[0]?.defaultProvider).toBe("anthropic");
+    expect(postMergeAgentCall?.[0]?.defaultModelId).toBe("claude-3-5-sonnet-20241022");
+  });
+
+  it("uses workflow-step model override over assigned agent runtime model", async () => {
+    const store = createMockStore();
+    (store as any).getWorkflowStep = vi.fn().mockResolvedValue({
+      id: "WS-001",
+      name: "Post-merge Notify",
+      description: "Send notifications after merge",
+      prompt: "Check merged code.",
+      phase: "post-merge",
+      mode: "prompt",
+      modelProvider: "openai",
+      modelId: "gpt-4.1-mini",
+      enabled: true,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    const baseTask = {
+      id: "FN-050",
+      title: "Test task",
+      description: "Test",
+      column: "in-review",
+      dependencies: [],
+      worktree: "/tmp/root/.worktrees/KB-050",
+      steps: [],
+      currentStep: 0,
+      log: [],
+      assignedAgentId: "agent-001",
+      enabledWorkflowSteps: ["WS-001"],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    store.getTask = vi.fn().mockResolvedValue({ ...baseTask, prompt: "# test" });
+
+    await aiMergeTask(store, "/tmp/root", "FN-050", {
+      agentStore: {
+        listAgents: vi.fn().mockResolvedValue([]),
+        getAgent: vi.fn().mockResolvedValue({
+          id: "agent-001",
+          runtimeConfig: {
+            model: "anthropic/claude-3-5-sonnet-20241022",
+          },
+        }),
+      } as any,
+    });
+
+    const postMergeAgentCall = mockedCreateFnAgent.mock.calls.find(
+      (c: any) => c[0]?.systemPrompt?.includes("post-merge workflow step agent"),
+    );
+    expect(postMergeAgentCall?.[0]?.defaultProvider).toBe("openai");
+    expect(postMergeAgentCall?.[0]?.defaultModelId).toBe("gpt-4.1-mini");
+
+    const modelLogCall = (store.logEntry as ReturnType<typeof vi.fn>).mock.calls.find(
+      (call: any) => String(call[1]).includes("Workflow step 'Post-merge Notify' using model:"),
+    );
+    expect(modelLogCall?.[1]).toContain("(workflow step override)");
+  });
+
+  it("falls back to project default override model when no workflow-step or assigned-agent model is set", async () => {
+    const store = createMockStore();
+    (store as any).getWorkflowStep = vi.fn().mockResolvedValue({
+      id: "WS-001",
+      name: "Post-merge Notify",
+      description: "Send notifications after merge",
+      prompt: "Check merged code.",
+      phase: "post-merge",
+      mode: "prompt",
+      enabled: true,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    const baseTask = {
+      id: "FN-050",
+      title: "Test task",
+      description: "Test",
+      column: "in-review",
+      dependencies: [],
+      worktree: "/tmp/root/.worktrees/KB-050",
+      steps: [],
+      currentStep: 0,
+      log: [],
+      enabledWorkflowSteps: ["WS-001"],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    store.getTask = vi.fn().mockResolvedValue({ ...baseTask, prompt: "# test" });
+    (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...DEFAULT_SETTINGS,
+      defaultProviderOverride: "openai",
+      defaultModelIdOverride: "gpt-4o-mini",
+      defaultProvider: "anthropic",
+      defaultModelId: "claude-3-5-haiku-latest",
+    });
+
+    await aiMergeTask(store, "/tmp/root", "FN-050");
+
+    const postMergeAgentCall = mockedCreateFnAgent.mock.calls.find(
+      (c: any) => c[0]?.systemPrompt?.includes("post-merge workflow step agent"),
+    );
+    expect(postMergeAgentCall?.[0]?.defaultProvider).toBe("openai");
+    expect(postMergeAgentCall?.[0]?.defaultModelId).toBe("gpt-4o-mini");
+  });
+
   it("does not run pre-merge workflow steps in merger", async () => {
     const store = createMockStore();
     (store as any).getWorkflowStep = vi.fn().mockResolvedValue({

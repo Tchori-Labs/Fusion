@@ -491,6 +491,16 @@ export function getRateLimitResetTime(ip: string): Date | null {
  * Manages AI agent chat sessions.
  * Creates sessions, sends messages, and streams AI responses via SSE.
  */
+export class RoomReplyGenerationError extends Error {
+  readonly roomId: string;
+
+  constructor(message: string, roomId: string) {
+    super(message);
+    this.name = "RoomReplyGenerationError";
+    this.roomId = roomId;
+  }
+}
+
 export class ChatManager {
   private agentStoreReady?: Promise<void>;
   private generationCounter = 0;
@@ -885,6 +895,7 @@ export class ChatManager {
       ...(Array.isArray(attachments) ? { attachments } : {}),
     });
 
+    const roomMembers = this.chatStore.listRoomMembers(roomId);
     const responders = [...responderPlan.direct, ...responderPlan.ambient];
     if (responders.length === 0) {
       if (responderPlan.nonMemberMentions.length > 0) {
@@ -897,29 +908,51 @@ export class ChatManager {
           content: `I couldn't route ${labels} because they are not members of this room.`,
         });
       }
+
+      if (roomMembers.length > 0) {
+        throw new RoomReplyGenerationError(`No active room responders available for room ${roomId}`, roomId);
+      }
+
       return { userMessage, responders: [] };
     }
 
-    for (const responder of responders) {
-      const response = await this.generateRoomResponderReply({
-        roomId,
-        roomName: room.name,
-        content: trimmedContent,
-        latestUserMessageId: userMessage.id,
-        mentions,
-        responder,
-        modelProvider,
-        modelId,
-      });
+    const successfulResponderIds: string[] = [];
+    const responderFailures: string[] = [];
 
-      this.chatStore.addRoomMessage(roomId, {
-        role: "assistant",
-        content: response.content,
-        thinkingOutput: response.thinkingOutput,
-        metadata: response.metadata,
-        senderAgentId: responder.id,
-        mentions: mentions.map((mention) => mention.agentId),
-      });
+    for (const responder of responders) {
+      try {
+        const response = await this.generateRoomResponderReply({
+          roomId,
+          roomName: room.name,
+          content: trimmedContent,
+          latestUserMessageId: userMessage.id,
+          mentions,
+          responder,
+          modelProvider,
+          modelId,
+        });
+
+        this.chatStore.addRoomMessage(roomId, {
+          role: "assistant",
+          content: response.content,
+          thinkingOutput: response.thinkingOutput,
+          metadata: response.metadata,
+          senderAgentId: responder.id,
+          mentions: mentions.map((mention) => mention.agentId),
+        });
+        successfulResponderIds.push(responder.id);
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        diagnostics.error(`Room responder ${responder.id} failed in room ${roomId}: ${reason}`);
+        responderFailures.push(`${responder.id}: ${reason}`);
+      }
+    }
+
+    if (successfulResponderIds.length === 0) {
+      throw new RoomReplyGenerationError(
+        `Failed to generate room replies for room ${roomId}: ${responderFailures.join("; ")}`,
+        roomId,
+      );
     }
 
     if (responderPlan.nonMemberMentions.length > 0) {
@@ -935,7 +968,7 @@ export class ChatManager {
 
     return {
       userMessage,
-      responders: responders.map((responder) => responder.id),
+      responders: successfulResponderIds,
     };
   }
 
@@ -1011,8 +1044,18 @@ export class ChatManager {
           .join("");
       }
 
+      const stateError = (resolvedSession.session.state as { errorMessage?: string } | undefined)?.errorMessage;
+      if (stateError?.trim()) {
+        throw new Error(stateError.trim());
+      }
+
+      const finalContent = content.trim();
+      if (!finalContent) {
+        throw new Error("Room responder returned an empty reply");
+      }
+
       return {
-        content: content.trim() || "(no response)",
+        content: finalContent,
         thinkingOutput: null,
         metadata: {
           roomId: input.roomId,
