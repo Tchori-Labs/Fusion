@@ -237,14 +237,20 @@ describe("RoutineStore", () => {
     });
 
     it("returns all routines sorted by createdAt", async () => {
-      await store.createRoutine({ name: "A", agentId: "test-agent", trigger: { type: "manual" } });
-      await new Promise((r) => setTimeout(r, 5));
-      await store.createRoutine({ name: "B", agentId: "test-agent", trigger: { type: "manual" } });
+      vi.useFakeTimers();
+      try {
+        vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+        await store.createRoutine({ name: "A", agentId: "test-agent", trigger: { type: "manual" } });
+        vi.setSystemTime(new Date("2026-01-01T00:00:01.000Z"));
+        await store.createRoutine({ name: "B", agentId: "test-agent", trigger: { type: "manual" } });
 
-      const list = await store.listRoutines();
-      expect(list).toHaveLength(2);
-      expect(list[0].name).toBe("A");
-      expect(list[1].name).toBe("B");
+        const list = await store.listRoutines();
+        expect(list).toHaveLength(2);
+        expect(list[0].name).toBe("A");
+        expect(list[1].name).toBe("B");
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 
@@ -252,24 +258,30 @@ describe("RoutineStore", () => {
 
   describe("updateRoutine", () => {
     it("updates name and description", async () => {
-      const routine = await store.createRoutine({
-        name: "Original",
-        agentId: "test-agent",
-        trigger: { type: "manual" },
-      });
+      vi.useFakeTimers();
+      try {
+        vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+        const routine = await store.createRoutine({
+          name: "Original",
+          agentId: "test-agent",
+          trigger: { type: "manual" },
+        });
 
-      await new Promise((r) => setTimeout(r, 5));
+        vi.setSystemTime(new Date("2026-01-01T00:00:01.000Z"));
 
-      const updated = await store.updateRoutine(routine.id, {
-        name: "Updated",
-        description: "A description",
-      });
+        const updated = await store.updateRoutine(routine.id, {
+          name: "Updated",
+          description: "A description",
+        });
 
-      expect(updated.name).toBe("Updated");
-      expect(updated.description).toBe("A description");
-      expect(new Date(updated.updatedAt).getTime()).toBeGreaterThanOrEqual(
-        new Date(routine.updatedAt).getTime(),
-      );
+        expect(updated.name).toBe("Updated");
+        expect(updated.description).toBe("A description");
+        expect(new Date(updated.updatedAt).getTime()).toBeGreaterThan(
+          new Date(routine.updatedAt).getTime(),
+        );
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it("updates trigger from manual to cron", async () => {
@@ -495,31 +507,38 @@ describe("RoutineStore", () => {
     });
 
     it("recomputes nextRunAt for cron routines after run", async () => {
-      // Use a cron that fires every minute to ensure different nextRunAt
-      const routine = await store.createRoutine({
-        name: "Cron run test",
-        agentId: "test-agent",
-        trigger: { type: "cron", cronExpression: "0 * * * * *" },
-      });
+      vi.useFakeTimers();
+      try {
+        vi.setSystemTime(new Date("2026-01-01T00:00:30.000Z"));
 
-      const originalNextRun = routine.nextRunAt;
-      expect(originalNextRun).toBeTruthy();
+        // Fires on each minute boundary (second 0)
+        const routine = await store.createRoutine({
+          name: "Cron run test",
+          agentId: "test-agent",
+          trigger: { type: "cron", cronExpression: "0 * * * * *" },
+        });
 
-      // Wait a bit to ensure time passes
-      await new Promise((r) => setTimeout(r, 1000));
+        const originalNextRun = routine.nextRunAt;
+        expect(originalNextRun).toBeTruthy();
 
-      const result: RoutineExecutionResult = {
-        routineId: routine.id,
-        success: true,
-        output: "ok",
-        startedAt: new Date().toISOString(),
-        completedAt: new Date().toISOString(),
-      };
+        vi.setSystemTime(new Date("2026-01-01T00:01:10.000Z"));
 
-      const updated = await store.recordRun(routine.id, result);
-      expect(updated.nextRunAt).toBeTruthy();
-      // nextRunAt should be updated (may be same or later depending on timing)
-      expect(updated.nextRunAt).not.toBeUndefined();
+        const result: RoutineExecutionResult = {
+          routineId: routine.id,
+          success: true,
+          output: "ok",
+          startedAt: new Date().toISOString(),
+          completedAt: new Date().toISOString(),
+        };
+
+        const updated = await store.recordRun(routine.id, result);
+        expect(updated.nextRunAt).toBeTruthy();
+        expect(new Date(updated.nextRunAt!).getTime()).toBeGreaterThan(
+          new Date(originalNextRun!).getTime(),
+        );
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 
