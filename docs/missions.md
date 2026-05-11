@@ -49,7 +49,8 @@ The dashboard supports mission planning workflows where you can:
 - Break work into milestones/slices/features
 - Associate features to executable tasks
 - Track progress at each layer
-- Resume in-progress mission interview sessions directly from the main missions list (generating, awaiting input, or error) before a mission record is created
+- Persisted missions with `interviewState: "in_progress"` remain visible as interview-styled mission cards in the main mission list so planning work does not disappear after reloads
+- Resume in-progress mission interview sessions directly from separate transient session rows in the main missions list (`mission_interview` sessions in `generating`, `awaiting_input`, or `error`) before a mission record is created
 
 ### Auto-Generated Assertions
 

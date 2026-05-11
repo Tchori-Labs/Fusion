@@ -3546,7 +3546,7 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
     );
   });
 
-  const renderMissionListItems = () => missions.map((mission) => {
+  const renderMissionListItems = (missionList: MissionWithSummary[], options?: { interviewStyle?: boolean }) => missionList.map((mission) => {
     const m = mission;
     const isSelected = selectedMission?.id === m.id;
     const statusColors = missionStatusColors[m.status as MissionStatus] || { bg: "", text: "" };
@@ -3559,11 +3559,12 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
     const tasksFailed = health?.tasksFailed ?? 0;
     const progressPercent = health?.estimatedCompletionPercent ?? summary?.progressPercent ?? 0;
     const showSummaryBlock = hasContent || totalTasks > 0 || tasksFailed > 0 || Boolean(health?.lastActivityAt);
+    const isInterviewStyle = options?.interviewStyle === true;
 
     return (
       <div
         key={m.id}
-        className={`mission-list__item ${isSelected ? "mission-list__item--selected" : ""}`}
+        className={`mission-list__item ${isSelected ? "mission-list__item--selected" : ""} ${isInterviewStyle ? "mission-list__item--interview" : ""}`}
         onClick={() => handleSelectMission(mission)}
       >
         <div className="mission-list__item-content">
@@ -3589,10 +3590,17 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
             >
               {m.status}
             </span>
+            {isInterviewStyle && (
+              <span className="mission-status-badge mission-status-badge--sm mission-interview-status mission-interview-status--awaiting_input">
+                Interview in progress
+              </span>
+            )}
           </div>
-          {m.description && (
+          {isInterviewStyle ? (
+            <p className="mission-list__item-description">Mission interview is still in progress. Open this mission to continue planning.</p>
+          ) : m.description ? (
             <p className="mission-list__item-description">{m.description}</p>
-          )}
+          ) : null}
           {showSummaryBlock && (
             <div className="mission-list__item-summary">
               {hasContent && (
@@ -3685,6 +3693,8 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
   });
 
   const renderMissionListContent = ({ hideBottomButtons = false }: { hideBottomButtons?: boolean } = {}) => {
+    const persistedInterviewMissions = missions.filter((mission) => mission.interviewState === "in_progress");
+    const standardMissions = missions.filter((mission) => mission.interviewState !== "in_progress");
     const showMobileTopPlanButton = isMobile && missions.length > 0 && !isCreatingMission;
     const showBottomPlanButton = !hideBottomButtons && !showMobileTopPlanButton;
 
@@ -3732,7 +3742,8 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
               )}
 
               {/* Mission and interview items */}
-              {renderMissionListItems()}
+              {renderMissionListItems(persistedInterviewMissions, { interviewStyle: true })}
+              {renderMissionListItems(standardMissions)}
               {renderInterviewSessionItems()}
 
               {/* Edit mission form */}

@@ -76,6 +76,7 @@ const mockMissions = [
     title: "Build Auth System",
     description: "Complete authentication flow",
     status: "planning",
+    interviewState: "not_started",
     milestones: [],
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
@@ -85,6 +86,7 @@ const mockMissions = [
     title: "API Redesign",
     description: "Redesign the REST API",
     status: "active",
+    interviewState: "not_started",
     autopilotEnabled: true,
     autopilotState: "watching",
     milestones: [],
@@ -1648,6 +1650,59 @@ describe("MissionManager", () => {
 
     await waitFor(() => {
       expect(screen.queryByText("Plan Mission with AI")).not.toBeInTheDocument();
+    });
+  });
+
+  it("keeps persisted interview-stage missions visible with interview styling and mission selection behavior", async () => {
+    const missionsWithInterview = [
+      {
+        id: "M-INTERVIEW",
+        title: "Reliability planning draft",
+        description: "Should remain visible while interview planning is in progress",
+        status: "planning",
+        interviewState: "in_progress",
+        milestones: [],
+        createdAt: "2026-01-06T00:00:00.000Z",
+        updatedAt: "2026-01-06T00:00:00.000Z",
+      },
+      ...mockMissions,
+    ];
+
+    mockFetchAiSessions.mockResolvedValueOnce([]);
+
+    globalThis.fetch = createFetchMockWithHealth(missionsWithInterview as Array<Record<string, unknown>>, {
+      ...mockMissionHealthById,
+      "M-INTERVIEW": {
+        missionId: "M-INTERVIEW",
+        status: "planning",
+        tasksCompleted: 0,
+        tasksFailed: 0,
+        tasksInFlight: 0,
+        totalTasks: 0,
+        estimatedCompletionPercent: 0,
+        autopilotState: "inactive",
+        autopilotEnabled: false,
+      },
+    });
+
+    render(<MissionManager isOpen={true} onClose={vi.fn()} addToast={vi.fn()} />);
+
+    const interviewMissionTitle = await screen.findByText("Reliability planning draft");
+    const interviewMissionRow = interviewMissionTitle.closest(".mission-list__item");
+    expect(interviewMissionRow).toBeTruthy();
+    expect(interviewMissionRow).toHaveClass("mission-list__item--interview");
+
+    expect(within(interviewMissionRow as HTMLElement).getByText("Interview in progress")).toBeInTheDocument();
+    expect(
+      within(interviewMissionRow as HTMLElement).getByText(
+        "Mission interview is still in progress. Open this mission to continue planning.",
+      ),
+    ).toBeInTheDocument();
+
+    fireEvent.click(interviewMissionTitle);
+
+    await waitFor(() => {
+      expect(screen.getByText("Database Schema")).toBeInTheDocument();
     });
   });
 
