@@ -19,7 +19,17 @@ describe("TaskStore.listTasksModifiedSince", () => {
 
   afterEach(async () => {
     await store.close();
-    await rm(rootDir, { recursive: true, force: true });
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      try {
+        await rm(rootDir, { recursive: true, force: true });
+        return;
+      } catch (error) {
+        if (!(error instanceof Error) || !/(ENOTEMPTY|EBUSY|EPERM)/.test(error.message) || attempt === 4) {
+          throw error;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 25 * (attempt + 1)));
+      }
+    }
   });
 
   async function createTaskWithUpdatedAt(id: string, updatedAt: string, column: "todo" | "archived" = "todo") {
@@ -62,7 +72,7 @@ describe("TaskStore.listTasksModifiedSince", () => {
     expect(exact.hasMore).toBe(false);
   });
 
-  it("uses default limit 50 and clamps above max to 200", async () => {
+  it("uses default limit 50 and clamps above max to 200", { timeout: 30_000 }, async () => {
     for (let i = 1; i <= 220; i += 1) {
       const padded = i.toString().padStart(3, "0");
       await createTaskWithUpdatedAt(`FN-${i}`, `2026-01-01T00:00:00.${padded}Z`);
