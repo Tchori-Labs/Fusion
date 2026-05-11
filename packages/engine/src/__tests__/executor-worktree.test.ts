@@ -2074,7 +2074,7 @@ describe("Merger worktree pool integration", () => {
     );
   });
 
-  // Full merger worktree pool integration tests are in merger.test.ts
+  // Full merger worktree pool integration tests are split across merger-merge-lifecycle.test.ts and related merger-*.test.ts files
   // which tests aiMergeTask with real implementation
 });
 
