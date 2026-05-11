@@ -8,6 +8,8 @@ _Date: 2026-04-08_
 
 - Decomposed `packages/core/src/__tests__/store.test.ts` into focused suites: `store-plugin-routing.test.ts`, `store-prompt-generation.test.ts`, `store-priority.test.ts`, `store-token-usage.test.ts`, `store-persistence.test.ts`, `store-settings.test.ts`, `store-attachments.test.ts`, `store-watcher.test.ts`, and `store-migration.test.ts`.
 - Local verification after the split (`pnpm --filter @fusion/core exec vitest run ...`) showed the extracted suites running in sub-second to low-single-digit durations (`store-attachments` ~0.45s, `store-migration` ~0.46s, `store-persistence` ~0.72s, `store-watcher` ~2.89s), while the remaining catch-all `store.test.ts` still measured ~23.35s and remains the largest residual core test file.
+- FN-3982 second-wave follow-up (2026-05-11) extracted the remaining bottleneck domains into `store-workflow-steps.test.ts`, `store-archive-search.test.ts`, and `store-run-mutation-context.test.ts`.
+- Post-split local timing snapshot (`pnpm --filter @fusion/core exec vitest run src/__tests__/store.test.ts src/__tests__/store-workflow-steps.test.ts src/__tests__/store-archive-search.test.ts src/__tests__/store-run-mutation-context.test.ts`) now shows: `store.test.ts` ~18.50s, `store-archive-search.test.ts` ~3.66s, `store-workflow-steps.test.ts` ~2.22s, and `store-run-mutation-context.test.ts` ~1.51s.
 
 ### FN-3293 stabilization update (2026-05-04)
 
