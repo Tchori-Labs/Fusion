@@ -1368,94 +1368,98 @@ export function AgentsView({ addToast, projectId, onOpenTaskLogs, agentOnboardin
                   </div>
 
                   <div className="agent-card-actions">
-                    {agent.state === "idle" && (
-                      <button
-                        className="btn btn-sm"
-                        onClick={() => void handleStateChange(agent.id, "active")}
-                        disabled={transitioningAgentIds.has(agent.id)}
-                        title="Activate"
-                      >
-                        <Play size={14} /> <span className="agent-card-action-label">Start</span>
-                      </button>
-                    )}
-                    {agent.state === "active" && (
-                      <>
+                    <div className="agent-card-actions-group agent-card-actions-group--primary">
+                      {agent.state === "idle" && (
                         <button
                           className="btn btn-sm"
-                          onClick={() => void handleRunHeartbeat(agent.id, agent.name)}
+                          onClick={() => void handleStateChange(agent.id, "active")}
                           disabled={transitioningAgentIds.has(agent.id)}
-                          title="Run Now"
-                          aria-label={`Run now for ${agent.name}`}
+                          title="Activate"
                         >
-                          <Activity size={14} /> <span className="agent-card-action-label">Run Now</span>
+                          <Play size={14} /> <span className="agent-card-action-label">Start</span>
                         </button>
+                      )}
+                      {agent.state === "active" && (
+                        <>
+                          <button
+                            className="btn btn-sm"
+                            onClick={() => void handleRunHeartbeat(agent.id, agent.name)}
+                            disabled={transitioningAgentIds.has(agent.id)}
+                            title="Run Now"
+                            aria-label={`Run now for ${agent.name}`}
+                          >
+                            <Activity size={14} /> <span className="agent-card-action-label">Run Now</span>
+                          </button>
+                          <button
+                            className="btn btn-sm"
+                            onClick={() => void handleStateChange(agent.id, "paused")}
+                            disabled={transitioningAgentIds.has(agent.id)}
+                            title="Pause"
+                          >
+                            <Pause size={14} /> <span className="agent-card-action-label">Pause</span>
+                          </button>
+                        </>
+                      )}
+                      {agent.state === "paused" && (
                         <button
                           className="btn btn-sm"
-                          onClick={() => void handleStateChange(agent.id, "paused")}
+                          onClick={() => void handleStateChange(agent.id, "active")}
                           disabled={transitioningAgentIds.has(agent.id)}
-                          title="Pause"
+                          title="Resume"
                         >
-                          <Pause size={14} /> <span className="agent-card-action-label">Pause</span>
+                          <Play size={14} /> <span className="agent-card-action-label">Resume</span>
                         </button>
-                      </>
-                    )}
-                    {agent.state === "paused" && (
-                      <button
-                        className="btn btn-sm"
-                        onClick={() => void handleStateChange(agent.id, "active")}
-                        disabled={transitioningAgentIds.has(agent.id)}
-                        title="Resume"
-                      >
-                        <Play size={14} /> <span className="agent-card-action-label">Resume</span>
-                      </button>
-                    )}
-                    {agent.state === "running" && (
-                      <>
+                      )}
+                      {agent.state === "running" && (
+                        <>
+                          <button
+                            className="btn btn-sm"
+                            onClick={() => openAgentDetail(agent.id, { initialTab: "runs", initialRunId: null, preferActiveRun: true })}
+                            title="View live run details"
+                            aria-label={`View live run details for ${agent.name}`}
+                          >
+                            <Activity size={14} /> <span className="agent-card-action-label">Running</span>
+                          </button>
+                          <button
+                            className="btn btn-sm"
+                            onClick={() => void handleStateChange(agent.id, "paused")}
+                            disabled={transitioningAgentIds.has(agent.id)}
+                            title="Pause"
+                          >
+                            <Pause size={14} /> <span className="agent-card-action-label">Pause</span>
+                          </button>
+                        </>
+                      )}
+                      {agent.state === "error" && (
                         <button
                           className="btn btn-sm"
-                          onClick={() => openAgentDetail(agent.id, { initialTab: "runs", initialRunId: null, preferActiveRun: true })}
-                          title="View live run details"
-                          aria-label={`View live run details for ${agent.name}`}
-                        >
-                          <Activity size={14} /> <span className="agent-card-action-label">Running</span>
-                        </button>
-                        <button
-                          className="btn btn-sm"
-                          onClick={() => void handleStateChange(agent.id, "paused")}
+                          onClick={() => void handleStateChange(agent.id, "active")}
                           disabled={transitioningAgentIds.has(agent.id)}
-                          title="Pause"
+                          title="Retry"
                         >
-                          <Pause size={14} /> <span className="agent-card-action-label">Pause</span>
+                          <Play size={14} /> <span className="agent-card-action-label">Retry</span>
                         </button>
-                      </>
-                    )}
-                    {agent.state === "error" && (
+                      )}
+                    </div>
+                    <div className="agent-card-actions-group agent-card-actions-group--secondary">
                       <button
-                        className="btn btn-sm"
-                        onClick={() => void handleStateChange(agent.id, "active")}
-                        disabled={transitioningAgentIds.has(agent.id)}
-                        title="Retry"
+                        className="btn btn-sm agent-card-details-btn"
+                        onClick={() => openAgentDetail(agent.id)}
+                        title={`View details for ${agent.name}`}
+                        aria-label={`View details for ${agent.name}`}
                       >
-                        <Play size={14} /> <span className="agent-card-action-label">Retry</span>
+                        <Info size={14} /> <span className="agent-card-action-label">Details</span>
                       </button>
-                    )}
-                    <button
-                      className="btn btn-sm agent-card-details-btn"
-                      onClick={() => openAgentDetail(agent.id)}
-                      title={`View details for ${agent.name}`}
-                      aria-label={`View details for ${agent.name}`}
-                    >
-                      <Info size={14} /> <span className="agent-card-action-label">Details</span>
-                    </button>
-                    {(agent.state === "idle" || agent.state === "paused") && (
-                      <button
-                        className="btn btn-sm btn-danger"
-                        onClick={() => void handleDelete(agent.id, agent.name)}
-                        title="Delete"
-                      >
-                        <Trash2 size={14} /> <span className="agent-card-action-label">Delete</span>
-                      </button>
-                    )}
+                      {(agent.state === "idle" || agent.state === "paused") && (
+                        <button
+                          className="btn btn-sm btn-danger"
+                          onClick={() => void handleDelete(agent.id, agent.name)}
+                          title="Delete"
+                        >
+                          <Trash2 size={14} /> <span className="agent-card-action-label">Delete</span>
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
               );

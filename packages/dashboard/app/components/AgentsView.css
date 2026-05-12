@@ -698,20 +698,38 @@
 }
 
 .agent-card-actions {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: var(--space-sm);
-  align-items: center;
-  flex-wrap: nowrap;
+  align-items: start;
+  width: 100%;
+  min-width: 0;
   container-type: inline-size;
   container-name: agent-card-actions;
 }
 
+.agent-card-actions-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+  align-items: center;
+  min-width: 0;
+}
+
+.agent-card-actions-group--secondary {
+  justify-content: flex-end;
+}
+
 .agent-card-actions .btn {
-  flex-shrink: 0;
+  flex: 0 0 auto;
   white-space: nowrap;
 }
 
 .agents-split-sidebar .agent-card-actions {
+  gap: var(--space-xs);
+}
+
+.agents-split-sidebar .agent-card-actions-group {
   gap: var(--space-xs);
 }
 
@@ -721,13 +739,17 @@
 }
 
 @container agent-card-actions (max-width: calc(var(--space-2xl) * 9)) {
+  .agents-split-sidebar .agent-card-actions {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .agents-split-sidebar .agent-card-actions-group--secondary {
+    justify-content: flex-start;
+  }
+
   .agents-split-sidebar .agent-card-actions .agent-card-action-label {
     display: none;
   }
-}
-
-.agent-card-details-btn {
-  margin-left: auto;
 }
 
 .agent-card--clickable {

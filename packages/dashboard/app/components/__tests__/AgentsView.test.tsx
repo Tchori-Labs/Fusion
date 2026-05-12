@@ -651,18 +651,36 @@ describe("AgentsView", () => {
       expect(screen.getAllByText("Details").length).toBeGreaterThanOrEqual(4);
     });
 
-    it("keeps a visible icon affordance on View Details buttons when labels are compacted", async () => {
-      render(<AgentsView addToast={mockAddToast} />);
+    it("keeps a visible icon affordance on split-sidebar action buttons when labels are compacted", async () => {
+      const { container } = render(<AgentsView addToast={mockAddToast} />);
 
-      const detailsButton = await screen.findByRole("button", { name: "View details for Test Agent 1" });
+      const sidebarCard = await waitFor(() => {
+        const card = container.querySelector(".agents-split-sidebar .agent-card");
+        expect(card).toBeTruthy();
+        return card as HTMLElement;
+      });
+      const actions = sidebarCard.querySelector(".agent-card-actions");
+      const primaryGroup = sidebarCard.querySelector(".agent-card-actions-group--primary");
+      const secondaryGroup = sidebarCard.querySelector(".agent-card-actions-group--secondary");
+      const detailsButton = within(sidebarCard).getByRole("button", { name: "View details for Test Agent 1" });
+
+      expect(actions).toBeTruthy();
+      expect(primaryGroup).toBeTruthy();
+      expect(secondaryGroup).toBeTruthy();
+      expect(primaryGroup?.querySelector("button")).toBeTruthy();
+      expect(secondaryGroup?.contains(detailsButton)).toBe(true);
       expect(detailsButton.querySelector("svg")).toBeTruthy();
+      expect(sidebarCard.querySelectorAll(".agent-card-action-label").length).toBeGreaterThan(0);
     });
 
-    it("hides split-sidebar action labels only within an agent-card-actions container query", () => {
+    it("uses a grid-and-wrap containment contract for split-sidebar action rows", () => {
       const css = loadAllAppCss();
 
+      expect(css).toMatch(/\.agent-card-actions\s*\{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*minmax\(0, 1fr\) auto;[^}]*width:\s*100%;[^}]*min-width:\s*0;[^}]*\}/);
+      expect(css).toMatch(/\.agent-card-actions-group\s*\{[^}]*display:\s*flex;[^}]*flex-wrap:\s*wrap;[^}]*min-width:\s*0;[^}]*\}/);
       expect(css).not.toContain(".agents-split-sidebar .agent-card-actions .agent-card-action-label {\n  display: none;\n}");
       expect(css).toContain("@container agent-card-actions (max-width: calc(var(--space-2xl) * 9))");
+      expect(css).toContain(".agents-split-sidebar .agent-card-actions {\n    grid-template-columns: minmax(0, 1fr);\n  }");
       expect(css).toContain(".agents-split-sidebar .agent-card-actions .agent-card-action-label {\n    display: none;\n  }");
     });
 
