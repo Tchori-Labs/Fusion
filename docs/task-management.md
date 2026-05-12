@@ -567,7 +567,7 @@ Users can apply presets at task creation; manual model selection can override th
 
 ## AI Title Summarization
 
-When `autoSummarizeTitles` is enabled and a task has a long untitled description, Fusion can auto-generate a concise title. This applies to tasks created from the dashboard/API as well as tasks created by agents and tooling flows (`fn_task_create`, delegated tasks, and triage-created child tasks).
+When `autoSummarizeTitles` is enabled and a task has a long untitled description, Fusion can auto-generate a concise title. This applies to tasks created from the dashboard/API as well as tasks created by agents and tooling flows (`fn_task_create`, delegated tasks, and triage-created child tasks). GitHub tracking also opportunistically uses the title-summarizer lane for untitled tasks before falling back to a deterministic description-derived title.
 
 ## Screenshots
 

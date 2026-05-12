@@ -1,4 +1,5 @@
 import type { GlobalSettings, MergeDetails, ProjectSettings, Task, TaskStore } from "@fusion/core";
+import { deriveTitleFromDescription } from "./github-tracking.js";
 import { GitHubClient } from "./github.js";
 import { resolveGithubTrackingAuth } from "./github-auth.js";
 
@@ -44,6 +45,15 @@ function formatTitleSegment(title: string, maxLength: number): string {
   return truncateText(title, maxLength);
 }
 
+function resolveTrackingTitle(
+  task: Pick<Task, "title" | "description">,
+  maxLength: number,
+): string {
+  return sanitizeInlineText(task.title ?? "")
+    || deriveTitleFromDescription(task.description, maxLength)
+    || "Untitled task";
+}
+
 function formatCommitLine(
   mergeDetails: MergeDetails | undefined,
   linkContext: TrackingLinkContext | undefined,
@@ -83,11 +93,10 @@ function formatFilesLine(mergeDetails: MergeDetails | undefined): string | null 
 }
 
 function buildDoneComment(
-  task: Pick<Task, "id" | "title" | "branch" | "mergeDetails">,
+  task: Pick<Task, "id" | "title" | "description" | "branch" | "mergeDetails">,
   linkContext?: TrackingLinkContext,
   options?: { includeCommitSubject?: boolean; includeFilesLine?: boolean },
 ): string {
-  const rawTitle = sanitizeInlineText(task.title ?? "") || "Untitled task";
   const branch = sanitizeInlineText(task.branch ?? "");
   const mergedAt = collapseWhitespace(task.mergeDetails?.mergedAt ?? "");
   const prNumber = task.mergeDetails?.prNumber;
@@ -122,7 +131,7 @@ function buildDoneComment(
   const suffix = "” is complete.";
   const extraLength = optionalLines.length === 0 ? 0 : `\n${optionalLines.join("\n")}`.length;
   const available = DONE_COMMENT_MAX_LENGTH - prefix.length - stem.length - suffix.length - extraLength;
-  const title = formatTitleSegment(rawTitle, available);
+  const title = formatTitleSegment(resolveTrackingTitle(task, available), available);
   const statusLine = `${stem}${title}${suffix}`;
 
   return optionalLines.length === 0
@@ -131,7 +140,7 @@ function buildDoneComment(
 }
 
 export function formatTrackingComment(
-  task: Pick<Task, "id" | "title" | "branch" | "mergeDetails">,
+  task: Pick<Task, "id" | "title" | "description" | "branch" | "mergeDetails">,
   transition: "in-progress" | "done",
   linkContext?: TrackingLinkContext,
 ): string {
@@ -153,11 +162,8 @@ export function formatTrackingComment(
   const stem = "🚧 In progress — work has started on “";
   const suffix = "”.";
 
-  const rawTitle = collapseWhitespace(task.title ?? "") || "Untitled task";
   const available = COMMENT_MAX_LENGTH - prefix.length - stem.length - suffix.length;
-  const title = rawTitle.length <= available
-    ? rawTitle
-    : `${rawTitle.slice(0, Math.max(0, available - 1)).trimEnd()}…`;
+  const title = formatTitleSegment(resolveTrackingTitle(task, available), available);
 
   return `${prefix}${stem}${title}${suffix}`;
 }

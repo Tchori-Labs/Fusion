@@ -21,6 +21,7 @@ async function maybeCreateTaskTrackingIssue(taskStore: TaskStore, task: import("
       taskStore,
       projectSettings,
       globalSettings,
+      rootDir: taskStore.getRootDir(),
       logger: console,
     });
   } catch {

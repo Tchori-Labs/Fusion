@@ -28,14 +28,20 @@ function makeTmpDir(): string {
   return dir;
 }
 
+async function removeTrackedTmpDir(dir: string | undefined): Promise<void> {
+  if (!dir) return;
+  try {
+    await rm(dir, { recursive: true, force: true });
+  } catch {
+    rmSync(dir, { recursive: true, force: true });
+  } finally {
+    createdTmpDirs.delete(dir);
+  }
+}
+
 async function cleanupTmpDirsAsync(): Promise<void> {
   const cleanup = Array.from(createdTmpDirs);
-  await Promise.all(
-    cleanup.map(async (dir) => {
-      await rm(dir, { recursive: true, force: true });
-      createdTmpDirs.delete(dir);
-    }),
-  );
+  await Promise.all(cleanup.map((dir) => removeTrackedTmpDir(dir)));
 }
 
 function cleanupTmpDirsSync(): void {
@@ -1269,7 +1275,7 @@ describe("schema migrations", () => {
   let tmpDir: string;
 
   afterEach(async () => {
-    await rm(tmpDir, { recursive: true, force: true });
+    await removeTrackedTmpDir(tmpDir);
   });
 
   it("migrates a v1 database by adding missing columns", () => {
@@ -2196,7 +2202,7 @@ describe("FTS5 full-text search", () => {
     } catch {
       // already closed
     }
-    await rm(tmpDir, { recursive: true, force: true });
+    await removeTrackedTmpDir(tmpDir);
   });
 
   it("creates tasks_fts virtual table after init", () => {
@@ -2409,7 +2415,7 @@ describe("Database FTS5 guard behavior", () => {
       expect(localDb.rebuildFts5Index()).toBe(false);
     } finally {
       localDb.close();
-      await rm(tmpDir, { recursive: true, force: true });
+      await removeTrackedTmpDir(tmpDir);
       if (prevEnv === undefined) {
         delete process.env.FUSION_DISABLE_FTS5;
       } else {
@@ -2423,7 +2429,7 @@ describe("createDatabase factory", () => {
   let tmpDir: string;
 
   afterEach(async () => {
-    await rm(tmpDir, { recursive: true, force: true });
+    await removeTrackedTmpDir(tmpDir);
   });
 
   it("creates a database instance without auto-init", () => {

@@ -70,8 +70,20 @@ describe("formatTrackingComment", () => {
     expect(comment.startsWith("Fusion task: FN-1\n\n✅ Done")).toBe(true);
   });
 
-  it("falls back to untitled task", () => {
-    const comment = formatTrackingComment({ id: "FN-1", title: "   " }, "done");
+  it.each(["in-progress", "done"] as const)("derives the title from description for %s comments when title is empty", (transition) => {
+    const comment = formatTrackingComment({ id: "FN-1", title: "", description: "Ship GitHub tracking fallback" }, transition);
+    expect(comment).toContain("Ship GitHub tracking fallback");
+    expect(comment).not.toContain("Untitled task");
+  });
+
+  it.each(["in-progress", "done"] as const)("derives the title from description for %s comments when title is whitespace", (transition) => {
+    const comment = formatTrackingComment({ id: "FN-1", title: "   ", description: "Use description instead" }, transition);
+    expect(comment).toContain("Use description instead");
+    expect(comment).not.toContain("Untitled task");
+  });
+
+  it.each(["in-progress", "done"] as const)("falls back to untitled task for %s comments only when title and description are empty", (transition) => {
+    const comment = formatTrackingComment({ id: "FN-1", title: "   ", description: "\n\n  " }, transition);
     expect(comment).toContain("Untitled task");
   });
 

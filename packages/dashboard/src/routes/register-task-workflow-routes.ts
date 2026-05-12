@@ -108,6 +108,7 @@ async function maybeCreateTaskTrackingIssue(taskStore: TaskStore, task: Task, op
       taskStore,
       projectSettings: trackingProjectSettings,
       globalSettings,
+      rootDir: taskStore.getRootDir(),
       logger: console,
     });
   } catch {

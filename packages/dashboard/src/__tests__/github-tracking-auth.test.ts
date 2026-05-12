@@ -8,14 +8,16 @@ vi.mock("@fusion/core", async () => {
     ...actual,
     isGhAvailable: vi.fn(),
     isGhAuthenticated: vi.fn(),
+    runGhAsync: vi.fn(),
     runGhJsonAsync: vi.fn(),
   };
 });
 
-import { isGhAuthenticated, isGhAvailable, runGhJsonAsync } from "@fusion/core";
+import { isGhAuthenticated, isGhAvailable, runGhAsync, runGhJsonAsync } from "@fusion/core";
 
 const mockIsGhAvailable = vi.mocked(isGhAvailable);
 const mockIsGhAuthenticated = vi.mocked(isGhAuthenticated);
+const mockRunGhAsync = vi.mocked(runGhAsync);
 const mockRunGhJsonAsync = vi.mocked(runGhJsonAsync);
 
 function task(): Task {
@@ -38,6 +40,7 @@ describe("tracking auth mode integration", () => {
     vi.clearAllMocks();
     mockIsGhAvailable.mockReturnValue(true);
     mockIsGhAuthenticated.mockReturnValue(true);
+    mockRunGhAsync.mockResolvedValue("https://github.com/o/r/issues/5");
     mockRunGhJsonAsync.mockResolvedValue({ url: "https://github.com/o/r/issues/5", number: 5, createdAt: "2026-01-01T00:00:00.000Z" } as any);
   });
 
@@ -52,6 +55,7 @@ describe("tracking auth mode integration", () => {
       taskStore: { linkGithubIssue: vi.fn(), recordActivity: vi.fn() } as any,
       projectSettings: { githubAuthMode: "token", githubAuthToken: "token" } as any,
       globalSettings: { githubTrackingDefaultRepo: "o/r" } as any,
+      rootDir: "/tmp/test",
     });
 
     expect(fetchSpy).toHaveBeenCalled();
@@ -68,6 +72,7 @@ describe("tracking auth mode integration", () => {
       taskStore: { recordActivity } as any,
       projectSettings: { githubAuthMode: "token", githubAuthToken: "" } as any,
       globalSettings: { githubTrackingDefaultRepo: "o/r" } as any,
+      rootDir: "/tmp/test",
     });
 
     expect(result).toEqual({ created: false, reason: "auth_token_missing" });
@@ -84,6 +89,7 @@ describe("tracking auth mode integration", () => {
       taskStore: { linkGithubIssue: vi.fn(), recordActivity: vi.fn() } as any,
       projectSettings: { githubAuthMode: "gh-cli" } as any,
       globalSettings: { githubTrackingDefaultRepo: "o/r" } as any,
+      rootDir: "/tmp/test",
     });
 
     expect(mockRunGhJsonAsync).toHaveBeenCalled();
@@ -96,6 +102,7 @@ describe("tracking auth mode integration", () => {
       taskStore: { recordActivity: vi.fn() } as any,
       projectSettings: { githubAuthMode: "gh-cli" } as any,
       globalSettings: { githubTrackingDefaultRepo: "o/r" } as any,
+      rootDir: "/tmp/test",
     });
 
     expect(result).toEqual({ created: false, reason: "auth_gh_not_installed" });
@@ -106,6 +113,7 @@ describe("tracking auth mode integration", () => {
       taskStore: { linkGithubIssue: vi.fn(), recordActivity: vi.fn() } as any,
       projectSettings: {} as any,
       globalSettings: { githubTrackingDefaultRepo: "o/r" } as any,
+      rootDir: "/tmp/test",
     });
 
     expect(mockRunGhJsonAsync).toHaveBeenCalled();
