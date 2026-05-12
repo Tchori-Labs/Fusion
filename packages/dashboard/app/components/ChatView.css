@@ -386,6 +386,7 @@
 .chat-mobile-session-trigger {
   width: 100%;
   max-width: 100%;
+  min-width: 0;
   display: inline-flex;
   align-items: center;
   justify-content: flex-start;
@@ -398,11 +399,25 @@
   min-height: calc(var(--space-lg) * 2);
 }
 
-.chat-mobile-session-trigger .chat-thread-header-title,
-.chat-mobile-session-trigger .chat-model-tag {
+.chat-mobile-session-trigger .chat-thread-header-title {
+  flex: 1 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.chat-mobile-session-trigger .chat-model-tag {
+  flex-shrink: 0;
+  max-width: calc(var(--space-xl) * 4);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-mobile-session-trigger .provider-icon,
+.chat-mobile-session-trigger > svg:first-child {
+  flex-shrink: 0;
 }
 
 .chat-mobile-session-trigger svg:last-child {
@@ -441,8 +456,8 @@
 .chat-mobile-session-option {
   width: 100%;
   display: flex;
-  align-items: center;
-  min-height: calc(var(--space-lg) * 2);
+  align-items: flex-start;
+  min-height: calc(var(--space-lg) * 2.25);
   border: none;
   border-radius: var(--radius-sm);
   background: transparent;
@@ -467,9 +482,8 @@
 
 .chat-mobile-session-option-title {
   width: 100%;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .chat-thread-header-new-chat {
