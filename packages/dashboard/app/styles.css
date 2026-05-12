@@ -3250,7 +3250,8 @@ input[type="range"]:focus-visible {
     overflow-x: auto;
     overflow-y: hidden;
     -webkit-overflow-scrolling: touch;
-    scroll-snap-type: x mandatory;
+    scroll-snap-type: x proximity;
+    overflow-anchor: none;
     scroll-padding-inline: calc(50% - 150px);
     scroll-behavior: smooth;
     scrollbar-width: none;
@@ -3258,6 +3259,7 @@ input[type="range"]:focus-visible {
     padding-bottom: var(--space-md);
     gap: var(--space-md);
     height: 100%;
+    width: 100%;
   }
 
   .board::-webkit-scrollbar {

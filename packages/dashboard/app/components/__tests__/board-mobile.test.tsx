@@ -156,11 +156,11 @@ describe("Board desktop column width CSS", () => {
 });
 
 describe("Board and Column mobile CSS", () => {
-  it("contains .board scroll-snap-type: x mandatory in the mobile media block", () => {
+  it("contains .board scroll-snap-type: x proximity in the mobile media block (FN-001)", () => {
     const css = loadAllAppCss();
     const mobileSection = getMainMobileSection(css);
 
-    expectRuleToContain(mobileSection, ".board", "scroll-snap-type: x mandatory;");
+    expectRuleToContain(mobileSection, ".board", "scroll-snap-type: x proximity;");
   });
 
   it("contains .board scroll-behavior: smooth in the mobile media block", () => {
