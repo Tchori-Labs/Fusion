@@ -410,12 +410,18 @@ describe("POST /tasks/:id/retry", () => {
     expect(store.logEntry).toHaveBeenCalledWith("KB-001", "Retry requested from dashboard (stuck kill budget reset)");
   });
 
-  it("retries a failed in-review task without moving columns", async () => {
-    const reviewTask = { ...FAKE_TASK_DETAIL, column: "in-review", status: "failed" };
-    (store.getTask as ReturnType<typeof vi.fn>)
-      .mockResolvedValueOnce(reviewTask)
-      .mockResolvedValueOnce(reviewTask);
+  it("retries a failed zero-step in-review task with no merge attempts by moving to todo", async () => {
+    const reviewTask = {
+      ...FAKE_TASK_DETAIL,
+      column: "in-review",
+      status: "failed",
+      steps: [],
+      mergeRetries: 0,
+    };
+    const movedTask = { ...reviewTask, column: "todo", status: undefined };
+    (store.getTask as ReturnType<typeof vi.fn>).mockResolvedValueOnce(reviewTask);
     (store.updateTask as ReturnType<typeof vi.fn>).mockResolvedValue(reviewTask);
+    (store.moveTask as ReturnType<typeof vi.fn>).mockResolvedValue(movedTask);
 
     const res = await REQUEST(buildApp(), "POST", "/api/tasks/KB-001/retry", JSON.stringify({}), {
       "Content-Type": "application/json",
@@ -426,18 +432,27 @@ describe("POST /tasks/:id/retry", () => {
       status: null,
       error: null,
       stuckKillCount: 0,
-      mergeRetries: 0,
     });
-    expect(store.moveTask).not.toHaveBeenCalled();
-    expect(store.logEntry).toHaveBeenCalledWith("KB-001", "Retry requested from dashboard (in-review merge retry, mergeRetries reset)");
+    expect(store.moveTask).toHaveBeenCalledWith("KB-001", "todo", { preserveProgress: true });
+    expect(store.logEntry).toHaveBeenCalledWith(
+      "KB-001",
+      "Retry requested from dashboard (execution failure in-review → todo, preserving progress)",
+    );
+    const updateCall = (store.updateTask as ReturnType<typeof vi.fn>).mock.calls[0][1];
+    expect(updateCall).not.toHaveProperty("mergeRetries");
   });
 
-  it("retries a stuck-killed in-review task without moving columns", async () => {
-    const reviewTask = { ...FAKE_TASK_DETAIL, column: "in-review", status: "stuck-killed" };
-    (store.getTask as ReturnType<typeof vi.fn>)
-      .mockResolvedValueOnce(reviewTask)
-      .mockResolvedValueOnce(reviewTask);
+  it("retries a stuck-killed zero-step in-review task with no merge attempts by moving to todo", async () => {
+    const reviewTask = {
+      ...FAKE_TASK_DETAIL,
+      column: "in-review",
+      status: "stuck-killed",
+      steps: [],
+    };
+    const movedTask = { ...reviewTask, column: "todo", status: undefined };
+    (store.getTask as ReturnType<typeof vi.fn>).mockResolvedValueOnce(reviewTask);
     (store.updateTask as ReturnType<typeof vi.fn>).mockResolvedValue(reviewTask);
+    (store.moveTask as ReturnType<typeof vi.fn>).mockResolvedValue(movedTask);
 
     const res = await REQUEST(buildApp(), "POST", "/api/tasks/KB-001/retry", JSON.stringify({}), {
       "Content-Type": "application/json",
@@ -448,10 +463,14 @@ describe("POST /tasks/:id/retry", () => {
       status: null,
       error: null,
       stuckKillCount: 0,
-      mergeRetries: 0,
     });
-    expect(store.moveTask).not.toHaveBeenCalled();
-    expect(store.logEntry).toHaveBeenCalledWith("KB-001", "Retry requested from dashboard (in-review merge retry, mergeRetries reset)");
+    expect(store.moveTask).toHaveBeenCalledWith("KB-001", "todo", { preserveProgress: true });
+    expect(store.logEntry).toHaveBeenCalledWith(
+      "KB-001",
+      "Retry requested from dashboard (execution failure in-review → todo, preserving progress)",
+    );
+    const updateCall = (store.updateTask as ReturnType<typeof vi.fn>).mock.calls[0][1];
+    expect(updateCall).not.toHaveProperty("mergeRetries");
   });
 
   it("preserves worktree/branch when retrying in-review task", async () => {
@@ -525,6 +544,37 @@ describe("POST /tasks/:id/retry", () => {
         { name: "Step 1", status: "done" },
         { name: "Step 2", status: "done" },
       ],
+    };
+    (store.getTask as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce(mergeFailedTask)
+      .mockResolvedValueOnce(mergeFailedTask);
+    (store.updateTask as ReturnType<typeof vi.fn>).mockResolvedValue(mergeFailedTask);
+
+    const res = await REQUEST(buildApp(), "POST", "/api/tasks/KB-001/retry", JSON.stringify({}), {
+      "Content-Type": "application/json",
+    });
+
+    expect(res.status).toBe(200);
+    expect(store.updateTask).toHaveBeenCalledWith("KB-001", {
+      status: null,
+      error: null,
+      stuckKillCount: 0,
+      mergeRetries: 0,
+    });
+    expect(store.moveTask).not.toHaveBeenCalled();
+    expect(store.logEntry).toHaveBeenCalledWith(
+      "KB-001",
+      "Retry requested from dashboard (in-review merge retry, mergeRetries reset)",
+    );
+  });
+
+  it("retries zero-step merge-failed in-review task with prior merge attempts by staying in-review", async () => {
+    const mergeFailedTask = {
+      ...FAKE_TASK_DETAIL,
+      column: "in-review" as const,
+      status: "failed",
+      steps: [],
+      mergeRetries: 2,
     };
     (store.getTask as ReturnType<typeof vi.fn>)
       .mockResolvedValueOnce(mergeFailedTask)

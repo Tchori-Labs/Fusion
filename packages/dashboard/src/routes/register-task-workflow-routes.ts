@@ -450,11 +450,15 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
       // In-review retry: distinguish between execution failures (incomplete steps)
       // and merge failures (all steps done).
       if (isInReviewRetry) {
-        const hasIncompleteSteps =
-          task.steps.length > 0 &&
-          task.steps.some((s: { status: string }) => s.status === "pending" || s.status === "in-progress");
+        const hasIncompleteSteps = task.steps.some(
+          (s: { status: string }) => s.status === "pending" || s.status === "in-progress",
+        );
+        // FN-4130 / PR #59 follow-up: zero-step review failures with no merge attempts
+        // (`mergeRetries ?? 0 === 0`) failed during execution, not merge finalization.
+        const isExecutionFailureInReview =
+          hasIncompleteSteps || (task.steps.length === 0 && (task.mergeRetries ?? 0) === 0);
 
-        if (hasIncompleteSteps) {
+        if (isExecutionFailureInReview) {
           await scopedStore.updateTask(req.params.id, {
             status: null,
             error: null,

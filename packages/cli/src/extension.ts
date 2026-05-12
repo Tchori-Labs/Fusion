@@ -884,11 +884,15 @@ export default function kbExtension(pi: ExtensionAPI) {
       
       // In-review retry: distinguish between execution failures and merge failures.
       if (task.column === 'in-review') {
-        const hasIncompleteSteps =
-          task.steps.length > 0 &&
-          task.steps.some((s: { status: string }) => s.status === "pending" || s.status === "in-progress");
+        const hasIncompleteSteps = task.steps.some(
+          (s: { status: string }) => s.status === "pending" || s.status === "in-progress",
+        );
+        // FN-4130 / PR #59 follow-up: zero-step review failures with no merge attempts
+        // (`mergeRetries ?? 0 === 0`) failed during execution, not merge finalization.
+        const isExecutionFailureInReview =
+          hasIncompleteSteps || (task.steps.length === 0 && (task.mergeRetries ?? 0) === 0);
 
-        if (hasIncompleteSteps) {
+        if (isExecutionFailureInReview) {
           await store.updateTask(params.id, { status: null, error: null, stuckKillCount: 0 });
           await store.logEntry(params.id, "Retry requested via Fusion extension (execution failure in-review → todo, preserving progress)");
           await store.moveTask(params.id, "todo", { preserveProgress: true });

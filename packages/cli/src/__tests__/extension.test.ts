@@ -1782,6 +1782,35 @@ describe("fn pi extension (runnable structured-output regression slice)", () => 
       expect(updated?.steps[1].status).toBe("in-progress");
     });
 
+    it("moves zero-step execution-failed in-review task to todo and clears failure state", async () => {
+      const store = new TaskStore(tmpDir);
+      await store.init();
+
+      const task = await store.createTask({
+        title: "zero-step execution-failed task",
+        description: "test",
+        column: "todo",
+      });
+      await writeFile(join(tmpDir, ".fusion", "tasks", task.id, "PROMPT.md"), "# zero-step execution-failed task\n\nNo steps yet.\n");
+      await store.updateTask(task.id, { steps: [] });
+      await store.moveTask(task.id, "in-progress");
+      await store.moveTask(task.id, "in-review");
+      await store.updateTask(task.id, { status: "failed", error: "executor crashed", mergeRetries: 0, steps: [] });
+
+      const retryTool = api.tools.get("fn_task_retry")!;
+      const result = await retryTool.execute("retry-zero-step-exec", { id: task.id }, undefined, undefined, makeCtx(tmpDir));
+
+      expect(result.isError).toBeFalsy();
+      expect(result.details.newColumn).toBe("todo");
+
+      const updated = await store.getTask(task.id);
+      expect(updated?.column).toBe("todo");
+      expect(updated?.status).toBeFalsy();
+      expect(updated?.error).toBeFalsy();
+      expect(updated?.steps).toEqual([]);
+      expect(updated?.mergeRetries).toBe(0);
+    });
+
     it("keeps merge-failed in-review task (all steps done) in in-review and resets merge state", async () => {
       const store = new TaskStore(tmpDir);
       await store.init();
@@ -1811,6 +1840,35 @@ describe("fn pi extension (runnable structured-output regression slice)", () => 
       expect(updated?.column).toBe("in-review");
       expect(updated?.status).toBeFalsy();
       expect(updated?.error).toBeFalsy();
+      expect(updated?.mergeRetries).toBe(0);
+    });
+
+    it("keeps zero-step merge-failed in-review task with prior merge attempts in-review and resets merge state", async () => {
+      const store = new TaskStore(tmpDir);
+      await store.init();
+
+      const task = await store.createTask({
+        title: "zero-step merge-failed task",
+        description: "test",
+        column: "todo",
+      });
+      await writeFile(join(tmpDir, ".fusion", "tasks", task.id, "PROMPT.md"), "# zero-step merge-failed task\n\nNo steps yet.\n");
+      await store.updateTask(task.id, { steps: [] });
+      await store.moveTask(task.id, "in-progress");
+      await store.moveTask(task.id, "in-review");
+      await store.updateTask(task.id, { status: "failed", error: "merge conflict", mergeRetries: 2, steps: [] });
+
+      const retryTool = api.tools.get("fn_task_retry")!;
+      const result = await retryTool.execute("retry-zero-step-merge", { id: task.id }, undefined, undefined, makeCtx(tmpDir));
+
+      expect(result.isError).toBeFalsy();
+      expect(result.details.newColumn).toBe("in-review");
+
+      const updated = await store.getTask(task.id);
+      expect(updated?.column).toBe("in-review");
+      expect(updated?.status).toBeFalsy();
+      expect(updated?.error).toBeFalsy();
+      expect(updated?.steps).toEqual([]);
       expect(updated?.mergeRetries).toBe(0);
     });
   });
