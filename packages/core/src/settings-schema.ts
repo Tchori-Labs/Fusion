@@ -208,6 +208,7 @@ export const DEFAULT_PROJECT_SETTINGS = {
   worktreeRebaseRemote: "",
   worktreeRebaseLocalBase: true,
   mergeConflictStrategy: "smart-prefer-main",
+  mergeStrategyOverlapBehavior: "flip-to-prefer-branch",
   workflowStepTimeoutMs: 360_000,
   workflowRevisionForkOnScopeMismatch: true,
   strictScopeEnforcement: false,

@@ -2036,8 +2036,11 @@ describe("aiMergeTask — in-merge verification fix", () => {
     );
     (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({ ...DEFAULT_SETTINGS, testCommand: "vitest run", buildCommand: "pnpm build", verificationFixRetries: 1 });
 
-    await expect(aiMergeTask(store, "/tmp/root", "FN-050")).rejects.toThrow();
-    expect(buildRuns).toBeGreaterThanOrEqual(0);
+    await expect(aiMergeTask(store, "/tmp/root", "FN-050")).resolves.toMatchObject({
+      branchDeleted: true,
+    });
+    expect(vitestRuns).toBe(2);
+    expect(buildRuns).toBe(1);
   });
 
   it("retries when test-failure fix passes tests but full rerun fails on build", async () => {
@@ -2085,7 +2088,10 @@ describe("aiMergeTask — in-merge verification fix", () => {
     mockedCreateFnAgent.mockResolvedValue({ session: { prompt: vi.fn().mockResolvedValue(undefined), dispose: vi.fn() } } as any);
     const store = createMockStore({ id: "FN-050", worktree: "/tmp/root/.worktrees/KB-050" }, [{ id: "FN-050", worktree: "/tmp/root/.worktrees/KB-050", column: "in-review" } as Task]);
     (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({ ...DEFAULT_SETTINGS, testCommand: "vitest run", buildCommand: "pnpm build", verificationFixRetries: 1, buildRetryCount: 0 });
-    await expect(aiMergeTask(store, "/tmp/root", "FN-050")).rejects.toThrow();
+    await expect(aiMergeTask(store, "/tmp/root", "FN-050")).resolves.toMatchObject({
+      branchDeleted: true,
+    });
+    expect(buildRuns).toBe(2);
   });
 
   it("retries when build-failure fix keeps build green but breaks tests in full rerun", async () => {

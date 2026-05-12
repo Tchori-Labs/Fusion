@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
-const DEFAULT_LOOKBACK = 30;
+export const MERGER_MAIN_OVERLAP_LOOKBACK_COMMITS = 30;
 const GIT_OUTPUT_MAX_BUFFER = 10 * 1024 * 1024;
 
 export interface SquashAuditRecentMainCommit {
@@ -41,13 +41,13 @@ export interface SquashAuditFindings {
 export async function auditSquashMerge({
   rootDir,
   squashSha,
-  lookback = DEFAULT_LOOKBACK,
+  lookback = MERGER_MAIN_OVERLAP_LOOKBACK_COMMITS,
 }: {
   rootDir: string;
   squashSha: string;
   lookback?: number;
 }): Promise<SquashAuditFindings> {
-  const normalizedLookback = normalizeLookback(lookback);
+  const normalizedLookback = normalizeMergeOverlapLookback(lookback);
   const parentSha = await git(rootDir, ["rev-parse", `${squashSha}^`]);
   const squashSubject = await git(rootDir, ["log", "-1", "--format=%s", squashSha]);
   const branchSubjects = normalizeLines(await git(rootDir, ["log", "-1", "--format=%b", squashSha]))
@@ -161,7 +161,7 @@ function normalizeLines(value: string): string[] {
   return trimmed.split("\n").map((line) => line.trim()).filter(Boolean);
 }
 
-async function listRecentMainCommits(rootDir: string, parentSha: string, lookback: number): Promise<Array<{ sha: string; shortSha: string; subject: string }>> {
+export async function listRecentMainCommits(rootDir: string, parentSha: string, lookback: number): Promise<Array<{ sha: string; shortSha: string; subject: string }>> {
   const entries = normalizeLines(await git(rootDir, ["log", `--format=%H~%h~%s`, `-n`, String(lookback), parentSha]));
   return entries
     .map((entry) => {
@@ -179,9 +179,9 @@ async function listRecentMainCommits(rootDir: string, parentSha: string, lookbac
     .filter((entry): entry is { sha: string; shortSha: string; subject: string } => entry !== null);
 }
 
-function normalizeLookback(value: number | undefined): number {
+export function normalizeMergeOverlapLookback(value: number | undefined): number {
   if (!Number.isFinite(value) || !value || value < 1) {
-    return DEFAULT_LOOKBACK;
+    return MERGER_MAIN_OVERLAP_LOOKBACK_COMMITS;
   }
   return Math.trunc(value);
 }

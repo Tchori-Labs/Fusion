@@ -170,6 +170,23 @@ export function normalizeMergeConflictStrategy(
       return value;
   }
 }
+
+export const MERGE_STRATEGY_OVERLAP_BEHAVIORS = [
+  "flip-to-prefer-branch",
+  "warn-only",
+  "ignore",
+] as const;
+
+export type MergeStrategyOverlapBehavior = (typeof MERGE_STRATEGY_OVERLAP_BEHAVIORS)[number];
+
+export function normalizeMergeStrategyOverlapBehavior(
+  value: unknown,
+): MergeStrategyOverlapBehavior {
+  return typeof value === "string"
+    && (MERGE_STRATEGY_OVERLAP_BEHAVIORS as readonly string[]).includes(value)
+    ? value as MergeStrategyOverlapBehavior
+    : "flip-to-prefer-branch";
+}
 /** Policy for handling task execution when the selected node is unavailable/unhealthy. */
 export type UnavailableNodePolicy = "block" | "fallback-local";
 
@@ -2172,6 +2189,9 @@ export interface ProjectSettings {
   /** Strategy used when a merge conflict can't be resolved by AI. See
    *  {@link MergeConflictStrategy}. Default: "smart". */
   mergeConflictStrategy?: MergeConflictStrategy;
+  /** Controls overlap protection when `mergeConflictStrategy="smart-prefer-main"`
+   *  reaches its Attempt 3 fallback. Default: "flip-to-prefer-branch". */
+  mergeStrategyOverlapBehavior?: MergeStrategyOverlapBehavior;
   /** Wall-clock timeout (ms) for a single pre-merge workflow step's AI call.
    *  When a step exceeds this, the session is aborted and the executor is
    *  given one shot to retry with the configured fallback model before the

@@ -3881,6 +3881,26 @@ export function SettingsModal({
               </details>
             </div>
             <div className="form-group">
+              <label htmlFor="mergeStrategyOverlapBehavior">Smart Prefer Main Overlap Guard</label>
+              <select
+                id="mergeStrategyOverlapBehavior"
+                value={form.mergeStrategyOverlapBehavior ?? "flip-to-prefer-branch"}
+                onChange={(e) =>
+                  setForm((f) => ({
+                    ...f,
+                    mergeStrategyOverlapBehavior: e.target.value as "flip-to-prefer-branch" | "warn-only" | "ignore",
+                  }))
+                }
+              >
+                <option value="flip-to-prefer-branch">Flip overlapping files to prefer the task branch (default)</option>
+                <option value="warn-only">Warn only — keep legacy main-wins fallback</option>
+                <option value="ignore">Ignore overlap detection — preserve legacy behavior</option>
+              </select>
+              <small>
+                When using smart-prefer-main, automatically prefer the branch side for files that main has recently modified to avoid silently discarding branch work.
+              </small>
+            </div>
+            <div className="form-group">
               <label htmlFor="pushAfterMerge" className="checkbox-label">
                 <input
                   id="pushAfterMerge"

@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { normalizeMergeConflictStrategy } from "../types.js";
+import {
+  normalizeMergeConflictStrategy,
+  normalizeMergeStrategyOverlapBehavior,
+} from "../types.js";
 
 describe("normalizeMergeConflictStrategy", () => {
   it("maps legacy 'smart' to 'smart-prefer-branch'", () => {
@@ -28,5 +31,21 @@ describe("normalizeMergeConflictStrategy", () => {
 
   it("passes through 'abort' unchanged", () => {
     expect(normalizeMergeConflictStrategy("abort")).toBe("abort");
+  });
+});
+
+describe("normalizeMergeStrategyOverlapBehavior", () => {
+  it("returns the default when undefined", () => {
+    expect(normalizeMergeStrategyOverlapBehavior(undefined)).toBe("flip-to-prefer-branch");
+  });
+
+  it("passes through canonical values", () => {
+    expect(normalizeMergeStrategyOverlapBehavior("flip-to-prefer-branch")).toBe("flip-to-prefer-branch");
+    expect(normalizeMergeStrategyOverlapBehavior("warn-only")).toBe("warn-only");
+    expect(normalizeMergeStrategyOverlapBehavior("ignore")).toBe("ignore");
+  });
+
+  it("falls back to the default for unknown values", () => {
+    expect(normalizeMergeStrategyOverlapBehavior("legacy-mode")).toBe("flip-to-prefer-branch");
   });
 });
