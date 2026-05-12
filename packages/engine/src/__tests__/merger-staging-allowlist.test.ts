@@ -15,8 +15,8 @@
  *   6. Untracked file pre-existing in working tree (user WIP) — NOT staged
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from "node:fs";
+import { describe, it, expect, beforeEach, afterEach, afterAll, vi } from "vitest";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { execSync } from "node:child_process";
@@ -85,6 +85,30 @@ const STUB_SETTINGS = {
   commitAuthorEnabled: false, // skip --author flag to avoid user config issues
 };
 
+const createdDirs = new Set<string>();
+
+function cleanupTempDir(dir?: string): void {
+  if (!dir) return;
+  createdDirs.delete(dir);
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      if (!existsSync(dir)) return;
+      rmSync(dir, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      if (attempt === 3) {
+        throw error;
+      }
+    }
+  }
+}
+
+afterAll(() => {
+  for (const dir of Array.from(createdDirs)) {
+    cleanupTempDir(dir);
+  }
+});
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -94,12 +118,13 @@ describe("snapshotDirtyFiles", () => {
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "fusion-test-merger-snapshot-"));
+    createdDirs.add(dir);
     assertIsolatedWorkspace(dir);
     initRepo(dir);
   });
 
   afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
+    cleanupTempDir(dir);
   });
 
   it("returns empty set when working tree is clean", async () => {
@@ -159,14 +184,18 @@ describe("commitOrAmendMergeWithFixes — staging allowlist", () => {
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "fusion-test-merger-allowlist-"));
+    createdDirs.add(dir);
     assertIsolatedWorkspace(dir);
     initRepo(dir);
     warnSpy = vi.spyOn(mergerLog, "warn");
   });
 
   afterEach(() => {
-    warnSpy.mockRestore();
-    rmSync(dir, { recursive: true, force: true });
+    try {
+      warnSpy.mockRestore();
+    } finally {
+      cleanupTempDir(dir);
+    }
   });
 
   // ── Scenario 1: Unrelated dirty file is excluded ───────────────────────
@@ -543,14 +572,18 @@ describe("commitOrAmendMergeWithFixes — embedded-space paths round-trip", () =
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "fusion-test-merger-allowlist-spaces-"));
+    createdDirs.add(dir);
     assertIsolatedWorkspace(dir);
     initRepo(dir);
     warnSpy = vi.spyOn(mergerLog, "warn");
   });
 
   afterEach(() => {
-    warnSpy.mockRestore();
-    rmSync(dir, { recursive: true, force: true });
+    try {
+      warnSpy.mockRestore();
+    } finally {
+      cleanupTempDir(dir);
+    }
   });
 
   it("stages and commits a tracked file edited by the fix agent whose path contains spaces", async () => {

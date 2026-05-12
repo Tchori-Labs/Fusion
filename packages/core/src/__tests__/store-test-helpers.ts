@@ -45,6 +45,7 @@ export function createTaskStoreTestHarness() {
     globalDir: () => globalDir,
     store: () => store,
     beforeEach: async () => {
+      vi.useRealTimers();
       rootDir = makeTmpDir();
       globalDir = makeTmpDir();
       store = new TaskStore(rootDir, globalDir, { inMemoryDb: true });

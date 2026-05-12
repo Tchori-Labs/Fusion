@@ -3677,6 +3677,20 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
           ...(runContext ? { runContext } : {}),
         });
       }
+      if (assignmentChanged) {
+        this.syncAgentTaskLinkOnReassignment(id, previousAssignedAgentId, task.assignedAgentId);
+
+        if (task.checkedOutBy === previousAssignedAgentId) {
+          task.checkedOutBy = undefined;
+          task.checkedOutAt = undefined;
+        }
+
+        task.log.push({
+          timestamp: new Date().toISOString(),
+          action: `Agent task link synced: ${previousAssignedAgentId ?? "none"} → ${task.assignedAgentId ?? "none"}`,
+          ...(runContext ? { runContext } : {}),
+        });
+      }
       if (updates.pausedByAgentId === null) {
         task.pausedByAgentId = undefined;
       } else if (updates.pausedByAgentId !== undefined) {
@@ -4593,6 +4607,51 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         END
       WHERE taskId = ?
     `).run(updatedAt, updatedAt, taskId);
+  }
+
+  /**
+   * Sync `agents.taskId` when {@link updateTask} reassigns a task.
+   *
+   * Uses direct SQL against the shared `agents` table instead of AgentStore to
+   * avoid a circular dependency while keeping the column and JSON data blob in
+   * lockstep. Clearing the previous agent is race-guarded with `WHERE id = ?
+   * AND taskId = ?` so we do not clobber an agent that already moved on to a
+   * different task.
+   */
+  private syncAgentTaskLinkOnReassignment(
+    taskId: string,
+    previousAgentId: string | undefined,
+    newAgentId: string | undefined,
+  ): void {
+    const updatedAt = new Date().toISOString();
+
+    if (previousAgentId) {
+      this.db.prepare(`
+        UPDATE agents
+        SET
+          taskId = NULL,
+          updatedAt = ?,
+          data = CASE
+            WHEN json_valid(data) THEN json_set(json_remove(data, '$.taskId'), '$.updatedAt', ?)
+            ELSE data
+          END
+        WHERE id = ? AND taskId = ?
+      `).run(updatedAt, updatedAt, previousAgentId, taskId);
+    }
+
+    if (newAgentId) {
+      this.db.prepare(`
+        UPDATE agents
+        SET
+          taskId = ?,
+          updatedAt = ?,
+          data = CASE
+            WHEN json_valid(data) THEN json_set(data, '$.taskId', ?, '$.updatedAt', ?)
+            ELSE data
+          END
+        WHERE id = ?
+      `).run(taskId, updatedAt, taskId, updatedAt, newAgentId);
+    }
   }
 
   /**

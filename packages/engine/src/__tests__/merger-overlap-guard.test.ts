@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { execSync } from "node:child_process";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
@@ -151,17 +151,42 @@ function assertIsolatedWorkspace(dir: string): void {
   expect(resolve(dir).startsWith(resolve(repoRoot))).toBe(false);
 }
 
+const createdDirs = new Set<string>();
+
+function cleanupTempDir(dir?: string): void {
+  if (!dir) return;
+  createdDirs.delete(dir);
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      if (!existsSync(dir)) return;
+      rmSync(dir, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      if (attempt === 3) {
+        throw error;
+      }
+    }
+  }
+}
+
+afterAll(() => {
+  for (const dir of Array.from(createdDirs)) {
+    cleanupTempDir(dir);
+  }
+});
+
 describe("merger overlap guard", () => {
   let dir: string;
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "fusion-test-overlap-guard-"));
+    createdDirs.add(dir);
     assertIsolatedWorkspace(dir);
     initRepo(dir);
   });
 
   afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
+    cleanupTempDir(dir);
   });
 
   it("detects overlap when branch and recent main commits touch the same file", async () => {
@@ -302,12 +327,13 @@ describe("aiMergeTask overlap-aware fallback integration", () => {
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "fusion-test-overlap-merge-"));
+    createdDirs.add(dir);
     assertIsolatedWorkspace(dir);
     initRepo(dir);
   });
 
   afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
+    cleanupTempDir(dir);
   });
 
   it("defaults to restoring the branch version for overlapping files under smart-prefer-main", async () => {

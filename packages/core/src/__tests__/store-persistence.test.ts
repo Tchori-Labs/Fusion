@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { AgentStore } from "../agent-store.js";
+import { TaskStore } from "../store.js";
 import { createTaskStoreTestHarness } from "./store-test-helpers.js";
 
 describe("TaskStore", () => {
@@ -54,6 +56,133 @@ describe("TaskStore", () => {
       const listedAssigned = tasks.find((t) => t.id === assigned.id);
 
       expect(listedAssigned?.assignedAgentId).toBe("agent-list");
+    });
+  });
+
+  describe("agent taskId sync on reassignment", () => {
+    it("reassignment clears the old agent taskId and sets the new agent taskId", async () => {
+      harness.store().close();
+      const store = new TaskStore(harness.rootDir(), harness.globalDir());
+      await store.init();
+      const agentStore = new AgentStore({ rootDir: store.getFusionDir() });
+      await agentStore.init();
+
+      try {
+        const task = await store.createTask({ description: "Reassignment target" });
+        const agentA = await agentStore.createAgent({ name: "Agent A", role: "executor" });
+        const agentB = await agentStore.createAgent({ name: "Agent B", role: "executor" });
+
+        await store.updateTask(task.id, { assignedAgentId: agentA.id });
+        expect((await agentStore.getAgent(agentA.id))?.taskId).toBe(task.id);
+
+        await store.updateTask(task.id, { assignedAgentId: agentB.id });
+
+        expect((await agentStore.getAgent(agentA.id))?.taskId).toBeUndefined();
+        expect((await agentStore.getAgent(agentB.id))?.taskId).toBe(task.id);
+      } finally {
+        agentStore.close();
+        store.close();
+      }
+    });
+
+    it("reassignment clears stale checkedOutBy when the outgoing agent held the lease", async () => {
+      harness.store().close();
+      const store = new TaskStore(harness.rootDir(), harness.globalDir());
+      await store.init();
+      const agentStore = new AgentStore({ rootDir: store.getFusionDir(), taskStore: store });
+      await agentStore.init();
+
+      try {
+        const task = await store.createTask({ description: "Checkout cleanup target" });
+        const agentA = await agentStore.createAgent({ name: "Agent A Checkout", role: "executor" });
+        const agentB = await agentStore.createAgent({ name: "Agent B Checkout", role: "executor" });
+
+        await store.updateTask(task.id, { assignedAgentId: agentA.id });
+        await agentStore.checkoutTask(agentA.id, task.id);
+        expect((await store.getTask(task.id)).checkedOutBy).toBe(agentA.id);
+
+        const updated = await store.updateTask(task.id, { assignedAgentId: agentB.id });
+        expect(updated.checkedOutBy).toBeUndefined();
+      } finally {
+        agentStore.close();
+        store.close();
+      }
+    });
+
+    it("unassignment clears the agent taskId", async () => {
+      harness.store().close();
+      const store = new TaskStore(harness.rootDir(), harness.globalDir());
+      await store.init();
+      const agentStore = new AgentStore({ rootDir: store.getFusionDir() });
+      await agentStore.init();
+
+      try {
+        const task = await store.createTask({ description: "Unassign target" });
+        const agent = await agentStore.createAgent({ name: "Sole Agent", role: "executor" });
+
+        await store.updateTask(task.id, { assignedAgentId: agent.id });
+        expect((await agentStore.getAgent(agent.id))?.taskId).toBe(task.id);
+
+        await store.updateTask(task.id, { assignedAgentId: null });
+
+        expect((await agentStore.getAgent(agent.id))?.taskId).toBeUndefined();
+      } finally {
+        agentStore.close();
+        store.close();
+      }
+    });
+
+    it("re-setting the same agent id is a no-op for agent task links", async () => {
+      harness.store().close();
+      const store = new TaskStore(harness.rootDir(), harness.globalDir());
+      await store.init();
+      const agentStore = new AgentStore({ rootDir: store.getFusionDir() });
+      await agentStore.init();
+
+      try {
+        const task = await store.createTask({ description: "Idempotent target" });
+        const agentA = await agentStore.createAgent({ name: "Agent Same", role: "executor" });
+
+        await store.updateTask(task.id, { assignedAgentId: agentA.id });
+        expect((await agentStore.getAgent(agentA.id))?.taskId).toBe(task.id);
+
+        await store.updateTask(task.id, { assignedAgentId: agentA.id });
+
+        expect((await agentStore.getAgent(agentA.id))?.taskId).toBe(task.id);
+      } finally {
+        agentStore.close();
+        store.close();
+      }
+    });
+
+    it("does not clear the outgoing agent taskId when it already moved to another task", async () => {
+      harness.store().close();
+      const store = new TaskStore(harness.rootDir(), harness.globalDir());
+      await store.init();
+      const agentStore = new AgentStore({ rootDir: store.getFusionDir() });
+      await agentStore.init();
+
+      try {
+        const task1 = await store.createTask({ description: "Race guard task 1" });
+        const task2 = await store.createTask({ description: "Race guard task 2" });
+        const agentA = await agentStore.createAgent({ name: "Agent Race A", role: "executor" });
+        const agentB = await agentStore.createAgent({ name: "Agent Race B", role: "executor" });
+
+        await store.updateTask(task1.id, { assignedAgentId: agentA.id });
+        expect((await agentStore.getAgent(agentA.id))?.taskId).toBe(task1.id);
+        expect((await agentStore.getAgent(agentB.id))?.taskId).toBeUndefined();
+
+        await agentStore.syncExecutionTaskLink(agentA.id, task2.id);
+        expect((await agentStore.getAgent(agentA.id))?.taskId).toBe(task2.id);
+
+        await store.updateTask(task1.id, { assignedAgentId: agentB.id });
+
+        expect((await agentStore.getAgent(agentA.id))?.taskId).toBe(task2.id);
+        expect((await agentStore.getAgent(agentB.id))?.taskId).toBe(task1.id);
+      } finally {
+        agentStore.close();
+        store.close();
+      }
     });
   });
 
