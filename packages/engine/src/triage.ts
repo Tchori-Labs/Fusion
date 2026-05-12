@@ -2064,12 +2064,13 @@ export class TriageProcessor {
     // ordering as defense in depth so a future change to the guard can't
     // resurrect the regression.
     const promptDeclaredTitle = extractPromptDeclaredTitle(written, task.id);
+    const shouldApplyPromptDeclaredTitle = shouldReplaceTaskTitleFromPrompt(task, promptDeclaredTitle);
 
     await this.store.updateTask(task.id, taskUpdates);
 
     if (settings.requirePlanApproval) {
       const approvalUpdates: Record<string, unknown> = { status: "awaiting-approval" };
-      if (promptDeclaredTitle) {
+      if (shouldApplyPromptDeclaredTitle && promptDeclaredTitle) {
         approvalUpdates.title = promptDeclaredTitle;
       }
       await this.store.updateTask(task.id, approvalUpdates);
@@ -2083,7 +2084,7 @@ export class TriageProcessor {
 
     await this.store.moveTask(task.id, "todo");
 
-    if (promptDeclaredTitle) {
+    if (shouldApplyPromptDeclaredTitle && promptDeclaredTitle) {
       await this.store.updateTask(task.id, { title: promptDeclaredTitle });
     }
 
@@ -2112,11 +2113,30 @@ function extractPromptDeclaredTitle(prompt: string, taskId: string): string | nu
   if (!title) return null;
 
   // Conservative guard: do not overwrite metadata with confirmation prose.
-  if (/^created\s+(?:task\s+)?(?:fn-\d+\b|\*\*\s*fn-\d+\s*\*\*)/i.test(title)) {
+  if (isMalformedTaskTitle(title)) {
     return null;
   }
 
   return title;
+}
+
+function isMalformedTaskTitle(title: string): boolean {
+  return /^created\s+(?:task\s+)?(?:fn-\d+\b|\*\*\s*fn-\d+\s*\*\*)/i.test(title.trim());
+}
+
+function shouldReplaceTaskTitleFromPrompt(task: Task, promptDeclaredTitle: string | null): boolean {
+  if (!promptDeclaredTitle) return false;
+
+  if (
+    task.sourceType === "github_import" &&
+    task.sourceIssue?.provider === "github" &&
+    task.title?.trim() &&
+    !isMalformedTaskTitle(task.title)
+  ) {
+    return false;
+  }
+
+  return true;
 }
 
 function hasLatestSpecReviewApproval(task: Task): boolean {

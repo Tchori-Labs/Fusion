@@ -230,7 +230,7 @@ interface MemoryAuditState {
 /** Input for processing an insight extraction run. */
 export interface ProcessRunInput {
   /** Raw AI response text from the insight extraction step. */
-  rawResponse: string;
+  rawResponse?: string;
   /** Whether the AI step itself succeeded. */
   stepSuccess: boolean;
   /** Timestamp of the run. */
@@ -1118,7 +1118,7 @@ export async function processInsightExtractionRun(
   let parseError: string | undefined;
 
   // Try to parse the AI response
-  if (stepSuccess && rawResponse.trim()) {
+  if (stepSuccess && rawResponse?.trim()) {
     try {
       parsedResult = parseInsightExtractionResponse(rawResponse);
     } catch (err) {

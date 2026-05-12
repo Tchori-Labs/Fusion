@@ -838,6 +838,19 @@ describe("memory-insights run processing", () => {
       expect(result.summary).toContain("AI timeout");
     });
 
+    it("should treat undefined successful response as no output", async () => {
+      const result = await processInsightExtractionRun(tempDir, {
+        rawResponse: undefined,
+        stepSuccess: true,
+        runAt: new Date().toISOString(),
+      });
+
+      expect(result.insights).toHaveLength(0);
+      expect(result.summary).toBe("Step did not produce output");
+      expect(result.newInsightCount).toBe(0);
+      expect(result.duplicateCount).toBe(0);
+    });
+
     it("should preserve existing insights on failure", async () => {
       // Create existing insights
       const existingInsights = `# Memory Insights
