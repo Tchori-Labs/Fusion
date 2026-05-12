@@ -179,6 +179,17 @@ export async function maybeCreateTrackingIssue(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     deps.logger?.warn?.(`[github-tracking] Failed to create issue for ${task.id} in ${repo.owner}/${repo.repo}: ${message}`);
+    await deps.taskStore.recordActivity({
+      type: "task:updated",
+      taskId: task.id,
+      taskTitle: task.title,
+      details: `GitHub tracking issue not created: ${message}`,
+      metadata: {
+        type: "github-issue-failed",
+        reason: "github_error",
+        message,
+      },
+    });
     return { created: false, reason: "github_error" };
   }
 }

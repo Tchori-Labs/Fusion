@@ -66,16 +66,9 @@ describe("GitHubClient", () => {
   });
 
   describe("createIssue", () => {
-    it("uses gh path when authenticated", async () => {
-      mockRunGhJsonAsync.mockResolvedValue({ url: "https://github.com/o/r/issues/8", number: 8, createdAt: "2026-01-02T00:00:00Z" } as any);
-      const issue = await client.createIssue({ owner: "o", repo: "r", title: "t", body: "b", labels: ["bug"] });
-      expect(mockRunGhJsonAsync).toHaveBeenCalled();
-      expect(issue.number).toBe(8);
-    });
-
     it("falls back to API when gh path fails and token is configured", async () => {
       const clientWithToken = new GitHubClient("ghp_token");
-      mockRunGhJsonAsync.mockRejectedValue(new Error("gh failed"));
+      mockRunGhAsync.mockRejectedValue(new Error("gh failed"));
       const fetchSpy = vi.spyOn(global, "fetch" as any).mockResolvedValue({
         ok: true,
         status: 201,
@@ -84,7 +77,8 @@ describe("GitHubClient", () => {
 
       const issue = await clientWithToken.createIssue({ owner: "o", repo: "r", title: "t", body: "b" });
       expect(issue).toEqual({ owner: "o", repo: "r", number: 7, htmlUrl: "https://github.com/o/r/issues/7", createdAt: "2026-01-01T00:00:00Z" });
-      expect(mockRunGhJsonAsync).toHaveBeenCalled();
+      expect(mockRunGhAsync).toHaveBeenCalled();
+      expect(mockRunGhJsonAsync).not.toHaveBeenCalled();
       fetchSpy.mockRestore();
     });
 
@@ -119,6 +113,82 @@ describe("GitHubClient", () => {
       const clientWithToken = new GitHubClient("ghp_token");
       vi.spyOn(global, "fetch" as any).mockResolvedValue({ ok: false, status: 404, statusText: "Not Found", json: async () => ({ message: "Not Found" }) } as any);
       await expect(clientWithToken.createIssue({ owner: "o", repo: "r", title: "t", body: "b" })).rejects.toThrow("Failed to create GitHub issue");
+    });
+  });
+
+  describe("GitHubClient.createIssue (gh-cli mode)", () => {
+    it("creates an issue from gh stdout and follow-up view metadata", async () => {
+      mockRunGhAsync.mockResolvedValue("https://github.com/acme/repo/issues/42\n");
+      mockRunGhJsonAsync.mockResolvedValue({
+        number: 42,
+        url: "https://github.com/acme/repo/issues/42",
+        createdAt: "2025-01-02T03:04:05Z",
+      } as any);
+      const ghClient = new GitHubClient({ forceMode: "gh-cli" });
+
+      const issue = await ghClient.createIssue({ owner: "acme", repo: "repo", title: "T", body: "B" });
+
+      expect(issue).toEqual({
+        owner: "acme",
+        repo: "repo",
+        number: 42,
+        htmlUrl: "https://github.com/acme/repo/issues/42",
+        createdAt: "2025-01-02T03:04:05Z",
+      });
+      expect(mockRunGhAsync).toHaveBeenCalledWith([
+        "issue",
+        "create",
+        "--repo",
+        "acme/repo",
+        "--title",
+        "T",
+        "--body",
+        "B",
+      ]);
+      expect(mockRunGhAsync).toHaveBeenCalledWith(expect.not.arrayContaining(["--json"]));
+      expect(mockRunGhJsonAsync).toHaveBeenCalledWith([
+        "issue",
+        "view",
+        "https://github.com/acme/repo/issues/42",
+        "--json",
+        "number,url,createdAt",
+      ]);
+    });
+
+    it("passes labels without adding --json to issue create", async () => {
+      mockRunGhAsync.mockResolvedValue("https://github.com/acme/repo/issues/42\n");
+      mockRunGhJsonAsync.mockResolvedValue({
+        number: 42,
+        url: "https://github.com/acme/repo/issues/42",
+        createdAt: "2025-01-02T03:04:05Z",
+      } as any);
+      const ghClient = new GitHubClient({ forceMode: "gh-cli" });
+
+      await ghClient.createIssue({ owner: "acme", repo: "repo", title: "T", body: "B", labels: ["a", "b"] });
+
+      expect(mockRunGhAsync).toHaveBeenCalledWith([
+        "issue",
+        "create",
+        "--repo",
+        "acme/repo",
+        "--title",
+        "T",
+        "--body",
+        "B",
+        "--label",
+        "a,b",
+      ]);
+      expect(mockRunGhAsync).toHaveBeenCalledWith(expect.not.arrayContaining(["--json"]));
+    });
+
+    it("rejects malformed gh stdout without calling issue view", async () => {
+      mockRunGhAsync.mockResolvedValue("oops");
+      const ghClient = new GitHubClient({ forceMode: "gh-cli" });
+
+      await expect(ghClient.createIssue({ owner: "acme", repo: "repo", title: "T", body: "B" })).rejects.toThrow(
+        "Failed to parse issue URL from gh output",
+      );
+      expect(mockRunGhJsonAsync).not.toHaveBeenCalled();
     });
   });
 

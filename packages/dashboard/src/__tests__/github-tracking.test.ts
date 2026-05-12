@@ -223,4 +223,29 @@ describe("maybeCreateTrackingIssue", () => {
 
     expect(resolveAuthMock).toHaveBeenCalledWith(expect.objectContaining({ globalSettings }));
   });
+
+  it("records activity when GitHub issue creation fails", async () => {
+    const recordActivity = vi.fn();
+    createIssueMock.mockRejectedValue(new Error("gh create failed"));
+
+    const result = await maybeCreateTrackingIssue(buildTask({ title: "Test", githubTracking: { enabled: true } }), {
+      taskStore: { recordActivity, linkGithubIssue: vi.fn() } as any,
+      projectSettings: {},
+      globalSettings: { githubTrackingDefaultRepo: "o/r" } as any,
+      logger: { warn: vi.fn(), info: vi.fn() },
+    });
+
+    expect(result).toEqual({ created: false, reason: "github_error" });
+    expect(recordActivity).toHaveBeenCalledWith(expect.objectContaining({
+      type: "task:updated",
+      taskId: "FN-1",
+      taskTitle: "Test",
+      details: "GitHub tracking issue not created: gh create failed",
+      metadata: expect.objectContaining({
+        type: "github-issue-failed",
+        reason: "github_error",
+        message: "gh create failed",
+      }),
+    }));
+  });
 });

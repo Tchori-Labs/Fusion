@@ -16,6 +16,21 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function parseIssueUrl(stdout: string): { owner: string; repo: string; number: number; url: string } {
+  const url = stdout.trim();
+  const match = url.match(/^https:\/\/github\.com\/([^/]+)\/([^/]+)\/issues\/(\d+)$/);
+  if (!match) {
+    throw new Error(`Failed to parse issue URL from gh output: ${JSON.stringify(stdout)}`);
+  }
+
+  return {
+    owner: match[1],
+    repo: match[2],
+    number: Number.parseInt(match[3], 10),
+    url,
+  };
+}
+
 /**
  * Result of a throttled fetch operation.
  */
@@ -514,7 +529,7 @@ export class GitHubClient {
   }
 
   private async createIssueWithGh(params: CreateIssueParams): Promise<CreatedIssue> {
-    const issue = await runGhJsonAsync<{ url: string; number: number; createdAt: string }>([
+    const stdout = await runGhAsync([
       "issue",
       "create",
       "--repo",
@@ -524,8 +539,14 @@ export class GitHubClient {
       "--body",
       params.body,
       ...(params.labels && params.labels.length > 0 ? ["--label", params.labels.join(",")] : []),
+    ]);
+    const parsed = parseIssueUrl(stdout);
+    const issue = await runGhJsonAsync<{ number: number; url: string; createdAt: string }>([
+      "issue",
+      "view",
+      parsed.url,
       "--json",
-      "url,number,createdAt",
+      "number,url,createdAt",
     ]);
 
     return {
