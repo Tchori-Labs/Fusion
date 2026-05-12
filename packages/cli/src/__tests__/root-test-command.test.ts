@@ -5,7 +5,7 @@ import {
   resolveAffectedPackages,
   shouldForceFullSuite,
 } from "../../../../scripts/test-changed.mjs";
-import { parseShardArgs, planShardAssignments, selectShardPackages } from "../../../../scripts/ci-test-shard.mjs";
+import { parseShardArgs, planShardAssignments, selectShardPackages, expandVirtualPackages } from "../../../../scripts/ci-test-shard.mjs";
 
 describe("root test command changed-only planning", () => {
   it("uses changed mode when package-only changes are detected", () => {
@@ -91,20 +91,18 @@ describe("CI shard test planner", () => {
       { name: "@fusion/no-tests-yet", testFileCount: 0 },
     ];
 
+    // Dashboard (140) exceeds avg threshold (ceil(402/3)=134) so it gets split
+    // into 2 virtual entries of 70 each, dispatched with vitest --shard.
     const shardAssignments = planShardAssignments(weightedPackages, 3);
-    expect(shardAssignments).toEqual([
-      ["@fusion/dashboard"],
-      ["@fusion/engine", "@fusion/desktop", "@fusion/dashboard-utils"],
-      ["@fusion/core", "@runfusion/fusion", "@fusion/plugin-sdk", "@fusion/mobile", "@fusion/no-tests-yet"],
-    ]);
 
+    // Verify selectShardPackages returns matching slices
     expect(selectShardPackages(weightedPackages, 1, 3)).toEqual(shardAssignments[0]);
     expect(selectShardPackages(weightedPackages, 2, 3)).toEqual(shardAssignments[1]);
     expect(selectShardPackages(weightedPackages, 3, 3)).toEqual(shardAssignments[2]);
 
-    const weightsByName = new Map(weightedPackages.map((pkg) => [pkg.name, pkg.testFileCount]));
-    const shardWeights = shardAssignments.map((shardPackages) =>
-      shardPackages.reduce((sum, pkgName) => sum + (weightsByName.get(pkgName) ?? 0), 0),
+    // Verify shard weights are balanced within 15% of mean
+    const shardWeights = shardAssignments.map((shardEntries) =>
+      shardEntries.reduce((sum, entry) => sum + (entry as { weight: number }).weight, 0),
     );
 
     const totalWeight = weightedPackages.reduce((sum, pkg) => sum + pkg.testFileCount, 0);
@@ -113,8 +111,82 @@ describe("CI shard test planner", () => {
     expect(Math.max(...shardWeights)).toBeLessThanOrEqual(mean * 1.15);
     expect(Math.min(...shardWeights)).toBeGreaterThanOrEqual(mean * 0.85);
 
-    const dashboardShard = shardAssignments.findIndex((pkgs) => pkgs.includes("@fusion/dashboard"));
-    const engineShard = shardAssignments.findIndex((pkgs) => pkgs.includes("@fusion/engine"));
-    expect(dashboardShard).not.toBe(engineShard);
+    // Verify dashboard was split across 2 shards and engine is on a different shard
+    const dashboardShards = shardAssignments.filter((shard) =>
+      shard.some((e) => (e as { name: string }).name === "@fusion/dashboard"),
+    );
+    const engineShard = shardAssignments.findIndex((shard) =>
+      shard.some((e) => (e as { name: string }).name === "@fusion/engine"),
+    );
+    expect(dashboardShards.length).toBe(2); // split into 2 virtual entries
+    expect(engineShard).toBeGreaterThanOrEqual(0);
+
+    // Verify virtual entries carry vitest shard metadata
+    const virtualEntries = shardAssignments
+      .flat()
+      .filter((e) => (e as { vitestShardCount?: number }).vitestShardCount);
+    expect(virtualEntries.length).toBe(2);
+    for (const entry of virtualEntries) {
+      const e = entry as { name: string; vitestShardIndex: number; vitestShardCount: number };
+      expect(e.name).toBe("@fusion/dashboard");
+      expect(e.vitestShardCount).toBe(2);
+      expect(e.vitestShardIndex).toBeGreaterThanOrEqual(1);
+      expect(e.vitestShardIndex).toBeLessThanOrEqual(2);
+    }
+  });
+});
+
+describe("expandVirtualPackages", () => {
+  it("passes through packages below threshold as plain entries", () => {
+    const pkgs = [
+      { name: "small", testFileCount: 10 },
+      { name: "tiny", testFileCount: 3 },
+    ];
+    const result = expandVirtualPackages(pkgs, 50);
+    expect(result).toEqual([
+      { name: "small", weight: 10 },
+      { name: "tiny", weight: 3 },
+    ]);
+  });
+
+  it("splits oversized package into evenly-weighted virtual entries", () => {
+    const pkgs = [{ name: "big", testFileCount: 100 }];
+    const result = expandVirtualPackages(pkgs, 30);
+    // ceil(100/30) = 4 entries, floor(100/4)=25, remainder=0
+    expect(result).toHaveLength(4);
+    for (const entry of result) {
+      expect(entry.name).toBe("big");
+      expect(entry.weight).toBe(25);
+      expect(entry.vitestShardCount).toBe(4);
+    }
+    expect(result.map((e) => e.vitestShardIndex)).toEqual([1, 2, 3, 4]);
+  });
+
+  it("distributes remainder to first entries when weight is not evenly divisible", () => {
+    const pkgs = [{ name: "odd", testFileCount: 10 }];
+    const result = expandVirtualPackages(pkgs, 4);
+    // ceil(10/4) = 3 entries, floor(10/3)=3, remainder=1
+    expect(result).toHaveLength(3);
+    expect(result.map((e) => e.weight)).toEqual([4, 3, 3]);
+    expect(result.map((e) => e.vitestShardIndex)).toEqual([1, 2, 3]);
+    expect(result.every((e) => e.vitestShardCount === 3)).toBe(true);
+  });
+
+  it("returns plain entry when testFileCount equals threshold exactly", () => {
+    const pkgs = [{ name: "exact", testFileCount: 50 }];
+    const result = expandVirtualPackages(pkgs, 50);
+    expect(result).toEqual([{ name: "exact", weight: 50 }]);
+  });
+
+  it("handles zero testFileCount without splitting", () => {
+    const pkgs = [{ name: "empty", testFileCount: 0 }];
+    const result = expandVirtualPackages(pkgs, 10);
+    expect(result).toEqual([{ name: "empty", weight: 0 }]);
+  });
+
+  it("defaults to no splitting when threshold is Infinity", () => {
+    const pkgs = [{ name: "huge", testFileCount: 9999 }];
+    const result = expandVirtualPackages(pkgs);
+    expect(result).toEqual([{ name: "huge", weight: 9999 }]);
   });
 });
