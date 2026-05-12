@@ -269,6 +269,25 @@ describe.skipIf(!SHOULD_RUN_LEGACY_EXTENSION_INTEGRATION)("fn pi extension (lega
       expect(result.content[0].text).toContain("Fix the login button");
       expect(result.content[0].text).toContain("triage");
       expect(result.details.column).toBe("triage");
+      expect(result.details.priority).toBe("normal");
+    });
+
+    it("creates a task with explicit priority", async () => {
+      const tool = api.tools.get("fn_task_create")!;
+      const result = await tool.execute(
+        "call-priority",
+        { description: "Urgent task", priority: "urgent" },
+        undefined,
+        undefined,
+        makeCtx(tmpDir),
+      );
+
+      expect(result.details.priority).toBe("urgent");
+      expect(result.content[0].text).toContain("Priority: urgent");
+
+      const showTool = api.tools.get("fn_task_show")!;
+      const show = await showTool.execute("s-priority", { id: result.details.taskId }, undefined, undefined, makeCtx(tmpDir));
+      expect(show.details.task.priority).toBe("urgent");
     });
 
     it("creates a task with dependencies", async () => {

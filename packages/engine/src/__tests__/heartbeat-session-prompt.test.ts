@@ -134,6 +134,7 @@ describe("createHeartbeatTools", () => {
       description: "Follow-up task",
       dependencies: undefined,
       column: "triage",
+      priority: undefined,
       source: {
         sourceType: "agent_heartbeat",
         sourceAgentId: "agent-001",
@@ -145,6 +146,18 @@ describe("createHeartbeatTools", () => {
     expect(responseText).toContain("Created FN-100");
     expect((result.details as any).taskId).toBe("FN-100");
     expect(result.details).toEqual({ taskId: "FN-100" });
+  });
+
+  it("fn_task_create forwards explicit priority to TaskStore.createTask", async () => {
+    const store = createMockStore();
+    const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: "/tmp" });
+
+    const tools = monitor.createHeartbeatTools("agent-001", mockTaskStore, "FN-001");
+    await tools[0]!.execute("call-1", { description: "Follow-up task", priority: "urgent" }, undefined as any, undefined as any, undefined as any);
+
+    expect(mockTaskStore.createTask).toHaveBeenCalledWith(expect.objectContaining({
+      priority: "urgent",
+    }), expect.any(Object));
   });
 
   it("fn_task_create details includes taskId matching mock store return", async () => {

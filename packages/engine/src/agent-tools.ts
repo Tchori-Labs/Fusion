@@ -26,10 +26,17 @@ import { computeApprovalDedupeKey } from "./agent-action-gate.js";
 
 // ── Tool parameter schemas (canonical definitions) ────────────────────────
 
+const TASK_CREATE_PRIORITY_VALUES = ["low", "normal", "high", "urgent"] as const;
+
 export const taskCreateParams = Type.Object({
   description: Type.String({ description: "What needs to be done" }),
   dependencies: Type.Optional(
     Type.Array(Type.String(), { description: "Task IDs this new task depends on (e.g. [\"KB-001\"])" }),
+  ),
+  priority: Type.Optional(
+    Type.Union(TASK_CREATE_PRIORITY_VALUES.map((priority) => Type.Literal(priority)), {
+      description: "Task priority (low, normal, high, urgent)",
+    }),
   ),
 });
 
@@ -628,6 +635,7 @@ export function createTaskCreateTool(
           description: params.description,
           dependencies: params.dependencies,
           column: "triage",
+          priority: params.priority,
           source: provenance ? {
             sourceType: provenance.sourceType,
             sourceAgentId: provenance.sourceAgentId,

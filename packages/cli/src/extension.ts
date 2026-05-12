@@ -8,6 +8,7 @@ import {
   validateNodeOverrideChange,
   type Task,
   type InsightCategory,
+  type TaskPriority,
   type InsightStatus,
   type InsightRunStatus,
   type InsightRunTrigger,
@@ -19,6 +20,7 @@ import {
   canAgentTakeImplementationTaskForExplicitRouting,
   formatRoleMismatchReason,
   resolveAgentProvisioningPolicy,
+  TASK_PRIORITIES,
 } from "@fusion/core";
 import {
   getGhErrorMessage,
@@ -406,6 +408,9 @@ export default function kbExtension(pi: ExtensionAPI) {
           description: "Agent ID to assign this task to (e.g. 'agent-abc123')",
         }),
       ),
+      priority: Type.Optional(
+        StringEnum([...TASK_PRIORITIES], { description: "Task priority (low, normal, high, urgent)" }) as unknown as TSchema,
+      ),
     }),
 
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
@@ -430,6 +435,7 @@ export default function kbExtension(pi: ExtensionAPI) {
           description: params.description.trim(),
           dependencies: params.depends,
           assignedAgentId: normalizedAgentId === null ? undefined : normalizedAgentId,
+          priority: params.priority as TaskPriority | undefined,
           source: { sourceType: "api" },
         });
 
@@ -451,6 +457,7 @@ export default function kbExtension(pi: ExtensionAPI) {
                 (task.assignedAgentId
                   ? `Assigned to: ${task.assignedAgentId}\n`
                   : "") +
+                `Priority: ${task.priority}\n` +
                 `Path: .fusion/tasks/${task.id}/`,
             },
           ],
@@ -459,6 +466,7 @@ export default function kbExtension(pi: ExtensionAPI) {
             column: task.column,
             dependencies: task.dependencies,
             assignedAgentId: task.assignedAgentId,
+            priority: task.priority,
           },
         };
       } catch (error) {

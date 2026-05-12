@@ -2603,12 +2603,34 @@ describe("executeHeartbeat", () => {
         description: "Follow-up task",
         dependencies: undefined,
         column: "triage",
+        priority: undefined,
         source: {
           sourceType: "agent_heartbeat",
           sourceAgentId: "agent-001",
           sourceRunId: undefined,
         },
       }, expect.objectContaining({ settings: { autoSummarizeTitles: false } }));
+    });
+
+    it("forwards explicit priority when fn_task_create tool is called", async () => {
+      const store = createStoreWithAgentForExec();
+      let capturedCreateTool: any;
+      const mockSession = createMockAgentSession();
+      mockedCreateFnAgent.mockImplementation(async (opts: any) => {
+        capturedCreateTool = opts.customTools[0];
+        return { session: mockSession as any };
+      });
+
+      mockSession.prompt = vi.fn().mockImplementation(async () => {
+        await capturedCreateTool.execute("call-1", { description: "Follow-up task", priority: "high" });
+      });
+
+      const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: "/tmp" });
+      await monitor.executeHeartbeat({ agentId: "agent-001", source: "on_demand" });
+
+      expect(mockTaskStore.createTask).toHaveBeenCalledWith(expect.objectContaining({
+        priority: "high",
+      }), expect.any(Object));
     });
   });
 

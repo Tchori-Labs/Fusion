@@ -61,7 +61,7 @@ Based on the user's request, route to the appropriate workflow:
 <quick_reference>
 
 **Create a task:**
-Use `fn_task_create` with a descriptive message. Include the problem AND desired outcome.
+Use `fn_task_create` with a descriptive message. Include the problem AND desired outcome, and set `priority` (`low`/`normal`/`high`/`urgent`) when urgency matters.
 
 **List tasks:**
 Use `fn_task_list` to see all tasks grouped by column. Use `column` param to filter.

@@ -11,7 +11,7 @@ These tools are **not** part of the user-invokable extension surface. They are i
 
 | Tool | Agent Types | Purpose | Parameters |
 |---|---|---|---|
-| `fn_task_create` | triage, executor, heartbeat | Create a follow-up task from within an agent run | `description` (string), `dependencies?` (string[]) |
+| `fn_task_create` | triage, executor, heartbeat | Create a follow-up task from within an agent run | `description` (string), `dependencies?` (string[]), `priority?` (`low` \| `normal` \| `high` \| `urgent`) |
 | `fn_task_log` | executor, heartbeat | Write significant task log entries | `message` (string), `outcome?` (string) |
 | `fn_task_document_write` | triage, executor, heartbeat | Save/update a named task document revision | `key` (string), `content` (string), `author?` (string) |
 | `fn_task_document_read` | triage, executor, heartbeat | Read one task document or list all | `key?` (string) |

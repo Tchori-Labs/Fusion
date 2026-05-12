@@ -20,6 +20,10 @@ function initRepo(dir: string): void {
   git(dir, 'git commit -m "chore: initial"');
 }
 
+function testTempParent(): string {
+  return process.env.FUSION_TEST_WORKER_ROOT ?? tmpdir();
+}
+
 function assertIsolatedWorkspace(dir: string): void {
   const repoRoot = process.env.FUSION_TEST_REAL_ROOT;
   if (!repoRoot) return;
@@ -51,7 +55,7 @@ describe("commitOrAmendMergeWithFixes ancestor/equivalent-content short-circuit"
   let dir: string;
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "fusion-test-merger-ancestor-"));
+    dir = mkdtempSync(join(testTempParent(), "fusion-test-merger-ancestor-"));
     assertIsolatedWorkspace(dir);
     initRepo(dir);
   });

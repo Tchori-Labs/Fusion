@@ -38,6 +38,10 @@ function createAutostash(dir: string, label: string, content: string): string {
   return sha;
 }
 
+function testTempParent(): string {
+  return process.env.FUSION_TEST_WORKER_ROOT ?? tmpdir();
+}
+
 function assertIsolatedWorkspace(dir: string): void {
   const repoRoot = process.env.FUSION_TEST_REAL_ROOT;
   if (!repoRoot) return;
@@ -48,7 +52,7 @@ describe("autostash orphan surface", () => {
   let dir: string;
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "fusion-test-merger-autostash-surface-"));
+    dir = mkdtempSync(join(testTempParent(), "fusion-test-merger-autostash-surface-"));
     assertIsolatedWorkspace(dir);
     initRepo(dir);
   });

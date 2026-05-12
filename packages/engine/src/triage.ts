@@ -1574,11 +1574,17 @@ export class TriageProcessor {
     const taskGetParams = Type.Object({
       id: Type.String({ description: "Task ID (e.g. KB-001)" }),
     });
+    const taskCreatePriorityValues = ["low", "normal", "high", "urgent"] as const;
     const taskCreateParams = Type.Object({
       title: Type.Optional(Type.String({ description: "Short child task title" })),
       description: Type.String({ description: "Child task description/mission" }),
       dependencies: Type.Optional(
         Type.Array(Type.String({ description: "Task ID dependency (e.g. KB-001)" })),
+      ),
+      priority: Type.Optional(
+        Type.Union(taskCreatePriorityValues.map((priority) => Type.Literal(priority)), {
+          description: "Task priority (low, normal, high, urgent)",
+        }),
       ),
     });
 
@@ -1740,6 +1746,7 @@ export class TriageProcessor {
             description: params.description,
             dependencies: validDeps,
             column: "triage",
+            priority: params.priority,
             // Inherit parent's model settings if available
             modelProvider: parentTask?.modelProvider,
             modelId: parentTask?.modelId,

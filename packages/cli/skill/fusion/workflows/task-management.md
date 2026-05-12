@@ -17,6 +17,7 @@ Use only the public `fn_*` extension tools in this workflow. Do not substitute i
    - Include the problem AND the desired outcome
    - Be specific — the AI triage agent uses your description to write the specification
    - Optionally add dependencies with the `depends` parameter
+   - Optionally set urgency with `priority` (`low`, `normal`, `high`, `urgent`)
 
 2. The task enters **triage** where the AI auto-generates a PROMPT.md with:
    - Steps, file scope, acceptance criteria
@@ -29,7 +30,8 @@ Example:
 ```
 fn_task_create({
   description: "The login form doesn't validate email format before submission. Add client-side email validation that shows an inline error message when the email is invalid. Use the existing form validation pattern from the signup form.",
-  depends: ["FN-042"]
+  depends: ["FN-042"],
+  priority: "high"
 })
 ```
 

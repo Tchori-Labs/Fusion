@@ -114,6 +114,7 @@ describe("createTaskCreateTool", () => {
       description: "Follow-up task",
       dependencies: ["PROJ-001"],
       column: "triage",
+      priority: undefined,
       source: undefined,
     }, {
       settings: { autoSummarizeTitles: false },
@@ -123,6 +124,21 @@ describe("createTaskCreateTool", () => {
     const responseText = result.content[0]?.type === "text" ? result.content[0].text : "";
     expect(responseText).toContain("Created PROJ-042: Follow-up task");
     expect(responseText).toContain("(depends on: PROJ-001)");
+  });
+
+  it("passes explicit priority to store.createTask", async () => {
+    const store = {
+      getSettings: vi.fn().mockResolvedValue({ autoSummarizeTitles: false }),
+      createTask: vi.fn().mockResolvedValue({ id: "PROJ-098", description: "Test", dependencies: [], column: "triage" }),
+    };
+
+    const tool = createTaskCreateTool(store as any);
+
+    await tool.execute("call-1", { description: "Test", priority: "high" } as any, undefined, undefined, {} as any);
+
+    expect(store.createTask).toHaveBeenCalledWith(expect.objectContaining({
+      priority: "high",
+    }), expect.objectContaining({ settings: { autoSummarizeTitles: false } }));
   });
 
   it("passes explicit provenance to store.createTask", async () => {

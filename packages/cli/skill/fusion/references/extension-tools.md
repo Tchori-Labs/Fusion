@@ -17,6 +17,7 @@ Create a new task on the Fusion task board. The task enters the planning column 
 | `description` | string | ✓ | What needs to be done — be descriptive |
 | `depends` | array | — | Task IDs this depends on (e.g. ['FN-001', 'FN-002']) |
 | `agentId` | string | — | Agent ID to assign this task to (e.g. 'agent-abc123') |
+| `priority` | string(enum) | — | Task priority (low, normal, high, urgent) |
 
 ### fn_task_update
 

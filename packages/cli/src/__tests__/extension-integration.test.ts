@@ -176,6 +176,7 @@ describe.skipIf(!SHOULD_RUN_EXTENSION_INTEGRATION)("built fn pi extension integr
 
     expect(created.details.taskId).toMatch(/^[A-Z]+-\d+$/);
     expect(created.details.column).toBe("triage");
+    expect(created.details.priority).toBe("normal");
 
     const listTool = api.tools.get("fn_task_list")!;
     const listed = await listTool.execute("list-1", {}, undefined, undefined, makeCtx(tmpDir));
@@ -186,6 +187,17 @@ describe.skipIf(!SHOULD_RUN_EXTENSION_INTEGRATION)("built fn pi extension integr
     await store.init();
     const persisted = await store.getTask(created.details.taskId);
     expect(persisted?.description).toBe("Ship the packed CLI contract");
+
+    const urgent = await createTool.execute(
+      "create-2",
+      { description: "Needs urgency", priority: "high" },
+      undefined,
+      undefined,
+      makeCtx(tmpDir),
+    );
+    expect(urgent.details.priority).toBe("high");
+    const urgentPersisted = await store.getTask(urgent.details.taskId);
+    expect(urgentPersisted?.priority).toBe("high");
   });
 
   it("runs provisioning tools through the built extension", async () => {
