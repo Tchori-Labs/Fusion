@@ -5,7 +5,7 @@ import {
   resolveAffectedPackages,
   shouldForceFullSuite,
 } from "../../../../scripts/test-changed.mjs";
-import { parseShardArgs, selectShardPackages } from "../../../../scripts/ci-test-shard.mjs";
+import { parseShardArgs, planShardAssignments, selectShardPackages } from "../../../../scripts/ci-test-shard.mjs";
 
 describe("root test command changed-only planning", () => {
   it("uses changed mode when package-only changes are detected", () => {
@@ -78,10 +78,43 @@ describe("CI shard test planner", () => {
     );
   });
 
-  it("selects deterministic package partitions", () => {
-    const packages = ["a", "b", "c", "d", "e"];
-    expect(selectShardPackages(packages, 1, 3)).toEqual(["a", "d"]);
-    expect(selectShardPackages(packages, 2, 3)).toEqual(["b", "e"]);
-    expect(selectShardPackages(packages, 3, 3)).toEqual(["c"]);
+  it("deterministically balances weighted packages across shards", () => {
+    const weightedPackages = [
+      { name: "@fusion/dashboard", testFileCount: 140 },
+      { name: "@fusion/engine", testFileCount: 120 },
+      { name: "@fusion/core", testFileCount: 60 },
+      { name: "@runfusion/fusion", testFileCount: 40 },
+      { name: "@fusion/plugin-sdk", testFileCount: 18 },
+      { name: "@fusion/mobile", testFileCount: 12 },
+      { name: "@fusion/desktop", testFileCount: 8 },
+      { name: "@fusion/dashboard-utils", testFileCount: 4 },
+      { name: "@fusion/no-tests-yet", testFileCount: 0 },
+    ];
+
+    const shardAssignments = planShardAssignments(weightedPackages, 3);
+    expect(shardAssignments).toEqual([
+      ["@fusion/dashboard"],
+      ["@fusion/engine", "@fusion/desktop", "@fusion/dashboard-utils"],
+      ["@fusion/core", "@runfusion/fusion", "@fusion/plugin-sdk", "@fusion/mobile", "@fusion/no-tests-yet"],
+    ]);
+
+    expect(selectShardPackages(weightedPackages, 1, 3)).toEqual(shardAssignments[0]);
+    expect(selectShardPackages(weightedPackages, 2, 3)).toEqual(shardAssignments[1]);
+    expect(selectShardPackages(weightedPackages, 3, 3)).toEqual(shardAssignments[2]);
+
+    const weightsByName = new Map(weightedPackages.map((pkg) => [pkg.name, pkg.testFileCount]));
+    const shardWeights = shardAssignments.map((shardPackages) =>
+      shardPackages.reduce((sum, pkgName) => sum + (weightsByName.get(pkgName) ?? 0), 0),
+    );
+
+    const totalWeight = weightedPackages.reduce((sum, pkg) => sum + pkg.testFileCount, 0);
+    const mean = totalWeight / 3;
+
+    expect(Math.max(...shardWeights)).toBeLessThanOrEqual(mean * 1.15);
+    expect(Math.min(...shardWeights)).toBeGreaterThanOrEqual(mean * 0.85);
+
+    const dashboardShard = shardAssignments.findIndex((pkgs) => pkgs.includes("@fusion/dashboard"));
+    const engineShard = shardAssignments.findIndex((pkgs) => pkgs.includes("@fusion/engine"));
+    expect(dashboardShard).not.toBe(engineShard);
   });
 });

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { spawnSync } from "node:child_process";
+import { globSync } from "node:fs";
 import { cpus } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -55,14 +56,54 @@ export function parseShardArgs(argv = process.argv.slice(2), env = process.env) 
   return { shard, total };
 }
 
+export function countPackageTestFiles(packageDir, { projectRoot = process.cwd() } = {}) {
+  const packageRoot = path.join(projectRoot, packageDir);
+  return globSync("**/__tests__/**/*.test.{ts,tsx,mjs}", {
+    cwd: packageRoot,
+    nodir: true,
+  }).length;
+}
+
+export function planShardAssignments(packages, total) {
+  const shardAssignments = Array.from({ length: total }, () => []);
+  const shardWeights = Array.from({ length: total }, () => 0);
+  const normalized = packages
+    .map((pkg) => ({
+      name: pkg.name,
+      weight: pkg.testFileCount,
+    }))
+    .sort((a, b) => {
+      if (b.weight !== a.weight) return b.weight - a.weight;
+      return a.name.localeCompare(b.name);
+    });
+
+  for (const pkg of normalized) {
+    let targetIndex = 0;
+    for (let index = 1; index < total; index += 1) {
+      if (shardWeights[index] < shardWeights[targetIndex]) {
+        targetIndex = index;
+      }
+    }
+
+    shardAssignments[targetIndex].push(pkg.name);
+    shardWeights[targetIndex] += pkg.weight;
+  }
+
+  return shardAssignments;
+}
+
 export function selectShardPackages(packages, shard, total) {
-  return packages.filter((_, index) => index % total === shard - 1);
+  return planShardAssignments(packages, total)[shard - 1];
 }
 
 export function listWorkspaceTestPackages({ projectRoot = process.cwd() } = {}) {
   return listWorkspacePackageInfos({ projectRoot })
     .filter((workspacePackage) => workspacePackage.hasTestScript)
-    .map((workspacePackage) => workspacePackage.name);
+    .map((workspacePackage) => ({
+      name: workspacePackage.name,
+      dir: workspacePackage.dir,
+      testFileCount: countPackageTestFiles(workspacePackage.dir, { projectRoot }),
+    }));
 }
 
 export function main(argv = process.argv.slice(2), env = process.env) {
