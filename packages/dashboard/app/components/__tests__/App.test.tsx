@@ -50,6 +50,13 @@ vi.mock("../../api", async (importOriginal) => {
     fetchAgents: vi.fn(() => Promise.resolve([])),
     fetchTaskDetail: vi.fn((id: string) => Promise.resolve({ id, title: `Task ${id}` })),
     fetchUnreadCount: vi.fn(() => Promise.resolve({ unreadCount: 0 })),
+    fetchDashboardHealth: vi.fn(() => Promise.resolve({
+      status: "ok",
+      version: "1.0.0",
+      uptime: 1,
+      database: { healthy: true, lastCheckedAt: null, isRunning: false },
+      taskIdIntegrity: { status: "ok", checkedAt: "2026-05-12T00:00:00.000Z", anomalies: [], recommendedAction: null },
+    })),
     fetchPluginDashboardViews: vi.fn(() => Promise.resolve([])),
     fetchExecutorStats: vi.fn(() => Promise.resolve({
       globalPause: false,

@@ -3,14 +3,16 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import http from "node:http";
 import { createHmac } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
+import { rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import express from "express";
 import { createServer, setupTerminalWebSocket } from "../server.js";
 import { toSessionTag } from "../terminal-websocket-diagnostics.js";
 import { RATE_LIMITS } from "../rate-limit.js";
-import type { TaskStore } from "@fusion/core";
+import { Database, TaskStore } from "@fusion/core";
 import { get as performGet, request as performRequest } from "../test-request.js";
 
 // Mock terminal-service before any imports that use it
@@ -44,6 +46,24 @@ const CLI_PACKAGE_VERSION = (() => {
   return typeof packageJson.version === "string" ? packageJson.version : "";
 })();
 
+function makeTmpDir(): string {
+  return mkdtempSync(join(tmpdir(), "fn-server-test-"));
+}
+
+async function seedTaskIdIntegrityPrecondition(rootDir: string): Promise<void> {
+  const fusionDir = join(rootDir, ".fusion");
+  const db = new Database(fusionDir);
+  db.init();
+  const now = new Date().toISOString();
+  db.prepare(
+    "INSERT INTO tasks (id, description, \"column\", createdAt, updatedAt) VALUES (?, '', 'todo', ?, ?)",
+  ).run("FN-100", now, now);
+  db.prepare(
+    "INSERT INTO distributed_task_id_state (prefix, nextSequence, committedClusterTaskCount, lastCommittedTaskId, updatedAt) VALUES (?, ?, ?, ?, ?)",
+  ).run("FN", 100, 0, null, now);
+  db.close();
+}
+
 function createMockStore(overrides: Partial<TaskStore> = {}): TaskStore {
   return {
     getTask: vi.fn(),
@@ -72,6 +92,16 @@ function createMockStore(overrides: Partial<TaskStore> = {}): TaskStore {
       healthy: true,
       isRunning: false,
       lastCheckedAt: null,
+    }),
+    getTaskIdIntegrityReport: vi.fn().mockReturnValue({
+      status: "ok",
+      checkedAt: "2026-05-12T00:00:00.000Z",
+      anomalies: [],
+    }),
+    refreshTaskIdIntegrityReport: vi.fn().mockReturnValue({
+      status: "ok",
+      checkedAt: "2026-05-12T00:00:00.000Z",
+      anomalies: [],
     }),
     getMissionStore: vi.fn().mockReturnValue({
       listMissions: vi.fn().mockReturnValue([]),
@@ -317,6 +347,12 @@ describe("createServer health and headless mode", () => {
         isRunning: false,
         lastCheckedAt: null,
       },
+      taskIdIntegrity: {
+        status: "ok",
+        checkedAt: "2026-05-12T00:00:00.000Z",
+        anomalies: [],
+        recommendedAction: null,
+      },
     });
   });
 
@@ -342,7 +378,170 @@ describe("createServer health and headless mode", () => {
         isRunning: false,
         lastCheckedAt: "2026-05-11T10:00:00.000Z",
       },
+      taskIdIntegrity: {
+        status: "ok",
+        checkedAt: "2026-05-12T00:00:00.000Z",
+        anomalies: [],
+        recommendedAction: null,
+      },
     });
+  });
+
+  it("reports degraded status when task ID integrity anomalies are present", async () => {
+    const store = createMockStore({
+      getTaskIdIntegrityReport: vi.fn().mockReturnValue({
+        status: "anomaly",
+        checkedAt: "2026-05-12T10:00:00.000Z",
+        anomalies: [
+          {
+            kind: "next_sequence_at_or_below_used",
+            prefix: "FN",
+            affectedIds: ["FN-100"],
+            details: "state drift",
+          },
+        ],
+      }),
+    });
+    const app = createServer(store);
+
+    const res = await GET(app, "/api/health");
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      status: "degraded",
+      version: CLI_PACKAGE_VERSION,
+      uptime: expect.any(Number),
+      database: {
+        healthy: true,
+        isRunning: false,
+        lastCheckedAt: null,
+      },
+      taskIdIntegrity: {
+        status: "anomaly",
+        checkedAt: "2026-05-12T10:00:00.000Z",
+        anomalies: [
+          {
+            kind: "next_sequence_at_or_below_used",
+            prefix: "FN",
+            affectedIds: ["FN-100"],
+            details: "state drift",
+          },
+        ],
+        recommendedAction:
+          "Pause task delegation, inspect the affected task IDs, and run the allocator audit before creating new tasks.",
+      },
+    });
+  });
+
+  it("refreshes task ID integrity health on demand", async () => {
+    const store = createMockStore({
+      refreshTaskIdIntegrityReport: vi.fn().mockReturnValue({
+        status: "anomaly",
+        checkedAt: "2026-05-12T11:00:00.000Z",
+        anomalies: [
+          {
+            kind: "committed_reservation_for_existing_id",
+            prefix: "FN",
+            affectedIds: ["FN-103"],
+            details: "reservation collision",
+          },
+        ],
+      }),
+    });
+    const app = createServer(store);
+
+    const res = await REQUEST(app, "POST", "/api/health/refresh");
+
+    expect(res.status).toBe(200);
+    expect(store.refreshTaskIdIntegrityReport).toHaveBeenCalledTimes(1);
+    expect(res.body).toEqual({
+      status: "degraded",
+      version: CLI_PACKAGE_VERSION,
+      uptime: expect.any(Number),
+      database: {
+        healthy: true,
+        isRunning: false,
+        lastCheckedAt: null,
+      },
+      taskIdIntegrity: {
+        status: "anomaly",
+        checkedAt: "2026-05-12T11:00:00.000Z",
+        anomalies: [
+          {
+            kind: "committed_reservation_for_existing_id",
+            prefix: "FN",
+            affectedIds: ["FN-103"],
+            details: "reservation collision",
+          },
+        ],
+        recommendedAction:
+          "Pause task delegation, inspect the affected task IDs, and run the allocator audit before creating new tasks.",
+      },
+    });
+  });
+
+  it("surfaces startup-detected nextSequence collisions end-to-end through /api/health", async () => {
+    const rootDir = makeTmpDir();
+    const globalDir = makeTmpDir();
+    await seedTaskIdIntegrityPrecondition(rootDir);
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const store = new TaskStore(rootDir, globalDir);
+    try {
+      await store.init();
+      const app = createServer(store, { headless: true });
+
+      expect(store.getTaskIdIntegrityReport()).toMatchObject({
+        status: "anomaly",
+        anomalies: [
+          expect.objectContaining({
+            kind: "next_sequence_at_or_below_used",
+            prefix: "FN",
+            affectedIds: ["FN-100"],
+          }),
+        ],
+      });
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining("[core] [task-id-integrity] anomaly detected"),
+        expect.objectContaining({
+          anomalies: expect.arrayContaining([
+            expect.objectContaining({
+              kind: "next_sequence_at_or_below_used",
+              affectedIds: ["FN-100"],
+            }),
+          ]),
+        }),
+      );
+
+      const res = await GET(app, "/api/health");
+
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({
+        status: "degraded",
+        database: {
+          healthy: true,
+          isRunning: expect.any(Boolean),
+          lastCheckedAt: null,
+        },
+        taskIdIntegrity: {
+          status: "anomaly",
+          anomalies: [
+            {
+              kind: "next_sequence_at_or_below_used",
+              prefix: "FN",
+              affectedIds: ["FN-100"],
+              details: expect.any(String),
+            },
+          ],
+          recommendedAction:
+            "Pause task delegation, inspect the affected task IDs, and run the allocator audit before creating new tasks.",
+        },
+      });
+    } finally {
+      store.close();
+      await rm(rootDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+      await rm(globalDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    }
   });
 
   it("does not return stale hardcoded 0.4.0 unless package version is 0.4.0", async () => {

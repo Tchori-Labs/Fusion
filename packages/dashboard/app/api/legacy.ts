@@ -74,6 +74,7 @@ import type {
   DockerNodeStatus,
   ProjectNodePathMapping,
   ApprovalRequestStatus,
+  TaskIdIntegrityReport,
 } from "@fusion/core";
 import type { PlanningQuestion, PlanningSummary } from "@fusion/core";
 import type { ScheduledTask, ScheduledTaskCreateInput, ScheduledTaskUpdateInput, AutomationRunResult, Routine, RoutineCreateInput, RoutineUpdateInput, RoutineExecutionResult } from "@fusion/core";
@@ -204,10 +205,17 @@ export interface DashboardHealthResponse {
     lastCheckedAt: string | null;
     isRunning: boolean;
   };
+  taskIdIntegrity: TaskIdIntegrityReport & {
+    recommendedAction: string | null;
+  };
 }
 
 export function fetchDashboardHealth(): Promise<DashboardHealthResponse> {
   return api<DashboardHealthResponse>("/health");
+}
+
+export function refreshDashboardHealth(): Promise<DashboardHealthResponse> {
+  return api<DashboardHealthResponse>("/health/refresh", { method: "POST" });
 }
 
 export function checkForUpdates(): Promise<UpdateCheckResponse> {

@@ -5,7 +5,17 @@ import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createSecureServer as createHttp2SecureServer, type Http2SecureServer } from "node:http2";
 import type { Server as HttpServer } from "node:http";
-import type { Task, TaskStore, MergeResult, AutomationStore, RoutineStore, CentralCore, MessageStore, AgentLogEntry } from "@fusion/core";
+import type {
+  Task,
+  TaskStore,
+  MergeResult,
+  AutomationStore,
+  RoutineStore,
+  CentralCore,
+  MessageStore,
+  AgentLogEntry,
+  TaskIdIntegrityReport,
+} from "@fusion/core";
 import { AgentStore, ChatStore } from "@fusion/core";
 import type { AuthStorageLike, ModelRegistryLike } from "./routes.js";
 import { createApiRoutes } from "./routes.js";
@@ -59,6 +69,30 @@ function parseVersion(version: string): number[] {
     .slice(0, 3)
     .map((part) => Number.parseInt(part, 10))
     .map((value) => (Number.isFinite(value) ? value : 0));
+}
+
+function buildTaskIdIntegrityHealth(report: TaskIdIntegrityReport) {
+  return {
+    status: report.status,
+    checkedAt: report.checkedAt,
+    anomalies: report.anomalies,
+    recommendedAction:
+      report.status === "anomaly"
+        ? "Pause task delegation, inspect the affected task IDs, and run the allocator audit before creating new tasks."
+        : null,
+  };
+}
+
+function buildHealthPayload(store: TaskStore, cliPackageVersion: string) {
+  const database = store.getDatabaseHealth();
+  const taskIdIntegrity = buildTaskIdIntegrityHealth(store.getTaskIdIntegrityReport());
+  return {
+    status: !database.healthy || taskIdIntegrity.status === "anomaly" ? "degraded" : "ok",
+    version: cliPackageVersion,
+    uptime: Math.floor(process.uptime()),
+    database,
+    taskIdIntegrity,
+  };
 }
 
 function isRemoteVersionNewer(remoteVersion: string, currentVersion: string): boolean {
@@ -1062,12 +1096,18 @@ export function createServer(store: TaskStore, options?: ServerOptions): ReturnT
   }
 
   app.get("/api/health", (_req, res) => {
+    res.json(buildHealthPayload(store, cliPackageVersion));
+  });
+
+  app.post("/api/health/refresh", (_req, res) => {
+    const report = store.refreshTaskIdIntegrityReport();
     const database = store.getDatabaseHealth();
     res.json({
-      status: database.healthy ? "ok" : "degraded",
+      status: !database.healthy || report.status === "anomaly" ? "degraded" : "ok",
       version: cliPackageVersion,
       uptime: Math.floor(process.uptime()),
       database,
+      taskIdIntegrity: buildTaskIdIntegrityHealth(report),
     });
   });
 

@@ -30,6 +30,10 @@ import { assertProjectRootDir } from "./project-root-guard.js";
 import { generateTaskLineageId, normalizeTaskCommitAssociation } from "./task-lineage.js";
 import { createDistributedTaskIdAllocator, reconcileTaskIdState, resolveLocalNodeId, type DistributedTaskIdAllocator } from "./distributed-task-id.js";
 import {
+  detectTaskIdIntegrityAnomalies,
+  type TaskIdIntegrityReport,
+} from "./task-id-integrity.js";
+import {
   buildBootstrapPrompt,
   replicationCollisionError,
   taskMatchesReplicatedCreate,
@@ -279,6 +283,7 @@ const AGENT_LOG_TOOL_DETAIL_TRUNCATION_NOTICE =
   "\n\n[tool output truncated to keep dashboard log views responsive]";
 const AGENT_LOG_TOOL_TYPES = new Set<AgentLogEntry["type"]>(["tool", "tool_result", "tool_error"]);
 const storeLog = createLogger("task-store");
+const coreLog = createLogger("core");
 
 /**
  * Reject branch names that would be unsafe to interpolate into a shell command.
@@ -587,6 +592,14 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   private configLock: Promise<void> = Promise.resolve();
   /** Startup/open guard for distributed_task_id_state reconciliation. */
   private taskIdStateReconciled = false;
+  /** Cached startup/refresh integrity report for allocator-related task ID anomalies. */
+  private taskIdIntegrityReport: TaskIdIntegrityReport = {
+    status: "ok",
+    checkedAt: new Date().toISOString(),
+    anomalies: [],
+  };
+  /** Prevent duplicate anomaly logs when the report content has not changed. */
+  private lastTaskIdIntegrityLogSignature: string | null = null;
   /** Cached workflow steps — invalidated on create/update/delete */
   private workflowStepsCache: import("./types.js").WorkflowStep[] | null = null;
   /** Plugin-contributed workflow step templates injected by engine runtime. */
@@ -708,11 +721,74 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     return this._archiveDb;
   }
 
+  private buildTaskIdIntegrityFallbackReport(): TaskIdIntegrityReport {
+    return {
+      status: "ok",
+      checkedAt: new Date().toISOString(),
+      anomalies: [],
+    };
+  }
+
+  private detectAndCacheTaskIdIntegrityReport(): TaskIdIntegrityReport {
+    const report = detectTaskIdIntegrityAnomalies(this.db);
+    this.taskIdIntegrityReport = report;
+    const signature = report.status === "anomaly" ? JSON.stringify(report.anomalies) : null;
+    if (report.status === "anomaly" && signature !== this.lastTaskIdIntegrityLogSignature) {
+      coreLog.error("[task-id-integrity] anomaly detected", { anomalies: report.anomalies });
+    }
+    this.lastTaskIdIntegrityLogSignature = signature;
+    return report;
+  }
+
+  private mergeTaskIdIntegrityReports(...reports: TaskIdIntegrityReport[]): TaskIdIntegrityReport {
+    const checkedAt = reports[reports.length - 1]?.checkedAt ?? new Date().toISOString();
+    const seen = new Set<string>();
+    const anomalies = reports.flatMap((report) => report.anomalies).filter((anomaly) => {
+      const key = JSON.stringify(anomaly);
+      if (seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    });
+    return {
+      status: anomalies.length > 0 ? "anomaly" : "ok",
+      checkedAt,
+      anomalies,
+    };
+  }
+
+  refreshTaskIdIntegrityReport(): TaskIdIntegrityReport {
+    try {
+      return this.detectAndCacheTaskIdIntegrityReport();
+    } catch (error) {
+      const fallback = this.buildTaskIdIntegrityFallbackReport();
+      this.taskIdIntegrityReport = fallback;
+      this.lastTaskIdIntegrityLogSignature = null;
+      coreLog.warn("[task-id-integrity] detector failed; degrading to healthy report", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return fallback;
+    }
+  }
+
+  getTaskIdIntegrityReport(): TaskIdIntegrityReport {
+    return this.taskIdIntegrityReport;
+  }
+
   private reconcileDistributedTaskIdStateOnOpen(): void {
     if (this.taskIdStateReconciled) {
       return;
     }
+    const previousReport = this.taskIdIntegrityReport;
+    const preReconcileReport = this.refreshTaskIdIntegrityReport();
     reconcileTaskIdState(this.db);
+    const postReconcileReport = this.refreshTaskIdIntegrityReport();
+    this.taskIdIntegrityReport = this.mergeTaskIdIntegrityReports(
+      previousReport,
+      preReconcileReport,
+      postReconcileReport,
+    );
     this.taskIdStateReconciled = true;
   }
 

@@ -8,6 +8,29 @@
 - Startup/store-open allocator reconciliation bumps each active prefix sequence to `max(current nextSequence, max(tasks suffix)+1, max(archivedTasks suffix)+1, max(reservation sequence)+1)` so stale allocator rows self-heal before local task creation resumes.
 - Create-class task persistence is intentionally non-destructive: new tasks use plain `INSERT` semantics, while `ON CONFLICT(id) DO UPDATE` remains update-only. If counters drift and a reserved ID still collides, the create fails and the existing SQLite row / task directory stays intact.
 
+### Task-ID integrity detection
+
+Fusion runs a read-only task-ID integrity detector at startup and on demand to surface allocator regressions before operators lose track of overwritten cards. The detector checks for:
+
+- duplicate task IDs inside `tasks`
+- task IDs that exist in both `tasks` and `archivedTasks`
+- `distributed_task_id_state.nextSequence` values that point at or below an already-used numeric suffix
+- committed reservation rows that still reference existing task IDs
+- active task rows whose prefix falls outside the prefixes declared in `distributed_task_id_state`
+
+The latest report is exposed in two operator-facing places:
+
+- `GET /api/health` returns a `taskIdIntegrity` object with `status`, `checkedAt`, `anomalies`, and a `recommendedAction` string. When anomalies are present, the top-level health `status` becomes `"degraded"` even if the SQLite integrity check is still healthy.
+- The dashboard renders a non-dismissible task-ID integrity banner for anomalous reports so the operator sees the issue in the same session.
+
+### Operator playbook
+
+When the detector reports an anomaly:
+
+1. Pause task delegation and avoid creating new tasks until the state is understood.
+2. Inspect the affected task IDs in the dashboard/database and confirm whether any live task content or archived records mismatched their IDs.
+3. If the historical allocator audit script is available in your checkout, run it before resuming normal task creation.
+
 ### Detecting historical task-ID overwrites
 
 If allocator state drifted before the current guards landed, historical task records may still contain overwrite evidence. Run the audit script from the project root:

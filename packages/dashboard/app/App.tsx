@@ -15,6 +15,7 @@ import { ExecutorStatusBar } from "./components/ExecutorStatusBar";
 import { SessionNotificationBanner } from "./components/SessionNotificationBanner";
 import { CliBinaryInstallBanner } from "./components/CliBinaryInstallBanner";
 import { SetupWarningBanner } from "./components/SetupWarningBanner";
+import { TaskIdIntegrityBanner } from "./components/TaskIdIntegrityBanner";
 import { UpdateAvailableBanner } from "./components/UpdateAvailableBanner";
 import { ApprovalNotificationBanner } from "./components/ApprovalNotificationBanner";
 import { OnboardingResumeCard } from "./components/OnboardingResumeCard";
@@ -64,8 +65,8 @@ import { NativeShellOnboardingModal } from "./components/NativeShellOnboardingMo
 import { NativeShellConnectionManager } from "./components/NativeShellConnectionManager";
 import { ShellConnectionStatus } from "./components/ShellConnectionStatus";
 import { getShellConnectionNativeResult, type ShellConnectionNativeResult } from "./shell-native";
-import type { AiSessionSummary } from "./api";
-import { api, fetchUnreadCount, fetchTaskDetail, fetchWorkflowSteps } from "./api";
+import type { AiSessionSummary, DashboardHealthResponse } from "./api";
+import { api, fetchDashboardHealth, fetchUnreadCount, fetchTaskDetail, fetchWorkflowSteps } from "./api";
 import { getScopedItem, setScopedItem } from "./utils/projectStorage";
 import { subscribeSse } from "./sse-bus";
 import { AUTH_TOKEN_RECOVERY_REQUIRED_EVENT } from "./auth";
@@ -651,6 +652,7 @@ function AppInner() {
   const [milestoneSliceResumeSessionId, setMilestoneSliceResumeSessionId] = useState<string | undefined>(undefined);
   const [quickChatOpen, setQuickChatOpen] = useState(false);
   const [authTokenRecoveryOpen, setAuthTokenRecoveryOpen] = useState(false);
+  const [dashboardHealth, setDashboardHealth] = useState<DashboardHealthResponse | null>(null);
   const [setupWarningDismissed, setSetupWarningDismissed] = useState(
     () => getScopedItem(SETUP_WARNING_DISMISSED_KEY, currentProject?.id) === "true",
   );
@@ -660,6 +662,26 @@ function AppInner() {
       getScopedItem(SETUP_WARNING_DISMISSED_KEY, currentProject?.id) === "true",
     );
   }, [currentProject?.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    fetchDashboardHealth()
+      .then((health) => {
+        if (!cancelled) {
+          setDashboardHealth(health);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setDashboardHealth(null);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     const handleDaemonAuthFailure = () => {
@@ -1600,6 +1622,27 @@ function AppInner() {
           latestVersion={latestVersion}
           currentVersion={currentVersion}
           onDismiss={dismissUpdateBanner}
+        />
+      )}
+      {viewMode === "project" && currentProject && dashboardHealth?.taskIdIntegrity.status === "anomaly" && dashboardHealth.taskIdIntegrity.recommendedAction && (
+        <TaskIdIntegrityBanner
+          report={dashboardHealth.taskIdIntegrity}
+          recommendedAction={dashboardHealth.taskIdIntegrity.recommendedAction}
+          onRefresh={(report, recommendedAction) => {
+            setDashboardHealth((current) => {
+              if (!current) {
+                return null;
+              }
+              return {
+                ...current,
+                status: report.status === "anomaly" || !current.database.healthy ? "degraded" : "ok",
+                taskIdIntegrity: {
+                  ...report,
+                  recommendedAction,
+                },
+              };
+            });
+          }}
         />
       )}
       {viewMode === "project" && currentProject && !setupReadinessLoading && hasWarnings && !setupWarningDismissed && (

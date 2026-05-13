@@ -88,6 +88,14 @@ export type {
 } from "./agent-provisioning-policy.js";
 export { TaskStore } from "./store.js";
 export {
+  detectTaskIdIntegrityAnomalies,
+} from "./task-id-integrity.js";
+export type {
+  TaskIdIntegrityAnomaly,
+  TaskIdIntegrityAnomalyKind,
+  TaskIdIntegrityReport,
+} from "./task-id-integrity.js";
+export {
   FUSION_TASK_LINEAGE_TRAILER_KEY,
   buildTaskLineageTrailer,
   classifyTaskCommitAssociationConfidence,

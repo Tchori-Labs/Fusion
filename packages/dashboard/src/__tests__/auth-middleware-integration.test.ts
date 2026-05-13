@@ -72,6 +72,18 @@ class MockStore extends EventEmitter {
     };
   }
 
+  getTaskIdIntegrityReport() {
+    return {
+      status: "ok",
+      checkedAt: "2026-05-12T00:00:00.000Z",
+      anomalies: [],
+    };
+  }
+
+  refreshTaskIdIntegrityReport() {
+    return this.getTaskIdIntegrityReport();
+  }
+
   getMissionStore() {
     return {
       listMissions: vi.fn().mockResolvedValue([]),
