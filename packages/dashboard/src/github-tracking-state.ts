@@ -1,4 +1,4 @@
-import type { GlobalSettings, ProjectSettings, TaskStore } from "@fusion/core";
+import type { GlobalSettings, ProjectSettings, Task, TaskStore } from "@fusion/core";
 import { GitHubClient } from "./github.js";
 import { resolveGithubTrackingAuth } from "./github-auth.js";
 
@@ -43,6 +43,9 @@ export class GitHubTrackingStateService {
   private readonly onTaskMoved = (event: TaskMovedEvent): void => {
     void this.handleTaskMoved(event);
   };
+  private readonly onTaskDeleted = (task: Task): void => {
+    void this.handleTaskDeleted(task);
+  };
   private started = false;
 
   constructor(store: TaskStore) {
@@ -53,12 +56,14 @@ export class GitHubTrackingStateService {
     if (this.started) return;
     this.started = true;
     this.store.on("task:moved", this.onTaskMoved);
+    this.store.on("task:deleted", this.onTaskDeleted);
   }
 
   stop(): void {
     if (!this.started) return;
     this.started = false;
     this.store.off("task:moved", this.onTaskMoved);
+    this.store.off("task:deleted", this.onTaskDeleted);
   }
 
   private async handleTaskMoved(event: TaskMovedEvent): Promise<void> {
@@ -120,6 +125,41 @@ export class GitHubTrackingStateService {
           ? "Failed to close GitHub tracking issue"
           : "Failed to reopen GitHub tracking issue",
         err instanceof Error ? err.message : String(err),
+      );
+    }
+  }
+
+  private async handleTaskDeleted(task: Task): Promise<void> {
+    if (task.githubTracking?.enabled !== true) {
+      return;
+    }
+
+    const issue = task.githubTracking.issue;
+    if (!issue) {
+      return;
+    }
+
+    const { owner, repo, number } = issue;
+    if (!owner || !repo || !number) {
+      return;
+    }
+
+    const projectSettings = await this.store.getSettings() as Pick<ProjectSettings, "githubAuthMode" | "githubAuthToken">;
+    const globalSettings = (await this.store.getGlobalSettingsStore?.()?.getSettings?.() ?? {}) as Pick<GlobalSettings, never>;
+    const resolution = resolveGithubTrackingAuth({ projectSettings, globalSettings });
+    if (!resolution.ok) {
+      return;
+    }
+
+    const client = resolution.auth.mode === "token"
+      ? new GitHubClient({ token: resolution.auth.token, forceMode: "token" })
+      : new GitHubClient({ forceMode: "gh-cli" });
+
+    try {
+      await client.setIssueState(owner, repo, number, "closed", "not_planned");
+    } catch (err) {
+      console.warn(
+        `[github-tracking-state] Failed to close linked GitHub tracking issue for deleted task ${task.id}: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
   }

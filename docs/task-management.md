@@ -493,6 +493,8 @@ When Fusion creates a tracking issue, it uses:
 
 When tracked tasks later move to `in-progress` or `done`, Fusion also posts a short lifecycle comment on the linked tracking issue. The `in-progress` comment stays plain-text and capped, while the `done` comment can include the merge commit SHA/subject, task branch, PR link, file-change stats, and merge timestamp when those fields are available.
 
+When a tracked task moves into `done`, Fusion closes the linked GitHub issue with `state_reason: completed`; when it leaves `done` for an active column, Fusion reopens the issue with `state_reason: reopened`; and when the Fusion task is permanently deleted, Fusion closes the linked issue with `state_reason: not_planned`.
+
 GitHub authentication/settings are configured in [Settings Reference](./settings-reference.md) via `githubAuthMode` (`gh-cli` or `token`) and `githubAuthToken`.
 
 ## Completion Modes (`mergeStrategy`)

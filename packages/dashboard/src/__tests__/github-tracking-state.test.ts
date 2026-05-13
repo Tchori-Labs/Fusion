@@ -98,15 +98,17 @@ describe("GitHubTrackingStateService", () => {
     service.start();
 
     store.emit("task:moved", { task: createTask(), from: "triage", to: "done" });
+    store.emit("task:deleted", createTask({ id: "FN-2" }));
     await flushAsync();
-    expect(mockSetIssueState).toHaveBeenCalledTimes(1);
+    expect(mockSetIssueState).toHaveBeenCalledTimes(2);
 
     service.stop();
     service.stop();
 
     store.emit("task:moved", { task: createTask(), from: "done", to: "todo" });
+    store.emit("task:deleted", createTask({ id: "FN-3" }));
     await flushAsync();
-    expect(mockSetIssueState).toHaveBeenCalledTimes(1);
+    expect(mockSetIssueState).toHaveBeenCalledTimes(2);
   });
 
   it("closes on triage -> done and logs success", async () => {
@@ -261,5 +263,65 @@ describe("GitHubTrackingStateService", () => {
     expect(mockSetIssueState).toHaveBeenCalledTimes(2);
     expect(mockSetIssueState).toHaveBeenNthCalledWith(1, "owner", "repo", 42, "closed", "completed");
     expect(mockSetIssueState).toHaveBeenNthCalledWith(2, "owner", "repo", 42, "open", "reopened");
+  });
+
+  describe("on task:deleted", () => {
+    it("closes the linked issue with not_planned and does not log to the store", async () => {
+      service.start();
+
+      store.emit("task:deleted", createTask());
+      await flushAsync();
+
+      expect(mockSetIssueState).toHaveBeenCalledWith("owner", "repo", 42, "closed", "not_planned");
+      expect(store.logEntry).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      {
+        label: "tracking disabled",
+        task: createTask({ githubTracking: { enabled: false } }),
+      },
+      {
+        label: "missing issue",
+        task: createTask({ githubTracking: { enabled: true } }),
+      },
+      {
+        label: "missing owner",
+        task: createTask({ githubTracking: { enabled: true, issue: { owner: "", repo: "repo", number: 42 } } }),
+      },
+      {
+        label: "missing repo",
+        task: createTask({ githubTracking: { enabled: true, issue: { owner: "owner", repo: "", number: 42 } } }),
+      },
+      {
+        label: "missing number",
+        task: createTask({ githubTracking: { enabled: true, issue: { owner: "owner", repo: "repo" } } }),
+      },
+    ])("does nothing when $label", async ({ task }) => {
+      service.start();
+
+      store.emit("task:deleted", task);
+      await flushAsync();
+
+      expect(mockSetIssueState).not.toHaveBeenCalled();
+      expect(store.logEntry).not.toHaveBeenCalled();
+    });
+
+    it("swallows network failures without throwing and does not log to the store", async () => {
+      service.start();
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      mockSetIssueState.mockRejectedValueOnce(new Error("delete close failed"));
+
+      expect(() => {
+        store.emit("task:deleted", createTask());
+      }).not.toThrow();
+      await flushAsync();
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        "[github-tracking-state] Failed to close linked GitHub tracking issue for deleted task FN-1: delete close failed",
+      );
+      expect(store.logEntry).not.toHaveBeenCalled();
+      warnSpy.mockRestore();
+    });
   });
 });
