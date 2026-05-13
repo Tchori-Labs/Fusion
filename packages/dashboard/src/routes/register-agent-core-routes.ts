@@ -6,6 +6,7 @@ import {
   ApprovalRequestStore,
   getDefaultHeartbeatProcedurePath,
   isAgentPermissionPolicyPresetId,
+  isEphemeralAgent,
   normalizeAgentPermissionPolicyFromPreset,
 } from "@fusion/core";
 import { ApiError, badRequest, notFound } from "../api-error.js";
@@ -268,6 +269,7 @@ export function registerAgentCoreRoutes(ctx: ApiRoutesContext, deps: AgentCoreRo
    * Return aggregate stats across all agents.
    * Must be registered before /agents/:id to avoid "stats" matching :id.
    * Note: assignedTaskCount excludes agents whose linked task is in a terminal state.
+   * Includes idleNonEphemeralCount and todoTaskCount to back capacity-risk signaling.
    */
   router.get("/agents/stats", async (req, res) => {
     try {
@@ -278,6 +280,7 @@ export function registerAgentCoreRoutes(ctx: ApiRoutesContext, deps: AgentCoreRo
 
       const agents = await agentStore.listAgents();
       const activeCount = agents.filter((a) => a.state === "active" || a.state === "running").length;
+      const idleNonEphemeralCount = agents.filter((a) => a.state === "idle" && !isEphemeralAgent(a)).length;
 
       // Count only agents with non-terminal linked tasks
       const sanitizedAgents = await sanitizeAgentTaskLinks(agents, scopedStore);
@@ -293,7 +296,17 @@ export function registerAgentCoreRoutes(ctx: ApiRoutesContext, deps: AgentCoreRo
 
       const total = completedRuns + failedRuns;
       const successRate = total > 0 ? completedRuns / total : 0;
-      res.json({ activeCount, assignedTaskCount, completedRuns, failedRuns, successRate });
+      const tasks = await scopedStore.listTasks({ slim: true, includeArchived: false });
+      const todoTaskCount = tasks.filter((task) => task.column === "todo").length;
+      res.json({
+        activeCount,
+        assignedTaskCount,
+        completedRuns,
+        failedRuns,
+        successRate,
+        idleNonEphemeralCount,
+        todoTaskCount,
+      });
     } catch (err: unknown) {
       if (err instanceof ApiError) {
         throw err;

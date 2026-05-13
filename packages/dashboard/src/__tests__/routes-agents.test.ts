@@ -4250,6 +4250,47 @@ describe("Agent stale task-link sanitization", () => {
     expect(res.body.assignedTaskCount).toBe(0);
   });
 
+  it("GET /api/agents/stats returns idle non-ephemeral and todo counts", async () => {
+    const store = createMockStore({
+      getFusionDir: vi.fn().mockReturnValue(fusionDir),
+      listTasks: vi.fn().mockResolvedValue([
+        { id: "FN-1", column: "todo" },
+        { id: "FN-2", column: "todo" },
+        { id: "FN-3", column: "triage" },
+        { id: "FN-4", column: "in-progress" },
+        { id: "FN-5", column: "in-review" },
+        { id: "FN-6", column: "done" },
+      ]),
+    } as any);
+
+    const app = express();
+    app.use(express.json());
+    app.use("/api", createApiRoutes(store));
+
+    const { AgentStore } = await import("@fusion/core");
+    const agentStore = new AgentStore({ rootDir: fusionDir });
+    await agentStore.init();
+
+    const idleNonEphemeral = await agentStore.createAgent({ name: "Idle Exec", role: "executor" });
+    await agentStore.updateAgentState(idleNonEphemeral.id, "idle");
+
+    const idleEphemeral = await agentStore.createAgent({
+      name: "executor-ephemeral",
+      role: "executor",
+      metadata: { type: "spawned" },
+    });
+    await agentStore.updateAgentState(idleEphemeral.id, "idle");
+
+    const active = await agentStore.createAgent({ name: "Active Exec", role: "executor" });
+    await agentStore.updateAgentState(active.id, "active");
+
+    const res = await GET(app, "/api/agents/stats");
+
+    expect(res.status).toBe(200);
+    expect(res.body.idleNonEphemeralCount).toBe(1);
+    expect(res.body.todoTaskCount).toBe(2);
+  });
+
   it("GET /api/agents handles task lookup failure gracefully", async () => {
     const taskId = "FN-LOOKUP-FAIL";
     const store = createMockStore({
