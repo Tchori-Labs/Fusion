@@ -27,9 +27,32 @@
 }
 
 @media (max-width: 768px) {
+  /* FN-4281: let Settings header content reflow so close button stays visible on narrow phones. */
+  .settings-modal .modal-header {
+    flex-wrap: wrap;
+    align-items: flex-start;
+    row-gap: var(--space-sm);
+    column-gap: var(--space-sm);
+  }
+
+  .settings-modal-heading {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .settings-update-check {
+    flex-wrap: wrap;
+    row-gap: var(--space-xs);
+  }
+
   /* Preserve mobile touch targets while keeping visuals compact via icon sizing/padding. */
   .settings-header-actions {
     --settings-header-action-height: calc(var(--space-md) * 3);
+
+    flex: 1 1 100%;
+    justify-content: flex-start;
+    margin-left: 0;
+    margin-right: 0;
   }
 
   .settings-header-actions > .btn-icon,
@@ -45,6 +68,14 @@
   .settings-github-star-btn__action,
   .settings-github-star-btn__count {
     min-height: var(--settings-header-action-height);
+  }
+
+  .settings-modal .modal-close {
+    flex: 0 0 auto;
+    align-self: flex-start;
+    margin-left: auto;
+    min-width: calc(var(--space-md) * 3);
+    min-height: calc(var(--space-md) * 3);
   }
 }
 
