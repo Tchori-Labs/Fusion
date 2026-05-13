@@ -27,18 +27,16 @@
 }
 
 @media (max-width: 768px) {
-  /* FN-4281: let Settings header content reflow so close button stays visible on narrow phones. */
+  /* FN-4375: keep heading, actions, and close in one row on mobile; supersedes FN-4281/FN-4331/FN-4363 wrap/order behavior. */
   .settings-modal .modal-header {
-    flex-wrap: wrap;
-    align-items: flex-start;
-    row-gap: var(--space-sm);
+    flex-wrap: nowrap;
+    align-items: center;
     column-gap: var(--space-sm);
   }
 
   .settings-modal-heading {
     flex: 1 1 0;
     min-width: 0;
-    order: 1;
   }
 
   .settings-update-check {
@@ -46,19 +44,9 @@
     row-gap: var(--space-xs);
   }
 
-  /* FN-4354: settings header actions inherit desktop sizing on mobile per user direction (revert of FN-3782/FN-3913/FN-4281 touch-target inflation). Layout reflow (flex-wrap on .modal-header, flex: 1 1 100% on .settings-header-actions) is retained. */
   .settings-header-actions {
-    flex: 1 1 100%;
-    justify-content: flex-start;
-    margin-left: 0;
-    margin-right: 0;
-  }
-
-  .settings-modal .modal-close {
-    order: 2;
-    flex: 0 0 auto;
-    align-self: flex-start;
     margin-left: auto;
+    margin-right: var(--space-sm);
   }
 }
 

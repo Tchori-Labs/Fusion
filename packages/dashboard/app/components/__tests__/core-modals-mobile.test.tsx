@@ -133,20 +133,32 @@ describe("core modals mobile css coverage", () => {
     expect(mobileBlock).toContain("gap: 4px;");
   });
 
-  it("FN-4281: SettingsModal header reflows and keeps close button touch target on mobile", () => {
+  it("FN-4281: SettingsModal header keeps mobile heading shrink-to-fit scaffolding", () => {
     const css = loadAllAppCss();
     const mobileBlock = getMainMobileBlock(css);
 
     expect(mobileBlock).toContain(".settings-modal .modal-header {");
-    expect(mobileBlock).toContain("flex-wrap: wrap;");
     expect(mobileBlock).toContain(".settings-header-actions {");
-    expect(mobileBlock).toContain("order: 3;");
-    expect(mobileBlock).toContain("flex: 1 1 100%;");
-    expect(mobileBlock).toContain("margin-left: 0;");
-    expect(mobileBlock).toContain(".settings-modal .modal-close {");
-    expect(mobileBlock).toContain("order: 2;");
-    expect(mobileBlock).toContain("min-width: calc(var(--space-md) * 3);");
-    expect(mobileBlock).toContain("min-height: calc(var(--space-md) * 3);");
+    expect(mobileBlock).toContain(".settings-modal-heading {");
+
+    const headingRule = mobileBlock.match(/\.settings-modal-heading\s*\{[^}]*\}/s);
+    expect(headingRule).toBeTruthy();
+    expect(headingRule![0]).toContain("flex: 1 1 0;");
+    expect(headingRule![0]).toContain("min-width: 0;");
+  });
+
+  it("FN-4375: SettingsModal header keeps GitHub/Help/title/close on one row at ≤768px", () => {
+    const css = loadAllAppCss();
+    const mobileBlock = getMainMobileBlock(css);
+
+    const headerRule = mobileBlock.match(/\.settings-modal \.modal-header\s*\{[^}]*\}/s);
+    expect(headerRule).toBeTruthy();
+    expect(headerRule![0]).not.toContain("flex-wrap: wrap;");
+
+    const actionsRule = mobileBlock.match(/\.settings-header-actions\s*\{[^}]*\}/s);
+    expect(actionsRule).toBeTruthy();
+    expect(actionsRule![0]).not.toContain("flex: 1 1 100%;");
+    expect(actionsRule![0]).toContain("margin-left: auto;");
   });
 
   it("GitManagerModal: 768px mobile block includes stacked layout rules", () => {
