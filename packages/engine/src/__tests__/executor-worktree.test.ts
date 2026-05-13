@@ -29,6 +29,7 @@ import {
   mockedExecSync,
   mockedExistsSync,
   mockedHydrateWorktreeDb,
+  mockedIsUsableTaskWorktree,
   mockExecuteAll,
   mockTerminateAllSessions,
   mockCleanup,
@@ -403,6 +404,7 @@ describe("TaskExecutor worktree naming", () => {
 
   it("does not reuse a stored worktree path that is not registered", async () => {
     const stalePath = "/tmp/test/.worktrees/broken-wt";
+    mockedIsUsableTaskWorktree.mockResolvedValueOnce(false);
     mockedExistsSync.mockImplementation((path) => String(path).startsWith(stalePath));
     mockedExecSync.mockImplementation((cmd: any) => {
       if (String(cmd) === "git worktree list --porcelain") {
@@ -2203,6 +2205,7 @@ describe("worktree DB hydration", () => {
   });
 
   it("runs hydration path when executor reassigns unusable root worktree", async () => {
+    mockedIsUsableTaskWorktree.mockResolvedValueOnce(false);
     mockedExistsSync.mockReturnValue(true);
     const store = createMockStore();
     const executor = new TaskExecutor(store, "/tmp/test");
