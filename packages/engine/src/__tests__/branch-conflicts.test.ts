@@ -68,7 +68,7 @@ describe("branch-conflicts", () => {
     expect(mockedExecSync).not.toHaveBeenCalled();
   });
 
-  it("treats branch as stale-resolved when conflicting path exists but branch is not checked out in any live worktree", async () => {
+  it("FN-4397: treats branch as stale-resolved when conflicting path exists but branch is not checked out in any live worktree", async () => {
     mockedExecSync.mockImplementation((cmd: string | string[]) => {
       const command = typeof cmd === "string" ? cmd : cmd[0];
       if (command === "git worktree prune") return Buffer.from("");
