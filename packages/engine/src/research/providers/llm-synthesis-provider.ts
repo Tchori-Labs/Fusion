@@ -200,6 +200,11 @@ function extractCitations(text: string, sources: ResearchSource[]): string[] {
   return [...refs];
 }
 
+/**
+ * Extracts synthesis-emitted confidence (0-1) from model output.
+ * This is an LLM-provided signal for cited-research synthesis,
+ * not a statistical MAD confidence metric.
+ */
 function extractConfidence(text: string): number | undefined {
   const jsonBlock = text.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1] ?? text;
   try {

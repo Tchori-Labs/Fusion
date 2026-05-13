@@ -126,6 +126,10 @@ export interface ResearchFinding {
   heading: string;
   content: string;
   sources: string[];
+  /**
+   * Synthesis-emitted confidence in [0,1] from the LLM response.
+   * NOT a statistical MAD confidence score.
+   */
   confidence?: number;
 }
 
@@ -143,6 +147,11 @@ export interface ResearchTokenUsage {
   totalTokens?: number;
 }
 
+/**
+ * A cited-search/synthesis run persisted by Fusion Research.
+ * Not an upstream pi-autoresearch experiment session.
+ * See docs/research/naming-decision-2026-05.md.
+ */
 export interface ResearchRun {
   id: string;
   query: string;
@@ -305,7 +314,15 @@ export interface ResearchModelSettings {
 
 export interface ResearchOrchestrationConfig {
   providers: ResearchOrchestrationProvider[];
+  /**
+   * Bounds source fan-out within a single cited-research run.
+   * NOT an experiment-iteration cap.
+   */
   maxSources: number;
+  /**
+   * Bounds synthesis passes within a single cited-research run.
+   * NOT an experiment-iteration cap.
+   */
   maxSynthesisRounds: number;
   phaseTimeoutMs?: number;
   stepTimeoutMs?: number;
