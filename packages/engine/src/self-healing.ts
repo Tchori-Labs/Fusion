@@ -148,7 +148,7 @@ interface LandedTaskCommit {
   deletions?: number;
 }
 
-type AlreadyMergedDetectionStrategy = "trailer" | "ancestry" | "patch-id";
+type AlreadyMergedDetectionStrategy = "trailer" | "ancestry" | "patch-id" | "tree-equal";
 
 interface AlreadyMergedLookupInput {
   taskId: string;
@@ -866,6 +866,51 @@ export class SelfHealingManager {
       }
     } catch {
       // Fall through to null when patch-id detection fails.
+    }
+
+    // Last-resort fallback: if branch and base resolve to identical trees, content is already landed
+    // but attribution is weak (we cannot identify the exact landing commit), so prefer stronger
+    // trailer/ancestry/patch-id matches first and use this only at the end.
+    try {
+      const treeBranchName = taskBranch || `fusion/${taskId.toLowerCase()}`;
+      execSync(`git rev-parse --verify ${shellQuote(treeBranchName)}`, {
+        cwd: repoDir,
+        encoding: "utf-8",
+        stdio: ["pipe", "pipe", "pipe"],
+      }).trim();
+
+      const { stdout: baseTreeStdout } = await execAsync(
+        `git rev-parse ${shellQuote(baseBranch)}^{tree}`,
+        {
+          cwd: repoDir,
+          timeout: 30_000,
+          maxBuffer: 1024 * 1024,
+        },
+      );
+      const { stdout: branchTreeStdout } = await execAsync(
+        `git rev-parse ${shellQuote(treeBranchName)}^{tree}`,
+        {
+          cwd: repoDir,
+          timeout: 30_000,
+          maxBuffer: 1024 * 1024,
+        },
+      );
+
+      const baseTree = baseTreeStdout.trim();
+      const branchTree = branchTreeStdout.trim();
+      if (baseTree && branchTree && baseTree === branchTree) {
+        const { stdout: baseHeadStdout } = await execAsync(`git rev-parse ${shellQuote(baseBranch)}`, {
+          cwd: repoDir,
+          timeout: 30_000,
+          maxBuffer: 1024 * 1024,
+        });
+        const baseHead = baseHeadStdout.trim();
+        if (baseHead) {
+          return { sha: baseHead, strategy: "tree-equal" };
+        }
+      }
+    } catch {
+      // Fall through to null when tree-equality detection fails.
     }
 
     return null;
