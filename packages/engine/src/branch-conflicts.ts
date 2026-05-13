@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { promisify } from "node:util";
 
 const execAsync = promisify(exec);
+const FUSION_TASK_ID_TRAILER_KEY = "Fusion-Task-Id";
 
 export interface BranchConflictCommit {
   sha: string;
@@ -61,11 +62,15 @@ export interface InspectBranchConflictInput {
   repoDir: string;
   branchName: string;
   conflictingWorktreePath: string;
+  requestingTaskId: string;
   startPoint?: string;
 }
 
 export type BranchConflictInspectionResult =
   | { kind: "stale" }
+  | { kind: "stale-resolved" }
+  | { kind: "reclaimable"; livePath: string; tipSha: string; taskAttributedCommitCount: number; strandedCommits: BranchConflictCommit[] }
+  | { kind: "live-foreign"; livePath: string }
   | { kind: "live"; error: BranchConflictError };
 
 export interface ListBranchRecoveryCandidatesInput {
@@ -173,12 +178,71 @@ export async function listBranchRecoveryCandidates(
   return candidates;
 }
 
+async function countTaskAttributedCommits(repoDir: string, range: string, taskId: string): Promise<number> {
+  const escapedTaskId = taskId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const subjectPattern = new RegExp(`^(feat|fix|test|chore|docs|refactor|perf|build)\\(${escapedTaskId}\\):`);
+  const trailerPattern = new RegExp(`(?:^|\\n)${FUSION_TASK_ID_TRAILER_KEY}: ${escapedTaskId}(?:\\n|$)`);
+  let output = "";
+  try {
+    output = await runGit(repoDir, `git log --format=%H%x00%s%x00%b ${quoteShellArg(range)}`);
+  } catch {
+    return 0;
+  }
+  if (!output) return 0;
+
+  const tokens = output.split("\u0000");
+  let count = 0;
+  for (let i = 0; i + 2 < tokens.length; i += 3) {
+    const subject = tokens[i + 1] ?? "";
+    const body = tokens[i + 2] ?? "";
+    if (subjectPattern.test(subject) || trailerPattern.test(body)) {
+      count += 1;
+    }
+  }
+  return count;
+}
+
 export async function inspectBranchConflict(
   input: InspectBranchConflictInput,
 ): Promise<BranchConflictInspectionResult> {
   const startPoint = input.startPoint ?? "HEAD";
   if (!existsSync(input.conflictingWorktreePath)) {
     return { kind: "stale" };
+  }
+
+  try {
+    await runGit(input.repoDir, "git worktree prune");
+  } catch {
+    // best-effort
+  }
+
+  const worktreeMap = await getWorktreeBranchMap(input.repoDir);
+  const livePath = worktreeMap.get(input.branchName);
+
+  try {
+    await revParse(input.repoDir, `refs/heads/${input.branchName}`);
+  } catch {
+    return { kind: "stale-resolved" };
+  }
+
+  if (livePath && livePath !== input.conflictingWorktreePath) {
+    const tipSha = await revParse(input.repoDir, input.branchName);
+    const strandedCommits = await listStrandedCommits(input.repoDir, startPoint, input.branchName);
+    const taskAttributedCommitCount = await countTaskAttributedCommits(
+      input.repoDir,
+      `${startPoint}..${input.branchName}`,
+      input.requestingTaskId,
+    );
+    if (taskAttributedCommitCount > 0) {
+      return {
+        kind: "reclaimable",
+        livePath,
+        tipSha,
+        taskAttributedCommitCount,
+        strandedCommits,
+      };
+    }
+    return { kind: "live-foreign", livePath };
   }
 
   const existingTipSha = await revParse(input.repoDir, input.branchName);

@@ -1162,6 +1162,12 @@ export interface Task {
   blockedBy?: string;
   /** When true, all automated agent and scheduler interaction is suspended. */
   paused?: boolean;
+  /** Optional machine-readable reason for automated pauses (for example dispatch-storm). */
+  pausedReason?: string;
+  /** Dispatch-storm cycle counter tracked by scheduler for todo↔in-progress loop detection. */
+  dispatchStormCount?: number;
+  /** ISO timestamp of the most recent dispatch-storm cycle increment. */
+  lastDispatchAt?: string;
   /** When set, this task was paused because the agent with this ID was paused. Cleared when the agent resumes. Distinct from user-initiated pause. */
   pausedByAgentId?: string;
   /** Configured merge target/base branch for this task (task intent).

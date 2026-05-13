@@ -247,6 +247,7 @@ export class WorktreePool {
         repoDir: options?.repoDir ?? worktreePath,
         branchName,
         conflictingWorktreePath: conflictingPath,
+        requestingTaskId: branchName,
         startPoint: base,
       });
       if (inspection.kind === "stale") {

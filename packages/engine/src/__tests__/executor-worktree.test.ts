@@ -811,7 +811,7 @@ describe("TaskExecutor worktree recovery", () => {
         worktree: "/tmp/test/.worktrees/green-sage",
       }),
     );
-    expect(store.moveTask).toHaveBeenCalledWith("FN-050", "todo", { preserveProgress: true });
+    expect(store.moveTask).not.toHaveBeenCalled();
     expect(store.logEntry).toHaveBeenCalledWith(
       "FN-050",
       expect.stringContaining("Existing tip: abc123def456"),
@@ -2086,11 +2086,16 @@ describe("TaskExecutor worktree pool integration", () => {
       (c) => typeof c[0] === "string" && (c[0] as string).includes("worktree add"),
     );
     expect(worktreeAddCalls).toHaveLength(0);
-    expect(store.moveTask).toHaveBeenCalledWith("FN-020", "todo", { preserveProgress: true });
     expect(store.updateTask).toHaveBeenCalledWith(
       "FN-020",
-      expect.objectContaining({ branch: "fusion/fn-020", worktree: "/tmp/test/.worktrees/existing-fn-020" }),
+      expect.objectContaining({
+        status: "failed",
+        branch: "fusion/fn-020",
+        worktree: "/tmp/test/.worktrees/existing-fn-020",
+        paused: true,
+      }),
     );
+    expect(store.moveTask).not.toHaveBeenCalled();
   });
 });
 

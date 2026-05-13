@@ -108,6 +108,7 @@ export {
 export { generateReservedWorktreeName, generateWorktreeName, planTaskWorktreePath, slugify } from "./worktree-names.js";
 export { createLogger, type Logger } from "./logger.js";
 export { fetchWebContent, assertSafeUrl, WebFetchError, type WebFetchOptions, type WebFetchResult, type WebFetchErrorCode } from "./web-fetch.js";
+export { classifyTaskError, type ErrorClass, type TaskErrorClassification } from "./error-classifier.js";
 export { isUsageLimitError, UsageLimitPauser } from "./usage-limit-detector.js";
 export { withRateLimitRetry } from "./rate-limit-retry.js";
 export { ResearchOrchestrator, type ResearchOrchestratorOptions, type ResearchOrchestratorStatus, type ResearchOrchestratorStartOptions } from "./research-orchestrator.js";

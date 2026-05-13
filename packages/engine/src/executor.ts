@@ -3962,7 +3962,21 @@ export class TaskExecutor {
           });
           // Fall through to terminal failure marking
         } else if (isBranchConflictError(err)) {
-          await this.handleBranchConflict(task, err);
+          let outcome: "retry" | "reclaimed" | "sticky" = "sticky";
+          for (let attempt = 1; attempt <= this.MAX_AUTO_RECOVERY_ATTEMPTS; attempt += 1) {
+            outcome = await this.handleBranchConflict(task, err);
+            if (outcome !== "retry") break;
+            await this.store.logEntry(task.id, `[recovery] ${task.id} branch-conflict auto-retry requested (${attempt}/${this.MAX_AUTO_RECOVERY_ATTEMPTS})`, undefined, this.currentRunContext);
+          }
+          if (outcome === "retry") {
+            await this.store.updateTask(task.id, {
+              status: "failed",
+              error: err.message,
+              paused: true,
+              pausedReason: "branch-conflict-recovery-exhausted",
+            });
+            return;
+          }
           return;
         } else if (this.options.usageLimitPauser && isUsageLimitError(errorMessage)) {
           await this.options.usageLimitPauser.onUsageLimitHit("executor", task.id, errorMessage);
@@ -6324,32 +6338,78 @@ and show an appropriate message to the user.\`
     return lines.join("\n");
   }
 
-  private async handleBranchConflict(task: Task, error: BranchConflictError): Promise<void> {
+  private readonly MAX_AUTO_RECOVERY_ATTEMPTS = 3;
+
+  private async reclaimExistingWorktree(
+    task: Task,
+    livePath: string,
+    branch: string,
+    tipSha: string,
+    count: number,
+  ): Promise<void> {
+    await this.store.updateTask(task.id, { worktree: livePath, branch });
+    const message = `[recovery] reclaimed existing worktree for ${task.id} at ${livePath} (${count} commits preserved, tip ${tipSha.slice(0, 12)})`;
+    await this.store.logEntry(task.id, message, undefined, this.currentRunContext);
+    await this.store.appendAgentLog(task.id, "Branch conflict auto-recovery", "info", message, "executor");
+  }
+
+  private async handleBranchConflict(task: Task, error: BranchConflictError): Promise<"retry" | "reclaimed" | "sticky"> {
+    const inspection = await inspectBranchConflict({
+      repoDir: this.rootDir,
+      branchName: error.branchName,
+      conflictingWorktreePath: error.conflictingWorktreePath,
+      requestingTaskId: task.id,
+      startPoint: error.startPoint,
+    });
+
+    if (inspection.kind === "stale-resolved") {
+      const message = `[recovery] ${task.id} stage-A: pruned stale admin entry for ${error.branchName}`;
+      await this.store.logEntry(task.id, message, undefined, this.currentRunContext);
+      await this.store.appendAgentLog(task.id, "Branch conflict auto-recovery", "info", message, "executor");
+      return "retry";
+    }
+
+    if (inspection.kind === "reclaimable") {
+      await this.reclaimExistingWorktree(task, inspection.livePath, error.branchName, inspection.tipSha, inspection.taskAttributedCommitCount);
+      return "reclaimed";
+    }
+
+    if (inspection.kind === "live-foreign") {
+      const cleanupSuccess = await this.cleanupConflictingWorktree(inspection.livePath, error.branchName, task.id);
+      if (cleanupSuccess) {
+        try {
+          await execAsync("git worktree prune", { cwd: this.rootDir });
+        } catch {
+          // best-effort
+        }
+        try {
+          const worktreeMap = await this.getWorktreeBranchMap();
+          if (!worktreeMap.has(error.branchName)) {
+            await execAsync(`git branch -D "${error.branchName}"`, { cwd: this.rootDir });
+          }
+        } catch {
+          // best-effort
+        }
+        return "retry";
+      }
+    }
+
     const conflictMessage = `Task branch conflict: ${error.branchName} is already checked out at ${error.conflictingWorktreePath}. ` +
       `Run 'fn task branch-recovery ${task.id}' to inspect candidates, then reclaim the existing branch or discard prior work explicitly.`;
-    await this.store.logEntry(
-      task.id,
-      this.formatBranchConflictLifecycleLog(task.id, error),
-      undefined,
-      this.currentRunContext,
-    );
-    await this.store.appendAgentLog(
-      task.id,
-      "Branch conflict recovery required",
-      "tool_error",
-      this.formatBranchConflictAgentLog(task.id, error),
-      "executor",
-    );
+    await this.store.logEntry(task.id, this.formatBranchConflictLifecycleLog(task.id, error), undefined, this.currentRunContext);
+    await this.store.appendAgentLog(task.id, "Branch conflict recovery required", "tool_error", this.formatBranchConflictAgentLog(task.id, error), "executor");
     await this.store.updateTask(task.id, {
       status: "failed",
       error: conflictMessage,
       branch: error.branchName,
       worktree: error.conflictingWorktreePath,
+      paused: true,
+      pausedReason: "branch-conflict-unrecoverable",
     });
     await this.persistTokenUsage(task.id);
-    await this.store.moveTask(task.id, "todo", { preserveProgress: true });
-    executorLog.warn(`✗ ${task.id} branch conflict → todo: ${error.branchName} @ ${error.conflictingWorktreePath}`);
+    executorLog.warn(`✗ ${task.id} branch conflict sticky failure: ${error.branchName} @ ${error.conflictingWorktreePath}`);
     this.options.onError?.(task, error);
+    return "sticky";
   }
 
   private async createWorktree(
@@ -6982,12 +7042,32 @@ and show an appropriate message to the user.\`
         repoDir: this.rootDir,
         branchName: branch,
         conflictingWorktreePath: conflictPath,
+        requestingTaskId: taskId,
         startPoint,
       });
-      if (inspection.kind === "stale") {
+
+      if (inspection.kind === "stale" || inspection.kind === "stale-resolved") {
         const cleanupSuccess = await this.cleanupConflictingWorktree(conflictPath, branch, taskId);
         if (cleanupSuccess) {
           await this.store.logEntry(taskId, `Cleaned up conflicting worktree, retrying`, path);
+          return this.tryCreateWorktree(branch, path, taskId, startPoint, attemptNumber, 0, allowSiblingBranchRename);
+        }
+        return null;
+      }
+
+      if (inspection.kind === "reclaimable") {
+        await this.store.logEntry(
+          taskId,
+          `[recovery] reclaimed existing worktree for ${taskId} at ${inspection.livePath} (${inspection.taskAttributedCommitCount} commits preserved)`,
+          inspection.tipSha,
+        );
+        return { path: inspection.livePath, branch };
+      }
+
+      if (inspection.kind === "live-foreign") {
+        const cleanupSuccess = await this.cleanupConflictingWorktree(inspection.livePath, branch, taskId);
+        if (cleanupSuccess) {
+          await this.store.logEntry(taskId, `Removed foreign conflicting worktree and retrying`, inspection.livePath);
           return this.tryCreateWorktree(branch, path, taskId, startPoint, attemptNumber, 0, allowSiblingBranchRename);
         }
         return null;
@@ -7069,6 +7149,22 @@ and show an appropriate message to the user.\`
    * Determine if we should generate a new worktree name instead of cleaning up.
    * Returns true if the conflicting worktree is used by an active task.
    */
+  private async getWorktreeBranchMap(): Promise<Map<string, string>> {
+    const { stdout } = await execAsync("git worktree list --porcelain", { cwd: this.rootDir, encoding: "utf-8" });
+    const map = new Map<string, string>();
+    let currentWorktree: string | null = null;
+    for (const line of stdout.split("\n")) {
+      if (line.startsWith("worktree ")) {
+        currentWorktree = line.slice("worktree ".length).trim();
+      } else if (line.startsWith("branch refs/heads/") && currentWorktree) {
+        map.set(line.slice("branch refs/heads/".length).trim(), currentWorktree);
+      } else if (!line.trim()) {
+        currentWorktree = null;
+      }
+    }
+    return map;
+  }
+
   private async shouldGenerateNewWorktreeName(
     conflictPath: string,
     currentTaskId: string,

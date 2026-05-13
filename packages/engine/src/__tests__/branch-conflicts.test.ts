@@ -60,6 +60,7 @@ describe("branch-conflicts", () => {
       repoDir: "/tmp/repo",
       branchName: "fusion/fn-4068",
       conflictingWorktreePath: "/tmp/missing-wt",
+      requestingTaskId: "FN-4068",
       startPoint: "main",
     });
 
@@ -70,6 +71,13 @@ describe("branch-conflicts", () => {
   it("returns a typed live conflict with stranded commits", async () => {
     mockedExecSync.mockImplementation((cmd: string | string[]) => {
       const command = typeof cmd === "string" ? cmd : cmd[0];
+      if (command === "git worktree prune") return Buffer.from("");
+      if (command === "git worktree list --porcelain") {
+        return Buffer.from(["worktree /tmp/existing-wt", "HEAD 2222222", "branch refs/heads/fusion/fn-4068", ""].join("\n"));
+      }
+      if (command.includes("git rev-parse --verify 'refs/heads/fusion/fn-4068^{commit}'")) {
+        return Buffer.from("abc123def456\n");
+      }
       if (command.includes("git rev-parse --verify 'fusion/fn-4068^{commit}'")) {
         return Buffer.from("abc123def456\n");
       }
@@ -83,6 +91,7 @@ describe("branch-conflicts", () => {
       repoDir: "/tmp/repo",
       branchName: "fusion/fn-4068",
       conflictingWorktreePath: "/tmp/existing-wt",
+      requestingTaskId: "FN-4068",
       startPoint: "main",
     });
 
