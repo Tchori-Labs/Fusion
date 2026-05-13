@@ -197,16 +197,21 @@ describe("TaskStore github tracking", () => {
   });
 
   it("emits githubIssueAction metadata on task:deleted", async () => {
-    const task = await store.createTask({ description: "Delete tracking metadata" });
+    const taskWithExplicitAction = await store.createTask({ description: "Delete tracking metadata explicit" });
+    const taskWithDefaultAction = await store.createTask({ description: "Delete tracking metadata default" });
     const deletedEvents: Array<{ id: string; action: string | undefined }> = [];
 
     store.on("task:deleted", (deletedTask, meta) => {
       deletedEvents.push({ id: deletedTask.id, action: meta?.githubIssueAction });
     });
 
-    await store.deleteTask(task.id, { githubIssueAction: "delete" });
+    await store.deleteTask(taskWithExplicitAction.id, { githubIssueAction: "delete" });
+    await store.deleteTask(taskWithDefaultAction.id);
 
-    expect(deletedEvents).toEqual([{ id: task.id, action: "delete" }]);
+    expect(deletedEvents).toEqual([
+      { id: taskWithExplicitAction.id, action: "delete" },
+      { id: taskWithDefaultAction.id, action: "auto" },
+    ]);
   });
 
   it("persists disabled state, repo override, and issue mutations across repeated restarts", async () => {
