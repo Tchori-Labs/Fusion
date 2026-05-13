@@ -1,6 +1,6 @@
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { execMock, readFileMock, pingMock, versionMock, inspectMock, dockerCtor } = vi.hoisted(() => {
+const { execMock, readFileMock, pingMock, versionMock, inspectMock, dockerCtor, dockerodeModuleFactoryMock } = vi.hoisted(() => {
   const execMock = vi.fn();
   const readFileMock = vi.fn();
   const pingMock = vi.fn();
@@ -9,12 +9,13 @@ const { execMock, readFileMock, pingMock, versionMock, inspectMock, dockerCtor }
   const dockerCtor = vi.fn().mockImplementation(() => ({
     ping: pingMock,
     version: versionMock,
-    getContainer: vi.fn(() => ({ inspect: inspectMock })),
+    getContainer: vi.fn(() => ({ inspect: inspectMock, logs: vi.fn().mockResolvedValue(Buffer.from("logs")) })),
   }));
-  return { execMock, readFileMock, pingMock, versionMock, inspectMock, dockerCtor };
+  const dockerodeModuleFactoryMock = vi.fn(() => ({ default: dockerCtor }));
+  return { execMock, readFileMock, pingMock, versionMock, inspectMock, dockerCtor, dockerodeModuleFactoryMock };
 });
 
-vi.mock("dockerode", () => ({ default: dockerCtor }));
+vi.mock("dockerode", dockerodeModuleFactoryMock);
 vi.mock("node:child_process", () => ({ exec: execMock }));
 vi.mock("node:fs/promises", () => ({ readFile: readFileMock }));
 
@@ -23,6 +24,8 @@ import { DockerClientService } from "../docker-client";
 describe("DockerClientService", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.resetModules();
+    vi.doMock("dockerode", dockerodeModuleFactoryMock);
     execMock.mockImplementation((cmd: string, _opts: unknown, cb: (err: unknown, out: { stdout: string; stderr: string }) => void) => cb(null, { stdout: "", stderr: "" }));
     pingMock.mockResolvedValue(undefined);
     versionMock.mockResolvedValue({ Version: "24.0.0", ApiVersion: "1.43", Os: "linux" });
@@ -130,5 +133,60 @@ describe("DockerClientService", () => {
   it("does not use execSync", async () => {
     const source = await import("node:fs/promises").then((m) => m.readFile(new URL("../docker-client.ts", import.meta.url), "utf8"));
     expect(source.includes("execSync")).toBe(false);
+  });
+
+  describe("lazy loading", () => {
+    afterEach(() => {
+      vi.resetModules();
+      vi.doMock("dockerode", dockerodeModuleFactoryMock);
+    });
+
+    it("returns actionable error when dockerode is missing", async () => {
+      const missingModuleError = Object.assign(new Error("Cannot find package 'dockerode'"), { code: "ERR_MODULE_NOT_FOUND" });
+
+      vi.resetModules();
+      vi.doMock("dockerode", () => ({
+        get default() {
+          throw missingModuleError;
+        },
+      }));
+
+      const { DockerClientService: FreshDockerClientService } = await import("../docker-client");
+      const service = new FreshDockerClientService();
+      const result = await service.testConnection();
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Install it with: npm install dockerode");
+    });
+
+    it("preserves diagnostics for generic load failures", async () => {
+      vi.resetModules();
+      vi.doMock("dockerode", () => ({
+        get default() {
+          throw new Error("boom — internal init failure");
+        },
+      }));
+
+      const { DockerClientService: FreshDockerClientService } = await import("../docker-client");
+      const service = new FreshDockerClientService();
+      const result = await service.testConnection();
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Failed to load 'dockerode': boom — internal init failure");
+    });
+
+    it("loads dockerode only once across multiple calls", async () => {
+      vi.resetModules();
+      vi.doMock("dockerode", dockerodeModuleFactoryMock);
+
+      const { DockerClientService: FreshDockerClientService } = await import("../docker-client");
+      const service = new FreshDockerClientService();
+
+      await service.testConnection();
+      await service.testConnection({ host: "tcp://1.2.3.4:2376" });
+      await service.getContainerInfo("abc");
+
+      expect(dockerodeModuleFactoryMock).toHaveBeenCalledTimes(1);
+    });
   });
 });

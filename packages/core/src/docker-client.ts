@@ -1,5 +1,5 @@
-import Docker from "dockerode";
 import { exec } from "node:child_process";
+import type Docker from "dockerode";
 import { readFile } from "node:fs/promises";
 import { promisify } from "node:util";
 import type {
@@ -15,6 +15,11 @@ const EXEC_OPTIONS = {
   maxBuffer: 5 * 1024 * 1024,
 } as const;
 
+type DockerodeModule = typeof import("dockerode");
+type DockerConstructor = DockerodeModule extends { default: infer T } ? T : DockerodeModule;
+
+let dockerodeConstructorPromise: Promise<DockerConstructor> | null = null;
+
 function isLocalDaemonHost(host?: string): boolean {
   return !host || host.trim() === "" || host === "unix:///var/run/docker.sock";
 }
@@ -22,6 +27,42 @@ function isLocalDaemonHost(host?: string): boolean {
 function toErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message) return error.message;
   return String(error);
+}
+
+function isDockerodeMissingModuleError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const code = "code" in error ? (error as Error & { code?: string }).code : undefined;
+  return (
+    code === "ERR_MODULE_NOT_FOUND" ||
+    code === "MODULE_NOT_FOUND" ||
+    /cannot find (package|module) ['"]dockerode['"]/i.test(error.message)
+  );
+}
+
+async function loadDockerode(): Promise<DockerConstructor> {
+  if (!dockerodeConstructorPromise) {
+    dockerodeConstructorPromise = import("dockerode")
+      .then((mod) => ("default" in mod && mod.default ? mod.default : mod) as DockerConstructor)
+      .catch((error: unknown) => {
+        // Clear the cache on any failure so a later retry can succeed after environment changes.
+        dockerodeConstructorPromise = null;
+
+        if (isDockerodeMissingModuleError(error)) {
+          throw new Error("Docker support requires the optional 'dockerode' package. Install it with: npm install dockerode", {
+            cause: error,
+          });
+        }
+
+        throw new Error(`Failed to load 'dockerode': ${toErrorMessage(error)}`, {
+          cause: error,
+        });
+      });
+  }
+
+  return dockerodeConstructorPromise;
 }
 
 interface DockerContextCliEntry {
@@ -53,6 +94,7 @@ export class DockerClientService {
       const parsed = JSON.parse(stdout) as Array<{ Endpoints?: { docker?: { Host?: string } } }>;
       const dockerHost = parsed[0]?.Endpoints?.docker?.Host;
       if (!dockerHost) throw new Error(`Docker context "${contextName}" does not define a Docker endpoint host`);
+      const Docker = await loadDockerode();
       return new Docker({ host: dockerHost });
     }
 
@@ -72,9 +114,11 @@ export class DockerClientService {
       if (hostConfig.tlsKeyPath) options.key = await readFile(hostConfig.tlsKeyPath);
       if (hostConfig.tlsVerify === false) options.rejectUnauthorized = false;
 
+      const Docker = await loadDockerode();
       return new Docker(options);
     }
 
+    const Docker = await loadDockerode();
     return new Docker();
   }
 
