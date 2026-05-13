@@ -293,30 +293,36 @@ export function TaskReviewTab({ task, projectId, onTaskUpdated, addToast }: Prop
       {!loading && !error && !isPrMode && displayItems.length === 0 ? <div className="task-review-tab__empty">{emptyMessage ?? DIRECT_MODE_EMPTY_MESSAGE}</div> : null}
       {!loading && !error && displayItems.length > 0 ? (
         <ul className="task-review-tab__list">
-          {displayItems.map((item) => (
-            <li key={item.id} className="task-review-tab__item card">
-              <label className="task-review-tab__direct-item task-review-tab__direct-item--selectable">
-                <div className="task-review-tab__summary-wrap">
-                  <input type="checkbox" checked={selected.includes(item.id)} onChange={() => toggleSelected(item.id)} />
-                  <span className="task-review-tab__item-summary">{item.path ? `${item.path}: ` : ""}{item.summary}</span>
-                  <span className={`task-review-tab__status task-review-tab__status--${item.status}`}>{item.status}</span>
+          {displayItems.map((item) => {
+            const checkboxId = `task-review-item-${item.id}`;
+
+            return (
+              <li key={item.id} className="task-review-tab__item card">
+                <div className="task-review-tab__item-inner">
+                  <label htmlFor={checkboxId} className="task-review-tab__direct-item task-review-tab__direct-item--selectable">
+                    <div className="task-review-tab__summary-wrap">
+                      <input id={checkboxId} type="checkbox" checked={selected.includes(item.id)} onChange={() => toggleSelected(item.id)} />
+                      <span className="task-review-tab__item-summary">{item.path ? `${item.path}: ` : ""}{item.summary}</span>
+                      <span className={`task-review-tab__status task-review-tab__status--${item.status}`}>{item.status}</span>
+                    </div>
+                    <div className="task-review-tab__meta">{formatTimestamp(item.createdAt)}</div>
+                    {item.addressing ? (
+                      <div className="task-review-tab__meta">Selected: {formatTimestamp(item.addressing.selectedAt)}{item.addressing.startedAt ? ` · Started: ${formatTimestamp(item.addressing.startedAt)}` : ""}{item.addressing.completedAt ? ` · Completed: ${formatTimestamp(item.addressing.completedAt)}` : ""}{item.addressing.error ? ` · Error: ${item.addressing.error}` : ""}</div>
+                    ) : null}
+                  </label>
+                  {renderMarkdown ? (
+                    <div className="task-review-tab__body markdown-body">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                        {item.body}
+                      </ReactMarkdown>
+                    </div>
+                  ) : (
+                    <pre className="task-review-tab__body">{item.body}</pre>
+                  )}
                 </div>
-                <div className="task-review-tab__meta">{formatTimestamp(item.createdAt)}</div>
-                {item.addressing ? (
-                  <div className="task-review-tab__meta">Selected: {formatTimestamp(item.addressing.selectedAt)}{item.addressing.startedAt ? ` · Started: ${formatTimestamp(item.addressing.startedAt)}` : ""}{item.addressing.completedAt ? ` · Completed: ${formatTimestamp(item.addressing.completedAt)}` : ""}{item.addressing.error ? ` · Error: ${item.addressing.error}` : ""}</div>
-                ) : null}
-                {renderMarkdown ? (
-                  <div className="task-review-tab__body markdown-body">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-                      {item.body}
-                    </ReactMarkdown>
-                  </div>
-                ) : (
-                  <pre className="task-review-tab__body">{item.body}</pre>
-                )}
-              </label>
-            </li>
-          ))}
+              </li>
+            );
+          })}
         </ul>
       ) : null}
       {isPrMode && !loading && !error && displayItems.length === 0 ? <div className="task-review-tab__empty">No review items yet.</div> : null}

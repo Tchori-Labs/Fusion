@@ -145,6 +145,36 @@ describe("TaskReviewTab", () => {
     expect(screen.getByText("failed").className).toContain("task-review-tab__status--failed");
   });
 
+  it("FN-4137 keeps markdown body clicks from toggling the review-item checkbox", async () => {
+    const task = makeTask({
+      reviewState: {
+        source: "reviewer-agent",
+        summary: { verdict: "REVISE", reviewType: "code", summary: "Needs fixes" },
+        items: [
+          {
+            id: "reviewer-markdown-click-1",
+            body: "**bold**\n\n[details](https://example.test/review)",
+            author: { login: "reviewer-agent" },
+            createdAt: new Date().toISOString(),
+            summary: "Markdown body click target",
+          },
+        ],
+        addressing: [],
+      },
+    });
+
+    apiMocks.fetchTaskReview.mockResolvedValue({ reviewState: task.reviewState, automationStatus: null, emptyMessage: null });
+
+    render(<TaskReviewTab task={task} addToast={vi.fn()} />);
+
+    const checkbox = await screen.findByRole("checkbox");
+    expect(checkbox).not.toBeChecked();
+
+    fireEvent.click(screen.getByText("bold"));
+
+    expect(checkbox).not.toBeChecked();
+  });
+
   it("renders markdown by default and persists plain-text toggle preference", async () => {
     const task = makeTask({
       reviewState: {
