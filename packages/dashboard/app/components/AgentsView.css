@@ -863,6 +863,22 @@
   display: none;
 }
 
+.agent-org-chart-toolbar {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.agent-org-chart-layout-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: var(--space-xs);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
 .agent-org-chart-controls__zoom-label {
   min-width: calc(var(--space-2xl) * 2);
   font-family: var(--font-mono);
@@ -1239,12 +1255,25 @@
   .agent-org-chart-controls {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: var(--space-sm);
+  }
+
+  .agent-org-chart-controls .agent-org-chart-layout-toggle {
+    order: 1;
+  }
+
+  .agent-org-chart-controls__zoom-label {
+    order: 2;
   }
 
   .agent-org-chart-controls .btn-icon,
   .agent-org-chart-controls .agent-org-chart-controls__fit-btn {
     min-height: calc(var(--space-lg) * 2 + var(--space-xs));
+  }
+
+  .agent-org-chart-controls .agent-org-chart-controls__fit-btn {
+    margin-left: 0;
   }
 
   .agent-org-chart-viewport {
