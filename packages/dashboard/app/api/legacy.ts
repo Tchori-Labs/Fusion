@@ -1868,6 +1868,41 @@ export function createCustomProvider(config: CustomProviderConfig): Promise<Cust
   });
 }
 
+/**
+ * Probe a custom provider's /models endpoint to discover available models.
+ * Only works for OpenAI-compatible providers (the /models endpoint is an
+ * OpenAI convention). Returns the list of models found at the provider.
+ */
+export interface ProbeModelResult {
+  id: string;
+  name: string;
+  reasoning?: boolean;
+  contextWindow?: number;
+  maxTokens?: number;
+}
+
+export interface ProbeModelsResponse {
+  models: ProbeModelResult[];
+  count: number;
+}
+
+export interface ProbeModelsParams {
+  baseUrl: string;
+  apiKey?: string;
+  apiType: "openai-compatible" | "anthropic-compatible" | "google-generative-ai";
+}
+
+export async function probeProviderModels(params: ProbeModelsParams): Promise<ProbeModelsResponse> {
+  return api<ProbeModelsResponse>("/custom-providers/probe-models", {
+    method: "POST",
+    body: JSON.stringify({
+      baseUrl: params.baseUrl,
+      apiKey: params.apiKey,
+      apiType: params.apiType,
+    }),
+  });
+}
+
 /** Fetch authentication status for all OAuth providers */
 export function fetchAuthStatus(): Promise<{
   providers: AuthProvider[];

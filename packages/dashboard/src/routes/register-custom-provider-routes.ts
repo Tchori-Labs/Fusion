@@ -103,6 +103,199 @@ function parseCreateBody(body: unknown): Omit<CustomProvider, "id"> {
   return provider;
 }
 
+interface ProbeModelResult {
+  id: string;
+  name: string;
+  reasoning?: boolean;
+  contextWindow?: number;
+  maxTokens?: number;
+}
+
+const MAX_PROBE_MODELS = 100;
+
+type ProbeApiType = "openai-compatible" | "anthropic-compatible" | "google-generative-ai";
+
+/**
+ * Check if a model should be excluded (embedding / reranking / audio-only / no-text-input models).
+ */
+function isNonChatModel(m: Record<string, unknown>): boolean {
+  // OpenAI-compatible modalities: { input: ["text"], output: ["embedding"] }
+  const modalities = m.modalities as Record<string, unknown> | undefined;
+  if (modalities) {
+    // Exclude models that don't accept text input (e.g. audio-only, image-only)
+    if (Array.isArray(modalities.input)) {
+      const inputs = modalities.input.map((i: unknown) => String(i).toLowerCase());
+      if (!inputs.includes("text")) {
+        return true;
+      }
+    }
+
+    if (Array.isArray(modalities.output)) {
+      const outputs = modalities.output.map((o: unknown) => String(o).toLowerCase());
+      if (outputs.includes("embedding") || outputs.includes("scores")) {
+        return true;
+      }
+      // Exclude models that don't produce text output (e.g. audio-only)
+      if (!outputs.includes("text")) {
+        return true;
+      }
+    }
+  }
+
+  // Google supportedGenerationMethods: no generateContent = not a chat model
+  const methods = m.supportedGenerationMethods as unknown[] | undefined;
+  if (Array.isArray(methods) && methods.length > 0 && !methods.includes("generateContent")) {
+    return true;
+  }
+
+  // Heuristic: model ID contains embedding / rerank
+  const id = String(m.id ?? m.name ?? "").toLowerCase();
+  if (id.includes("embedding") || id.includes("embed-") || id.includes("-embed-") || id.includes("rerank")) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Probe a custom provider's /models endpoint to discover available models.
+ * Supports OpenAI-compatible, Anthropic-compatible, and Google Generative AI providers.
+ */
+async function probeProviderModels(
+  baseUrl: string,
+  apiKey: string | undefined,
+  apiType: ProbeApiType,
+): Promise<ProbeModelResult[]> {
+  let url: URL;
+  try {
+    url = new URL(baseUrl);
+  } catch {
+    throw badRequest("baseUrl must be a valid URL");
+  }
+
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw badRequest("baseUrl must use http or https");
+  }
+
+  let modelsUrl: string;
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    "User-Agent": "Fusion/1.0",
+  };
+
+  if (apiType === "openai-compatible") {
+    // OpenAI-compatible: /v1/models relative to baseUrl
+    const pathname = url.pathname.replace(/\/+$/, "");
+    const modelsPath = pathname ? pathname + "/models" : "/models";
+    modelsUrl = new URL(modelsPath, url.origin).toString();
+    if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
+  } else if (apiType === "anthropic-compatible") {
+    // Anthropic: GET /v1/models with x-api-key header
+    const pathname = url.pathname.replace(/\/+$/, "");
+    const modelsPath = pathname ? pathname + "/models" : "/v1/models";
+    modelsUrl = new URL(modelsPath, url.origin).toString();
+    if (apiKey) headers["x-api-key"] = apiKey;
+    headers["anthropic-version"] = "2023-06-01";
+  } else {
+    // Google Generative AI: GET /v1beta/models?key=API_KEY
+    const pathname = url.pathname.replace(/\/+$/, "");
+    const modelsPath = pathname ? pathname + "/models" : "/v1beta/models";
+    modelsUrl = new URL(modelsPath, url.origin).toString();
+    if (apiKey) {
+      // Append API key as query parameter (Google convention)
+      const separator = modelsUrl.includes("?") ? "&" : "?";
+      modelsUrl = `${modelsUrl}${separator}key=${encodeURIComponent(apiKey)}`;
+    }
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 10_000);
+
+  try {
+    const response = await fetch(modelsUrl, {
+      method: "GET",
+      headers,
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.text().catch(() => "");
+      const message = errorBody.slice(0, 200);
+      throw new ApiError(
+        response.status,
+        `Provider returned ${response.status} ${response.statusText}${message ? `: ${message}` : ""}`,
+      );
+    }
+
+    const data = await response.json();
+    const rawModels = data?.data ?? data?.models ?? [];
+
+    if (!Array.isArray(rawModels) || rawModels.length === 0) {
+      throw new ApiError(404, "No models found in provider response");
+    }
+
+    // Filter out embedding/reranking/audio-only models and truncate
+    const chatModels = rawModels.filter((m: Record<string, unknown>) => !isNonChatModel(m));
+    const trimmed = chatModels.length > MAX_PROBE_MODELS ? chatModels.slice(0, MAX_PROBE_MODELS) : chatModels;
+
+    return trimmed.map((m: Record<string, unknown>) => {
+      // Extract ID based on provider format
+      let id: string;
+      let name: string;
+      let contextWindow: number | undefined;
+      let maxTokens: number | undefined;
+      let reasoning: boolean;
+
+      if (apiType === "google-generative-ai") {
+        // Google: name = "models/gemini-2.0-flash", baseModelId = "gemini-2.0-flash"
+        id = String(m.baseModelId ?? m.name ?? "");
+        // Strip "models/" prefix if present
+        if (id.startsWith("models/")) id = id.slice(7);
+        name = String(m.displayName ?? id);
+        contextWindow = typeof m.inputTokenLimit === "number" && m.inputTokenLimit > 0
+          ? m.inputTokenLimit
+          : undefined;
+        maxTokens = typeof m.outputTokenLimit === "number" && m.outputTokenLimit > 0
+          ? m.outputTokenLimit
+          : undefined;
+        reasoning = Boolean(m.thinking);
+      } else if (apiType === "anthropic-compatible") {
+        // Anthropic: id = "claude-sonnet-4-20250514", display_name = "Claude Sonnet 4"
+        id = String(m.id ?? "");
+        name = String(m.display_name ?? id);
+        // Anthropic doesn't return context/max_tokens in the models list
+        reasoning = Boolean(
+          id.toLowerCase().includes("opus") ||
+            id.toLowerCase().includes("sonnet"),
+        );
+      } else {
+        // OpenAI-compatible
+        id = String(m.id ?? "");
+        name = String(m.name ?? m.display_name ?? id);
+        reasoning = Boolean(
+          m.reasoning ||
+            (Array.isArray(m.capabilities) && m.capabilities.includes("reasoning")) ||
+            id.toLowerCase().includes("reason") ||
+            id.toLowerCase().includes("o1") ||
+            id.toLowerCase().includes("o3"),
+        );
+        // Extract context window and max tokens from limit object
+        const limit = m.limit as Record<string, unknown> | undefined;
+        contextWindow = typeof limit?.context === "number" && limit.context > 0
+          ? limit.context
+          : undefined;
+        maxTokens = typeof limit?.output === "number" && limit.output > 0
+          ? limit.output
+          : undefined;
+      }
+
+      return { id, name, reasoning, contextWindow, maxTokens };
+    }).filter((m) => m.id.length > 0);
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 function parseUpdateBody(body: unknown): Partial<Omit<CustomProvider, "id">> {
   if (!body || typeof body !== "object") {
     throw badRequest("request body must be an object");
@@ -238,6 +431,41 @@ export const registerCustomProviderRoutes: ApiRouteRegistrar = (ctx) => {
       const nextProviders = providers.filter((provider) => provider.id !== providerId);
       await store.updateGlobalSettings({ customProviders: nextProviders });
       res.json({ success: true });
+    } catch (err: unknown) {
+      if (err instanceof ApiError) {
+        throw err;
+      }
+      rethrowAsApiError(err);
+    }
+  });
+
+  // NOTE: probe-models must be registered AFTER the :id param routes
+  // so Express does not match "probe-models" as an :id value.
+  router.post("/custom-providers/probe-models", async (req, res) => {
+    try {
+      const body = req.body as Record<string, unknown>;
+
+      const baseUrl = assertBaseUrl(body.baseUrl);
+      const apiKey =
+        typeof body.apiKey === "string" && body.apiKey.trim().length > 0
+          ? body.apiKey.trim()
+          : undefined;
+
+      // Probe endpoint accepts all three API types
+      const rawApiType = body.apiType as string | undefined;
+      if (
+        rawApiType !== "openai-compatible" &&
+        rawApiType !== "anthropic-compatible" &&
+        rawApiType !== "google-generative-ai"
+      ) {
+        throw badRequest(
+          "apiType must be 'openai-compatible', 'anthropic-compatible', or 'google-generative-ai'",
+        );
+      }
+      const apiType = rawApiType as ProbeApiType;
+
+      const models = await probeProviderModels(baseUrl, apiKey, apiType);
+      res.json({ models, count: models.length });
     } catch (err: unknown) {
       if (err instanceof ApiError) {
         throw err;
