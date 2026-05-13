@@ -1096,7 +1096,7 @@ describe("TaskCard", () => {
   });
 
   it("renders a GitHub tracking link for tracked issues on non-imported tasks", () => {
-    render(
+    const { container } = render(
       <TaskCard
         task={makeTask({
           column: "todo",
@@ -1117,10 +1117,45 @@ describe("TaskCard", () => {
     );
 
     const link = screen.getByRole("link", { name: "Linked GitHub issue #42" });
+    const bottomRightRow = container.querySelector(".card-bottom-right-row");
+    const footerRow = container.querySelector(".card-footer-row");
     expect(link.getAttribute("href")).toBe("https://github.com/owner/repo/issues/42");
     expect(link.getAttribute("title")).toBe("Linked GitHub issue: owner/repo#42");
     expect(link).toHaveClass("card-source-provenance", "card-github-tracking-link");
+    expect(bottomRightRow?.contains(link)).toBe(true);
+    expect(footerRow).toBeNull();
     expect(screen.getByTestId("provider-icon-github")).toBeDefined();
+  });
+
+  it("renders the GitHub tracking link below the queued badge in the bottom-right row", () => {
+    const { container } = render(
+      <TaskCard
+        task={makeTask({
+          column: "todo",
+          status: "queued",
+          sourceType: "dashboard_ui",
+          githubTracking: {
+            issue: {
+              owner: "owner",
+              repo: "repo",
+              number: 42,
+              url: "https://github.com/owner/repo/issues/42",
+              createdAt: "2026-05-12T00:00:00.000Z",
+            },
+          },
+        })}
+        onOpenDetail={noop}
+        addToast={noop}
+      />,
+    );
+
+    const link = screen.getByRole("link", { name: "Linked GitHub issue #42" });
+    const bottomRightRow = container.querySelector(".card-bottom-right-row");
+    const queuedBadge = container.querySelector(".queued-badge");
+    expect(bottomRightRow).not.toBeNull();
+    expect(bottomRightRow?.contains(link)).toBe(true);
+    expect(queuedBadge).not.toBeNull();
+    expect(queuedBadge?.compareDocumentPosition(bottomRightRow as Node) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it("keeps the GitHub tracking link keyboard focusable", () => {
