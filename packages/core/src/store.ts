@@ -30,6 +30,7 @@ import { sanitizeTitle } from "./ai-summarize.js";
 import { assertProjectRootDir } from "./project-root-guard.js";
 import { generateTaskLineageId, normalizeTaskCommitAssociation } from "./task-lineage.js";
 import { createDistributedTaskIdAllocator, reconcileTaskIdState, resolveLocalNodeId, type DistributedTaskIdAllocator } from "./distributed-task-id.js";
+import { detectStalledReview } from "./stalled-review-detector.js";
 import {
   detectTaskIdIntegrityAnomalies,
   type TaskIdIntegrityReport,
@@ -3084,7 +3085,9 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       // the board card has no way to display the same total-execution
       // figure that the task detail panel shows.
       if (slim) {
+        const now = Date.now();
         task.timedExecutionMs = this.computeTimedExecutionMs(task.log);
+        task.stalledReview = detectStalledReview(task, { now });
         task.log = [];
         task.githubTracking = undefined;
       }
@@ -3164,6 +3167,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       const task = this.rowToTask(row);
       task.inReviewStall = getInReviewStallReason(task, { now });
       task.timedExecutionMs = this.computeTimedExecutionMs(task.log);
+      task.stalledReview = detectStalledReview(task, { now });
       task.log = [];
       task.githubTracking = undefined;
       return task;
@@ -3277,7 +3281,9 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       // Slim path mirrors `listTasks`: aggregate timed execution server-side
       // before stripping the heavy log payload from the wire response.
       if (slim) {
+        const now = Date.now();
         task.timedExecutionMs = this.computeTimedExecutionMs(task.log);
+        task.stalledReview = detectStalledReview(task, { now });
         task.log = [];
         task.githubTracking = undefined;
       }
