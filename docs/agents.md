@@ -463,6 +463,7 @@ The `runtimeConfig` field on agents supports the following options:
 | `maxConcurrentRuns` | `number` | `1` | Max concurrent heartbeat runs for this agent |
 | `runMissedHeartbeatOnStartup` | `boolean` | `false` | When enabled, if the server was down across this agent's scheduled heartbeat tick, fire one catch-up heartbeat at startup (only when `lastHeartbeatAt` is older than the resolved interval) |
 | `allowParallelExecution` | `boolean` | `true` (when unset) | Permanent agents only. When `false`, heartbeat and executor paths serialize symmetrically: a heartbeat will not start while the agent's bound task has an active executor session, and an executor session will not start while the agent has an active heartbeat run |
+| `skipHeartbeatWhenIdle` | `boolean` | `false` | When `true`, scheduled timer heartbeats are skipped while the agent has no assigned task. Assignment-triggered and on-demand runs still fire |
 | `messageResponseMode` | `"immediate" \| "on-heartbeat"` | `"immediate"` | Whether agent wakes immediately on message (immediate) or processes during heartbeat (on-heartbeat). See [Heartbeat Run Mailbox Checking](#heartbeat-run-mailbox-checking) |
 | `selfImproveEnabled` | `boolean` | `true` | Enable periodic self-improvement reflection prompts during heartbeat runs |
 | `selfImproveIntervalMs` | `number` | `14400000` (4h) | Minimum delay between self-improvement cycles (minimum enforced: 3600000 ms) |
@@ -477,6 +478,8 @@ Project setting `heartbeatMultiplier` (default `1`) scales resolved heartbeat in
 `runMissedHeartbeatOnStartup` defaults to `false` and is configured in **Agent Detail → Settings → Heartbeat Settings → Run Missed Heartbeat On Startup**.
 
 `allowParallelExecution` defaults to `true` when unset; setting it to `false` is serialized explicitly so operators can enforce non-parallel heartbeat/executor behavior for that permanent agent. Configure it in **Agent Detail → Settings → Heartbeat Settings → Allow Parallel Execution**.
+
+`skipHeartbeatWhenIdle` defaults to `false`; when enabled, only scheduled timer ticks are skipped while the agent has no assigned task. Assignment-triggered wakeups and manual/on-demand runs still execute. Configure it in **Agent Detail → Settings → Heartbeat Settings → Skip heartbeat when idle**.
 
 ### No-task auto-claim behavior
 
