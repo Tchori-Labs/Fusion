@@ -256,7 +256,10 @@ export class WorktreePool {
       }
 
       if (!options?.allowSiblingBranchRename) {
-        throw inspection.error;
+        if (inspection.kind === "live") {
+          throw inspection.error;
+        }
+        throw new Error(`Branch ${branchName} is already in use at ${conflictingPath}`);
       }
 
       const conflictBase = branchName;
