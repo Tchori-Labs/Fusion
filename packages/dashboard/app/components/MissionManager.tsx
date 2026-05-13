@@ -3831,8 +3831,6 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
               )}
 
               {/* Mission and interview items */}
-              {renderMissionListItems(persistedInterviewMissions, { interviewStyle: true })}
-              {renderMissionListItems(standardMissions)}
               {missionInterviewDrafts.length > 0 && (
                 <div className="mission-list__drafts-group">
                   <div className="mission-list__drafts-header">
@@ -3843,6 +3841,8 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
                   {renderInterviewSessionItems()}
                 </div>
               )}
+              {renderMissionListItems(persistedInterviewMissions, { interviewStyle: true })}
+              {renderMissionListItems(standardMissions)}
 
               {/* Edit mission form */}
               {editingMissionId && (
