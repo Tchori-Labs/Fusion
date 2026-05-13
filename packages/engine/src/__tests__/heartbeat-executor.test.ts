@@ -292,6 +292,62 @@ describe("executeHeartbeat", () => {
       expect(section).toContain("**stale**");
     });
 
+    it.each([
+      {
+        name: "60-minute interval stays healthy at 45 minutes",
+        heartbeatIntervalMs: 60 * 60_000,
+        ageMinutes: 45,
+        shouldBeStale: false,
+      },
+      {
+        name: "60-minute interval is stale at 100 minutes",
+        heartbeatIntervalMs: 60 * 60_000,
+        ageMinutes: 100,
+        shouldBeStale: true,
+      },
+      {
+        name: "180-minute interval stays healthy at 240 minutes",
+        heartbeatIntervalMs: 180 * 60_000,
+        ageMinutes: 240,
+        shouldBeStale: false,
+      },
+      {
+        name: "180-minute interval is stale at 280 minutes",
+        heartbeatIntervalMs: 180 * 60_000,
+        ageMinutes: 280,
+        shouldBeStale: true,
+      },
+    ])("buildReportsHealthSection applies 1.5× heartbeatIntervalMs stale threshold (FN-4295): $name", async ({
+      heartbeatIntervalMs,
+      ageMinutes,
+      shouldBeStale,
+    }) => {
+      const now = Date.now();
+      const store = createStoreWithAgentForExec();
+      vi.mocked(store.getCachedAgent).mockImplementation((id: string) => ({
+        id,
+        runtimeConfig: { heartbeatIntervalMs },
+      }) as unknown as Agent);
+      vi.mocked(store.getAgentsByReportsTo).mockResolvedValue([
+        {
+          id: "agent-threshold-check",
+          name: "Threshold Check",
+          state: "active",
+          taskId: "FN-4295",
+          lastHeartbeatAt: new Date(now - ageMinutes * 60_000).toISOString(),
+          updatedAt: new Date(now - ageMinutes * 60_000).toISOString(),
+        } as Agent,
+      ]);
+      const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: "/tmp" });
+
+      const section = await (monitor as any).buildReportsHealthSection("agent-001", store);
+      if (shouldBeStale) {
+        expect(section).toContain("**stale**");
+      } else {
+        expect(section).not.toContain("**stale**");
+      }
+    });
+
     it("buildReportsHealthSection applies interval-specific stale thresholds in mixed report tables", async () => {
       const now = Date.now();
       const store = createStoreWithAgentForExec();
