@@ -665,12 +665,10 @@ html .column.drag-over * {
 
 .runtime-card__name {
   margin: 0;
-  font-size: 1rem;
   font-weight: 600;
 }
 
 .runtime-card__status {
-  font-size: 0.85rem;
   display: inline-flex;
   align-items: center;
   gap: var(--space-xs);
@@ -690,7 +688,6 @@ html .column.drag-over * {
 
 .runtime-card__learn-more {
   flex: 0 0 auto;
-  font-size: 0.85rem;
 }
 
 .runtime-card__description {
@@ -724,9 +721,8 @@ html .column.drag-over * {
   padding: var(--space-sm) var(--space-md);
   cursor: pointer;
   color: var(--text-muted);
-  font-size: 0.9rem;
   font-weight: 500;
-  margin-bottom: -1px;
+  margin-bottom: calc(var(--space-xs) / -4);
 }
 
 .runtime-card__tab:hover {
@@ -751,7 +747,6 @@ html .column.drag-over * {
 .runtime-card__toast {
   flex: 1;
   min-width: 0;
-  font-size: 0.85rem;
   padding: var(--space-xs) var(--space-sm);
   border-radius: var(--radius-sm);
 }
@@ -770,20 +765,19 @@ html .column.drag-over * {
   display: inline-flex;
   align-items: center;
   gap: var(--space-xs);
-  font-size: 0.75rem;
   color: var(--text-muted);
   margin-top: var(--space-xs);
 }
 
 .runtime-card__cobrand-mark {
-  width: 14px;
-  height: 14px;
+  width: calc(var(--space-sm) + (var(--space-xs) / 2));
+  height: calc(var(--space-sm) + (var(--space-xs) / 2));
   display: inline-flex;
   align-items: center;
   justify-content: center;
   background: currentColor;
   color: var(--text-muted);
-  border-radius: 2px;
+  border-radius: calc(var(--radius-sm) / 2);
   flex: 0 0 auto;
 }
 

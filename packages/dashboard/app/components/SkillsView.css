@@ -1,5 +1,4 @@
 /* === Skills View === */
-/* font-size values intentionally raw — no --font-size-* tokens defined yet */
 .skills-view {
   display: flex;
   flex-direction: column;
@@ -25,14 +24,12 @@
 }
 
 .skills-view-title h2 {
-  font-size: 18px;
   font-weight: 600;
   margin: 0;
 }
 
 .skills-view-count {
   color: var(--text-muted);
-  font-size: 13px;
 }
 
 .skills-view-actions {
@@ -52,7 +49,6 @@
 }
 
 .skills-view-section-title {
-  font-size: 14px;
   font-weight: 600;
   color: var(--text);
   margin-bottom: var(--space-md);
@@ -97,7 +93,6 @@
 }
 
 .skills-view-item-name {
-  font-size: 13px;
   font-weight: 500;
   color: var(--text);
   overflow: hidden;
@@ -106,7 +101,6 @@
 }
 
 .skills-view-item-path {
-  font-size: 12px;
   color: var(--text-muted);
   font-family: var(--font-mono);
   overflow: hidden;
@@ -115,10 +109,9 @@
 }
 
 .skills-view-item-source {
-  font-size: 11px;
   color: var(--text-dim);
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: calc(var(--space-xs) / 8);
 }
 
 /* Toggle switch */
@@ -132,10 +125,10 @@
 
 .skills-view-item-toggle input {
   position: absolute;
-  width: 1px;
-  height: 1px;
+  width: calc(var(--space-xs) / 4);
+  height: calc(var(--space-xs) / 4);
   padding: 0;
-  margin: -1px;
+  margin: calc(var(--space-xs) / -4);
   overflow: hidden;
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
@@ -144,8 +137,8 @@
 
 .skills-view-toggle-slider {
   position: relative;
-  width: 40px;
-  height: 22px;
+  width: calc(var(--space-xl) + var(--space-lg));
+  height: calc(var(--space-xl) - (var(--space-xs) / 2));
   background: var(--border);
   border-radius: var(--radius-md);
   transition: background var(--transition-normal);
@@ -155,10 +148,10 @@
 .skills-view-toggle-slider::after {
   content: "";
   position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 18px;
-  height: 18px;
+  top: calc(var(--space-xs) / 2);
+  left: calc(var(--space-xs) / 2);
+  width: calc(var(--space-lg) + (var(--space-xs) / 2));
+  height: calc(var(--space-lg) + (var(--space-xs) / 2));
   background: var(--card);
   border-radius: 50%;
   transition: transform var(--transition-normal);
@@ -169,7 +162,7 @@
 }
 
 .skills-view-item-toggle input:checked + .skills-view-toggle-slider::after {
-  transform: translateX(18px);
+  transform: translateX(calc(var(--space-lg) + (var(--space-xs) / 2)));
 }
 
 /* Skills search — at top */
@@ -179,13 +172,13 @@
 
 .skills-view-search .form-input {
   width: 100%;
-  max-width: 400px;
+  max-width: calc(var(--space-2xl) * 12 + var(--space-md));
 }
 
 /* Catalog grid */
 .skills-view-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(calc(var(--space-2xl) * 8 + var(--space-lg)), 1fr));
   gap: var(--space-md);
 }
 
@@ -194,7 +187,7 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   padding: var(--space-md);
-  min-height: 120px;
+  min-height: calc(var(--space-2xl) * 3 + var(--space-xl));
   display: flex;
   flex-direction: column;
   gap: var(--space-sm);
@@ -207,14 +200,12 @@
 }
 
 .skills-view-card-title {
-  font-size: 14px;
   font-weight: 600;
   color: var(--text);
   margin: 0;
 }
 
 .skills-view-card-description {
-  font-size: 13px;
   color: var(--text-muted);
   line-height: 1.45;
   display: -webkit-box;
@@ -231,7 +222,6 @@
 }
 
 .skills-view-card-installs {
-  font-size: 12px;
   color: var(--text-dim);
   margin-top: auto;
 }
@@ -269,7 +259,6 @@
   gap: var(--space-sm);
   padding: var(--space-xl);
   color: var(--text-muted);
-  font-size: 13px;
 }
 
 /* Close button */
@@ -286,7 +275,7 @@
 .skills-view-detail {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-left: var(--space-xs) solid var(--todo);
+  border-left: calc(var(--space-md) / 4) solid var(--todo);
   border-radius: var(--radius-md);
   margin: var(--space-sm) 0 var(--space-md) 0;
   padding: var(--space-lg);
@@ -304,7 +293,6 @@
 
 .skills-view-detail-title {
   font-weight: 600;
-  font-size: 14px;
   color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -317,7 +305,6 @@
 
 .skills-view-detail-content {
   font-family: var(--font-mono);
-  font-size: 12px;
   line-height: 1.5;
   overflow-x: auto;
   white-space: pre-wrap;
@@ -326,7 +313,7 @@
   background: var(--bg);
   padding: var(--space-md);
   border-radius: var(--radius-sm);
-  max-height: 400px;
+  max-height: calc(var(--space-2xl) * 12 + var(--space-md));
   overflow-y: auto;
 }
 
@@ -341,7 +328,6 @@
 }
 
 .skills-view-detail-files-label {
-  font-size: 12px;
   color: var(--text-muted);
 }
 
@@ -351,7 +337,6 @@
   gap: var(--space-sm);
   padding: var(--space-md);
   color: var(--text-muted);
-  font-size: 13px;
 }
 
 .skills-view-detail-error {
@@ -361,7 +346,6 @@
   gap: var(--space-sm);
   padding: var(--space-md);
   color: var(--color-error);
-  font-size: 13px;
   background: color-mix(in srgb, var(--color-error) 10%, transparent);
   border-radius: var(--radius-sm);
   text-align: center;
@@ -370,7 +354,6 @@
 .skills-view-detail-empty {
   padding: var(--space-md);
   color: var(--text-muted);
-  font-size: 13px;
   font-style: italic;
 }
 
@@ -384,32 +367,27 @@
   }
 
   .skills-view-title h2 {
-    font-size: 16px;
-  }
+    }
 
   .skills-view-count {
-    font-size: 12px;
-  }
+    }
 
   .skills-view-section {
     margin-bottom: var(--space-md);
   }
 
   .skills-view-section-title {
-    font-size: 13px;
-  }
+    }
 
   .skills-view-card {
     padding: var(--space-sm);
   }
 
   .skills-view-card-title {
-    font-size: 13px;
-  }
+    }
 
   .skills-view-card-description {
-    font-size: 12px;
-  }
+    }
 
   .skills-view-empty {
     padding: var(--space-lg);
@@ -434,7 +412,7 @@
 
   .skills-view-item {
     padding: var(--space-md);
-    min-height: 36px;
+    min-height: calc(var(--space-lg) + var(--space-md) + var(--space-xs));
     flex-wrap: wrap;
   }
 
@@ -451,8 +429,8 @@
   }
 
   .skills-view-toggle-slider {
-    min-width: 40px;
-    min-height: 22px;
+    min-width: calc(var(--space-xl) + var(--space-lg));
+    min-height: calc(var(--space-xl) - (var(--space-xs) / 2));
   }
 
   .skills-view-detail {
@@ -460,14 +438,13 @@
   }
 
   .skills-view-detail-content {
-    font-size: 11px;
-    max-height: calc(60dvh - (var(--space-2xl) * 6 + var(--space-xs)));
+      max-height: calc(60dvh - (var(--space-2xl) * 6 + var(--space-xs)));
     -webkit-overflow-scrolling: touch;
   }
 
   .skills-view-detail-close {
-    min-width: 36px;
-    min-height: 36px;
+    min-width: calc(var(--space-lg) + var(--space-md) + var(--space-xs));
+    min-height: calc(var(--space-lg) + var(--space-md) + var(--space-xs));
   }
 }
 
