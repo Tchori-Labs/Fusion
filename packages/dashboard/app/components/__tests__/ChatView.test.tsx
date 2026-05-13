@@ -4040,6 +4040,282 @@ describe("ChatView mobile behavior", () => {
     }
   });
 
+  it("FN-4336: direct chat re-anchors on ResizeObserver growth in mobile", async () => {
+    const restoreMatchMedia = mockViewportMode("mobile");
+    const originalResizeObserver = globalThis.ResizeObserver;
+    let resizeCallback: ResizeObserverCallback | null = null;
+
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(callback: ResizeObserverCallback) {
+          resizeCallback = callback;
+        }
+        observe = vi.fn();
+        disconnect = vi.fn();
+        unobserve = vi.fn();
+      },
+    );
+
+    try {
+      setupMockChat({
+        activeSession: activeSessionFixture,
+        messages: [{ id: "msg-001", sessionId: "session-001", role: "assistant", content: "One", createdAt: "2026-04-08T00:00:00.000Z" }],
+      });
+
+      render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+
+      const messagesContainer = document.querySelector(".chat-messages") as HTMLDivElement;
+      let scrollTopValue = 0;
+      let scrollHeightValue = 1000;
+      Object.defineProperty(messagesContainer, "scrollHeight", { configurable: true, get: () => scrollHeightValue });
+      Object.defineProperty(messagesContainer, "clientHeight", { configurable: true, get: () => 200 });
+      Object.defineProperty(messagesContainer, "scrollTop", {
+        configurable: true,
+        get: () => scrollTopValue,
+        set: (value: number) => {
+          scrollTopValue = value;
+        },
+      });
+
+      await waitFor(() => {
+        expect(scrollTopValue).toBe(1000);
+      });
+
+      scrollHeightValue = 1300;
+      await act(async () => {
+        resizeCallback?.([] as ResizeObserverEntry[], {} as ResizeObserver);
+      });
+
+      await waitFor(() => {
+        expect(scrollTopValue).toBe(1300);
+      });
+    } finally {
+      restoreMatchMedia.mockRestore();
+      if (originalResizeObserver) {
+        vi.stubGlobal("ResizeObserver", originalResizeObserver);
+      } else {
+        Reflect.deleteProperty(globalThis, "ResizeObserver");
+      }
+    }
+  });
+
+  it("FN-4336: direct chat ResizeObserver growth keeps thread pinned", async () => {
+    const restoreMatchMedia = mockViewportMode("mobile");
+    const originalResizeObserver = globalThis.ResizeObserver;
+    let resizeCallback: ResizeObserverCallback | null = null;
+
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(callback: ResizeObserverCallback) {
+          resizeCallback = callback;
+        }
+        observe = vi.fn();
+        disconnect = vi.fn();
+        unobserve = vi.fn();
+      },
+    );
+
+    try {
+      setupMockChat({
+        activeSession: activeSessionFixture,
+        messages: [{ id: "msg-001", sessionId: "session-001", role: "assistant", content: "One", createdAt: "2026-04-08T00:00:00.000Z" }],
+      });
+
+      render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+
+      const messagesContainer = document.querySelector(".chat-messages") as HTMLDivElement;
+      let scrollTopValue = 0;
+      let scrollHeightValue = 2000;
+      Object.defineProperty(messagesContainer, "scrollHeight", { configurable: true, get: () => scrollHeightValue });
+      Object.defineProperty(messagesContainer, "clientHeight", { configurable: true, get: () => 200 });
+      Object.defineProperty(messagesContainer, "scrollTop", {
+        configurable: true,
+        get: () => scrollTopValue,
+        set: (value: number) => {
+          scrollTopValue = value;
+        },
+      });
+
+      fireEvent.scroll(messagesContainer);
+      scrollHeightValue = 2400;
+
+      await act(async () => {
+        resizeCallback?.([] as ResizeObserverEntry[], {} as ResizeObserver);
+      });
+
+      await waitFor(() => {
+        expect(scrollTopValue).toBe(2400);
+      });
+    } finally {
+      restoreMatchMedia.mockRestore();
+      if (originalResizeObserver) {
+        vi.stubGlobal("ResizeObserver", originalResizeObserver);
+      } else {
+        Reflect.deleteProperty(globalThis, "ResizeObserver");
+      }
+    }
+  });
+
+  it("FN-4336: visibility restore performs deferred direct chat settle pass", async () => {
+    const restoreMatchMedia = mockViewportMode("mobile");
+    vi.useFakeTimers();
+    try {
+      setupMockChat({
+        activeSession: activeSessionFixture,
+        messages: [{ id: "msg-001", sessionId: "session-001", role: "assistant", content: "One", createdAt: "2026-04-08T00:00:00.000Z" }],
+      });
+
+      render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+
+      const messagesContainer = document.querySelector(".chat-messages") as HTMLDivElement;
+      let scrollTopValue = 0;
+      let scrollHeightValue = 1000;
+      Object.defineProperty(messagesContainer, "scrollHeight", { configurable: true, get: () => scrollHeightValue });
+      Object.defineProperty(messagesContainer, "clientHeight", { configurable: true, get: () => 200 });
+      Object.defineProperty(messagesContainer, "scrollTop", {
+        configurable: true,
+        get: () => scrollTopValue,
+        set: (value: number) => {
+          scrollTopValue = value;
+        },
+      });
+
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+      fireEvent(document, new Event("visibilitychange"));
+      await act(async () => {
+        vi.runOnlyPendingTimers();
+      });
+
+      scrollHeightValue = 1500;
+      await act(async () => {
+        vi.advanceTimersByTime(260);
+        vi.runOnlyPendingTimers();
+      });
+
+      expect(scrollTopValue).toBe(1500);
+    } finally {
+      restoreMatchMedia.mockRestore();
+      vi.useRealTimers();
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+    }
+  });
+
+  it("FN-4336: rooms scope does not attach direct ResizeObserver follower", async () => {
+    const restoreMatchMedia = mockViewportMode("mobile");
+    const originalResizeObserver = globalThis.ResizeObserver;
+    localStorage.setItem("fusion:chat-scope", "rooms");
+    const resizeObserverCtor = vi.fn();
+
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(callback: ResizeObserverCallback) {
+          resizeObserverCtor(callback);
+        }
+        observe = vi.fn();
+        disconnect = vi.fn();
+        unobserve = vi.fn();
+      },
+    );
+
+    try {
+      setupMockChat({ activeSession: null, messages: [] });
+      setupMockRooms({
+        activeRoom: createRoomFixture("general"),
+        rooms: [createRoomFixture("general")],
+        messages: [
+          {
+            id: "room-msg-001",
+            roomId: "room-general",
+            role: "assistant",
+            content: "Room message",
+            thinkingOutput: null,
+            metadata: null,
+            senderAgentId: null,
+            mentions: [],
+            createdAt: "2026-05-12T00:00:00.000Z",
+          },
+        ],
+      });
+
+      render(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
+
+      await waitFor(() => {
+        expect(screen.getByTestId("chat-sidebar-rooms")).toBeInTheDocument();
+      });
+      expect(resizeObserverCtor).not.toHaveBeenCalled();
+    } finally {
+      restoreMatchMedia.mockRestore();
+      if (originalResizeObserver) {
+        vi.stubGlobal("ResizeObserver", originalResizeObserver);
+      } else {
+        Reflect.deleteProperty(globalThis, "ResizeObserver");
+      }
+    }
+  });
+
+  it("FN-4336: desktop direct chat still re-anchors on ResizeObserver growth", async () => {
+    const restoreMatchMedia = mockViewportMode("desktop");
+    const originalResizeObserver = globalThis.ResizeObserver;
+    let resizeCallback: ResizeObserverCallback | null = null;
+
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(callback: ResizeObserverCallback) {
+          resizeCallback = callback;
+        }
+        observe = vi.fn();
+        disconnect = vi.fn();
+        unobserve = vi.fn();
+      },
+    );
+
+    try {
+      setupMockChat({
+        activeSession: activeSessionFixture,
+        messages: [{ id: "msg-001", sessionId: "session-001", role: "assistant", content: "One", createdAt: "2026-04-08T00:00:00.000Z" }],
+      });
+
+      render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+
+      const messagesContainer = document.querySelector(".chat-messages") as HTMLDivElement;
+      let scrollTopValue = 0;
+      let scrollHeightValue = 1200;
+      Object.defineProperty(messagesContainer, "scrollHeight", { configurable: true, get: () => scrollHeightValue });
+      Object.defineProperty(messagesContainer, "clientHeight", { configurable: true, get: () => 300 });
+      Object.defineProperty(messagesContainer, "scrollTop", {
+        configurable: true,
+        get: () => scrollTopValue,
+        set: (value: number) => {
+          scrollTopValue = value;
+        },
+      });
+
+      await waitFor(() => {
+        expect(scrollTopValue).toBe(1200);
+      });
+
+      scrollHeightValue = 1700;
+      await act(async () => {
+        resizeCallback?.([] as ResizeObserverEntry[], {} as ResizeObserver);
+      });
+
+      await waitFor(() => {
+        expect(scrollTopValue).toBe(1700);
+      });
+    } finally {
+      restoreMatchMedia.mockRestore();
+      if (originalResizeObserver) {
+        vi.stubGlobal("ResizeObserver", originalResizeObserver);
+      } else {
+        Reflect.deleteProperty(globalThis, "ResizeObserver");
+      }
+    }
+  });
+
   it("FN-4327: desktop visibility restore re-anchors direct chat and resets jump-to-latest state", async () => {
     const restoreMatchMedia = mockDesktopViewport();
     try {
