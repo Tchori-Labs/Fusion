@@ -622,4 +622,59 @@ describe("NotificationService", () => {
     await service.stop();
     vi.useRealTimers();
   });
+
+  it("suppresses pending failed notification on task:moved to done", async () => {
+    vi.useFakeTimers();
+    const store = createStore({ ntfyEnabled: true, ntfyTopic: "topic", failureNotificationMode: "sticky-only", failureNotificationDelayMs: 50 });
+    const sendNotification = vi.fn(async () => ({ success: true, providerId: "mock" }));
+    const service = new NotificationService(store as any);
+    service.registerProvider({ getProviderId: () => "mock", isEventSupported: () => true, sendNotification });
+    await service.start();
+
+    store.setTask(task({ id: "FN-1", status: "failed", column: "in-review" }));
+    store.emit("task:updated", task({ id: "FN-1", status: "failed", column: "in-review" }));
+    store.setTask(task({ id: "FN-1", status: null, column: "done" }));
+    store.emit("task:moved", { task: task({ id: "FN-1", status: null, column: "done" }), from: "in-review", to: "done" });
+
+    await vi.advanceTimersByTimeAsync(60);
+    expect(sendNotification).not.toHaveBeenCalledWith("failed", expect.anything());
+    await service.stop();
+    vi.useRealTimers();
+  });
+
+  it("suppresses pending failed notification when mergeConfirmed becomes true", async () => {
+    vi.useFakeTimers();
+    const store = createStore({ ntfyEnabled: true, ntfyTopic: "topic", failureNotificationMode: "sticky-only", failureNotificationDelayMs: 50 });
+    const sendNotification = vi.fn(async () => ({ success: true, providerId: "mock" }));
+    const service = new NotificationService(store as any);
+    service.registerProvider({ getProviderId: () => "mock", isEventSupported: () => true, sendNotification });
+    await service.start();
+
+    store.setTask(task({ id: "FN-1", status: "failed" }));
+    store.emit("task:updated", task({ id: "FN-1", status: "failed" }));
+    store.setTask(task({ id: "FN-1", status: "failed", mergeDetails: { mergeConfirmed: true } as any }));
+    store.emit("task:updated", task({ id: "FN-1", status: "failed" }));
+
+    await vi.advanceTimersByTimeAsync(60);
+    expect(sendNotification).not.toHaveBeenCalledWith("failed", expect.anything());
+    await service.stop();
+    vi.useRealTimers();
+  });
+
+  it("stop clears pending failed timers without dispatch", async () => {
+    vi.useFakeTimers();
+    const store = createStore({ ntfyEnabled: true, ntfyTopic: "topic", failureNotificationMode: "sticky-only", failureNotificationDelayMs: 50 });
+    const sendNotification = vi.fn(async () => ({ success: true, providerId: "mock" }));
+    const service = new NotificationService(store as any);
+    service.registerProvider({ getProviderId: () => "mock", isEventSupported: () => true, sendNotification });
+    await service.start();
+
+    store.setTask(task({ id: "FN-1", status: "failed" }));
+    store.emit("task:updated", task({ id: "FN-1", status: "failed" }));
+    await service.stop();
+
+    await vi.advanceTimersByTimeAsync(60);
+    expect(sendNotification).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
 });
