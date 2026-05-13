@@ -4559,6 +4559,76 @@ describe("clearStaleBlockedBy", () => {
     manager.stop();
   });
 
+  it.each(["merging", "merging-pr"] as const)("clears stale blockedBy when blocker is stale in-review %s", async (status) => {
+    vi.setSystemTime(new Date("2026-01-01T00:20:00.000Z"));
+    const store = createRunningStore();
+    const blockerId = "FN-510";
+    const taskA = createTask("A", { blockedBy: blockerId });
+    const taskB = createTask(blockerId, {
+      column: "in-review",
+      paused: false,
+      status,
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+    mockSweepTasks(store, { todo: [taskA], inReview: [taskB], all: [taskA, taskB] });
+
+    const manager = new SelfHealingManager(store, { rootDir: "/tmp/test-project" });
+    const recovered = await manager.clearStaleBlockedBy();
+
+    expect(recovered).toBe(1);
+    expect(store.updateTask).toHaveBeenCalledWith("A", { blockedBy: null, status: null });
+    expect(store.logEntry).toHaveBeenCalledWith("A", expect.stringContaining(`blocker ${blockerId}`));
+    expect(store.logEntry).toHaveBeenCalledWith("A", expect.stringContaining("stale for"));
+    manager.stop();
+    vi.useRealTimers();
+  });
+
+  it("does not clear stale merging blocker inside threshold", async () => {
+    vi.setSystemTime(new Date("2026-01-01T00:10:00.000Z"));
+    const store = createRunningStore();
+    const taskA = createTask("A", { blockedBy: "FN-511" });
+    const taskB = createTask("FN-511", {
+      column: "in-review",
+      paused: false,
+      status: "merging",
+      updatedAt: "2026-01-01T00:00:01.000Z",
+    });
+    mockSweepTasks(store, { todo: [taskA], inReview: [taskB], all: [taskA, taskB] });
+
+    const manager = new SelfHealingManager(store, { rootDir: "/tmp/test-project" });
+    const recovered = await manager.clearStaleBlockedBy();
+
+    expect(recovered).toBe(0);
+    expect(store.updateTask).not.toHaveBeenCalled();
+    manager.stop();
+    vi.useRealTimers();
+  });
+
+  it("honors staleMergingFanoutMinAgeMs option override", async () => {
+    vi.setSystemTime(new Date("2026-01-01T00:00:04.000Z"));
+    const store = createRunningStore();
+    const taskA = createTask("A", { blockedBy: "FN-512" });
+    const taskB = createTask("FN-512", {
+      column: "in-review",
+      paused: false,
+      status: "merging",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    });
+    mockSweepTasks(store, { todo: [taskA], inReview: [taskB], all: [taskA, taskB] });
+
+    const manager = new SelfHealingManager(store, {
+      rootDir: "/tmp/test-project",
+      staleMergingStatusMinAgeMs: 1,
+      staleMergingFanoutMinAgeMs: 2_000,
+    });
+    const recovered = await manager.clearStaleBlockedBy();
+
+    expect(recovered).toBe(1);
+    expect(store.updateTask).toHaveBeenCalledWith("A", { blockedBy: null, status: null });
+    manager.stop();
+    vi.useRealTimers();
+  });
+
   it("does not clear blockedBy when blocker failed retries are below threshold", async () => {
     const store = createRunningStore();
     const taskA = createTask("A", { blockedBy: "FN-600" });

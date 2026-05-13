@@ -93,6 +93,11 @@ export interface SelfHealingOptions {
    * Used to avoid clearing a transient merge status mid-merge.
    */
   getActiveMergeTaskId?: () => string | null;
+  /**
+   * Minimum blocker age before stale merge fan-out is cleared from downstream
+   * blockedBy pointers. Must be >= staleMergingStatusMinAgeMs.
+   */
+  staleMergingFanoutMinAgeMs?: number;
   hasActiveAgentExecution?: (agentId: string) => boolean;
   restartDurableAgentHeartbeat?: (agentId: string, context: { reason: string; attempt: number }) => Promise<boolean>;
 }
@@ -129,6 +134,7 @@ const MAX_AUTO_MERGE_RETRIES = 3;
 const MAX_STARVATION_DROPS = 3;
 const DEADLOCK_RECOVERY_COOLDOWN_MS = 15 * 60_000;
 const DEFAULT_STALE_MERGING_STATUS_MIN_AGE_MS = 5 * 60_000;
+const DEFAULT_STALE_MERGING_FANOUT_MIN_AGE_MS = 15 * 60_000;
 const DURABLE_ERROR_RECOVERY_MAX_RETRIES = 5;
 const DURABLE_ERROR_RECOVERY_BASE_COOLDOWN_MS = 30_000;
 const DURABLE_ERROR_RECOVERY_MAX_COOLDOWN_MS = 15 * 60_000;
@@ -1194,6 +1200,10 @@ export class SelfHealingManager {
    * 3. Blocker `column === "in-review"` and `paused === true`
    * 4. Blocker `column === "in-review"` and `status === "failed"`
    *    and `(mergeRetries ?? 0) >= MAX_AUTO_MERGE_RETRIES`
+   * 5. Blocker `column === "in-review"` and `status === "merging" | "merging-pr"`
+   *    (or a stale post-recovery `status === null` aftermath) with stale
+   *    `updatedAt` (older than `staleMergingFanoutMinAgeMs`) and no active
+   *    merger ownership in this process
    *
    * @returns Number of tasks unblocked
    */
@@ -1201,6 +1211,12 @@ export class SelfHealingManager {
     try {
       const settings = await this.store.getSettings();
       if (settings.globalPause || settings.enginePaused) return 0;
+
+      const staleMergingStatusMinAgeMs = this.options.staleMergingStatusMinAgeMs ?? DEFAULT_STALE_MERGING_STATUS_MIN_AGE_MS;
+      const configuredFanoutMinAgeMs = this.options.staleMergingFanoutMinAgeMs ?? DEFAULT_STALE_MERGING_FANOUT_MIN_AGE_MS;
+      const staleMergingFanoutMinAgeMs = Math.max(staleMergingStatusMinAgeMs, configuredFanoutMinAgeMs);
+      const activeMergeTaskId = this.options.getActiveMergeTaskId?.() ?? null;
+      const now = Date.now();
 
       const todoTasks = await this.store.listTasks({ column: "todo", slim: true });
       const inProgressTasks = await this.store.listTasks({ column: "in-progress", slim: true });
@@ -1261,6 +1277,19 @@ export class SelfHealingManager {
             isMissingWorktreeSessionStartFailure(blocker.error)
           ) {
             reason = `blocker ${blockerId} in-review + failed (missing-worktree session start)`;
+          } else if (
+            blocker.column === "in-review" &&
+            (blocker.status === "merging" || blocker.status === "merging-pr" || blocker.status == null) &&
+            (!activeMergeTaskId || activeMergeTaskId !== blocker.id)
+          ) {
+            const updatedAtMs = blocker.updatedAt ? Date.parse(blocker.updatedAt) : Number.NaN;
+            if (Number.isFinite(updatedAtMs)) {
+              const elapsedMs = now - updatedAtMs;
+              if (elapsedMs >= staleMergingFanoutMinAgeMs) {
+                const blockerStatus = blocker.status ?? "no-status";
+                reason = `blocker ${blockerId} in-review + ${blockerStatus} stale for ${elapsedMs}ms (threshold ${staleMergingFanoutMinAgeMs}ms)`;
+              }
+            }
           } else if (task.dependencies.length > 0 && !unresolvedDeps.includes(blockerId)) {
             reason = `blocker ${blockerId} not among unresolved dependencies`;
           }
