@@ -326,6 +326,21 @@ function getIssueUrlFromMetadata(metadata: Task["sourceMetadata"]): string | und
   return typeof issueUrl === "string" && issueUrl.length > 0 ? issueUrl : undefined;
 }
 
+function parseGithubIssueUrl(url?: string): { owner: string; repo: string; number: number } | null {
+  if (!url) return null;
+  const match = url.match(/^https?:\/\/github\.com\/([^/]+)\/([^/]+)\/issues\/(\d+)(?:$|[/?#])/i);
+  if (!match) return null;
+
+  const issueNumber = Number(match[3]);
+  if (!Number.isInteger(issueNumber) || issueNumber <= 0) return null;
+
+  return {
+    owner: match[1],
+    repo: match[2],
+    number: issueNumber,
+  };
+}
+
 function areTaskWorkflowResultsEqual(previous?: Task["workflowStepResults"], next?: Task["workflowStepResults"]): boolean {
   if (!previous && !next) return true;
   if (!previous || !next) return false;
@@ -740,12 +755,30 @@ function TaskCardComponent({
   const hasGithubTrackingLink = Boolean(githubTrackedIssue);
   const hasGitHubBadge = Boolean(task.prInfo || task.issueInfo);
   const isGitHubImportedTask = task.sourceType === "github_import";
+  const sourceIssueUrl = getIssueUrlFromMetadata(task.sourceMetadata);
+  const sourceIssueFromUrl = useMemo(() => parseGithubIssueUrl(sourceIssueUrl), [sourceIssueUrl]);
+  const issueInfoFromUrl = useMemo(() => parseGithubIssueUrl(task.issueInfo?.url), [task.issueInfo?.url]);
+  const issueInfoOwner = task.issueInfo?.owner ?? issueInfoFromUrl?.owner;
+  const issueInfoRepo = task.issueInfo?.repo ?? issueInfoFromUrl?.repo;
+  const hasMatchingIssueInfoBadge = Boolean(
+    task.issueInfo
+    && githubTrackedIssue
+    && task.issueInfo.number === githubTrackedIssue.number
+    && issueInfoOwner === githubTrackedIssue.owner
+    && issueInfoRepo === githubTrackedIssue.repo,
+  );
+  const hasMatchingSourceIssue = Boolean(
+    sourceIssueFromUrl
+    && githubTrackedIssue
+    && sourceIssueFromUrl.number === githubTrackedIssue.number
+    && sourceIssueFromUrl.owner === githubTrackedIssue.owner
+    && sourceIssueFromUrl.repo === githubTrackedIssue.repo,
+  );
   const showTrackingIndicator = hasGithubTrackingLink
-    && !isGitHubImportedTask
-    && !(task.issueInfo && task.issueInfo.number === githubTrackedIssue?.number);
+    && !hasMatchingIssueInfoBadge
+    && !hasMatchingSourceIssue;
   const branchMetadata = useMemo(() => getVisibleTaskCardBranches(task), [task.id, task.branch, task.baseBranch]);
   const hasBranchMetadata = Boolean(branchMetadata.branch || branchMetadata.baseBranch);
-  const sourceIssueUrl = getIssueUrlFromMetadata(task.sourceMetadata);
   const isAgentCreated = isAgentCreatedTask(task);
   const sourceAgentName = getSourceAgentName(task);
   const agentCreatedTitle = sourceAgentName ? `Created by agent: ${sourceAgentName}` : "Created by agent";
@@ -1630,6 +1663,7 @@ function TaskCardComponent({
               onClick={(e) => e.stopPropagation()}
             >
               <ProviderIcon provider="github" size="sm" />
+              <span>{`#${githubTrackedIssue.number}`}</span>
             </a>
           )}
           {timeIndicator && (

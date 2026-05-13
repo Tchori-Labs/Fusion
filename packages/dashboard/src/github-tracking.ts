@@ -142,7 +142,6 @@ export interface MaybeCreateTrackingIssueDeps {
 export type MaybeCreateTrackingIssueReason =
   | "tracking_disabled"
   | "issue_already_linked"
-  | "github_import_source"
   | "no_repo_configured"
   | "no_title_available"
   | "github_error"
@@ -191,10 +190,6 @@ export async function maybeCreateTrackingIssue(
 
   if (tracking?.issue) {
     return { created: false, reason: "issue_already_linked" };
-  }
-
-  if (task.sourceType === "github_import") {
-    return { created: false, reason: "github_import_source" };
   }
 
   const repo = resolvedTracking.repo;

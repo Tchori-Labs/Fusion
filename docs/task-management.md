@@ -476,8 +476,9 @@ Tracking behavior is controlled per task:
 - After an engine/dashboard restart, Task Detail preserves the fetched full `githubTracking` payload even when the board opened the modal from a slim task row that intentionally omitted tracking metadata.
 - When a task is already tracking-enabled but still unlinked, Task Detail exposes a **Create tracking issue** action in the disclosure content (including non-editable columns like `done`) so "Issue not yet created" is not a dead-end state.
 - Clearing the Task Detail repo override stores `null`, which reverts repo resolution to project/global defaults.
-- Explicit task-level enablement is honored even when project/global GitHub tracking defaults are unset. If `enabled: true` and the repo resolves at task scope (for example via `repoOverride`), Fusion attempts tracking-issue creation on both create-time and eligible edit-time flows.
+- Explicit task-level enablement is honored even when project/global GitHub tracking defaults are unset. If `enabled: true` and the repo resolves at task scope (for example via `repoOverride`), Fusion attempts tracking-issue creation on both create-time and eligible edit-time flows, including tasks imported from GitHub (`sourceType: "github_import"`).
 - Explicit manual unlink (`githubTracking.issue: null`) does not recreate a tracking issue in that same update request, and disabling tracking does not create new issues.
+- On board cards, Fusion shows both the imported-source provenance marker and tracking link when they refer to different issues. The tracking chip is hidden only when the linked tracking issue exactly matches the source issue (`owner/repo#number`) to avoid duplicate badges.
 
 Repository resolution order:
 

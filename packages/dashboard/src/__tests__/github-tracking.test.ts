@@ -225,6 +225,37 @@ describe("maybeCreateTrackingIssue", () => {
     }));
   });
 
+  it("creates issue for github_import tasks when tracking is explicitly enabled", async () => {
+    const linkGithubIssue = vi.fn();
+    const recordActivity = vi.fn();
+
+    const result = await maybeCreateTrackingIssue(buildTask({
+      sourceType: "github_import",
+      title: "Imported issue follow-up",
+      description: "Short body",
+      githubTracking: { enabled: true },
+    }), {
+      taskStore: { linkGithubIssue, recordActivity } as any,
+      projectSettings: {},
+      globalSettings: { githubTrackingDefaultRepo: "o/r" } as any,
+      rootDir,
+      logger: console,
+    });
+
+    expect(createIssueMock).toHaveBeenCalledWith(expect.objectContaining({
+      owner: "o",
+      repo: "r",
+      title: "[FN-1] Imported issue follow-up",
+      body: "Fusion task: FN-1\n\nShort body",
+    }));
+    expect(result).toMatchObject({
+      created: true,
+      issue: { owner: "o", repo: "r", number: 12, htmlUrl: "https://github.com/o/r/issues/12" },
+    });
+    expect(linkGithubIssue).toHaveBeenCalledWith("FN-1", expect.objectContaining({ owner: "o", repo: "r", number: 12 }));
+    expect(recordActivity).toHaveBeenCalled();
+  });
+
   it("uses the AI summarizer when the title is missing and a summarizer model is configured", async () => {
     const linkGithubIssue = vi.fn();
     const recordActivity = vi.fn();

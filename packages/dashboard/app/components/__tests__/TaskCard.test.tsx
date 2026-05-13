@@ -1062,7 +1062,33 @@ describe("TaskCard", () => {
     expect(screen.queryByRole("link", { name: /Linked GitHub issue/i })).toBeNull();
   });
 
-  it("does not render a GitHub tracking link for github_import tasks", () => {
+  it("renders a GitHub tracking link for github_import tasks when the tracking issue is distinct from source", () => {
+    render(
+      <TaskCard
+        task={makeTask({
+          column: "todo",
+          sourceType: "github_import",
+          sourceMetadata: { issueUrl: "https://github.com/owner/repo/issues/42" },
+          githubTracking: {
+            issue: {
+              owner: "other",
+              repo: "tracking",
+              number: 99,
+              url: "https://github.com/other/tracking/issues/99",
+              createdAt: "2026-05-12T00:00:00.000Z",
+            },
+          },
+        })}
+        onOpenDetail={noop}
+        addToast={noop}
+      />,
+    );
+
+    expect(screen.getByRole("link", { name: "Linked GitHub issue #99" })).toBeDefined();
+    expect(screen.getByLabelText("Imported from GitHub")).toBeDefined();
+  });
+
+  it("deduplicates the tracking link when github_import tracking issue matches source owner/repo/number", () => {
     render(
       <TaskCard
         task={makeTask({
