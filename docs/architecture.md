@@ -1081,6 +1081,18 @@ Task steps use statuses: `pending`, `in-progress`, `done`, `skipped`.
 
 ---
 
+### Stalled review detection
+
+`@fusion/core` computes a heuristic `task.stalledReview` signal during task hydration (both slim board listings and full/detail reads in `TaskStore`) by scanning recent task log activity.
+
+Current heuristics (see `packages/core/src/stalled-review-detector.ts`):
+- **Reenqueue churn** (`heuristic: "reenqueue-churn"`): at least `STALLED_REVIEW_REENQUEUE_THRESHOLD` (`3`) matches of `STALLED_REVIEW_REENQUEUE_PATTERN` within `STALLED_REVIEW_WINDOW_MS` (`60 minutes`).
+- **Invalid-transition loop** (`heuristic: "invalid-transition-loop"`): at least `STALLED_REVIEW_INVALID_TRANSITION_THRESHOLD` (`2`) matches of `STALLED_REVIEW_INVALID_TRANSITION_PATTERN` in log `action`/`outcome` within the same window.
+
+Detection is visibility-only: no scheduler/self-healing actions are triggered by this field. The dashboard `TaskCard` renders a `Stalled` badge for `in-review` tasks when `task.stalledReview` is present, with the heuristic reason in the tooltip.
+
+Tune sensitivity by adjusting the exported constants in `stalled-review-detector.ts`. Increase thresholds to reduce noise; decrease thresholds only with incident evidence, because lower values can over-flag transient recovery bursts.
+
 ## 10) Agent System
 
 Fusion has two complementary agent models:
