@@ -2148,9 +2148,9 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
             {/* Session list section */}
             <div className="chat-session-list chat-sidebar-list">
               {sessionsLoading ? (
-                <div className="chat-status-copy chat-status-copy--padded">Loading...</div>
+                <div className="chat-empty-state chat-empty-state--padded">Loading...</div>
               ) : filteredSessions.length === 0 ? (
-                <div className="chat-status-copy chat-status-copy--padded">No conversations yet</div>
+                <div className="chat-empty-state chat-empty-state--padded">No conversations yet</div>
               ) : (
                 filteredSessions.map((session) => (
                   <div
@@ -2403,9 +2403,9 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
               </div>
               <div className="chat-messages" ref={messagesContainerRef} onScroll={updateScrollState}>
                 {rooms.messagesLoading ? (
-                  <div className="chat-status-copy">Loading messages...</div>
+                  <div className="chat-empty-state">Loading messages...</div>
                 ) : rooms.messages.length === 0 ? (
-                  <div className="chat-status-copy">No messages yet. Start the conversation!</div>
+                  <div className="chat-empty-state">No messages yet. Start the conversation!</div>
                 ) : (
                   rooms.messages.map((message) => {
                     const senderName = message.senderAgentId ? (agentsMap.get(message.senderAgentId)?.name ?? message.senderAgentId.slice(0, 30)) : "You";
@@ -2639,11 +2639,11 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
               </div>
             </>
           ) : messagesLoading ? (
-            <div className="chat-status-copy">Loading messages...</div>
+            <div className="chat-empty-state">Loading messages...</div>
           ) : messages.length === 0 && !activeSession ? (
             renderEmptyState()
           ) : messages.length === 0 && activeSession ? (
-            <div className="chat-status-copy">No messages yet. Start the conversation!</div>
+            <div className="chat-empty-state">No messages yet. Start the conversation!</div>
           ) : (
             <>
               {messages.map((message) => (

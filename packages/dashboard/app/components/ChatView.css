@@ -216,12 +216,12 @@
   padding: 4px 8px;
 }
 
-.chat-status-copy {
+.chat-empty-state {
   color: var(--text-muted);
-  font-size: var(--space-md);
+  font-size: 13px;
 }
 
-.chat-status-copy--padded {
+.chat-empty-state--padded {
   padding: var(--space-md);
 }
 
@@ -262,7 +262,7 @@
 
 .chat-session-preview {
   font-size: 12px;
-  color: var(--text-secondary);
+  color: var(--text-muted);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -606,7 +606,7 @@
   gap: 6px;
   margin-bottom: 4px;
   font-size: 12px;
-  color: var(--text-secondary);
+  color: var(--text-muted);
 }
 
 /* Model-only chats hide the per-message agent identity. The toggle still
@@ -665,7 +665,7 @@
   padding: 1px 6px;
   border-radius: 4px;
   background: var(--surface-bg, color-mix(in srgb, var(--surface) 55%, transparent));
-  color: var(--text-secondary);
+  color: var(--text-muted);
   margin-left: 6px;
   white-space: nowrap;
   vertical-align: middle;
@@ -940,13 +940,13 @@
 
 .chat-message-thinking summary {
   font-size: 12px;
-  color: var(--text-secondary);
+  color: var(--text-muted);
   cursor: pointer;
 }
 
 .chat-message-thinking-content {
   font-size: 13px;
-  color: var(--text-secondary);
+  color: var(--text-muted);
   padding: 8px;
   background: var(--bg);
   border-radius: 6px;
@@ -1192,7 +1192,7 @@
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--text-secondary);
+  background: var(--text-muted);
   animation: chat-typing-bounce 1.4s infinite ease-in-out;
 }
 
