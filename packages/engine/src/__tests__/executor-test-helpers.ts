@@ -320,6 +320,7 @@ export function createMockStore() {
 
 export function resetExecutorMocks() {
   vi.clearAllMocks();
+  mockedIsUsableTaskWorktree.mockResolvedValue(true);
   mockExecuteAll.mockResolvedValue([]);
   mockTerminateAllSessions.mockResolvedValue(undefined);
   mockCleanup.mockResolvedValue(undefined);
