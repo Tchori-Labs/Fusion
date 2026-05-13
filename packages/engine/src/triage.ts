@@ -285,6 +285,14 @@ You MUST call \`fn_review_spec()\` after writing the PROMPT.md. Do not finish wi
 ## Output
 Write the PROMPT.md directly using the write tool, then call \`fn_review_spec()\` for review.
 
+## Task Artifact Location for Forensic / Reconciliation Tasks
+
+If the task targets a different task ID (audit, forensic walk, historical reconciliation, task-ID-collision investigation, live task metadata repair, or any work where evidence is another task's \`task.json\` / \`PROMPT.md\` / DB row), include this guidance in the generated PROMPT.md \`## Context to Read First\` and \`## File Scope\`:
+- Authoritative target-task artifacts live at the **project root**: \`<rootDir>/.fusion/tasks/{TARGET_ID}/\` (\`task.json\`, \`PROMPT.md\`, \`attachments/\`, agent logs).
+- Authoritative task DB rows live at the **project root** SQLite file: \`<rootDir>/.fusion/fusion.db\` (WAL mode). Read via \`TaskStore\` APIs; do not instruct direct SQL surgery.
+- \`.fusion/\` is gitignored, so a fresh worktree from \`main\` does **not** include \`.fusion/tasks/{TARGET_ID}/\` or \`.fusion/fusion.db\`. The running worktree's own \`.fusion/\` (if present) is scratch/session state for the running task only, not source of truth.
+- Prefer \`fn_task_get\` / \`fn_task_list\` when the target task ID is known; fall back to project-root filesystem reads only when tools cannot provide needed evidence.
+
 ## Frontend UX Criteria Injection
 
 <!-- UX criteria mirror the "frontend-ux-design" reviewer persona in packages/core/src/types.ts — keep them aligned. -->
@@ -451,6 +459,13 @@ Use that context to align file paths, APIs, assumptions, and completion expectat
 
 ## Project commands
 When the user prompt includes explicit test/build commands, use those exact commands in the generated spec.
+
+## Task Artifact Location for Forensic / Reconciliation Tasks
+
+For audit/forensic/historical reconciliation tasks that target a different task ID, explicitly state in generated PROMPT.md context/scope that authoritative artifacts and DB state are at project root, not the worktree.
+- Target-task files live at \`<rootDir>/.fusion/tasks/{TARGET_ID}/\` (\`task.json\`, \`PROMPT.md\`, \`attachments/\`, logs).
+- Task DB truth lives at \`<rootDir>/.fusion/fusion.db\` (SQLite/WAL) and should be accessed via \`TaskStore\`/task tools, not direct SQL edits.
+- \`.fusion/\` is gitignored: fresh worktrees from \`main\` do not contain other tasks' \`.fusion/tasks/{TARGET_ID}/\` or \`.fusion/fusion.db\`; worktree-local \`.fusion/\` is running-task scratch/session state only.
 
 ## Spec Review
 

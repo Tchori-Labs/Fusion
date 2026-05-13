@@ -606,6 +606,14 @@ describe("TRIAGE_SYSTEM_PROMPT", () => {
     expect(TRIAGE_SYSTEM_PROMPT).toContain("Specs must instruct executors to fix lint failures and quality-gate failures directly");
     expect(TRIAGE_SYSTEM_PROMPT).toContain("Refuse necessary fixes just because they touch files outside the initial File Scope");
   });
+
+  it("includes task-artifact location guidance for forensic/reconciliation tasks", () => {
+    expect(TRIAGE_SYSTEM_PROMPT).toContain("Task Artifact Location");
+    expect(TRIAGE_SYSTEM_PROMPT).toContain("<rootDir>/.fusion/tasks/{TARGET_ID}/");
+    expect(TRIAGE_SYSTEM_PROMPT).toContain(".fusion/fusion.db");
+    expect(TRIAGE_SYSTEM_PROMPT).toContain("project root");
+    expect(TRIAGE_SYSTEM_PROMPT).toContain("forensic");
+  });
 });
 
 describe("TRIAGE_SYSTEM_PROMPT", () => {
@@ -647,6 +655,14 @@ describe("fast-mode triage", () => {
     expect(FAST_TRIAGE_SYSTEM_PROMPT).not.toContain("## Triage subtask breakdown");
     expect(FAST_TRIAGE_SYSTEM_PROMPT).not.toContain("## Proactive Subtask Breakdown");
     expect(FAST_TRIAGE_SYSTEM_PROMPT).not.toContain("Frontend UX Criteria");
+  });
+
+  it("includes task-artifact location guidance for forensic/reconciliation tasks", () => {
+    expect(FAST_TRIAGE_SYSTEM_PROMPT).toContain("Task Artifact Location");
+    expect(FAST_TRIAGE_SYSTEM_PROMPT).toContain("<rootDir>/.fusion/tasks/{TARGET_ID}/");
+    expect(FAST_TRIAGE_SYSTEM_PROMPT).toContain(".fusion/fusion.db");
+    expect(FAST_TRIAGE_SYSTEM_PROMPT).toContain("project root");
+    expect(FAST_TRIAGE_SYSTEM_PROMPT).toContain("forensic");
   });
 
   it("selects FAST_TRIAGE_SYSTEM_PROMPT for fast tasks", async () => {
