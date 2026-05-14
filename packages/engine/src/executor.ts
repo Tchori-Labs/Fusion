@@ -6,6 +6,7 @@ import { delimiter, isAbsolute, join, relative, resolve as resolvePath } from "n
 import { existsSync, realpathSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import type { TaskStore, Task, TaskDetail, TaskTokenUsage, StepStatus, Settings, WorkflowStep, MissionStore, Slice, AgentState, AgentCapability, RunMutationContext, AgentHeartbeatConfig, Agent, AgentMemoryInclusionMode } from "@fusion/core";
+import { RetryStormError, serializeRetryStormError } from "@fusion/core";
 import {
   ApprovalRequestStore,
   buildExecutionMemoryInstructions,
@@ -99,6 +100,7 @@ import {
 import { createFusionAuthStorage, getModelRegistryModelsPath } from "./auth-storage.js";
 import { createRunVerificationTool } from "./run-verification-tool.js";
 import { createFallbackModelObserver } from "./fallback-model-observer.js";
+import { recordRetry } from "./retry-burned-logger.js";
 import type { AgentActionGateContext } from "./agent-action-gate.js";
 
 // Re-export for backward compatibility (tests import from executor.ts)
@@ -4285,6 +4287,16 @@ export class TaskExecutor {
             outcome = await this.handleBranchConflict(task, err);
             if (outcome !== "retry") break;
             await this.store.logEntry(task.id, `[recovery] ${task.id} branch-conflict auto-retry requested (${attempt}/${this.MAX_AUTO_RECOVERY_ATTEMPTS})`, undefined, this.currentRunContext);
+            const taskForRetry = await this.store.getTask(task.id);
+            await recordRetry({
+              store: this.store,
+              settings: await this.store.getSettings(),
+              task: taskForRetry,
+              category: "branchConflict",
+              role: "executor",
+              agentId: this.agentId,
+              attempt,
+            });
           }
           if (outcome === "retry") {
             await this.store.updateTask(task.id, {
@@ -4350,9 +4362,12 @@ export class TaskExecutor {
           this.options.onError?.(task, err instanceof Error ? err : new Error(errorMessage));
           return;
         }
+        const terminalError = err instanceof RetryStormError
+          ? JSON.stringify(serializeRetryStormError(err))
+          : errorMessage;
         executorLog.error(`✗ ${task.id} execution failed:`, errorDetail);
-        await this.store.logEntry(task.id, `Execution failed: ${errorMessage}`, errorStack ?? errorDetail, this.currentRunContext);
-        await this.store.updateTask(task.id, { status: "failed", error: errorMessage });
+        await this.store.logEntry(task.id, `Execution failed: ${terminalError}`, errorStack ?? errorDetail, this.currentRunContext);
+        await this.store.updateTask(task.id, { status: "failed", error: terminalError });
         await this.persistTokenUsage(task.id);
         await this.store.moveTask(task.id, "in-review");
         executorLog.log(`✗ ${task.id} execution failed → in-review`);

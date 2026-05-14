@@ -10,6 +10,7 @@
 
 import type { TaskStore, TaskComment, AgentPromptsConfig, Settings } from "@fusion/core";
 import { buildReviewerMemoryInstructions, resolveAgentPrompt, resolvePersistAgentThinkingLog, resolveAgentMemoryInclusionMode } from "@fusion/core";
+import { recordRetry } from "./retry-burned-logger.js";
 import { describeModel, promptWithFallback } from "./pi.js";
 import { isContextLimitError } from "./context-limit-detector.js";
 import { createResolvedAgentSession, extractRuntimeHint } from "./agent-session-helpers.js";
@@ -596,6 +597,15 @@ export async function reviewStep(
         reviewerLog.warn(`${taskId}: ${retryLogMessage}`);
         if (options.store && options.taskId) {
           await options.store.logEntry(options.taskId, retryLogMessage).catch(() => undefined);
+          const taskForRetry = await options.store.getTask(options.taskId);
+          await recordRetry({
+            store: options.store,
+            settings: liveSettings ?? options.settings ?? {},
+            task: taskForRetry,
+            category: "reviewerContext",
+            role: "reviewer",
+            agentId: options.agentId,
+          });
         }
 
         reviewText = "";
@@ -654,6 +664,17 @@ export async function reviewStep(
   } catch (err) {
     if (hasConfiguredFallback) {
       await logFallbackRetry("reviewer error", `${validatorFallbackProvider}/${validatorFallbackModelId}`);
+      if (options.store && options.taskId) {
+        const taskForRetry = await options.store.getTask(options.taskId);
+        await recordRetry({
+          store: options.store,
+          settings: liveSettings ?? options.settings ?? {},
+          task: taskForRetry,
+          category: "reviewerFallback",
+          role: "reviewer",
+          agentId: options.agentId,
+        });
+      }
       try {
         return await runAttempt(request, {
           forceProvider: validatorFallbackProvider,
@@ -665,6 +686,17 @@ export async function reviewStep(
     }
 
     await logFallbackRetry("reviewer error", "same-model strict prompt");
+    if (options.store && options.taskId) {
+      const taskForRetry = await options.store.getTask(options.taskId);
+      await recordRetry({
+        store: options.store,
+        settings: liveSettings ?? options.settings ?? {},
+        task: taskForRetry,
+        category: "reviewerFallback",
+        role: "reviewer",
+        agentId: options.agentId,
+      });
+    }
     try {
       return await runAttempt(fallbackReviewRequest);
     } catch {
@@ -678,6 +710,17 @@ export async function reviewStep(
 
   if (hasConfiguredFallback) {
     await logFallbackRetry("UNAVAILABLE verdict", `${validatorFallbackProvider}/${validatorFallbackModelId}`);
+    if (options.store && options.taskId) {
+      const taskForRetry = await options.store.getTask(options.taskId);
+      await recordRetry({
+        store: options.store,
+        settings: liveSettings ?? options.settings ?? {},
+        task: taskForRetry,
+        category: "reviewerFallback",
+        role: "reviewer",
+        agentId: options.agentId,
+      });
+    }
     return runAttempt(request, {
       forceProvider: validatorFallbackProvider,
       forceModelId: validatorFallbackModelId,
@@ -685,6 +728,17 @@ export async function reviewStep(
   }
 
   await logFallbackRetry("UNAVAILABLE verdict", "same-model strict prompt");
+  if (options.store && options.taskId) {
+    const taskForRetry = await options.store.getTask(options.taskId);
+    await recordRetry({
+      store: options.store,
+      settings: liveSettings ?? options.settings ?? {},
+      task: taskForRetry,
+      category: "reviewerFallback",
+      role: "reviewer",
+      agentId: options.agentId,
+    });
+  }
   return runAttempt(fallbackReviewRequest);
 }
 

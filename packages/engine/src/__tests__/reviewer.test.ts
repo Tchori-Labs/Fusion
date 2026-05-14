@@ -314,8 +314,11 @@ describe("reviewStep — context-limit retry", () => {
       },
     } as any);
 
+    const task = { id: "FN-4082", column: "in-progress", description: "d", dependencies: [], steps: [], currentStep: 0, log: [], prompt: "# prompt", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z", reviewerContextRetryCount: 0 };
     const store = {
-      getSettings: vi.fn().mockResolvedValue({}),
+      getSettings: vi.fn().mockResolvedValue({ maxReviewerContextRetries: 2, maxTotalRetriesBeforeFail: 25 }),
+      getTask: vi.fn().mockImplementation(async () => task),
+      updateTask: vi.fn().mockImplementation(async (_id: string, patch: Record<string, unknown>) => Object.assign(task, patch)),
       logEntry: vi.fn().mockResolvedValue(undefined),
       appendAgentLog: vi.fn().mockResolvedValue(undefined),
     };
@@ -359,6 +362,7 @@ describe("reviewStep — context-limit retry", () => {
       "FN-4082",
       "code review hit context limit — retrying with compacted request",
     );
+    expect(task.reviewerContextRetryCount).toBe(1);
   });
 
   it("returns UNAVAILABLE when both attempts hit the context limit", async () => {
@@ -401,8 +405,11 @@ describe("reviewStep — fallback retry for terminal unavailable", () => {
       .mockResolvedValueOnce(createMockSession("No parseable verdict here."))
       .mockResolvedValueOnce(createMockSession("### Verdict: APPROVE\n### Summary\nRecovered on fallback."));
 
+    const task = { id: "FN-4092", column: "in-progress", description: "d", dependencies: [], steps: [], currentStep: 0, log: [], prompt: "# prompt", createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z", reviewerFallbackRetryCount: 0 };
     const store = {
-      getSettings: vi.fn().mockResolvedValue({}),
+      getSettings: vi.fn().mockResolvedValue({ maxReviewerFallbackRetries: 2, maxTotalRetriesBeforeFail: 25 }),
+      getTask: vi.fn().mockImplementation(async () => task),
+      updateTask: vi.fn().mockImplementation(async (_id: string, patch: Record<string, unknown>) => Object.assign(task, patch)),
       logEntry: vi.fn().mockResolvedValue(undefined),
       appendAgentLog: vi.fn().mockResolvedValue(undefined),
     };
@@ -423,6 +430,7 @@ describe("reviewStep — fallback retry for terminal unavailable", () => {
       "FN-4092",
       expect.stringContaining("review retry with fallback model after UNAVAILABLE verdict"),
     );
+    expect(task.reviewerFallbackRetryCount).toBe(1);
   });
 
   it("retries once after non-context reviewer error", async () => {
