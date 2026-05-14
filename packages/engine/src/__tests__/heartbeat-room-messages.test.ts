@@ -54,7 +54,7 @@ type Harness = {
   agentId: string;
 };
 
-async function createHarness(): Promise<Harness> {
+async function createHarness(permissionPolicy?: any): Promise<Harness> {
   const rootDir = mkdtempSync(join(tmpdir(), "hb-room-root-"));
   const globalDir = mkdtempSync(join(tmpdir(), "hb-room-global-"));
   const taskStore = new TaskStore(rootDir, globalDir, { inMemoryDb: true });
@@ -66,6 +66,7 @@ async function createHarness(): Promise<Harness> {
     role: "engineer",
     soul: "Surfaces relevant room updates.",
     runtimeConfig: { enabled: true },
+    ...(permissionPolicy ? { permissionPolicy } : {}),
   });
   return { rootDir, globalDir, taskStore, agentStore, chatStore, agentId: agent.id };
 }
@@ -187,8 +188,17 @@ describe("heartbeat room messages", () => {
     expect(sessionCapture.prompt).toContain("(10 more truncated)");
   });
 
-  it("registers fn_post_room_message and posts through the real ChatStore", async () => {
-    harness = await createHarness();
+  it("registers fn_post_room_message and posts through the real ChatStore under restrictive policy", async () => {
+    harness = await createHarness({
+      presetId: "approval-required",
+      rules: {
+        git_write: "require-approval",
+        file_write_delete: "require-approval",
+        command_execution: "require-approval",
+        network_api: "require-approval",
+        task_agent_mutation: "require-approval",
+      },
+    });
     const room = harness.chatStore.createRoom({ name: "reply-room", memberAgentIds: [harness.agentId] });
     harness.chatStore.addRoomMessage(room.id, { role: "user", content: "can you confirm?" });
 
@@ -210,7 +220,10 @@ describe("heartbeat room messages", () => {
       replyToMessageId: "rmsg-parent",
     });
 
-    const posted = harness.chatStore.getRoomMessages(room.id).find((message) => message.id === result.details.messageId);
+    expect((result as any).isError).not.toBe(true);
+    expect((result as any)?.details?.requiresApproval).not.toBe(true);
+
+    const posted = harness.chatStore.getRoomMessages(room.id).find((message) => message.id === (result as any).details.messageId);
     expect(posted).toMatchObject({
       senderAgentId: harness.agentId,
       content: "Confirmed.",

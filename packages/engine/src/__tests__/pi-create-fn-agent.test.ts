@@ -561,7 +561,9 @@ describe("wrapToolsWithPermanentAgentGating", () => {
 
   it.each<[
     "locked-down" | "approval-required",
-    Record<string, "block" | "require-approval">
+    Record<string, "block" | "require-approval">,
+    "fn_send_message" | "fn_post_room_message",
+    Record<string, string>
   ]>([
     ["locked-down", {
       git_write: "block",
@@ -569,19 +571,32 @@ describe("wrapToolsWithPermanentAgentGating", () => {
       command_execution: "block",
       network_api: "block",
       task_agent_mutation: "block",
-    }],
+    }, "fn_send_message", { message: "ping" }],
     ["approval-required", {
       git_write: "require-approval",
       file_write_delete: "require-approval",
       command_execution: "require-approval",
       network_api: "require-approval",
       task_agent_mutation: "require-approval",
-    }],
-  ])("bypasses wrapping for fn_send_message under %s policy", async (presetId, rules) => {
-    const args = { message: "ping" };
+    }, "fn_send_message", { message: "ping" }],
+    ["locked-down", {
+      git_write: "block",
+      file_write_delete: "block",
+      command_execution: "block",
+      network_api: "block",
+      task_agent_mutation: "block",
+    }, "fn_post_room_message", { roomId: "room-1", content: "pong" }],
+    ["approval-required", {
+      git_write: "require-approval",
+      file_write_delete: "require-approval",
+      command_execution: "require-approval",
+      network_api: "require-approval",
+      task_agent_mutation: "require-approval",
+    }, "fn_post_room_message", { roomId: "room-1", content: "pong" }],
+  ])("bypasses wrapping for %s under %s policy", async (presetId, rules, toolName, args) => {
     const result = { ok: true, messageId: "msg-1" };
     const execute = vi.fn().mockResolvedValue(result);
-    const tool = { name: "fn_send_message", label: "Send Message", description: "", parameters: {}, execute };
+    const tool = { name: toolName, label: "Message Tool", description: "", parameters: {}, execute };
     const createApprovalRequest = vi.fn();
     const findPendingApprovalRequest = vi.fn();
     const { wrapToolsWithPermanentAgentGating } = await import("../pi.js");
@@ -771,15 +786,18 @@ describe("wrapToolsWithActionGate", () => {
 
   it.each<[
     "locked-down" | "approval-required",
-    typeof lockedDownRules | typeof approvalRules
+    typeof lockedDownRules | typeof approvalRules,
+    "fn_send_message" | "fn_post_room_message",
+    Record<string, string>
   ]>([
-    ["locked-down", lockedDownRules],
-    ["approval-required", approvalRules],
-  ])("bypasses wrapping for fn_send_message under %s policy", async (presetId, rules) => {
-    const args = { message: "ping" };
+    ["locked-down", lockedDownRules, "fn_send_message", { message: "ping" }],
+    ["approval-required", approvalRules, "fn_send_message", { message: "ping" }],
+    ["locked-down", lockedDownRules, "fn_post_room_message", { roomId: "room-1", content: "pong" }],
+    ["approval-required", approvalRules, "fn_post_room_message", { roomId: "room-1", content: "pong" }],
+  ])("bypasses wrapping for %s under %s policy", async (presetId, rules, toolName, args) => {
     const result = { ok: true, messageId: "msg-2" };
     const execute = vi.fn().mockResolvedValue(result);
-    const tool = { name: "fn_send_message", label: "Send Message", description: "", parameters: {}, execute };
+    const tool = { name: toolName, label: "Message Tool", description: "", parameters: {}, execute };
     const createApprovalRequest = vi.fn();
     const pauseForApproval = vi.fn();
     const { wrapToolsWithActionGate } = await import("../pi.js");

@@ -16,6 +16,7 @@ const FN_3548_COORDINATION_TOOLS = [
   "fn_agent_org_chart",
   "fn_send_message",
   "fn_read_messages",
+  "fn_post_room_message",
   "fn_memory_search",
   "fn_memory_get",
   "fn_memory_append",
