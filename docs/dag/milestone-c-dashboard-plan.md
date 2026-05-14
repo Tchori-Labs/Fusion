@@ -181,3 +181,17 @@ Schema details, persistence model, and endpoint implementation are out-of-scope 
 
 8. **No reliability-layer behavior changes**
    - Milestone C implementation must not modify scheduler, executor, self-healing, restart-recovery, or merger behavior while FN-4359 freeze remains active.
+
+## Cross-links and follow-up execution
+
+- FN-4487 mission proposal: task **FN-4487** (proposal lineage for Milestones A/B/C).
+- FN-4471 scoping recommendation: task **FN-4471** (upstream framing and constraints).
+- FN-4490 architecture inputs consumed by this plan:
+  - `docs/dag/requirements-matrix.md`
+  - `docs/dag/adr-0001-dag-orchestration.md`
+  - `docs/dag/failure-observability-contract.md`
+- FN-4491 scaffold dependency for downstream implementation: task **FN-4491**.
+
+Follow-up tasks created from this planning pass:
+- **FN-4503** (depends on FN-4491, FN-4492): Milestone C implementation task for DAG dashboard surfacing.
+- **FN-4504** (depends on FN-4490, FN-4492): add `dag:run:pause` + `dag:run:resume` event vocabulary and run-audit mapping guidance.
