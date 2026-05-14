@@ -896,6 +896,51 @@ describe("executeHeartbeat", () => {
       expect(store.claimTaskForAgent).not.toHaveBeenCalled();
     });
 
+    it("reuses one snapshot rebuild across concurrent no-task heartbeats", async () => {
+      const listTasks = vi.fn().mockResolvedValue([
+        {
+          id: "FN-CANDIDATE",
+          description: "executor reliability follow-up",
+          title: "Executor reliability",
+          prompt: "",
+          steps: [],
+          column: "todo",
+          dependencies: [],
+          log: [],
+          attachments: [],
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        } as unknown as TaskDetail,
+      ]);
+      mockTaskStore = createMockTaskStore({ listTasks });
+      const store = createStoreWithAgentForExec({ taskId: undefined, soul: "executor reliability owner" });
+      const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: "/tmp" });
+
+      await Promise.all([
+        monitor.executeHeartbeat({ agentId: "agent-001", source: "timer" }),
+        monitor.executeHeartbeat({ agentId: "agent-001", source: "on_demand" }),
+      ]);
+
+      expect(listTasks).toHaveBeenCalledTimes(1);
+    });
+
+    it("omits candidate section when autoClaimCandidatesInPrompt resolves to zero", async () => {
+      const store = createStoreWithAgentForExec({
+        taskId: undefined,
+        soul: "executor reliability owner",
+        runtimeConfig: { autoClaimRelevantTasks: true, autoClaimCandidatesInPrompt: 0 },
+      });
+      const mockSession = createMockAgentSession();
+      mockedCreateFnAgent.mockResolvedValue({ session: mockSession as any });
+
+      const monitor = new HeartbeatMonitor({ store, taskStore: mockTaskStore, rootDir: "/tmp" });
+      await monitor.executeHeartbeat({ agentId: "agent-001", source: "timer" });
+
+      const executionPrompt = mockSession.prompt.mock.calls.at(-1)?.[0] as string;
+      expect(executionPrompt).toContain("auto-claim relevant tasks: disabled (prompt-suppressed)");
+      expect(executionPrompt).not.toContain("Open unowned tasks you may auto-claim");
+    });
+
     it("agent WITH instructionsText but no task creates session and completes successfully", async () => {
       const store = createStoreWithAgentForExec({ taskId: undefined, instructionsText: "Monitor task board and create follow-up tasks" });
       const mockSession = createMockAgentSession();

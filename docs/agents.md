@@ -504,6 +504,7 @@ The `runtimeConfig` field on agents supports the following options:
 | `enabled` | `boolean` | `true` | Whether heartbeat triggers are enabled for this agent |
 | `heartbeatIntervalMs` | `number` | — | How often the agent should wake up for heartbeat checks (ms) |
 | `autoClaimRelevantTasks` | `boolean` | `true` | During no-task heartbeats, opportunistically claim unowned relevant todo tasks that align with the agent's role/soul |
+| `autoClaimCandidatesInPrompt` | `number` | `5` | Per-agent override for no-task candidate lines rendered in prompts. Integer `0-10`; `0` suppresses candidate injection. |
 | `heartbeatTimeoutMs` | `number` | — | Time without heartbeat before agent is considered unresponsive (ms) |
 | `maxConcurrentRuns` | `number` | `1` | Max concurrent heartbeat runs for this agent |
 | `runMissedHeartbeatOnStartup` | `boolean` | `false` | When enabled, if the server was down across this agent's scheduled heartbeat tick, fire one catch-up heartbeat at startup (only when `lastHeartbeatAt` is older than the resolved interval) |
@@ -523,6 +524,16 @@ Project setting `heartbeatMultiplier` (default `1`) scales resolved heartbeat in
 `runMissedHeartbeatOnStartup` defaults to `false` and is configured in **Agent Detail → Settings → Heartbeat Settings → Run Missed Heartbeat On Startup**.
 
 `allowParallelExecution` defaults to `true` when unset; setting it to `false` is serialized explicitly so operators can enforce non-parallel heartbeat/executor behavior for that permanent agent. Configure it in **Agent Detail → Settings → Heartbeat Settings → Allow Parallel Execution**.
+
+### Auto-claim candidate snapshot (FN-4401)
+
+No-task heartbeats now consume a project-wide in-memory `AutoClaimSnapshotManager` cache (TTL 30s) instead of each agent scanning the board independently. Rebuilds occur on TTL expiry and scheduler invalidations (`task:created`, `task:moved` when todo edge touched, and `task:updated`).
+
+Prompt candidate rendering uses:
+- project setting `autoClaimCandidatesInPrompt` (default `5`, range `0-10`)
+- optional per-agent runtime override `runtimeConfig.autoClaimCandidatesInPrompt`
+
+`0` suppresses candidate injection in no-task prompts (wake summary shows `disabled (prompt-suppressed)`). The Agent Detail heartbeat section also includes a **Coordination-only agent** preset that disables auto-claim and sets candidate injection to `0` for routing/CEO-style agents.
 
 `skipHeartbeatWhenIdle` defaults to `false`; when enabled, only scheduled timer ticks are skipped while the agent has no assigned task. Assignment-triggered wakeups and manual/on-demand runs still execute. Configure it in **Agent Detail → Settings → Heartbeat Settings → Skip heartbeat when idle**.
 

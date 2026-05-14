@@ -12,15 +12,15 @@ function makeTask(overrides: Partial<Task> & Pick<Task, "id">): Task {
     createdAt: overrides.createdAt ?? "2026-01-01T00:00:00.000Z",
     updatedAt: overrides.updatedAt ?? "2026-01-01T00:00:00.000Z",
     dependencies: overrides.dependencies ?? [],
-    labels: overrides.labels ?? [],
     comments: overrides.comments ?? [],
-    activityLog: overrides.activityLog ?? [],
-    metadata: overrides.metadata ?? {},
+    steps: overrides.steps ?? [],
+    currentStep: overrides.currentStep ?? 0,
+    log: overrides.log ?? [],
     assignedAgentId: overrides.assignedAgentId,
     checkedOutBy: overrides.checkedOutBy,
     paused: overrides.paused,
     columnMovedAt: overrides.columnMovedAt,
-  } as Task;
+  } as unknown as Task;
 }
 
 describe("AutoClaimSnapshotManager", () => {

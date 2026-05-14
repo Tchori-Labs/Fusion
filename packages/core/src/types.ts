@@ -2093,6 +2093,8 @@ export interface ProjectSettings {
    *  For example, 0.5 halves the interval (faster checks), 2.0 doubles it (slower checks).
    *  Must be > 0. Default: 1 (no change). */
   heartbeatMultiplier?: number;
+  /** Number of auto-claim candidates rendered in no-task heartbeat prompts. Range: 0-10. Default: 5. */
+  autoClaimCandidatesInPrompt?: number;
   groupOverlappingFiles: boolean;
   /** File/directory paths to ignore when evaluating overlap serialization.
    *  Entries are project-relative paths (for example: `docs/README.md`, `docs/`, `generated/*`).

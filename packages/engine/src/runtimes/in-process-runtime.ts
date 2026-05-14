@@ -19,6 +19,7 @@ import { TaskExecutor, type TaskExecutorOptions } from "../executor.js";
 import { WorktreePool, isGitRepository } from "../worktree-pool.js";
 import { AgentSemaphore } from "../concurrency.js";
 import { HeartbeatMonitor, HeartbeatTriggerScheduler, type WakeContext } from "../agent-heartbeat.js";
+import { AutoClaimSnapshotManager } from "../auto-claim-snapshot.js";
 import { RoutineRunner, type RoutineRunnerOptions } from "../routine-runner.js";
 import { RoutineScheduler } from "../routine-scheduler.js";
 import { createAiPromptExecutor } from "../cron-runner.js";
@@ -309,6 +310,8 @@ export class InProcessRuntime
         getExecutingTaskIds: () => this.executor?.getExecutingTaskIds() ?? new Set<string>(),
       });
 
+      const autoClaimSnapshotManager = new AutoClaimSnapshotManager({ taskStore: this.taskStore });
+
       this.scheduler = new Scheduler(this.taskStore, {
         maxConcurrent: this.config.maxConcurrent,
         maxWorktrees: this.config.maxWorktrees,
@@ -332,6 +335,7 @@ export class InProcessRuntime
           const mappedPath = await this.centralCore.getProjectNodePath(this.config.projectId, nodeId);
           return validateProjectNodeMapping({ nodeId, mappedPath });
         },
+        snapshotManager: autoClaimSnapshotManager,
 
       });
 
@@ -464,6 +468,7 @@ export class InProcessRuntime
           reflectionStore: reflectionStoreForService,
           reflectionService,
           selfImproveService,
+          snapshotManager: autoClaimSnapshotManager,
           onMissed: (agentId, reason) => {
             runtimeLog.warn(`Agent ${agentId} missed heartbeat: ${reason}`);
           },

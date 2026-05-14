@@ -1560,6 +1560,15 @@
 
 /* === Agent Detail View Mobile Responsive === */
 @media (max-width: 768px) {
+  .agent-heartbeat-preset-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .agent-heartbeat-preset-btn {
+    width: 100%;
+  }
+
   .config-runtime-tabs {
     grid-template-columns: 1fr;
   }

@@ -977,6 +977,45 @@ describe("Advanced Settings", () => {
     });
   });
 
+  it("applies coordination-only preset and persists disabled auto-claim", async () => {
+    mockFetchAgent.mockResolvedValue(createMockAgent({
+      runtimeConfig: {
+        enabled: true,
+        autoClaimRelevantTasks: true,
+        autoClaimCandidatesInPrompt: 5,
+      },
+    }));
+    mockUpdateAgent.mockResolvedValue(createMockAgent() as any);
+
+    const user = userEvent.setup();
+    render(
+      <AgentDetailView
+        agentId="agent-001"
+        onClose={vi.fn()}
+        addToast={vi.fn()}
+      />,
+    );
+
+    await navigateToSettings(user);
+    await user.click(await screen.findByRole("button", { name: "Apply preset" }));
+
+    expect((screen.getByLabelText("Auto-Claim Relevant Tasks") as HTMLInputElement).checked).toBe(false);
+
+    await user.click(screen.getByText("Save Settings"));
+    await waitFor(() => {
+      expect(mockUpdateAgent).toHaveBeenCalledWith(
+        "agent-001",
+        expect.objectContaining({
+          runtimeConfig: expect.objectContaining({
+            autoClaimRelevantTasks: false,
+            autoClaimCandidatesInPrompt: 0,
+          }),
+        }),
+        undefined,
+      );
+    });
+  });
+
   it("defaults allow-parallel-execution toggle to checked when runtimeConfig.allowParallelExecution is undefined", async () => {
     mockFetchAgent.mockResolvedValue(createMockAgent({
       runtimeConfig: {

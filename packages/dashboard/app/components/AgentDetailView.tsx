@@ -3218,6 +3218,9 @@ function deriveHeartbeatValues(runtimeConfig: AgentDetail["runtimeConfig"] | und
   if (rc.messageResponseMode === "immediate" || rc.messageResponseMode === "on-heartbeat") {
     nextValues.messageResponseMode = rc.messageResponseMode;
   }
+  if (rc.autoClaimCandidatesInPrompt !== undefined && rc.autoClaimCandidatesInPrompt !== null) {
+    nextValues.autoClaimCandidatesInPrompt = String(rc.autoClaimCandidatesInPrompt);
+  }
 
   return nextValues;
 }
@@ -3901,7 +3904,7 @@ function ConfigTab({
     if (runMissedHeartbeatOnStartup !== deriveRunMissedHeartbeatOnStartup(agent.runtimeConfig)) return true;
     if (allowParallelExecution !== deriveAllowParallelExecution(agent.runtimeConfig)) return true;
     if (skipHeartbeatWhenIdle !== deriveSkipHeartbeatWhenIdle(agent.runtimeConfig)) return true;
-    for (const key of ["heartbeatIntervalMs", "heartbeatTimeoutMs", "maxConcurrentRuns", "messageResponseMode"] as const) {
+    for (const key of ["heartbeatIntervalMs", "heartbeatTimeoutMs", "maxConcurrentRuns", "messageResponseMode", "autoClaimCandidatesInPrompt"] as const) {
       const current = heartbeatValues[key]?.trim() ?? "";
       let persisted = rc[key] !== undefined && rc[key] !== null ? String(rc[key]) : "";
 
@@ -4044,6 +4047,14 @@ function ConfigTab({
       }
     }
 
+    const autoClaimCandidatesInPromptRaw = heartbeatValues.autoClaimCandidatesInPrompt?.trim();
+    if (autoClaimCandidatesInPromptRaw) {
+      const num = Number(autoClaimCandidatesInPromptRaw);
+      if (!Number.isInteger(num) || num < 0 || num > 10) {
+        nextErrors.autoClaimCandidatesInPrompt = "\"Auto-claim candidates in prompt\" must be an integer between 0 and 10";
+      }
+    }
+
     const messageResponseModeForValidation = heartbeatValues.messageResponseMode?.trim();
     if (messageResponseModeForValidation && !["immediate", "on-heartbeat"].includes(messageResponseModeForValidation)) {
       nextErrors.messageResponseMode = "\"Message Response Mode\" must be either immediate or on-heartbeat";
@@ -4127,13 +4138,13 @@ function ConfigTab({
     newRuntimeConfig.runMissedHeartbeatOnStartup = runMissedHeartbeatOnStartup;
     newRuntimeConfig.allowParallelExecution = allowParallelExecution;
     newRuntimeConfig.skipHeartbeatWhenIdle = skipHeartbeatWhenIdle;
-    for (const key of ["heartbeatIntervalMs", "heartbeatTimeoutMs", "maxConcurrentRuns"] as const) {
+    for (const key of ["heartbeatIntervalMs", "heartbeatTimeoutMs", "maxConcurrentRuns", "autoClaimCandidatesInPrompt"] as const) {
       const raw = heartbeatValues[key]?.trim();
       if (!raw) {
         delete newRuntimeConfig[key];
       } else {
         const num = Number(raw);
-        newRuntimeConfig[key] = key === "maxConcurrentRuns" ? num : num * 1000;
+        newRuntimeConfig[key] = key === "maxConcurrentRuns" || key === "autoClaimCandidatesInPrompt" ? num : num * 1000;
       }
     }
 
@@ -4599,6 +4610,39 @@ function ConfigTab({
         </p>
 
         <div className="config-fields">
+          <div className="config-field agent-heartbeat-auto-claim-card">
+            <div className="agent-heartbeat-preset-row">
+              <div>
+                <label className="agent-heartbeat-preset-label">Coordination-only agent</label>
+                <span className="config-hint">Disables auto-claim and removes the candidate section from heartbeat prompts. Recommended for routing/CEO-style agents.</span>
+              </div>
+              <button
+                type="button"
+                className="btn btn-sm agent-heartbeat-preset-btn"
+                onClick={() => {
+                  setAutoClaimRelevantTasksEnabled(false);
+                  setHeartbeatValues((prev) => ({ ...prev, autoClaimCandidatesInPrompt: "0" }));
+                  void scheduleAutoSave();
+                }}
+              >
+                Apply preset
+              </button>
+            </div>
+            <label className="checkbox-label" htmlFor="hb-autoClaimRelevantTasks">
+              <input
+                id="hb-autoClaimRelevantTasks"
+                type="checkbox"
+                checked={autoClaimRelevantTasksEnabled}
+                onChange={(e) => {
+                  setAutoClaimRelevantTasksEnabled(e.target.checked);
+                  void scheduleAutoSave();
+                }}
+              />
+              Auto-Claim Relevant Tasks
+            </label>
+            <span className="config-hint">When enabled (default), no-task heartbeats scan open unowned work and auto-claim tasks aligned with this agent&apos;s role and soul.</span>
+          </div>
+
           <div className="config-field">
             <label className="checkbox-label" htmlFor="hb-enabled">
               <input
@@ -4613,22 +4657,6 @@ function ConfigTab({
               Heartbeat Enabled
             </label>
             <span className="config-hint">When enabled, this agent receives scheduled heartbeat runs based on its interval.</span>
-          </div>
-
-          <div className="config-field">
-            <label className="checkbox-label" htmlFor="hb-autoClaimRelevantTasks">
-              <input
-                id="hb-autoClaimRelevantTasks"
-                type="checkbox"
-                checked={autoClaimRelevantTasksEnabled}
-                onChange={(e) => {
-                  setAutoClaimRelevantTasksEnabled(e.target.checked);
-                  void scheduleAutoSave();
-                }}
-              />
-              Auto-Claim Relevant Tasks
-            </label>
-            <span className="config-hint">When enabled (default), no-task heartbeats scan open unowned work and auto-claim tasks aligned with this agent&apos;s role and soul.</span>
           </div>
 
           <div className="config-field">

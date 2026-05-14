@@ -171,6 +171,7 @@ export const DEFAULT_PROJECT_SETTINGS = {
   maxWorktrees: 4,
   pollIntervalMs: 15000,
   heartbeatMultiplier: 1,
+  autoClaimCandidatesInPrompt: 5,
   groupOverlappingFiles: true,
   overlapIgnorePaths: [],
   autoMerge: true,

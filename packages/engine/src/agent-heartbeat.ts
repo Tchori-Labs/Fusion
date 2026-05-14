@@ -18,6 +18,7 @@
  */
 
 import type { AgentStore, AgentHeartbeatRun, HeartbeatInvocationSource, AgentHeartbeatConfig, AgentBudgetStatus, Message, MessageStore, TaskStore, TaskDetail, AgentRole, Agent, InboxTask, RunMutationContext, Settings, AgentConfigRevision, ReflectionStore, ChatStore, ChatRoom, ChatRoomMessage, AgentMemoryInclusionMode } from "@fusion/core";
+import { AutoClaimSnapshotManager, type AutoClaimCandidate } from "./auto-claim-snapshot.js";
 import { ApprovalRequestStore, buildExecutionMemoryInstructions, isEphemeralAgent, hasAgentIdentity, resolveEffectiveAgentPermissionPolicy, canAgentTakeImplementationTask, canAgentTakeImplementationTaskForExplicitRouting, resolvePersistAgentThinkingLog, resolveAgentMemoryInclusionMode } from "@fusion/core";
 import type { ToolDefinition } from "@mariozechner/pi-coding-agent";
 import { Type, type Static } from "@mariozechner/pi-ai";
@@ -89,6 +90,8 @@ export interface HeartbeatMonitorOptions {
   onRunStarted?: (agentId: string, run: AgentHeartbeatRun) => void;
   /** Callback when a run completes */
   onRunCompleted?: (agentId: string, run: AgentHeartbeatRun) => void;
+  /** Project-wide auto-claim snapshot manager. */
+  snapshotManager?: AutoClaimSnapshotManager;
   /** TaskStore for fn_task_create and fn_task_log tools during heartbeat execution.
    *  When not provided, executeHeartbeat() will throw. */
   taskStore?: TaskStore;
@@ -232,7 +235,16 @@ function isAutoClaimRelevantTasksEnabled(agent: Agent): boolean {
   return runtimeConfig.autoClaimRelevantTasks !== false;
 }
 
-type RelevanceScorableTask = Pick<TaskDetail, "title" | "description">;
+function resolveAutoClaimCandidatesInPromptLimit(agent: Agent, settings?: Settings): number {
+  const runtimeConfig = (agent.runtimeConfig ?? {}) as AgentHeartbeatConfig;
+  const perAgent = runtimeConfig.autoClaimCandidatesInPrompt;
+  const projectValue = settings?.autoClaimCandidatesInPrompt;
+  const raw = typeof perAgent === "number" ? perAgent : (typeof projectValue === "number" ? projectValue : 5);
+  const integer = Number.isFinite(raw) ? Math.trunc(raw) : 5;
+  return Math.max(0, Math.min(10, integer));
+}
+
+type RelevanceScorableTask = { title?: string | null; description: string };
 
 const agentSoulWordsCache = new Map<string, { soulSnapshot: string; words: readonly string[] }>();
 
@@ -649,6 +661,7 @@ export class HeartbeatMonitor {
   private reflectionService?: AgentReflectionService;
   private selfImproveService?: SelfImproveServiceLike;
   private approvalRequestStore?: ApprovalRequestStore;
+  private snapshotManager?: AutoClaimSnapshotManager;
 
   private trackedAgents: Map<string, TrackedAgent> = new Map();
   private agentStartLocks: Map<string, Promise<unknown>> = new Map();
@@ -677,6 +690,7 @@ export class HeartbeatMonitor {
     this.reflectionStore = options.reflectionStore;
     this.reflectionService = options.reflectionService;
     this.selfImproveService = options.selfImproveService;
+    this.snapshotManager = options.snapshotManager ?? (this.taskStore ? new AutoClaimSnapshotManager({ taskStore: this.taskStore }) : undefined);
   }
 
   getChatStore(): ChatStore | undefined {
@@ -1727,58 +1741,38 @@ export class HeartbeatMonitor {
           engineRunContext.taskId = taskId;
         }
 
-        let autoClaimCandidates: TaskDetail[] = [];
+        let autoClaimCandidates: AutoClaimCandidate[] = [];
         const autoClaimEnabled = isAutoClaimRelevantTasksEnabled(agent);
-        if (!taskId && canRunNoTaskHeartbeat && autoClaimEnabled) {
-          const listTasks = (taskStore as TaskStore & { listTasks?: (options?: { slim?: boolean }) => Promise<TaskDetail[]> }).listTasks;
-          if (typeof listTasks === "function") {
-            try {
-              const allTasks = await listTasks.call(taskStore, { slim: true });
-              const tasksById = new Map(allTasks.map((candidate) => [candidate.id, candidate]));
-              const openCandidates = allTasks
-                .filter((candidate) => (
-                  candidate.column === "todo"
-                  && candidate.paused !== true
-                  && !candidate.assignedAgentId
-                  && !candidate.checkedOutBy
-                  && candidate.dependencies.every((dependencyId) => {
-                    const dependency = tasksById.get(dependencyId);
-                    return dependency?.column === "done" || dependency?.column === "archived";
-                  })
-                ))
-                .sort((a, b) => {
-                  const aSortAt = a.columnMovedAt ?? a.createdAt;
-                  const bSortAt = b.columnMovedAt ?? b.createdAt;
-                  return aSortAt.localeCompare(bSortAt);
-                })
-                .slice(0, 10);
-
-              const roleCompatibleCandidates = openCandidates.filter((candidate) => canAgentTakeImplementationTask(agent, candidate));
-              const skippedIncompatibleCount = openCandidates.length - roleCompatibleCandidates.length;
-              if (skippedIncompatibleCount > 0) {
-                heartbeatLog.log(
-                  `Agent ${agentId} (role=${agent.role}) skipped auto-claim of ${skippedIncompatibleCount} implementation task(s) — only executor agents may claim implementation work`,
-                );
-              }
-
-              autoClaimCandidates = roleCompatibleCandidates;
-              const ranked = roleCompatibleCandidates
-                .map((candidate) => ({ candidate, score: taskRelevanceScore(agent, candidate as TaskDetail) }))
-                .filter((entry) => entry.score > 0)
-                .sort((a, b) => b.score - a.score || (a.candidate.columnMovedAt ?? a.candidate.createdAt).localeCompare(b.candidate.columnMovedAt ?? b.candidate.createdAt));
-
-              if (ranked.length > 0) {
-                const claimResult = await this.store.claimTaskForAgent(agentId, ranked[0].candidate.id, runContext);
-                if (claimResult.ok) {
-                  taskId = ranked[0].candidate.id;
-                  heartbeatLog.log(`Agent ${agentId} auto-claimed relevant task ${taskId}`);
-                } else {
-                  heartbeatLog.log(`Agent ${agentId} auto-claim skipped (${claimResult.reason})`);
-                }
-              }
-            } catch (autoClaimError) {
-              heartbeatLog.warn(`Auto-claim scan failed for ${agentId}: ${autoClaimError instanceof Error ? autoClaimError.message : String(autoClaimError)}`);
+        if (!taskId && canRunNoTaskHeartbeat && autoClaimEnabled && this.snapshotManager) {
+          try {
+            const snapshot = await this.snapshotManager.getSnapshot();
+            const roleCompatibleCandidates = snapshot.tasks.filter((candidate) => canAgentTakeImplementationTask(agent, candidate));
+            const skippedIncompatibleCount = snapshot.tasks.length - roleCompatibleCandidates.length;
+            if (skippedIncompatibleCount > 0) {
+              heartbeatLog.log(
+                `Agent ${agentId} (role=${agent.role}) skipped auto-claim of ${skippedIncompatibleCount} implementation task(s) — only executor agents may claim implementation work`,
+              );
             }
+
+            autoClaimCandidates = roleCompatibleCandidates;
+            const ranked = roleCompatibleCandidates
+              .map((candidate) => ({ candidate, score: candidate.baseScore + taskRelevanceScore(agent, candidate) }))
+              .filter((entry) => entry.score > 0)
+              .sort((a, b) => b.score - a.score || (a.candidate.columnMovedAt ?? a.candidate.createdAt).localeCompare(b.candidate.columnMovedAt ?? b.candidate.createdAt));
+
+            if (ranked.length > 0) {
+              const winnerId = ranked[0].candidate.id;
+              const winner = await taskStore.getTask(winnerId);
+              const claimResult = await this.store.claimTaskForAgent(agentId, winner.id, runContext);
+              if (claimResult.ok) {
+                taskId = winner.id;
+                heartbeatLog.log(`Agent ${agentId} auto-claimed relevant task ${taskId}`);
+              } else {
+                heartbeatLog.log(`Agent ${agentId} auto-claim skipped (${claimResult.reason})`);
+              }
+            }
+          } catch (autoClaimError) {
+            heartbeatLog.warn(`Auto-claim scan failed for ${agentId}: ${autoClaimError instanceof Error ? autoClaimError.message : String(autoClaimError)}`);
           }
         }
         if (!taskId) {
@@ -2319,13 +2313,16 @@ export class HeartbeatMonitor {
               );
             }
 
-            const candidateLines = autoClaimCandidates.length > 0
+            const promptCandidateLimit = resolveAutoClaimCandidatesInPromptLimit(agent, heartbeatModelSettings);
+            const candidateLines = promptCandidateLimit > 0
               ? [
                 "",
                 "Open Task Candidates (auto-claim scan):",
-                ...autoClaimCandidates.slice(0, 10).map((candidate) => `- ${candidate.id}: ${candidate.title ?? candidate.description.slice(0, 80)}`),
+                ...autoClaimCandidates
+                  .slice(0, promptCandidateLimit)
+                  .map((candidate) => `- ${candidate.id}: ${candidate.title ?? candidate.descriptionFirstLine}`),
               ]
-              : ["", "Open Task Candidates (auto-claim scan): none found"];
+              : [];
 
             executionPrompt = [
               `Heartbeat execution for agent "${agent.name}" (ID: ${agent.id})`,
@@ -2343,7 +2340,7 @@ export class HeartbeatMonitor {
               `- assigned task: none`,
               `- pending messages: ${pendingMessages.length}`,
               `- pending room messages: ${pendingRoomMessages.total}`,
-              `- auto-claim relevant tasks: ${autoClaimEnabled ? "enabled" : "disabled"}`,
+              `- auto-claim relevant tasks: ${autoClaimEnabled ? (promptCandidateLimit === 0 ? "disabled (prompt-suppressed)" : "enabled") : "disabled"}`,
               "",
               "Treat this wake delta as the highest-priority change for this heartbeat.",
               "This is an autonomous heartbeat run (manual or automatic): re-anchor on",
@@ -2385,6 +2382,7 @@ export class HeartbeatMonitor {
               "",
               "Call fn_heartbeat_done when finished.",
             ].join("\n");
+            heartbeatLog.log(`[auto-claim-prompt] agent=${agentId} chars=${executionPrompt.length} count=${Math.min(promptCandidateLimit, autoClaimCandidates.length)}`);
           } else {
             // Task-scoped heartbeat: agent has an assigned task
             const taskTitle = taskDetail!.title ?? taskDetail!.description.slice(0, 100);

@@ -83,6 +83,20 @@ describe("settings key parity", () => {
     expect(DEFAULT_PROJECT_SETTINGS.heartbeatMultiplier).toBe(1);
   });
 
+  it("defaults autoClaimCandidatesInPrompt to 5 and keeps it project-scoped", () => {
+    expect(DEFAULT_PROJECT_SETTINGS.autoClaimCandidatesInPrompt).toBe(5);
+    expect(isProjectSettingsKey("autoClaimCandidatesInPrompt")).toBe(true);
+    expect(isGlobalSettingsKey("autoClaimCandidatesInPrompt")).toBe(false);
+  });
+
+  it("documents autoClaimCandidatesInPrompt expected integer range", () => {
+    const inRange = [0, 1, 5, 10];
+    const outOfRange = [-1, 11, 100];
+
+    expect(inRange.every((value) => Number.isInteger(value) && value >= 0 && value <= 10)).toBe(true);
+    expect(outOfRange.every((value) => Number.isInteger(value) && value >= 0 && value <= 10)).toBe(false);
+  });
+
   it("defaults sibling branch rename escape hatch to disabled", () => {
     expect(DEFAULT_PROJECT_SETTINGS.executorAllowSiblingBranchRename).toBe(false);
     expect(isProjectSettingsKey("executorAllowSiblingBranchRename")).toBe(true);

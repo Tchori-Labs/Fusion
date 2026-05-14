@@ -522,6 +522,8 @@ When debugging agent execution issues (agents stuck on "starting"), check these 
 7. **`[pi] Session created successfully`** — Confirms the AI session was created
 8. **`[executor] FN-XXX: calling promptWithFallback()...`** — Confirms the prompt was sent
 9. **`[stuck-detector] Tracking task FN-XXX`** — Confirms heartbeat monitoring started
+10. **`[auto-claim-snapshot] rebuild generated=N reason=<ttl|invalidate>`** — Confirms project-wide auto-claim snapshot rebuild cadence
+11. **`[auto-claim-prompt] agent=<id> chars=<n> count=<n>`** — Tracks rendered no-task candidate section size
 
 ### Semaphore Resilience
 

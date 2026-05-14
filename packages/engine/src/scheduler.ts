@@ -23,6 +23,7 @@ import { applyUnavailableNodePolicy } from "./node-routing-policy.js";
 import type { NodeDispatchValidationResult } from "./node-dispatch-validation.js";
 import type { MeshLeaseManager } from "./mesh-lease-manager.js";
 import { selectPermanentAgentForTask } from "./agent-assignment.js";
+import type { AutoClaimSnapshotManager } from "./auto-claim-snapshot.js";
 
 /**
  * Check whether two sets of file scope paths overlap.
@@ -145,6 +146,8 @@ export interface SchedulerOptions {
   nodeHealthMonitor?: import("./node-health-monitor.js").NodeHealthMonitor;
   /** Optional dispatch validator used to block dispatch on configuration issues before health policy checks. */
   validateNodeDispatch?: (nodeId: string) => Promise<NodeDispatchValidationResult>;
+  /** Optional shared auto-claim snapshot manager for invalidation on task mutations. */
+  snapshotManager?: AutoClaimSnapshotManager;
 }
 
 /**
@@ -202,6 +205,7 @@ export class Scheduler {
      * This reduces latency from up to 15 seconds to near-instant.
      */
     this.store.on("task:created", () => {
+      this.options.snapshotManager?.invalidate("task:created");
       schedulerLog.log("Task created — triggering scheduling");
       this.schedule();
     });
@@ -241,6 +245,9 @@ export class Scheduler {
      * update feature status and potentially activate next pending slice.
      */
     this.store.on("task:moved", async ({ task, from, to }) => {
+      if (from === "todo" || to === "todo") {
+        this.options.snapshotManager?.invalidate(`task:moved:${from}->${to}`);
+      }
       // PR Monitoring
       if (this.options.prMonitor) {
         if (to === "in-review" && task.prInfo) {
@@ -351,6 +358,7 @@ export class Scheduler {
      * Also detects task-level unpause transitions and triggers immediate scheduling.
      */
     this.store.on("task:updated", (task) => {
+      this.options.snapshotManager?.invalidate("task:updated");
       // Track mission failure signals before moveTask clears failure metadata.
       if (task.sliceId && task.column === "in-progress" && task.status === "failed") {
         this.failedTaskIds.add(task.id);
