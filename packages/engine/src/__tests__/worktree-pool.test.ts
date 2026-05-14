@@ -55,6 +55,7 @@ import {
   scanOrphanedBranches,
 } from "../worktree-pool.js";
 import { BranchConflictError } from "../branch-conflicts.js";
+import * as branchConflictModule from "../branch-conflicts.js";
 import { execSync } from "node:child_process";
 import { existsSync, lstatSync, readdirSync, rmSync } from "node:fs";
 import type { Task, Column } from "@fusion/core";
@@ -184,7 +185,7 @@ describe("WorktreePool", () => {
   describe("prepareForTask", () => {
     it("returns the original branch name on success", async () => {
       const result = await pool.prepareForTask("/tmp/wt", "fusion/fn-042");
-      expect(result).toBe("fusion/fn-042");
+      expect(result).toMatchObject({ branch: "fusion/fn-042", reclaimed: false, worktreePath: "/tmp/wt" });
     });
 
     it("cleans dirty working tree before checkout", async () => {
@@ -232,7 +233,7 @@ describe("WorktreePool", () => {
       });
 
       const result = await pool.prepareForTask("/tmp/wt", "fusion/fn-001");
-      expect(result).toBe("fusion/fn-001");
+      expect(result).toMatchObject({ branch: "fusion/fn-001", reclaimed: false, worktreePath: "/tmp/wt" });
 
       expect(errorSpy).toHaveBeenCalledWith(
         expect.stringContaining("[worktree-pool] git checkout -- . failed (may be clean): nothing to checkout"),
@@ -255,13 +256,13 @@ describe("WorktreePool", () => {
 
       const result = await pool.prepareForTask("/tmp/wt", "fusion/fn-042");
 
-      expect(result).toBe("fusion/fn-042");
+      expect(result).toMatchObject({ branch: "fusion/fn-042", reclaimed: false, worktreePath: "/tmp/wt" });
       expect(errorSpy).toHaveBeenCalledWith(
         expect.stringContaining("[worktree-pool] git checkout -- . failed (may be clean): working tree already clean"),
       );
     });
 
-    it("throws a typed branch conflict when the canonical branch is already live elsewhere by default", async () => {
+    it("returns reclaimed result when branch is already live elsewhere for the same task", async () => {
       mockedExistsSync.mockImplementation((p) => {
         if (p === "/other/wt") return true;
         return true;
@@ -293,9 +294,57 @@ describe("WorktreePool", () => {
         return Buffer.from("");
       });
 
-      await expect(
-        pool.prepareForTask("/tmp/wt", "fusion/fn-042", undefined, { repoDir: "/tmp/repo" })
-      ).rejects.toBeInstanceOf(BranchConflictError);
+      vi.spyOn(branchConflictModule, "inspectBranchConflict").mockResolvedValueOnce({
+        kind: "reclaimable",
+        livePath: "/other/wt",
+        tipSha: "abc123def456",
+        taskAttributedCommitCount: 1,
+        strandedCommits: [{ sha: "aaa111", subject: "Preserve prior fix" }],
+      });
+
+      const result = await pool.prepareForTask("/tmp/wt", "fusion/fn-042", "main", {
+        repoDir: "/tmp/repo",
+        requestingTaskId: "FN-042",
+      });
+
+      expect(result).toMatchObject({
+        branch: "fusion/fn-042",
+        worktreePath: "/other/wt",
+        reclaimed: true,
+        existingTipSha: "abc123def456",
+        strandedCommitCount: 1,
+      });
+    });
+
+    it("throws BranchConflictError for cross-task live-foreign conflicts", async () => {
+      mockedExistsSync.mockReturnValue(true);
+
+      mockedExecSync.mockImplementation((cmd: any) => {
+        const cmdStr = String(cmd);
+        if (cmdStr === 'git checkout -B "fusion/fn-042" main') {
+          const err: any = new Error("branch conflict");
+          err.stderr = Buffer.from("fatal: 'fusion/fn-042' is already used by worktree at '/other/wt'");
+          throw err;
+        }
+        if (cmdStr === "git worktree list --porcelain") {
+          return Buffer.from(["worktree /other/wt", "HEAD 1111111", "branch refs/heads/fusion/fn-042", ""].join("\n"));
+        }
+        if (cmdStr.includes("git rev-parse --verify 'fusion/fn-042^{commit}'")) {
+          return Buffer.from("abc123def456\n");
+        }
+        if (cmdStr.includes("git log --reverse --format=%H%x09%s 'main..fusion/fn-042'")) {
+          return Buffer.from("aaa111\tForeign fix\n");
+        }
+        if (cmdStr.includes("git log --format=%H%x00%s%x00%b 'main..fusion/fn-042'")) {
+          return Buffer.from("aaa111\tfeat(FN-999): foreign\x1fFusion-Task-Id: FN-999\n");
+        }
+        return Buffer.from("");
+      });
+
+      await expect(pool.prepareForTask("/tmp/wt", "fusion/fn-042", undefined, {
+        repoDir: "/tmp/repo",
+        requestingTaskId: "FN-042",
+      })).rejects.toBeInstanceOf(BranchConflictError);
 
       const checkoutCalls = mockedExecSync.mock.calls
         .map((c) => c[0])
@@ -310,33 +359,20 @@ describe("WorktreePool", () => {
         const cmdStr = String(cmd);
         if (cmdStr === 'git checkout -B "fusion/fn-042" fusion/fn-041') {
           const err: any = new Error("branch conflict");
-          err.stderr = Buffer.from(
-            "fatal: 'fusion/fn-042' is already used by worktree at '/other/wt'"
-          );
+          err.stderr = Buffer.from("fatal: 'fusion/fn-042' is already used by worktree at '/other/wt'");
           throw err;
         }
-        if (cmdStr.includes("git rev-parse --verify 'fusion/fn-042^{commit}'")) {
-          return Buffer.from("abc123def456\n");
+        if (cmdStr === "git worktree list --porcelain") {
+          return Buffer.from(["worktree /other/wt", "HEAD 1111111", "branch refs/heads/fusion/fn-042", ""].join("\n"));
         }
-        if (cmdStr.includes("git log --reverse --format=%H%x09%s 'fusion/fn-041..fusion/fn-042'")) {
-          return Buffer.from("aaa111\tPreserve prior fix\n");
-        }
+        if (cmdStr.includes("git rev-parse --verify 'fusion/fn-042^{commit}'")) return Buffer.from("abc123def456\n");
+        if (cmdStr.includes("git log --reverse --format=%H%x09%s 'fusion/fn-041..fusion/fn-042'")) return Buffer.from("aaa111\tPreserve prior fix\n");
+        if (cmdStr.includes("git log --format=%H%x00%s%x00%b 'fusion/fn-041..fusion/fn-042'")) return Buffer.from("aaa111\u001ffeat(FN-999): foreign\u001fFusion-Task-Id: FN-999\n");
         return Buffer.from("");
       });
 
-      const result = await pool.prepareForTask(
-        "/tmp/wt",
-        "fusion/fn-042",
-        "fusion/fn-041",
-        { allowSiblingBranchRename: true, repoDir: "/tmp/repo" },
-      );
-      expect(result).toBe("fusion/fn-042-2");
-
-      const checkoutCalls = mockedExecSync.mock.calls
-        .map((c) => c[0])
-        .filter((c) => typeof c === "string" && c.includes("checkout -B"));
-      expect(checkoutCalls).toContain('git checkout -B "fusion/fn-042-2" fusion/fn-042');
-      expect(checkoutCalls).not.toContain('git checkout -B "fusion/fn-042-2" fusion/fn-041');
+      const result = await pool.prepareForTask("/tmp/wt", "fusion/fn-042", "fusion/fn-041", { allowSiblingBranchRename: true, repoDir: "/tmp/repo" });
+      expect(result.branch).toBe("fusion/fn-042-2");
     });
 
     it("increments suffix when lower suffixes are also in use in legacy rename mode", async () => {
@@ -344,41 +380,22 @@ describe("WorktreePool", () => {
 
       mockedExecSync.mockImplementation((cmd: any) => {
         const cmdStr = String(cmd);
-        if (cmdStr.startsWith('git checkout -B "fusion/fn-042" ') ||
-            cmdStr.startsWith('git checkout -B "fusion/fn-042-2" ')) {
+        if (cmdStr.startsWith('git checkout -B "fusion/fn-042" ') || cmdStr.startsWith('git checkout -B "fusion/fn-042-2" ')) {
           const err: any = new Error("branch conflict");
-          err.stderr = Buffer.from(
-            `fatal: 'x' is already used by worktree at '/other/wt'`
-          );
+          err.stderr = Buffer.from("fatal: 'x' is already used by worktree at '/other/wt'");
           throw err;
         }
-        if (cmdStr.includes("git rev-parse --verify 'fusion/fn-042^{commit}'")) {
-          return Buffer.from("abc123def456\n");
-        }
-        if (cmdStr.includes("git log --reverse --format=%H%x09%s 'main..fusion/fn-042'")) {
-          return Buffer.from("aaa111\tPreserve prior fix\n");
-        }
-        if (cmdStr.includes("git rev-parse --verify 'fusion/fn-042-2^{commit}'")) {
-          return Buffer.from("bbb222ccc333\n");
-        }
-        if (cmdStr.includes("git log --reverse --format=%H%x09%s 'main..fusion/fn-042-2'")) {
-          return Buffer.from("bbb222\tFirst sibling\n");
-        }
+        if (cmdStr === "git worktree list --porcelain") return Buffer.from(["worktree /other/wt", "HEAD 1111111", "branch refs/heads/fusion/fn-042", ""].join("\n"));
+        if (cmdStr.includes("git rev-parse --verify 'fusion/fn-042^{commit}'")) return Buffer.from("abc123def456\n");
+        if (cmdStr.includes("git log --reverse --format=%H%x09%s 'main..fusion/fn-042'")) return Buffer.from("aaa111\tPreserve prior fix\n");
+        if (cmdStr.includes("git log --format=%H%x00%s%x00%b 'main..fusion/fn-042'")) return Buffer.from("aaa111\u001ffeat(FN-999): foreign\u001fFusion-Task-Id: FN-999\n");
+        if (cmdStr.includes("git rev-parse --verify 'fusion/fn-042-2^{commit}'")) return Buffer.from("bbb222ccc333\n");
+        if (cmdStr.includes("git log --reverse --format=%H%x09%s 'main..fusion/fn-042-2'")) return Buffer.from("bbb222\tFirst sibling\n");
         return Buffer.from("");
       });
 
-      const result = await pool.prepareForTask(
-        "/tmp/wt",
-        "fusion/fn-042",
-        undefined,
-        { allowSiblingBranchRename: true, repoDir: "/tmp/repo" },
-      );
-      expect(result).toBe("fusion/fn-042-3");
-
-      const checkoutCalls = mockedExecSync.mock.calls
-        .map((c) => c[0])
-        .filter((c) => typeof c === "string" && c.includes("checkout -B"));
-      expect(checkoutCalls).toContain('git checkout -B "fusion/fn-042-3" fusion/fn-042');
+      const result = await pool.prepareForTask("/tmp/wt", "fusion/fn-042", undefined, { allowSiblingBranchRename: true, repoDir: "/tmp/repo" });
+      expect(result.branch).toBe("fusion/fn-042-3");
     });
 
     it("falls back to git worktree prune when conflicting worktree no longer exists on disk", async () => {
@@ -406,7 +423,7 @@ describe("WorktreePool", () => {
       });
 
       const result = await pool.prepareForTask("/tmp/wt", "fusion/fn-042");
-      expect(result).toBe("fusion/fn-042");
+      expect(result.branch).toBe("fusion/fn-042");
 
       const cmds = mockedExecSync.mock.calls.map((c) => c[0]);
       expect(cmds).toContain("git worktree prune");
@@ -429,52 +446,21 @@ describe("WorktreePool", () => {
 
     it("throws when all suffixed names are exhausted in legacy rename mode", async () => {
       mockedExistsSync.mockReturnValue(true);
-
       mockedExecSync.mockImplementation((cmd: any) => {
         const cmdStr = String(cmd);
         if (cmdStr.includes("checkout -B")) {
           const err: any = new Error("branch conflict");
-          err.stderr = Buffer.from(
-            `fatal: 'x' is already used by worktree at '/other/wt'`
-          );
+          err.stderr = Buffer.from("fatal: 'x' is already used by worktree at '/other/wt'");
           throw err;
         }
-        if (cmdStr.includes("git rev-parse --verify 'fusion/fn-042^{commit}'")) {
-          return Buffer.from("abc123def456\n");
-        }
-        if (cmdStr.includes("git log --reverse --format=%H%x09%s 'main..fusion/fn-042'")) {
-          return Buffer.from("aaa111\tPreserve prior fix\n");
-        }
-        if (cmdStr.includes("git rev-parse --verify 'fusion/fn-042-2^{commit}'")) {
-          return Buffer.from("bbb222ccc333\n");
-        }
-        if (cmdStr.includes("git log --reverse --format=%H%x09%s 'main..fusion/fn-042-2'")) {
-          return Buffer.from("bbb222\tFirst sibling\n");
-        }
-        if (cmdStr.includes("git rev-parse --verify 'fusion/fn-042-3^{commit}'")) {
-          return Buffer.from("ccc333ddd444\n");
-        }
-        if (cmdStr.includes("git log --reverse --format=%H%x09%s 'main..fusion/fn-042-3'")) {
-          return Buffer.from("ccc333\tSecond sibling\n");
-        }
-        if (cmdStr.includes("git rev-parse --verify 'fusion/fn-042-4^{commit}'")) {
-          return Buffer.from("ddd444eee555\n");
-        }
-        if (cmdStr.includes("git log --reverse --format=%H%x09%s 'main..fusion/fn-042-4'")) {
-          return Buffer.from("ddd444\tThird sibling\n");
-        }
-        if (cmdStr.includes("git rev-parse --verify 'fusion/fn-042-5^{commit}'")) {
-          return Buffer.from("eee555fff666\n");
-        }
-        if (cmdStr.includes("git log --reverse --format=%H%x09%s 'main..fusion/fn-042-5'")) {
-          return Buffer.from("eee555\tFourth sibling\n");
-        }
+        if (cmdStr === "git worktree list --porcelain") return Buffer.from(["worktree /other/wt", "HEAD 1111111", "branch refs/heads/fusion/fn-042", ""].join("\n"));
+        if (cmdStr.includes("git rev-parse --verify 'fusion/fn-042^{commit}'")) return Buffer.from("abc123def456\n");
+        if (cmdStr.includes("git log --reverse --format=%H%x09%s 'main..fusion/fn-042'")) return Buffer.from("aaa111\tPreserve prior fix\n");
+        if (cmdStr.includes("git log --format=%H%x00%s%x00%b 'main..fusion/fn-042'")) return Buffer.from("aaa111\u001ffeat(FN-999): foreign\u001fFusion-Task-Id: FN-999\n");
         return Buffer.from("");
       });
 
-      await expect(
-        pool.prepareForTask("/tmp/wt", "fusion/fn-042", undefined, { allowSiblingBranchRename: true, repoDir: "/tmp/repo" })
-      ).rejects.toThrow(/suffixes -2 through -6 are all in use/);
+      await expect(pool.prepareForTask("/tmp/wt", "fusion/fn-042", undefined, { allowSiblingBranchRename: true, repoDir: "/tmp/repo" })).rejects.toThrow(/suffixes -2 through -6 are all in use/);
     });
   });
 

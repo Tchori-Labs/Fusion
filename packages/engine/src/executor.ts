@@ -2503,6 +2503,21 @@ export class TaskExecutor {
       });
       worktreePath = acquisition.worktreePath;
 
+      if (acquisition.reclaimed) {
+        await audit.git({
+          type: "branch:auto-reclaim",
+          target: acquisition.branch,
+          metadata: {
+            taskId: task.id,
+            branch: acquisition.branch,
+            worktreePath: acquisition.worktreePath,
+            existingTipSha: acquisition.reclaimed.existingTipSha,
+            strandedCommitCount: acquisition.reclaimed.strandedCommitCount ?? 0,
+            trigger: "dispatch-preflight",
+          },
+        });
+      }
+
       if (!acquisition.isResume && acquisition.source === "fresh" && settings.setupScript) {
         const scriptCommand = settings.scripts?.[settings.setupScript];
         if (scriptCommand) {
@@ -7343,7 +7358,7 @@ and show an appropriate message to the user.\`
       }
 
       if (!allowSiblingBranchRename) {
-        throw inspection.error;
+        throw new Error(`Branch ${branch} conflict could not be auto-resolved`);
       }
 
       const conflictStartPoint = branch;

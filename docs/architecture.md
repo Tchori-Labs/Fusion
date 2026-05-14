@@ -1398,6 +1398,12 @@ When a tracked task transitions into `done`, Fusion closes the linked GitHub iss
 - Executor creates branches like `fusion/{task-id}` (`executor.ts`)
 - `WorktreePool` can recycle idle worktrees when enabled
 
+#### Branch-conflict inspection and auto-reclaim
+- `inspectBranchConflict` classifies branch collisions as `stale`, `stale-resolved`, `reclaimable`, or `live-foreign`.
+- Dispatch preflight (`acquireTaskWorktree`/executor) now auto-reclaims `reclaimable` self-owned conflicts and emits `branch:auto-reclaim` run-audit events with task/branch/worktree/tip/stranded-commit metadata.
+- Self-healing also runs `reclaimSelfOwnedBranchConflicts()` across idle `todo` + `in-progress` tasks; successful reclaim keeps stranded commits intact and failed reclaim escalates to `in-review`/`failed` with `branch-conflict-unrecoverable`.
+- Cross-task collisions (`live-foreign`) remain manual by design and still surface `fn task branch-recovery <taskId>` as the escape hatch.
+
 ### Merge strategies
 - Setting type: `MergeStrategy = "direct" | "pull-request"` (`types.ts`)
 - `aiMergeTask()` in `merger.ts` performs merge flow

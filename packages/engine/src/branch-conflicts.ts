@@ -100,8 +100,7 @@ export type BranchConflictInspectionResult =
   | { kind: "stale" }
   | { kind: "stale-resolved" }
   | { kind: "reclaimable"; livePath: string; tipSha: string; taskAttributedCommitCount: number; strandedCommits: BranchConflictCommit[] }
-  | { kind: "live-foreign"; livePath: string }
-  | { kind: "live"; error: BranchConflictError };
+  | { kind: "live-foreign"; livePath: string; error: BranchConflictError };
 
 export interface ListBranchRecoveryCandidatesInput {
   repoDir: string;
@@ -287,38 +286,34 @@ export async function inspectBranchConflict(
     return { kind: "stale-resolved" };
   }
 
-  if (livePath !== input.conflictingWorktreePath) {
-    const tipSha = await revParse(input.repoDir, input.branchName);
-    const strandedCommits = await listStrandedCommits(input.repoDir, startPoint, input.branchName);
-    const taskAttributedCommitCount = await countTaskAttributedCommits(
-      input.repoDir,
-      `${startPoint}..${input.branchName}`,
-      input.requestingTaskId,
-    );
-    if (taskAttributedCommitCount > 0) {
-      return {
-        kind: "reclaimable",
-        livePath,
-        tipSha,
-        taskAttributedCommitCount,
-        strandedCommits,
-      };
-    }
-    return { kind: "live-foreign", livePath };
-  }
-
   const existingTipSha = await revParse(input.repoDir, input.branchName);
   const strandedCommits = await listStrandedCommits(input.repoDir, startPoint, input.branchName);
+  const taskAttributedCommitCount = await countTaskAttributedCommits(
+    input.repoDir,
+    `${startPoint}..${input.branchName}`,
+    input.requestingTaskId,
+  );
+
+  if (taskAttributedCommitCount > 0) {
+    return {
+      kind: "reclaimable",
+      livePath,
+      tipSha: existingTipSha,
+      taskAttributedCommitCount,
+      strandedCommits,
+    };
+  }
 
   return {
-    kind: "live",
+    kind: "live-foreign",
+    livePath,
     error: new BranchConflictError({
       branchName: input.branchName,
-      conflictingWorktreePath: input.conflictingWorktreePath,
+      conflictingWorktreePath: livePath,
       existingTipSha,
       strandedCommits,
       startPoint,
-      recommendedAction: "Reclaim the existing task branch/worktree or explicitly discard prior work before retrying.",
+      recommendedAction: "Run branch recovery and explicitly choose whether to reclaim or discard prior work.",
     }),
   };
 }

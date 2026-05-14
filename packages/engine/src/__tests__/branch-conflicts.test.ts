@@ -101,7 +101,7 @@ describe("branch-conflicts", () => {
     expect(result).toEqual({ kind: "stale-resolved" });
   });
 
-  it("returns a typed live conflict with stranded commits", async () => {
+  it("returns reclaimable for same-task live conflicts with stranded commits", async () => {
     mockedExecSync.mockImplementation((cmd: string | string[]) => {
       const command = typeof cmd === "string" ? cmd : cmd[0];
       if (command === "git worktree prune") return Buffer.from("");
@@ -117,6 +117,10 @@ describe("branch-conflicts", () => {
       if (command.includes("git log --reverse --format=%H%x09%s 'main..fusion/fn-4068'")) {
         return Buffer.from("aaa111\tPreserve prior fix\nbbb222\tAdd regression coverage\n");
       }
+      if (command.includes("git log --format=%H%x00%s%x00%b 'main..fusion/fn-4068'")) {
+        return Buffer.from("aaa111\u0000feat(FN-4068): preserve\u0000Fusion-Task-Id: FN-4068\u0000" +
+          "bbb222\u0000fix(FN-4068): regression\u0000Fusion-Task-Id: FN-4068\u0000");
+      }
       throw new Error(`Unexpected command: ${command}`);
     });
 
@@ -128,22 +132,57 @@ describe("branch-conflicts", () => {
       startPoint: "main",
     });
 
-    expect(result.kind).toBe("live");
-    if (result.kind !== "live") {
-      throw new Error("expected live conflict");
+    expect(result.kind).toBe("reclaimable");
+    if (result.kind !== "reclaimable") {
+      throw new Error("expected reclaimable conflict");
     }
-    expect(result.error).toBeInstanceOf(BranchConflictError);
-    expect(result.error).toMatchObject({
-      branchName: "fusion/fn-4068",
-      conflictingWorktreePath: "/tmp/existing-wt",
-      existingTipSha: "abc123def456",
-      startPoint: "main",
+    expect(result).toMatchObject({
+      livePath: "/tmp/existing-wt",
+      tipSha: "abc123def456",
+      taskAttributedCommitCount: 2,
     });
-    expect(result.error.strandedCommits).toEqual([
+    expect(result.strandedCommits).toEqual([
       { sha: "aaa111", subject: "Preserve prior fix" },
       { sha: "bbb222", subject: "Add regression coverage" },
     ]);
-    expect(result.error.message).toContain("2 stranded commits since main");
+  });
+
+  it("returns live-foreign with BranchConflictError for cross-task collisions", async () => {
+    mockedExecSync.mockImplementation((cmd: string | string[]) => {
+      const command = typeof cmd === "string" ? cmd : cmd[0];
+      if (command === "git worktree prune") return Buffer.from("");
+      if (command === "git worktree list --porcelain") {
+        return Buffer.from(["worktree /tmp/existing-wt", "HEAD 2222222", "branch refs/heads/fusion/fn-4068", ""].join("\n"));
+      }
+      if (command.includes("git rev-parse --verify 'refs/heads/fusion/fn-4068^{commit}'")) {
+        return Buffer.from("abc123def456\n");
+      }
+      if (command.includes("git rev-parse --verify 'fusion/fn-4068^{commit}'")) {
+        return Buffer.from("abc123def456\n");
+      }
+      if (command.includes("git log --reverse --format=%H%x09%s 'main..fusion/fn-4068'")) {
+        return Buffer.from("aaa111\tPreserve prior fix\n");
+      }
+      if (command.includes("git log --format=%H%x00%s%x00%b 'main..fusion/fn-4068'")) {
+        return Buffer.from("aaa111\u0000feat(FN-9999): foreign\u0000Fusion-Task-Id: FN-9999\u0000");
+      }
+      throw new Error(`Unexpected command: ${command}`);
+    });
+
+    const result = await inspectBranchConflict({
+      repoDir: "/tmp/repo",
+      branchName: "fusion/fn-4068",
+      conflictingWorktreePath: "/tmp/existing-wt",
+      requestingTaskId: "FN-4068",
+      startPoint: "main",
+    });
+
+    expect(result.kind).toBe("live-foreign");
+    if (result.kind !== "live-foreign") {
+      throw new Error("expected live-foreign conflict");
+    }
+    expect(result.error).toBeInstanceOf(BranchConflictError);
+    expect(result.error.message).toContain("Run branch recovery");
   });
 
   it("assertCleanBranchAtBase passes when no foreign task commits exist", async () => {

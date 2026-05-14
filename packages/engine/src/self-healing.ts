@@ -20,9 +20,10 @@ import { isAbsolute, join, relative, resolve } from "node:path";
 import { getInReviewStallReason, getTaskMergeBlocker, isEphemeralAgent, type AgentStore, type TaskStore, type Settings, type Task, type MergeDetails } from "@fusion/core";
 import type { MeshLeaseManager } from "./mesh-lease-manager.js";
 import { createLogger } from "./logger.js";
-import { getRegisteredWorktreePaths, scanIdleWorktrees, scanOrphanedBranches } from "./worktree-pool.js";
+import { getRegisteredWorktreePaths, isUsableTaskWorktree, scanIdleWorktrees, scanOrphanedBranches } from "./worktree-pool.js";
 import { extractMissingWorktreePathFromSessionStartFailure, isMissingWorktreeSessionStartFailure, isRecoverableMissingWorktreeReviewFailure } from "./restart-recovery-coordinator.js";
 import { classifyError, extractMissingModulePath, isOperatorActionableAgentError, isStaleWorktreeModuleResolutionError } from "./transient-error-detector.js";
+import { inspectBranchConflict } from "./branch-conflicts.js";
 import { createRunAuditor, generateSyntheticRunId } from "./run-audit.js";
 
 const log = createLogger("self-healing");
@@ -374,6 +375,7 @@ export class SelfHealingManager {
       { name: "recover-stale-heartbeat-runs", fn: () => this.recoverStaleHeartbeatRuns().then(() => undefined) },
       { name: "recover-running-on-inactive-tasks", fn: () => this.recoverAgentsRunningOnInactiveTasks().then(() => undefined) },
       { name: "clear-stale-blocked-by", fn: () => this.clearStaleBlockedBy().then(() => undefined) },
+      { name: "reclaim-self-owned-branch-conflicts", fn: () => this.reclaimSelfOwnedBranchConflicts().then(() => undefined) },
       { name: "surface-in-review-stalls", fn: () => this.surfaceInReviewStalls().then(() => undefined) },
     ];
 
@@ -1073,6 +1075,7 @@ export class SelfHealingManager {
           { name: "recover-stale-heartbeat-runs", fn: () => this.recoverStaleHeartbeatRuns() },
           { name: "recover-running-on-inactive-tasks", fn: () => this.recoverAgentsRunningOnInactiveTasks() },
           { name: "clear-stale-blocked-by", fn: () => this.clearStaleBlockedBy() },
+          { name: "reclaim-self-owned-branch-conflicts", fn: () => this.reclaimSelfOwnedBranchConflicts() },
           { name: "surface-in-review-stalls", fn: () => this.surfaceInReviewStalls() },
         ];
         for (const fn of batch2Fns) {
@@ -1292,6 +1295,93 @@ export class SelfHealingManager {
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : String(err);
       log.error(`Stale merging status recovery failed: ${errorMessage}`);
+      return 0;
+    }
+  }
+
+  /**
+   * STANDING: do not auto-discard stranded commits. Reclaim preserves commits;
+   * unrecoverable conflicts are escalated for human review.
+   */
+  async reclaimSelfOwnedBranchConflicts(): Promise<number> {
+    try {
+      const settings = await this.store.getSettings();
+      if (settings.globalPause || settings.enginePaused) return 0;
+
+      const candidates = [
+        ...(await this.store.listTasks({ column: "todo", slim: true })),
+        ...(await this.store.listTasks({ column: "in-progress", slim: true })),
+      ];
+
+      let recovered = 0;
+      for (const task of candidates) {
+        if (task.checkedOutBy || !task.branch || !task.worktree) continue;
+        if (!await isUsableTaskWorktree(this.options.rootDir, task.worktree)) continue;
+
+        try {
+          const inspection = await inspectBranchConflict({
+            repoDir: this.options.rootDir,
+            branchName: task.branch,
+            conflictingWorktreePath: task.worktree,
+            requestingTaskId: task.id,
+            startPoint: task.baseCommitSha ?? task.mergeDetails?.mergeTargetBranch ?? "main",
+          });
+
+          if (inspection.kind !== "reclaimable" || inspection.taskAttributedCommitCount <= 0) {
+            continue;
+          }
+
+          await this.store.updateTask(task.id, { worktree: inspection.livePath, branch: task.branch });
+          await this.store.logEntry(
+            task.id,
+            `[recovery] reclaimed existing worktree for ${task.id} at ${inspection.livePath} (${inspection.taskAttributedCommitCount} commits preserved, tip ${inspection.tipSha.slice(0, 12)})`,
+          );
+
+          try {
+            const auditor = createRunAuditor(this.store, {
+              runId: generateSyntheticRunId("self-heal", task.id),
+              agentId: "self-healing",
+              taskId: task.id,
+              taskLineageId: task.lineageId,
+              phase: "reclaim-self-owned-branch-conflicts",
+            });
+            await auditor.git({
+              type: "branch:auto-reclaim",
+              target: task.branch,
+              metadata: {
+                taskId: task.id,
+                branch: task.branch,
+                worktreePath: inspection.livePath,
+                existingTipSha: inspection.tipSha,
+                strandedCommitCount: inspection.strandedCommits.length,
+                trigger: "self-healing-sweep",
+              },
+            });
+          } catch (auditErr: unknown) {
+            log.warn(`Failed to write branch:auto-reclaim run-audit event for ${task.id}: ${auditErr instanceof Error ? auditErr.message : String(auditErr)}`);
+          }
+
+          recovered++;
+        } catch (err: unknown) {
+          const message = err instanceof Error ? err.message : String(err);
+          await this.store.updateTask(task.id, {
+            status: "failed",
+            error: `Task branch conflict: ${task.branch} is not safely reclaimable (${message})`,
+            paused: true,
+            pausedReason: "branch-conflict-unrecoverable",
+          });
+          await this.store.moveTask(task.id, "in-review");
+          await this.store.logEntry(task.id, `Auto-recovery failed: branch conflict unrecoverable — ${message}`);
+        }
+      }
+
+      if (recovered > 0) {
+        log.log(`Reclaimed ${recovered} self-owned branch conflict task(s)`);
+      }
+      return recovered;
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      log.error(`Self-owned branch conflict reclaim sweep failed: ${errorMessage}`);
       return 0;
     }
   }

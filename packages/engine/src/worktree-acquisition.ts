@@ -45,6 +45,10 @@ export interface AcquireTaskWorktreeResult {
   source: "existing" | "pool" | "fresh";
   hydrated: boolean;
   isResume: boolean;
+  reclaimed?: {
+    existingTipSha?: string;
+    strandedCommitCount?: number;
+  };
 }
 
 function configuredCommandErrorMessage(result: { spawnError?: string | Error; timedOut?: boolean; exitCode?: number | null }): string {
@@ -142,21 +146,42 @@ export async function acquireTaskWorktree(opts: AcquireTaskWorktreeOptions): Pro
     const pooled = pool.acquire();
     if (pooled) {
       try {
-        const actualBranch = await pool.prepareForTask(pooled, branchName, baseBranch ?? undefined, { allowSiblingBranchRename, repoDir: rootDir });
-        worktreePath = pooled;
-        branch = actualBranch;
+        const preparedRaw = await pool.prepareForTask(pooled, branchName, baseBranch ?? undefined, {
+          allowSiblingBranchRename,
+          repoDir: rootDir,
+          requestingTaskId: task.id,
+        });
+        const prepared = typeof preparedRaw === "string"
+          ? { branch: preparedRaw, worktreePath: pooled, reclaimed: false as const }
+          : preparedRaw;
+        worktreePath = prepared.worktreePath;
+        branch = prepared.branch;
         acquiredFromPool = true;
-        logger?.log(`Acquired worktree from pool: ${pooled}`);
-        await store.updateTask(task.id, { worktree: worktreePath, branch: actualBranch });
-        await audit?.git({ type: "worktree:reuse", target: worktreePath, metadata: { branch: actualBranch } });
-        if (actualBranch !== branchName) {
-          logger?.log(`Branch conflict resolved: using ${actualBranch} instead of ${branchName}`);
-          await store.logEntry(task.id, `Acquired worktree from pool: ${worktreePath} (branch conflict: using ${actualBranch})`, undefined, runContext);
+        logger?.log(`Acquired worktree from pool: ${worktreePath}`);
+        await store.updateTask(task.id, { worktree: worktreePath, branch });
+        await audit?.git({ type: "worktree:reuse", target: worktreePath, metadata: { branch, reclaimed: prepared.reclaimed } });
+        if (prepared.reclaimed) {
+          await store.logEntry(task.id, `Acquired reclaimed worktree from pool: ${worktreePath} (${prepared.strandedCommitCount ?? 0} commits preserved)`, undefined, runContext);
+        } else if (branch !== branchName) {
+          logger?.log(`Branch conflict resolved: using ${branch} instead of ${branchName}`);
+          await store.logEntry(task.id, `Acquired worktree from pool: ${worktreePath} (branch conflict: using ${branch})`, undefined, runContext);
         } else {
           await store.logEntry(task.id, `Acquired worktree from pool: ${worktreePath}`, undefined, runContext);
         }
         const hydrated = await hydrate(worktreePath);
-        return { worktreePath, branch, source: "pool", hydrated, isResume: false };
+        return {
+          worktreePath,
+          branch,
+          source: "pool",
+          hydrated,
+          isResume: false,
+          reclaimed: prepared.reclaimed
+            ? {
+                existingTipSha: prepared.existingTipSha,
+                strandedCommitCount: prepared.strandedCommitCount,
+              }
+            : undefined,
+        };
       } catch (poolErr) {
         pool.release(pooled);
         if (isBranchConflictError(poolErr)) throw poolErr;

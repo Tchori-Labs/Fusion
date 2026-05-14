@@ -54,6 +54,7 @@ vi.mock("../worktree-pool.js", () => ({
   scanIdleWorktrees: vi.fn().mockResolvedValue([]),
   cleanupOrphanedWorktrees: vi.fn().mockResolvedValue(0),
   scanOrphanedBranches: vi.fn().mockResolvedValue([]),
+  isUsableTaskWorktree: vi.fn().mockResolvedValue(true),
 }));
 
 const { selfHealingLoggerMock } = vi.hoisted(() => ({
@@ -74,13 +75,15 @@ import type { TaskStore, Settings, Task, AgentStore, Agent, NotificationProvider
 import { EventEmitter } from "node:events";
 import { execSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { scanOrphanedBranches } from "../worktree-pool.js";
+import { isUsableTaskWorktree, scanOrphanedBranches } from "../worktree-pool.js";
+import * as branchConflictModule from "../branch-conflicts.js";
 import { createLogger } from "../logger.js";
 import { NotificationService } from "../notification/notification-service.js";
 
 const mockedExecSync = vi.mocked(execSync);
 const mockedExistsSync = vi.mocked(existsSync);
 const mockedScanOrphanedBranches = vi.mocked(scanOrphanedBranches);
+const mockedIsUsableTaskWorktree = vi.mocked(isUsableTaskWorktree);
 const mockedCreateLogger = vi.mocked(createLogger);
 
 type MockLogger = {
@@ -5668,5 +5671,62 @@ describe("maintenance cycle concurrency", () => {
 
     // Should not throw — Promise.allSettled handles failures
     await expect((manager as any).runMaintenance()).resolves.toBeUndefined();
+  });
+});
+
+describe("SelfHealingManager reclaimSelfOwnedBranchConflicts", () => {
+  let store: TaskStore & EventEmitter;
+  let manager: SelfHealingManager;
+
+  beforeEach(() => {
+    store = createMockStore({
+      getSettings: vi.fn().mockResolvedValue({ globalPause: false, enginePaused: false } as any),
+    });
+    manager = new SelfHealingManager(store, { rootDir: "/tmp/test-project" });
+    mockedIsUsableTaskWorktree.mockResolvedValue(true);
+  });
+
+  it("reclaims stranded same-task branch conflicts", async () => {
+    (store.listTasks as any)
+      .mockResolvedValueOnce([{ id: "FN-500", checkedOutBy: null, branch: "fusion/fn-500", worktree: "/tmp/fn-500", lineageId: "lin-1" }])
+      .mockResolvedValueOnce([]);
+    vi.spyOn(branchConflictModule, "inspectBranchConflict").mockResolvedValueOnce({
+      kind: "reclaimable",
+      livePath: "/tmp/fn-500",
+      tipSha: "abc123def456",
+      taskAttributedCommitCount: 2,
+      strandedCommits: [{ sha: "abc123", subject: "work" }],
+    } as any);
+
+    const recovered = await manager.reclaimSelfOwnedBranchConflicts();
+    expect(recovered).toBe(1);
+    expect(store.updateTask).toHaveBeenCalledWith("FN-500", { worktree: "/tmp/fn-500", branch: "fusion/fn-500" });
+  });
+
+  it("skips checked out tasks", async () => {
+    (store.listTasks as any)
+      .mockResolvedValueOnce([{ id: "FN-501", checkedOutBy: "agent-1", branch: "fusion/fn-501", worktree: "/tmp/fn-501" }])
+      .mockResolvedValueOnce([]);
+    const inspectSpy = vi.spyOn(branchConflictModule, "inspectBranchConflict");
+
+    const recovered = await manager.reclaimSelfOwnedBranchConflicts();
+    expect(recovered).toBe(0);
+    expect(inspectSpy).not.toHaveBeenCalled();
+  });
+
+  it("escalates unrecoverable reclaim failures to in-review failed", async () => {
+    (store.listTasks as any)
+      .mockResolvedValueOnce([{ id: "FN-502", checkedOutBy: null, branch: "fusion/fn-502", worktree: "/tmp/fn-502" }])
+      .mockResolvedValueOnce([]);
+    vi.spyOn(branchConflictModule, "inspectBranchConflict").mockRejectedValueOnce(new Error("boom"));
+
+    const recovered = await manager.reclaimSelfOwnedBranchConflicts();
+    expect(recovered).toBe(0);
+    expect(store.updateTask).toHaveBeenCalledWith("FN-502", expect.objectContaining({
+      status: "failed",
+      paused: true,
+      pausedReason: "branch-conflict-unrecoverable",
+    }));
+    expect(store.moveTask).toHaveBeenCalledWith("FN-502", "in-review");
   });
 });

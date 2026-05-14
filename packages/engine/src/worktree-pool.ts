@@ -106,6 +106,14 @@ function deriveTaskIdFromBranch(branchName: string): string {
   return match ? match[1].toUpperCase() : branchName.toUpperCase();
 }
 
+export type PrepareForTaskResult = {
+  branch: string;
+  worktreePath: string;
+  reclaimed: boolean;
+  existingTipSha?: string;
+  strandedCommitCount?: number;
+};
+
 export class WorktreePool {
   private idle = new Set<string>();
 
@@ -207,8 +215,8 @@ export class WorktreePool {
     worktreePath: string,
     branchName: string,
     startPoint?: string,
-    options?: { allowSiblingBranchRename?: boolean; repoDir?: string },
-  ): Promise<string> {
+    options?: { allowSiblingBranchRename?: boolean; repoDir?: string; requestingTaskId?: string },
+  ): Promise<PrepareForTaskResult> {
     // Clean tracked modifications
     try {
       await execAsync("git checkout -- .", { cwd: worktreePath });
@@ -235,11 +243,11 @@ export class WorktreePool {
         cwd: worktreePath,
       });
       await assertCleanBranchAtBase(worktreePath, branchName, resolvedBase, taskId);
-      return branchName;
+      return { branch: branchName, worktreePath, reclaimed: false };
     } catch (err: unknown) {
       const execError = err instanceof Error ? err : new Error(String(err));
-      const stderr = "stderr" in execError && typeof execError.stderr === "string"
-        ? execError.stderr.toString()
+      const stderr = "stderr" in execError
+        ? String((execError as { stderr?: unknown }).stderr ?? execError.message)
         : execError.message;
       const match = stderr.match(/already used by worktree at '([^']+)'/);
       if (!match) {
@@ -255,18 +263,31 @@ export class WorktreePool {
         repoDir: options?.repoDir ?? worktreePath,
         branchName,
         conflictingWorktreePath: conflictingPath,
-        requestingTaskId: branchName,
+        requestingTaskId: options?.requestingTaskId ?? taskId,
         startPoint: base,
       });
-      if (inspection.kind === "stale") {
+      if (inspection.kind === "stale" || inspection.kind === "stale-resolved") {
         await execAsync("git worktree prune", { cwd: worktreePath });
         await execAsync(checkoutCmd, { cwd: worktreePath });
         await assertCleanBranchAtBase(worktreePath, branchName, resolvedBase, taskId);
-        return branchName;
+        return { branch: branchName, worktreePath, reclaimed: false };
+      }
+
+      if (inspection.kind === "reclaimable") {
+        worktreePoolLog.log(
+          `reclaimed self-owned branch conflict for ${branchName}: tip=${inspection.tipSha} strandedSince${base}=${inspection.strandedCommits.length}`,
+        );
+        return {
+          branch: branchName,
+          worktreePath: inspection.livePath,
+          reclaimed: true,
+          existingTipSha: inspection.tipSha,
+          strandedCommitCount: inspection.strandedCommits.length,
+        };
       }
 
       if (!options?.allowSiblingBranchRename) {
-        if (inspection.kind === "live") {
+        if (inspection.kind === "live-foreign") {
           throw inspection.error;
         }
         throw new Error(`Branch ${branchName} is already in use at ${conflictingPath}`);
@@ -279,7 +300,7 @@ export class WorktreePool {
         try {
           await execAsync(suffixedCmd, { cwd: worktreePath });
           await assertCleanBranchAtBase(worktreePath, suffixedName, resolvedBase, taskId);
-          return suffixedName;
+          return { branch: suffixedName, worktreePath, reclaimed: false };
         } catch (suffixErr: unknown) {
           const suffixExecError = suffixErr instanceof Error ? suffixErr : new Error(String(suffixErr));
           const suffixStderr = "stderr" in suffixExecError && typeof suffixExecError.stderr === "string"

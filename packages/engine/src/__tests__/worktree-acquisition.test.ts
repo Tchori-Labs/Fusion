@@ -40,7 +40,7 @@ describe("acquireTaskWorktree", () => {
   });
 
   it("acquires from pool when enabled", async () => {
-    const prepareForTask = vi.fn().mockResolvedValue("fusion/fn-1");
+    const prepareForTask = vi.fn().mockResolvedValue({ branch: "fusion/fn-1", worktreePath: "/tmp/pooled", reclaimed: false });
     const result = await acquireTaskWorktree({
       task,
       rootDir: process.cwd(),
@@ -54,7 +54,12 @@ describe("acquireTaskWorktree", () => {
       createWorktree: vi.fn(),
     });
     expect(result.source).toBe("pool");
-    expect(prepareForTask).toHaveBeenCalled();
+    expect(prepareForTask).toHaveBeenCalledWith(
+      "/tmp/pooled",
+      "fusion/fn-1",
+      undefined,
+      expect.objectContaining({ requestingTaskId: "FN-1" }),
+    );
     expect(store.updateTask).toHaveBeenCalledWith("FN-1", { worktree: "/tmp/pooled", branch: "fusion/fn-1" });
   });
 
