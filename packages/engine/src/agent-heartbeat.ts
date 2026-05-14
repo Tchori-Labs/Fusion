@@ -478,7 +478,7 @@ export const HEARTBEAT_SYSTEM_PROMPT_NO_TASK = HEARTBEAT_NO_TASK_SYSTEM_PROMPT;
  * agent to re-anchor on its own operating procedure each wake instead of
  * silently grinding on a previously assigned task.
  */
-export const HEARTBEAT_PROCEDURE = `## Heartbeat Procedure (run every tick, in order)
+export const HEARTBEAT_PROCEDURE_STRICT = `## Heartbeat Procedure (run every tick, in order)
 
 1. **Identity & context** — review the **Identity Snapshot** at the top of
    this prompt. Confirm your role, soul, instructions, and memory match what
@@ -524,11 +524,59 @@ Critical: a heartbeat without observable progress (a log, a document write, a
 status change, a comment, a delegation, or an explicit "no-op with reason") is
 a bug. Do not loop on the same plan across heartbeats without recording why.`;
 
+export const HEARTBEAT_PROCEDURE_LITE = `## Heartbeat Procedure (run every tick, in order)
+
+1. **Identity & context** — review the **Identity Snapshot** at the top of
+   this prompt. Confirm your role, soul, instructions, and memory match what
+   you expect, and surface any anomalies in your first text output before
+   doing anything else. The full content is in the Custom Instructions
+   section of your system prompt.
+2. **Inbox** — when fn_read_messages is available, call it immediately and
+   process unread/pending messages before any other action; reply with
+   reply_to_message_id when answering.
+3. **Wake delta** — read the Wake Delta block above. The wake reason is the
+   highest-priority change for this heartbeat. If you were woken by a comment
+   or a message, acknowledge it before doing anything else.
+4. **Assignment review** — if you have an assigned task, re-read its current
+   description, latest comments, and any task documents. Decide whether the
+   prior plan is still valid given the wake delta. Do not assume yesterday's
+   plan is still correct.
+5. **Classify scope before acting** — label the next action as either:
+   - **In-scope execution:** directly advances the assigned task's current
+     acceptance criteria.
+   - **Out-of-scope discovery:** useful but separate work; capture it as a
+     focused follow-up task instead of expanding the current task silently.
+6. **Pick the next concrete action** — exactly ONE useful action this heartbeat:
+   advance the task, create a follow-up, log findings, delegate, or update
+   memory. Don't stop at planning unless the task is a planning task.
+7. **Persist progress** — fn_task_log for observations, fn_task_document_write
+   for durable findings, status updates only when the work warrants it.
+8. **Exit** — call fn_heartbeat_done with a one-line summary of what changed
+   this tick. If you took no action, say so and explain why.
+
+Critical: a heartbeat without observable progress (a log, a document write, a
+status change, a comment, a delegation, or an explicit "no-op with reason") is
+a bug. Do not loop on the same plan across heartbeats without recording why.`;
+
+export const HEARTBEAT_PROCEDURE_OFF = `## Heartbeat Procedure (run every tick, in order)
+
+1. **Identity & context** — review the **Identity Snapshot** at the top of this prompt.
+2. **Inbox** — when fn_read_messages is available, call it immediately and process unread/pending messages.
+3. **Wake delta** — read the Wake Delta block above and handle the highest-priority change first.
+4. **Pick one concrete action** — do exactly one useful thing this tick.
+5. **Persist progress** — record the action via available task/memory tools.
+6. **Exit** — call fn_heartbeat_done with a one-line summary.
+
+Critical: a heartbeat without observable progress (or an explicit no-op reason) is a bug.`;
+
+// Backward-compatible alias; prefer HEARTBEAT_PROCEDURE_STRICT.
+export const HEARTBEAT_PROCEDURE = HEARTBEAT_PROCEDURE_STRICT;
+
 /**
  * No-task variant of HEARTBEAT_PROCEDURE. Keep this aligned with the ambient
  * tool set (no fn_task_log / fn_task_document_* in no-task runs).
  */
-export const HEARTBEAT_NO_TASK_PROCEDURE = `## Heartbeat Procedure (run every tick, in order)
+export const HEARTBEAT_NO_TASK_PROCEDURE_STRICT = `## Heartbeat Procedure (run every tick, in order)
 
 1. **Identity & context** — review the **Identity Snapshot** at the top of
    this prompt. Confirm your role, soul, instructions, and memory match what
@@ -561,6 +609,52 @@ export const HEARTBEAT_NO_TASK_PROCEDURE = `## Heartbeat Procedure (run every ti
 Critical: a heartbeat without observable progress (a created task, delegation,
 message reply, memory append, or explicit "no-op with reason") is a bug. Do
 not loop on the same plan across heartbeats without recording why.`;
+
+export const HEARTBEAT_NO_TASK_PROCEDURE_LITE = `## Heartbeat Procedure (run every tick, in order)
+
+1. **Identity & context** — review the **Identity Snapshot** at the top of
+   this prompt. Confirm your role, soul, instructions, and memory match what
+   you expect, and surface any anomalies in your first text output before
+   doing anything else. The full content is in the Custom Instructions
+   section of your system prompt.
+2. **Inbox** — when fn_read_messages is available, call it immediately and
+   process unread/pending messages before any other action; reply with
+   reply_to_message_id when answering.
+3. **Wake delta** — read the Wake Delta block above. The wake reason is the
+   highest-priority change for this heartbeat. If you were woken by a comment
+   or a message, acknowledge it before doing anything else.
+4. **Ambient review** — since you have no assigned task, review board/project
+   signals and recent memory context before acting.
+5. **Classify scope before acting** — label the next action as either:
+   - **Board-scope execution:** work that can be completed now with ambient
+     tools (coordination, delegation, messaging, memory updates).
+   - **Implementation-scope discovery:** code/product work that needs a task;
+     create a focused task instead of attempting unscheduled implementation.
+6. **Pick the next concrete action** — exactly ONE useful action this heartbeat:
+   create a focused task, delegate work, send/reply to a message, or append
+   durable memory.
+7. **Persist progress** — use available ambient tools only:
+   fn_task_create, fn_delegate_task, fn_send_message, fn_memory_append.
+8. **Exit** — call fn_heartbeat_done with a one-line summary of what changed
+   this tick. If you took no action, say so and explain why.
+
+Critical: a heartbeat without observable progress (a created task, delegation,
+message reply, memory append, or explicit "no-op with reason") is a bug. Do
+not loop on the same plan across heartbeats without recording why.`;
+
+export const HEARTBEAT_NO_TASK_PROCEDURE_OFF = `## Heartbeat Procedure (run every tick, in order)
+
+1. **Identity & context** — review the **Identity Snapshot** at the top of this prompt.
+2. **Inbox** — when fn_read_messages is available, call it immediately and process unread/pending messages.
+3. **Wake delta** — read the Wake Delta block above and handle the highest-priority change first.
+4. **Pick one concrete action** — do exactly one useful thing this tick.
+5. **Persist progress** — use available ambient tools only.
+6. **Exit** — call fn_heartbeat_done with a one-line summary.
+
+Critical: a heartbeat without observable progress (or an explicit no-op reason) is a bug.`;
+
+// Backward-compatible alias; prefer HEARTBEAT_NO_TASK_PROCEDURE_STRICT.
+export const HEARTBEAT_NO_TASK_PROCEDURE = HEARTBEAT_NO_TASK_PROCEDURE_STRICT;
 
 /** Parameter schema for the fn_heartbeat_done tool */
 const heartbeatDoneParams = Type.Object({
