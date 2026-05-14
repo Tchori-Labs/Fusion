@@ -28,6 +28,7 @@ import { PRIORITY_MERGE } from "./concurrency.js";
 import { runtimeLog } from "./logger.js";
 import type { HeartbeatTriggerScheduler } from "./agent-heartbeat.js";
 import { ResearchOrchestrator } from "./research-orchestrator.js";
+import { ResearchRunDispatcher } from "./research-dispatcher.js";
 import { ResearchStepRunner } from "./research-step-runner.js";
 import { TunnelProcessManager } from "./remote-access/tunnel-process-manager.js";
 import type {
@@ -155,6 +156,7 @@ export class ProjectEngine {
   private cronRunner?: CronRunner;
   private automationStore?: AutomationStoreType;
   private researchOrchestrator?: ResearchOrchestrator;
+  private researchDispatcher?: ResearchRunDispatcher;
   private remoteTunnelManager?: TunnelProcessManager;
   private remoteTunnelRestoreDiagnostics: TunnelRestoreDiagnostics = {
     outcome: "skipped",
@@ -279,6 +281,11 @@ export class ProjectEngine {
         stepRunner: new ResearchStepRunner(),
         maxConcurrentRuns: settings.researchMaxConcurrentRuns ?? 3,
       });
+      this.researchDispatcher = new ResearchRunDispatcher({
+        store: store.getResearchStore(),
+        orchestrator: this.researchOrchestrator,
+      });
+      this.researchDispatcher.start();
     }
 
     this.remoteTunnelManager = new TunnelProcessManager();
@@ -544,6 +551,9 @@ export class ProjectEngine {
     this.gridlockDetector?.stop();
     this.cronRunner?.stop();
     this.setAutomationSubsystemHealth("not-initialized", "Automation subsystem stopped");
+    await this.researchDispatcher?.stop();
+    this.researchDispatcher = undefined;
+    this.researchOrchestrator = undefined;
 
     const tunnelManager = this.remoteTunnelManager;
     this.remoteTunnelManager = undefined;
@@ -646,6 +656,11 @@ export class ProjectEngine {
   /** Get the ResearchOrchestrator (if initialized). Returns undefined before start(). */
   getResearchOrchestrator(): ResearchOrchestrator | undefined {
     return this.researchOrchestrator;
+  }
+
+  /** Get the ResearchRunDispatcher (if initialized). Returns undefined before start(). */
+  getResearchDispatcher(): ResearchRunDispatcher | undefined {
+    return this.researchDispatcher;
   }
 
   /** Get the remote tunnel manager (available after start()). */
