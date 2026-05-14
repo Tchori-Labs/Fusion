@@ -961,7 +961,7 @@ Mesh configuration and post-provision managed-node operations are registered sep
 ### Run Audit API
 The run-audit system records every mutation performed by the engine across three domains:
 - **Database** — task:create, task:update, task:move, etc.
-- **Git** — worktree:create, commit:create, merge:resolve, etc.
+- **Git** — worktree:create, commit:create, merge:resolve, merge:audit-failure, etc. Dirty post-merge audit outcomes emit `merge:audit-failure` with metadata `{ mode, strategy, action, reason, issueCount, duplicateSubjectCount, touchedFileOverlapCount, verificationPassed, auditTargetLabel }`.
 - **Filesystem** — file:write, prompt:write, attachment:create, etc.
 
 Events are tied to specific run IDs for end-to-end traceability.
