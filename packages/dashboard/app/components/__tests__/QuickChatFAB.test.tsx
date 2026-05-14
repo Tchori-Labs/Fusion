@@ -943,6 +943,11 @@ describe("QuickChatFAB session-first UX", () => {
 
     const nonMemberChip = await screen.findByText("@Agent_Two", { selector: ".chat-mention-chip--non-member" });
     expect(nonMemberChip).toHaveAttribute("title", "Not a member of engineering");
+
+    const sentBubble = nonMemberChip.closest(".quick-chat-panel-message--sent");
+    expect(sentBubble).toBeTruthy();
+    // FN-4520: quick-chat mention chip text must stay distinct from sent-bubble background.
+    expect(getComputedStyle(nonMemberChip).color).not.toBe(getComputedStyle(sentBubble as Element).backgroundColor);
   });
 
   it("FN-3884: snaps to bottom when switching sessions while open", async () => {

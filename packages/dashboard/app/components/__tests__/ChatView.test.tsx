@@ -1634,15 +1634,20 @@ describe("ChatView", () => {
             id: "room-msg-1",
             roomId: "room-001",
             role: "user",
-            content: "Ping @Beta",
+            content: "Ping @Alpha and @Beta",
             senderAgentId: "agent-001",
             metadata: null,
             attachments: [],
-            mentions: ["agent-002"],
+            mentions: ["agent-001", "agent-002"],
             createdAt: "2026-04-08T00:00:00.000Z",
           },
         ],
       });
+
+      const allCss = await loadAllAppCss();
+      const style = document.createElement("style");
+      style.textContent = allCss;
+      document.head.appendChild(style);
 
       render(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
 
@@ -1653,8 +1658,17 @@ describe("ChatView", () => {
       expect(await screen.findByTestId("agent-mention-members-header")).toBeInTheDocument();
       expect(screen.queryByTestId("agent-mention-others-header")).not.toBeInTheDocument();
 
+      const bubble = screen.getByText("Ping", { exact: false }).closest(".chat-message--user");
+      expect(bubble).toBeTruthy();
+
+      const memberChip = screen.getByText("@Alpha", { selector: ".chat-mention-chip" });
       const nonMemberChip = screen.getByText("@Beta", { selector: ".chat-mention-chip--non-member" });
       expect(nonMemberChip).toHaveAttribute("title", "Not a member of engineering");
+
+      // FN-4520: member mention chip text must not visually collapse into sent-bubble background.
+      expect(getComputedStyle(memberChip).color).not.toBe(getComputedStyle(bubble as Element).backgroundColor);
+      // FN-4520: non-member mention chip text must remain legible inside sent bubbles.
+      expect(getComputedStyle(nonMemberChip).color).not.toBe(getComputedStyle(bubble as Element).backgroundColor);
     });
 
     it("renders assistant mentions as plain text in markdown mode", async () => {
