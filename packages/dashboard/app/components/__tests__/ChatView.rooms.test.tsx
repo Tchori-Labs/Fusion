@@ -247,6 +247,31 @@ describe("ChatView — rooms (FN-3805..FN-3811 contract)", () => {
     expect(selectRoom).toHaveBeenCalledWith("room-b");
   });
 
+  it("shows Create room in mobile footer for Rooms scope and hides New Chat + rooms header", () => {
+    const viewportSpy = mockMobileViewport();
+
+    const { container } = render(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
+
+    const createRoomButton = screen.getByTestId("chat-create-room-btn");
+    expect(createRoomButton.closest(".chat-sidebar-footer")).toBeInTheDocument();
+    expect(screen.queryByTestId("chat-new-btn")).not.toBeInTheDocument();
+    expect(container.querySelector(".chat-sidebar-rooms-header")).not.toBeInTheDocument();
+
+    viewportSpy.mockRestore();
+  });
+
+  it("keeps Create room in rooms header on desktop and omits rooms footer", () => {
+    const viewportSpy = mockDesktopViewport();
+
+    const { container } = render(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
+
+    const createRoomButton = screen.getByTestId("chat-create-room-btn");
+    expect(createRoomButton.closest(".chat-sidebar-rooms-header")).toBeInTheDocument();
+    expect(container.querySelector(".chat-sidebar-footer")).not.toBeInTheDocument();
+
+    viewportSpy.mockRestore();
+  });
+
   it.each([
     { memberCount: 1, expectedText: "1 member" },
     { memberCount: 2, expectedText: "2 members" },

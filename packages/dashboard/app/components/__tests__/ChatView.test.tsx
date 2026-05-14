@@ -2836,16 +2836,32 @@ describe("ChatView sidebar structure", () => {
     expect(screen.getByTestId("chat-new-btn")).toBeInTheDocument();
   });
 
-  it("renders mobile footer New Chat button", () => {
+  it("renders mobile footer New Chat button in Direct scope", () => {
     setupMockChat({ sessions: [], filteredSessions: [] });
+    const viewportSpy = mockViewportMode("mobile");
 
     render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
 
     expect(screen.getByTestId("chat-new-btn")).toBeInTheDocument();
+
+    viewportSpy.mockRestore();
   });
 
-  it("opens new chat dialog when clicking mobile footer New Chat button", async () => {
+  it("hides mobile footer New Chat button in Rooms scope", async () => {
     setupMockChat({ sessions: [], filteredSessions: [] });
+    const viewportSpy = mockViewportMode("mobile");
+
+    render(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
+
+    await userEvent.click(screen.getByTestId("chat-sidebar-scope-rooms"));
+    expect(screen.queryByTestId("chat-new-btn")).not.toBeInTheDocument();
+
+    viewportSpy.mockRestore();
+  });
+
+  it("opens new chat dialog when clicking mobile footer New Chat button in Direct scope", async () => {
+    setupMockChat({ sessions: [], filteredSessions: [] });
+    const viewportSpy = mockViewportMode("mobile");
 
     render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
 
@@ -2853,6 +2869,8 @@ describe("ChatView sidebar structure", () => {
 
     const dialog = document.querySelector(".chat-new-dialog") as HTMLElement | null;
     expect(dialog).toBeInTheDocument();
+
+    viewportSpy.mockRestore();
   });
 
   it("session list has both chat-session-list and chat-sidebar-list classes", () => {
