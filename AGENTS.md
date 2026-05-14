@@ -237,6 +237,8 @@ Two rules, learned the hard way (FN-2370 silently reverted three commits' work):
 
 History-preserving cherry-pick merges now treat git's explicit empty-pick signatures (`The previous cherry-pick is now empty`, `nothing to commit, working tree clean`, and the `--skip`/`--allow-empty` hints) as "already on main" no-ops: empty commits are skipped, fully-subsumed branches auto-complete to `done`, and no empty commit is created.
 
+Executor contamination handling now does a single-shot auto-recovery when every foreign-attributed commit is already upstream by patch-id equivalence: it drops only the already-upstream commits, requeues the task, and records a guard so a second contamination event escalates directly to paused human adjudication.
+
 After any squash that auto-resolved conflicts, the merger runs the post-squash audit before auto-completing the task. Outcome depends on `postMergeAuditMode`: `warn` is the default (logs findings and continues), `block` is the stricter opt-in mode (refuses completion on findings), and `off` skips the audit. For rebase-strategy merges, overlap-only findings are also auto-cleared when deterministic verification has already proven the merged tree.
 
 When audit findings still block completion, Fusion now runs an auto-recovery pipeline (Stages 1–5) governed by `mergeAuditAutoRecovery` (`deterministic-only` → `programmatic` → `ai-assisted` → `off`). Stages include deterministic short-circuiting, per-file survival checks, optional single-commit AI restoration, bounded audit-bounce retries, and finally park-with-follow-up if unresolved.
