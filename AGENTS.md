@@ -237,6 +237,8 @@ Two rules, learned the hard way (FN-2370 silently reverted three commits' work):
 
 After any squash that auto-resolved conflicts, the merger runs the post-squash audit before auto-completing the task. Outcome depends on `postMergeAuditMode`: `warn` is the default (logs findings and continues), `block` is the stricter opt-in mode (refuses completion on findings), and `off` skips the audit. For rebase-strategy merges, overlap-only findings are also auto-cleared when deterministic verification has already proven the merged tree.
 
+When audit findings still block completion, Fusion now runs an auto-recovery pipeline (Stages 1–5) governed by `mergeAuditAutoRecovery` (`deterministic-only` → `programmatic` → `ai-assisted` → `off`). Stages include deterministic short-circuiting, per-file survival checks, optional single-commit AI restoration, bounded audit-bounce retries, and finally park-with-follow-up if unresolved.
+
 Before those auto-resolved squash commits are written, the merger also runs a per-file diff-volume gate: it compares each file's staged squash delta against the branch's net delta vs its merge-base, and blocks the merge in `in-review` when a non-allowlisted file loses too much branch volume. This is the pre-commit guard against FN-3936-style silent drops where fallback resolution kept a branch's commit message but discarded the branch's main file edits.
 
 ### Gitignored-path guard on squash merges

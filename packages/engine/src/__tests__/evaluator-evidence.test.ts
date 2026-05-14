@@ -150,6 +150,7 @@ describe("collectTaskEvaluationEvidence", () => {
       taskDoneRetryCount: 6,
       verificationFailureCount: 7,
       mergeConflictBounceCount: 8,
+      mergeAuditBounceCount: 0,
     });
 
     const summary = evidence.taskMetadata[0]?.summary ?? "";
