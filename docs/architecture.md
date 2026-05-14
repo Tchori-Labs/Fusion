@@ -1100,6 +1100,13 @@ Task steps use statuses: `pending`, `in-progress`, `done`, `skipped`.
 - **Pre-merge** steps run in executor (`runWorkflowSteps()`) — bypassed in fast mode
 - **Post-merge** steps run in merger (`runPostMergeWorkflowSteps()`)
 
+### User cancel via move-to-todo
+- `TaskStore.moveTask()` accepts `moveSource: "user" | "engine"` (default `"engine"`) and emits `task:moved` with `source` so listeners can distinguish manual moves from engine rebounds.
+- Manual `in-progress → todo` moves (dashboard route `/tasks/:id/move` with `moveSource: "user"`) atomically set `task.userPaused = true`; engine/default rebounds do not.
+- Any move to `in-progress` clears `task.userPaused` in the same store write so explicit redispatch resumes normally.
+- `TaskExecutor` treats manual `in-progress → todo` as hard cancel: it marks the task as user-canceled, aborts active session types before dispose/termination, and suppresses preserve-resume auto-bounces while logging `Execution canceled by user — leaving task in todo`.
+- Scheduler dispatch loop skips `todo` tasks with `userPaused === true` (queues with a user-paused reason) until a user explicitly moves the task back to `in-progress`.
+
 ---
 
 ### Stalled review detection
