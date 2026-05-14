@@ -962,6 +962,7 @@ Mesh configuration and post-provision managed-node operations are registered sep
 The run-audit system records every mutation performed by the engine across three domains:
 - **Database** — task:create, task:update, task:move, etc.
 - **Git** — worktree:create, commit:create, merge:resolve, merge:audit-failure, etc. Dirty post-merge audit outcomes emit `merge:audit-failure` with metadata `{ mode, strategy, action, reason, issueCount, duplicateSubjectCount, touchedFileOverlapCount, verificationPassed, auditTargetLabel }`.
+- **Git / `merge:file-scope-violation`** — emitted by the merger when `FileScopeViolationError` aborts a squash. `target` is the task ID; metadata includes `stagedFiles`, `declaredScope`, `resetLabel`, `stagedFileCount`, and `declaredScopeCount`. Consumed by `fileScopeInvariantFailuresPerDay` in `GET /api/health/reliability` (FN-4360).
 - **Filesystem** — file:write, prompt:write, attachment:create, etc.
 
 Events are tied to specific run IDs for end-to-end traceability.
