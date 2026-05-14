@@ -17,6 +17,7 @@ import { MissionStore } from "./mission-store.js";
 import { PluginStore } from "./plugin-store.js";
 import { InsightStore } from "./insight-store.js";
 import { ResearchStore } from "./research-store.js";
+import { ExperimentSessionStore } from "./experiment-session-store.js";
 import { TodoStore } from "./todo-store.js";
 import { EvalStore } from "./eval-store.js";
 import { BackwardCompat, ProjectRequiredError } from "./migration.js";
@@ -734,6 +735,8 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   private insightStore: InsightStore | null = null;
   /** Cached ResearchStore instance */
   private researchStore: ResearchStore | null = null;
+  /** Cached ExperimentSessionStore instance */
+  private experimentSessionStore: ExperimentSessionStore | null = null;
   /** Cached TodoStore instance */
   private todoStore: TodoStore | null = null;
   /** Cached EvalStore instance */
@@ -7719,6 +7722,18 @@ ${notificationsSection}`;
       this.researchStore = new ResearchStore(this.db);
     }
     return this.researchStore;
+  }
+
+  /**
+   * Get the ExperimentSessionStore instance for upstream-style experiment
+   * session operations (try-measure-keep-revert loop, finalize workflow).
+   * Lazily initializes the ExperimentSessionStore on first access.
+   */
+  getExperimentSessionStore(): ExperimentSessionStore {
+    if (!this.experimentSessionStore) {
+      this.experimentSessionStore = new ExperimentSessionStore(this.db);
+    }
+    return this.experimentSessionStore;
   }
 
   /**
