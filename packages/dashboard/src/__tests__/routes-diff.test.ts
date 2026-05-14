@@ -149,17 +149,17 @@ describe("FN-4308 multi-commit done task aggregation", () => {
       "merge-base --is-ancestor c1 HEAD": "",
       "merge-base --is-ancestor c2 HEAD": "",
       "merge-base --is-ancestor c3 HEAD": "",
-      "rev-parse c1^": "p1",
-      "diff --name-status p1..c1": "A\ta.txt\nM\tb.txt",
-      "diff p1..c1 -- a.txt": "+a\n",
-      "diff p1..c1 -- b.txt": "+b\n",
-      "rev-parse c2^": "p2",
-      "diff --name-status p2..c2": "M\tb.txt\nA\tc.txt",
-      "diff p2..c2 -- b.txt": "+bb\n-b\n",
-      "diff p2..c2 -- c.txt": "+c\n",
-      "rev-parse c3^": "p3",
-      "diff --name-status p3..c3": "A\td.txt",
-      "diff p3..c3 -- d.txt": "+d\n",
+      "rev-list --parents -n 1 c1": "c1 p1",
+      "diff --name-status -M p1..c1": "A\ta.txt\nM\tb.txt",
+      "diff -M p1..c1 -- a.txt": "+a\n",
+      "diff -M p1..c1 -- b.txt": "+b\n",
+      "rev-list --parents -n 1 c2": "c2 p2",
+      "diff --name-status -M p2..c2": "M\tb.txt\nA\tc.txt",
+      "diff -M p2..c2 -- b.txt": "+bb\n-b\n",
+      "diff -M p2..c2 -- c.txt": "+c\n",
+      "rev-list --parents -n 1 c3": "c3 p3",
+      "diff --name-status -M p3..c3": "A\td.txt",
+      "diff -M p3..c3 -- d.txt": "+d\n",
     });
 
     const app = createServer(store as any);
@@ -180,9 +180,9 @@ describe("FN-4308 multi-commit done task aggregation", () => {
 
     gitResponses({
       "merge-base --is-ancestor c1 HEAD": "",
-      "rev-parse c1^": "p1",
-      "diff --name-status p1..c1": "A\tone.txt",
-      "diff p1..c1 -- one.txt": "+one\n",
+      "rev-list --parents -n 1 c1": "c1 p1",
+      "diff --name-status -M p1..c1": "A\tone.txt",
+      "diff -M p1..c1 -- one.txt": "+one\n",
     });
 
     const app = createServer(store as any);
@@ -199,15 +199,16 @@ describe("FN-4308 multi-commit done task aggregation", () => {
 
     gitResponses({
       "merge-base --is-ancestor m1 HEAD": "",
-      "rev-parse m1^": "pm1",
-      "diff pm1..m1": "+x\n-y\n",
-      "diff --name-only pm1..m1": "x.txt\n",
+      "rev-list --parents -n 1 m1": "m1 pm1",
+      "diff --name-status -M pm1..m1": "M\tx.txt",
+      "diff -M pm1..m1 -- x.txt": "+x\n-y\n",
     });
 
     const app = createServer(store as any);
     const response = await requestDiff(app);
     expect(response.status).toBe(200);
-    expect(response.body.files).toEqual([]);
+    expect(response.body.files).toHaveLength(1);
+    expect(response.body.files[0].path).toBe("x.txt");
     expect(response.body.stats.filesChanged).toBe(1);
   });
 
@@ -220,9 +221,9 @@ describe("FN-4308 multi-commit done task aggregation", () => {
       const key = args.join(" ");
       if (key === "merge-base --is-ancestor bad HEAD") throw new Error("unreachable");
       if (key === "merge-base --is-ancestor good HEAD") return "";
-      if (key === "rev-parse good^") return "p";
-      if (key === "diff --name-status p..good") return "A\treachable.txt";
-      if (key === "diff p..good -- reachable.txt") return "+ok\n";
+      if (key === "rev-list --parents -n 1 good") return "good p";
+      if (key === "diff --name-status -M p..good") return "A\treachable.txt";
+      if (key === "diff -M p..good -- reachable.txt") return "+ok\n";
       throw new Error(`Unexpected git command: ${key}`);
     });
 
@@ -241,12 +242,12 @@ describe("FN-4308 multi-commit done task aggregation", () => {
     gitResponses({
       "merge-base --is-ancestor rev-1 HEAD": "",
       "merge-base --is-ancestor rev-2 HEAD": "",
-      "rev-parse rev-1^": "p1",
-      "diff --name-status p1..rev-1": "A\tinitial.ts",
-      "diff p1..rev-1 -- initial.ts": "+i\n",
-      "rev-parse rev-2^": "p2",
-      "diff --name-status p2..rev-2": "A\trevision.ts",
-      "diff p2..rev-2 -- revision.ts": "+r\n",
+      "rev-list --parents -n 1 rev-1": "rev-1 p1",
+      "diff --name-status -M p1..rev-1": "A\tinitial.ts",
+      "diff -M p1..rev-1 -- initial.ts": "+i\n",
+      "rev-list --parents -n 1 rev-2": "rev-2 p2",
+      "diff --name-status -M p2..rev-2": "A\trevision.ts",
+      "diff -M p2..rev-2 -- revision.ts": "+r\n",
     });
 
     const app = createServer(store as any);
@@ -262,9 +263,9 @@ describe("FN-4308 multi-commit done task aggregation", () => {
 
     gitResponses({
       "merge-base --is-ancestor healed HEAD": "",
-      "rev-parse healed^": "ph",
-      "diff --name-status ph..healed": "A\thealed.ts",
-      "diff ph..healed -- healed.ts": "+h\n",
+      "rev-list --parents -n 1 healed": "healed ph",
+      "diff --name-status -M ph..healed": "A\thealed.ts",
+      "diff -M ph..healed -- healed.ts": "+h\n",
     });
 
     const app = createServer(store as any);
@@ -272,6 +273,25 @@ describe("FN-4308 multi-commit done task aggregation", () => {
     expect(response.status).toBe(200);
     expect(response.body.stats.filesChanged).toBe(1);
     expect(response.body.files[0].path).toBe("healed.ts");
+  });
+
+  it("uses parent-to-parent range for merge commits", async () => {
+    const store = new MockStore();
+    store.addTask(createTask({ column: "done", mergeDetails: { commitSha: "merge-sha" } }));
+
+    gitResponses({
+      "merge-base --is-ancestor merge-sha HEAD": "",
+      "rev-list --parents -n 1 merge-sha": "merge-sha p1 p2",
+      "diff --name-status -M merge-sha^1...merge-sha^2": "A\tfeature-a.ts\nM\tfeature-b.ts",
+      "diff -M merge-sha^1...merge-sha^2 -- feature-a.ts": "+a\n",
+      "diff -M merge-sha^1...merge-sha^2 -- feature-b.ts": "+b\n",
+    });
+
+    const app = createServer(store as any);
+    const response = await requestDiff(app);
+    expect(response.status).toBe(200);
+    expect(response.body.files.map((f: any) => f.path).sort()).toEqual(["feature-a.ts", "feature-b.ts"]);
+    expect(response.body.stats.filesChanged).toBe(2);
   });
 
   it("includes mergeDetails.commitSha even when missing from associations", async () => {
@@ -283,9 +303,9 @@ describe("FN-4308 multi-commit done task aggregation", () => {
       const key = args.join(" ");
       if (key === "merge-base --is-ancestor assoc-1 HEAD") throw new Error("unreachable");
       if (key === "merge-base --is-ancestor merge-only HEAD") return "";
-      if (key === "rev-parse merge-only^") return "p";
-      if (key === "diff --name-status p..merge-only") return "A\tmerged.txt";
-      if (key === "diff p..merge-only -- merged.txt") return "+ok\n";
+      if (key === "rev-list --parents -n 1 merge-only") return "merge-only p";
+      if (key === "diff --name-status -M p..merge-only") return "A\tmerged.txt";
+      if (key === "diff -M p..merge-only -- merged.txt") return "+ok\n";
       throw new Error(`Unexpected git command: ${key}`);
     });
 
