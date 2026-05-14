@@ -7141,7 +7141,37 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
     });
 
     if (inspection.kind === "stale-resolved") {
+      await this.store.updateTask(task.id, { worktree: null, branch: null, baseCommitSha: null });
       const message = `[recovery] ${task.id} stage-A: pruned stale admin entry for ${error.branchName}`;
+      await this.store.logEntry(task.id, message, undefined, this.currentRunContext);
+      await this.store.appendAgentLog(task.id, "Branch conflict auto-recovery", "text", message, "executor");
+      return "retry";
+    }
+
+    if (inspection.kind === "tip-already-merged") {
+      if (inspection.livePath) {
+        await this.cleanupConflictingWorktree(inspection.livePath, error.branchName, task.id);
+      }
+      try {
+        await execAsync("git worktree prune", {
+          cwd: this.rootDir,
+          timeout: 120_000,
+          maxBuffer: 10 * 1024 * 1024,
+        });
+      } catch {
+        // best-effort
+      }
+      try {
+        await execAsync(`git branch -D ${JSON.stringify(error.branchName)}`, {
+          cwd: this.rootDir,
+          timeout: 120_000,
+          maxBuffer: 10 * 1024 * 1024,
+        });
+      } catch {
+        // best-effort
+      }
+      await this.store.updateTask(task.id, { worktree: null, branch: null, baseCommitSha: null });
+      const message = `[recovery] ${task.id} stage-A: tip-already-merged cleanup for ${error.branchName} (${inspection.tipSha.slice(0, 12)} on ${inspection.integrationRef})`;
       await this.store.logEntry(task.id, message, undefined, this.currentRunContext);
       await this.store.appendAgentLog(task.id, "Branch conflict auto-recovery", "text", message, "executor");
       return "retry";
@@ -7830,7 +7860,7 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
         startPoint,
       });
 
-      if (inspection.kind === "stale" || inspection.kind === "stale-resolved") {
+      if (inspection.kind === "stale" || inspection.kind === "stale-resolved" || inspection.kind === "tip-already-merged") {
         const cleanupSuccess = await this.cleanupConflictingWorktree(conflictPath, branch, taskId);
         if (cleanupSuccess) {
           await this.store.logEntry(taskId, `Cleaned up conflicting worktree, retrying`, path);

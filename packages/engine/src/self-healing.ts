@@ -1484,6 +1484,87 @@ export class SelfHealingManager {
           if (inspection.kind === "stale" || inspection.kind === "stale-resolved") {
             continue;
           }
+          if (inspection.kind === "tip-already-merged") {
+            const branchName = task.branch;
+            let reclaimedCleanly = false;
+            try {
+              if (inspection.livePath && existsSync(inspection.livePath)) {
+                await execAsync(`git worktree remove --force ${JSON.stringify(inspection.livePath)}`, {
+                  cwd: this.options.rootDir,
+                  timeout: 120_000,
+                  maxBuffer: 10 * 1024 * 1024,
+                });
+              }
+              await execAsync("git worktree prune", {
+                cwd: this.options.rootDir,
+                timeout: 120_000,
+                maxBuffer: 10 * 1024 * 1024,
+              });
+              await execAsync(`git branch -D ${JSON.stringify(branchName)}`, {
+                cwd: this.options.rootDir,
+                timeout: 120_000,
+                maxBuffer: 10 * 1024 * 1024,
+              });
+
+              await this.store.updateTask(task.id, {
+                worktree: null,
+                branch: null,
+                baseCommitSha: null,
+                paused: false,
+                pausedReason: undefined,
+                status: null,
+                error: null,
+              });
+              await this.store.logEntry(
+                task.id,
+                `[recovery] tip-already-merged ${task.id} branch=${branchName} tip=${inspection.tipSha.slice(0, 12)} integrationRef=${inspection.integrationRef} reason=stale-cached-metadata-ghost-conflict`,
+              );
+
+              if (task.column === "in-review") {
+                await this.store.moveTask(task.id, "todo", {
+                  moveSource: "engine",
+                  preserveProgress: true,
+                  preserveResumeState: true,
+                });
+              }
+
+              try {
+                const auditor = createRunAuditor(this.store, {
+                  runId: generateSyntheticRunId("self-heal", task.id),
+                  agentId: "self-healing",
+                  taskId: task.id,
+                  taskLineageId: task.lineageId,
+                  phase: "tip-already-merged",
+                });
+                await auditor.git({
+                  type: "branch:auto-reclaim",
+                  target: branchName,
+                  metadata: {
+                    taskId: task.id,
+                    branch: branchName,
+                    worktreePath: inspection.livePath,
+                    existingTipSha: inspection.tipSha,
+                    integrationRef: inspection.integrationRef,
+                    trigger: "self-healing-sweep-ghost-conflict",
+                  },
+                });
+              } catch (auditErr: unknown) {
+                log.warn(`Failed to write tip-already-merged run-audit event for ${task.id}: ${auditErr instanceof Error ? auditErr.message : String(auditErr)}`);
+              }
+
+              recovered++;
+              reclaimedCleanly = true;
+            } catch (tipMergedErr: unknown) {
+              const message = tipMergedErr instanceof Error ? tipMergedErr.message : String(tipMergedErr);
+              await this.store.logEntry(task.id, `Auto-recovery warning: tip-already-merged cleanup failed — ${message}`);
+              log.warn(`Failed tip-already-merged cleanup for ${task.id}: ${message}`);
+            }
+
+            if (reclaimedCleanly) {
+              continue;
+            }
+            throw new Error(`tip-already-merged cleanup failed for ${task.id}`);
+          }
           if (inspection.kind === "live-foreign") {
             throw inspection.error;
           }

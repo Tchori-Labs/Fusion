@@ -267,8 +267,15 @@ export class WorktreePool {
         ownerTaskId: taskId,
         startPoint: base,
       });
-      if (inspection.kind === "stale" || inspection.kind === "stale-resolved") {
+      if (inspection.kind === "stale" || inspection.kind === "stale-resolved" || inspection.kind === "tip-already-merged") {
         await execAsync("git worktree prune", { cwd: worktreePath });
+        if (inspection.kind === "tip-already-merged") {
+          try {
+            await execAsync(`git branch -D "${branchName}"`, { cwd: worktreePath });
+          } catch {
+            // best-effort
+          }
+        }
         await execAsync(checkoutCmd, { cwd: worktreePath });
         await assertCleanBranchAtBase(worktreePath, branchName, resolvedBase, taskId);
         return { branch: branchName, worktreePath, reclaimed: false };
