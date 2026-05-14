@@ -6,6 +6,7 @@ import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import {
   autoRecoverCrossContamination,
+  classifyBootstrapMisbinding,
   classifyForeignCommits,
   type BranchCrossContaminationCommit,
 } from "../branch-conflicts.js";
@@ -104,6 +105,82 @@ describe("branch contamination recovery classification", () => {
 
     expect(result.alreadyUpstream.map((entry) => entry.sha)).toEqual([upstreamCommit.sha]);
     expect(result.unique.map((entry) => entry.sha)).toEqual([uniqueCommit.sha]);
+  });
+
+  it("classifies bootstrap misbinding when range has only foreign-attributed commits", async () => {
+    const { repoDir, baseSha } = await setupRepo();
+    const foreign = await makeCommit(repoDir, "foreign-bootstrap", "feat(FN-4367): dependency change", "FN-4367");
+
+    const result = await classifyBootstrapMisbinding({
+      repoDir,
+      branchName: "feature",
+      baseSha,
+      taskId: "FN-4488",
+      foreignCommits: [foreign],
+    });
+
+    expect(result).toEqual({
+      isBootstrapMisbinding: true,
+      ownCommitCount: 0,
+      nonAttributedCount: 0,
+    });
+  });
+
+  it("does not classify bootstrap misbinding when an own-task commit exists", async () => {
+    const { repoDir, baseSha } = await setupRepo();
+    const foreign = await makeCommit(repoDir, "foreign-mixed", "feat(FN-4367): dependency change", "FN-4367");
+    await appendFile(path.join(repoDir, "note.txt"), "own\n", "utf-8");
+    await run("git add note.txt", repoDir);
+    await run("git commit -m 'feat(FN-4488): own work' -m 'Fusion-Task-Id: FN-4488'", repoDir);
+
+    const result = await classifyBootstrapMisbinding({
+      repoDir,
+      branchName: "feature",
+      baseSha,
+      taskId: "FN-4488",
+      foreignCommits: [foreign],
+    });
+
+    expect(result.isBootstrapMisbinding).toBe(false);
+    expect(result.ownCommitCount).toBe(1);
+  });
+
+  it("does not classify bootstrap misbinding when non-attributed commits are present", async () => {
+    const { repoDir, baseSha } = await setupRepo();
+    const foreign = await makeCommit(repoDir, "foreign-mixed-2", "feat(FN-4367): dependency change", "FN-4367");
+    await appendFile(path.join(repoDir, "note.txt"), "refactor\n", "utf-8");
+    await run("git add note.txt", repoDir);
+    await run("git commit -m 'refactor: unattributed cleanup'", repoDir);
+
+    const result = await classifyBootstrapMisbinding({
+      repoDir,
+      branchName: "feature",
+      baseSha,
+      taskId: "FN-4488",
+      foreignCommits: [foreign],
+    });
+
+    expect(result.isBootstrapMisbinding).toBe(false);
+    expect(result.ownCommitCount).toBe(0);
+    expect(result.nonAttributedCount).toBe(1);
+  });
+
+  it("returns false for empty range with zero own and zero non-attributed commits", async () => {
+    const { repoDir, baseSha } = await setupRepo();
+
+    const result = await classifyBootstrapMisbinding({
+      repoDir,
+      branchName: "feature",
+      baseSha,
+      taskId: "FN-4488",
+      foreignCommits: [],
+    });
+
+    expect(result).toEqual({
+      isBootstrapMisbinding: false,
+      ownCommitCount: 0,
+      nonAttributedCount: 0,
+    });
   });
 
   it("auto-recovers by dropping already-upstream foreign commits and preserving remaining branch work", async () => {

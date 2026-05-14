@@ -97,6 +97,7 @@ export {
   BranchConflictError,
   BranchCrossContaminationError,
   assertCleanBranchAtBase,
+  classifyBootstrapMisbinding,
   isBranchConflictError,
   inspectBranchConflict,
   listBranchRecoveryCandidates,

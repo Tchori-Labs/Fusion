@@ -340,6 +340,64 @@ export async function assertCleanBranchAtBase(
   }
 }
 
+export interface ClassifyBootstrapMisbindingInput {
+  repoDir: string;
+  branchName: string;
+  baseSha: string;
+  taskId: string;
+  foreignCommits: BranchCrossContaminationCommit[];
+}
+
+export interface ClassifyBootstrapMisbindingResult {
+  isBootstrapMisbinding: boolean;
+  ownCommitCount: number;
+  nonAttributedCount: number;
+}
+
+export async function classifyBootstrapMisbinding(
+  input: ClassifyBootstrapMisbindingInput,
+): Promise<ClassifyBootstrapMisbindingResult> {
+  const { repoDir, branchName, baseSha, taskId, foreignCommits } = input;
+  const output = await runGit(repoDir, `git log --format=%H%x1f%s%x1f%b ${quoteShellArg(`${baseSha}..${branchName}`)}`)
+    .catch(() => "");
+  if (!output) {
+    return {
+      isBootstrapMisbinding: false,
+      ownCommitCount: 0,
+      nonAttributedCount: 0,
+    };
+  }
+
+  const escapedTaskId = taskId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const ownSubjectPattern = new RegExp(`^(feat|fix|test|chore|docs|refactor|perf|build)\\(${escapedTaskId}\\):`, "i");
+  const ownTrailerPattern = new RegExp(`(?:^|\\n)${FUSION_TASK_ID_TRAILER_KEY}:\\s*${escapedTaskId}\\s*(?:\\n|$)`, "i");
+  const subjectPattern = /^(feat|fix|test|chore|docs|refactor|perf|build)\((FN-\d+)\):/i;
+  const trailerPattern = /(?:^|\n)Fusion-Task-Id:\s*(FN-\d+)\s*(?:\n|$)/i;
+
+  let ownCommitCount = 0;
+  let nonAttributedCount = 0;
+  for (const line of output.split("\n").map((entry) => entry.trim()).filter(Boolean)) {
+    const [, subject = "", body = ""] = line.split("\u001f");
+    if (ownSubjectPattern.test(subject) || ownTrailerPattern.test(body)) {
+      ownCommitCount += 1;
+      continue;
+    }
+
+    const subjectMatch = subject.match(subjectPattern);
+    const trailerMatch = body.match(trailerPattern);
+    const attributedTaskId = (trailerMatch?.[1] ?? subjectMatch?.[2] ?? "").toUpperCase();
+    if (!attributedTaskId) {
+      nonAttributedCount += 1;
+    }
+  }
+
+  return {
+    isBootstrapMisbinding: foreignCommits.length > 0 && ownCommitCount === 0 && nonAttributedCount === 0,
+    ownCommitCount,
+    nonAttributedCount,
+  };
+}
+
 export interface ClassifyForeignCommitsInput {
   repoDir: string;
   branchName: string;
