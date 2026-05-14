@@ -1884,7 +1884,7 @@ describe("TaskExecutor dependency-based worktree creation", () => {
     });
 
     const executor = new TaskExecutor(store, "/tmp/test", { pool });
-    await executor.execute(makeTask({ id: "FN-066", worktree: null, branch: null }));
+    await executor.execute(makeTask({ id: "FN-066" }));
 
     expect(store.recordRunAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
       mutationType: "branch:auto-reclaim",
