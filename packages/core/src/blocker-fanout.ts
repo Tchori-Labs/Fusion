@@ -15,6 +15,10 @@ export interface BlockerFanoutEntry {
   totalCount: number;
   activeTodoCount: number;
   dependentIds: string[];
+  dependencyDependentIds: string[];
+  overlapBlockedDependentIds: string[];
+  overlapBlockedActiveCount: number;
+  overlapBlockedTodoCount: number;
   staleBlockedByDependentIds: string[];
   isHighFanout: boolean;
   escalation?: BlockerEscalation;
@@ -32,9 +36,12 @@ const ACTIVE_COLUMNS = new Set<Task["column"]>(["triage", "todo", "in-progress",
 
 interface MutableEntry {
   dependentIds: string[];
+  dependencyDependentIds: string[];
   blockedByDependentIds: string[];
   activeCount: number;
   activeTodoCount: number;
+  overlapBlockedActiveCount: number;
+  overlapBlockedTodoCount: number;
 }
 
 export function isStaleBlockedByBlocker(blocker: Task | undefined, maxAutoMergeRetries: number): boolean {
@@ -70,7 +77,15 @@ export function computeBlockerFanoutMap(
   const ensureEntry = (blockerId: string): MutableEntry => {
     let entry = fanout.get(blockerId);
     if (!entry) {
-      entry = { dependentIds: [], blockedByDependentIds: [], activeCount: 0, activeTodoCount: 0 };
+      entry = {
+        dependentIds: [],
+        dependencyDependentIds: [],
+        blockedByDependentIds: [],
+        activeCount: 0,
+        activeTodoCount: 0,
+        overlapBlockedActiveCount: 0,
+        overlapBlockedTodoCount: 0,
+      };
       fanout.set(blockerId, entry);
     }
     return entry;
@@ -84,6 +99,7 @@ export function computeBlockerFanoutMap(
       if (!depId) continue;
       const entry = ensureEntry(depId);
       entry.dependentIds.push(task.id);
+      entry.dependencyDependentIds.push(task.id);
       if (active) entry.activeCount += 1;
       if (isTodo) entry.activeTodoCount += 1;
     }
@@ -92,8 +108,14 @@ export function computeBlockerFanoutMap(
       const entry = ensureEntry(task.blockedBy);
       entry.dependentIds.push(task.id);
       entry.blockedByDependentIds.push(task.id);
-      if (active) entry.activeCount += 1;
-      if (isTodo) entry.activeTodoCount += 1;
+      if (active) {
+        entry.activeCount += 1;
+        entry.overlapBlockedActiveCount += 1;
+      }
+      if (isTodo) {
+        entry.activeTodoCount += 1;
+        entry.overlapBlockedTodoCount += 1;
+      }
     }
   }
 
@@ -104,7 +126,7 @@ export function computeBlockerFanoutMap(
       ? [...entry.blockedByDependentIds]
       : [];
 
-    const isHighFanout = entry.activeTodoCount >= highFanoutTodoThreshold;
+    const isHighFanout = entry.overlapBlockedTodoCount >= highFanoutTodoThreshold;
     const blockingAgeMs = blocker ? getBlockingAgeMs(blocker, nowMs) : 0;
     const blockerColumn = blocker?.column;
     const shouldEscalate =
@@ -117,13 +139,17 @@ export function computeBlockerFanoutMap(
       totalCount: entry.activeCount,
       activeTodoCount: entry.activeTodoCount,
       dependentIds: entry.dependentIds,
+      dependencyDependentIds: entry.dependencyDependentIds,
+      overlapBlockedDependentIds: entry.blockedByDependentIds,
+      overlapBlockedActiveCount: entry.overlapBlockedActiveCount,
+      overlapBlockedTodoCount: entry.overlapBlockedTodoCount,
       staleBlockedByDependentIds,
       isHighFanout,
       escalation: shouldEscalate
         ? {
             blockerId,
-            activeTodoCount: entry.activeTodoCount,
-            totalActiveCount: entry.activeCount,
+            activeTodoCount: entry.overlapBlockedTodoCount,
+            totalActiveCount: entry.overlapBlockedActiveCount,
             blockingAgeMs,
           }
         : undefined,
