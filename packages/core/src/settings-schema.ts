@@ -311,6 +311,9 @@ export const DEFAULT_PROJECT_SETTINGS = {
   reflectionAfterTask: true,
   reviewHandoffPolicy: "disabled",
   showQuickChatFAB: false,
+  chatRoomRecentVerbatimMessages: 12,
+  chatRoomCompactionFetchLimit: 80,
+  chatRoomSummaryMaxChars: 1_500,
   researchSettings: {
     enabled: true,
     searchProvider: undefined,

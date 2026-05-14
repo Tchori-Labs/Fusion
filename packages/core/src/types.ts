@@ -2652,6 +2652,15 @@ export interface ProjectSettings {
    *  When false, the FAB is hidden but chat remains accessible via the More menu.
    *  Default: false. */
   showQuickChatFAB?: boolean;
+  /** Number of most-recent chat-room messages kept verbatim in the responder transcript.
+   *  Older messages are compacted into a summary block. Default: 12. */
+  chatRoomRecentVerbatimMessages?: number;
+  /** Upper bound on messages fetched from the room store for compaction consideration.
+   *  Default: 80. */
+  chatRoomCompactionFetchLimit?: number;
+  /** Hard cap on the synthesized "Earlier room context" summary block.
+   *  Default: 1500. */
+  chatRoomSummaryMaxChars?: number;
 }
 
 /**
