@@ -160,6 +160,12 @@ describe("FN-4308 multi-commit done task aggregation", () => {
       "rev-list --parents -n 1 c3": "c3 p3",
       "diff --name-status -M p3..c3": "A\td.txt",
       "diff -M p3..c3 -- d.txt": "+d\n",
+      "rev-parse c1^": "p1",
+      "diff --name-status -M p1..c3": "A\ta.txt\nM\tb.txt\nA\tc.txt\nA\td.txt",
+      "diff -M p1..c3 -- a.txt": "+a\n",
+      "diff -M p1..c3 -- b.txt": "+bb\n-b\n",
+      "diff -M p1..c3 -- c.txt": "+c\n",
+      "diff -M p1..c3 -- d.txt": "+d\n",
     });
 
     const app = createServer(store as any);
@@ -248,6 +254,10 @@ describe("FN-4308 multi-commit done task aggregation", () => {
       "rev-list --parents -n 1 rev-2": "rev-2 p2",
       "diff --name-status -M p2..rev-2": "A\trevision.ts",
       "diff -M p2..rev-2 -- revision.ts": "+r\n",
+      "rev-parse rev-1^": "p1",
+      "diff --name-status -M p1..rev-2": "A\tinitial.ts\nA\trevision.ts",
+      "diff -M p1..rev-2 -- initial.ts": "+i\n",
+      "diff -M p1..rev-2 -- revision.ts": "+r\n",
     });
 
     const app = createServer(store as any);
@@ -292,6 +302,83 @@ describe("FN-4308 multi-commit done task aggregation", () => {
     expect(response.status).toBe(200);
     expect(response.body.files.map((f: any) => f.path).sort()).toEqual(["feature-a.ts", "feature-b.ts"]);
     expect(response.body.stats.filesChanged).toBe(2);
+  });
+
+  it("falls back to commitSha enumeration when aggregation under-counts mergeDetails", async () => {
+    const store = new MockStore();
+    store.addTask(createTask({ column: "done", lineageId: "lin-1", mergeDetails: { commitSha: "merge", filesChanged: 3 } }));
+    store.setAssociations("lin-1", [makeAssociation("assoc", "2026-04-01T00:00:00.000Z")]);
+
+    let mergeNameStatusCalls = 0;
+    runGitCommandMock.mockImplementation(async (args: string[]) => {
+      const key = args.join(" ");
+      if (key === "merge-base --is-ancestor assoc HEAD") return "";
+      if (key === "merge-base --is-ancestor merge HEAD") return "";
+      if (key === "rev-list --parents -n 1 assoc") return "assoc pa";
+      if (key === "diff --name-status -M pa..assoc") return "M\ta.txt";
+      if (key === "diff -M pa..assoc -- a.txt") return "+a\n";
+      if (key === "rev-list --parents -n 1 merge") return "merge pm";
+      if (key === "diff --name-status -M pm..merge") {
+        mergeNameStatusCalls += 1;
+        return mergeNameStatusCalls === 1 ? "M\tb.txt" : "A\tone.ts\nA\ttwo.ts\nA\tthree.ts";
+      }
+      if (key === "diff -M pm..merge -- b.txt") return "+b\n";
+      if (key === "rev-parse assoc^") return "pa";
+      if (key === "diff --name-status -M pa..merge") return "M\ta.txt";
+      if (key === "diff -M pa..merge -- a.txt") return "+a\n";
+      if (key === "diff -M pm..merge -- one.ts") return "+1\n";
+      if (key === "diff -M pm..merge -- two.ts") return "+2\n";
+      if (key === "diff -M pm..merge -- three.ts") return "+3\n";
+      throw new Error(`Unexpected git command: ${key}`);
+    });
+
+    const app = createServer(store as any);
+    const response = await requestDiff(app);
+    expect(response.status).toBe(200);
+    expect(response.body.files.map((f: any) => f.path).sort()).toEqual(["one.ts", "three.ts", "two.ts"]);
+    expect(response.body.files.length).toBe(response.body.stats.filesChanged);
+  });
+
+  it("uses empty tree fallback for root commit done tasks", async () => {
+    const store = new MockStore();
+    store.addTask(createTask({ column: "done", mergeDetails: { commitSha: "root" } }));
+
+    gitResponses({
+      "merge-base --is-ancestor root HEAD": "",
+      "rev-list --parents -n 1 root": "root",
+      "diff --name-status -M 4b825dc642cb6eb9a060e54bf8d69288fbee4904..root": "A\tinitial.ts",
+      "diff -M 4b825dc642cb6eb9a060e54bf8d69288fbee4904..root -- initial.ts": "+init\n",
+    });
+
+    const app = createServer(store as any);
+    const response = await requestDiff(app);
+    expect(response.status).toBe(200);
+    expect(response.body.files[0].path).toBe("initial.ts");
+    expect(response.body.files.length).toBe(response.body.stats.filesChanged);
+  });
+
+  it("uses diffBase-to-worktree patching for in-progress committed/staged/unstaged files", async () => {
+    const store = new MockStore();
+    store.addTask(createTask({ column: "in-progress", worktree: process.cwd() }));
+
+    gitResponses({
+      "diff --name-status origin/main..HEAD": "M\tcommitted.ts",
+      "diff --cached --name-status": "A\tstaged.ts",
+      "diff --name-status": "M\tunstaged.ts",
+      "diff origin/main -- committed.ts": "+c\n",
+      "diff origin/main -- staged.ts": "+s\n",
+      "diff origin/main -- unstaged.ts": "+u\n",
+    });
+
+    const app = createServer(store as any);
+    const response = await requestDiff(app);
+    expect(response.status).toBe(200);
+    expect(response.body.files).toHaveLength(3);
+    for (const file of response.body.files) {
+      expect(file.patch.length).toBeGreaterThan(0);
+      expect(file.additions + file.deletions).toBeGreaterThan(0);
+    }
+    expect(response.body.files.length).toBe(response.body.stats.filesChanged);
   });
 
   it("includes mergeDetails.commitSha even when missing from associations", async () => {

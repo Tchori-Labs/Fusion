@@ -337,7 +337,7 @@ async function collectDoneTaskFiles(task: DoneTaskAggregationTask, scopedStore: 
     };
   }
 
-  const byPath = new Map<string, AggregatedDoneTaskFile>();
+  const byPath = new Map<string, DoneTaskFileStatus>();
 
   for (const sha of reachableShas) {
     let diffSpec: Awaited<ReturnType<typeof resolveCommitDiffSpec>>;
@@ -356,21 +356,32 @@ async function collectDoneTaskFiles(task: DoneTaskAggregationTask, scopedStore: 
 
     for (const file of filesForSha) {
       const existing = byPath.get(file.path);
-      if (!existing) {
-        byPath.set(file.path, file);
-        continue;
-      }
-
-      existing.additions += file.additions;
-      existing.deletions += file.deletions;
-      existing.patch = `${existing.patch}${existing.patch && file.patch ? "\n" : ""}${file.patch}`;
-      if (statusPriority(file.status) > statusPriority(existing.status)) {
-        existing.status = file.status;
+      if (!existing || statusPriority(file.status) > statusPriority(existing)) {
+        byPath.set(file.path, file.status);
       }
     }
   }
 
-  const files = Array.from(byPath.values());
+  const earliestSha = reachableShas[0];
+  const latestSha = reachableShas[reachableShas.length - 1];
+  if (!earliestSha || !latestSha) {
+    return {
+      files: [],
+      stats: { filesChanged: 0, additions: 0, deletions: 0 },
+      usedAggregation: false,
+    };
+  }
+
+  let earliestParent = EMPTY_TREE_SHA;
+  try {
+    earliestParent = (await runGitCommand(["rev-parse", `${earliestSha}^`], rootDir, 5000)).trim() || EMPTY_TREE_SHA;
+  } catch {
+    earliestParent = EMPTY_TREE_SHA;
+  }
+
+  const netRange = `${earliestParent}..${latestSha}`;
+  const netFiles = await collectDoneRangeFiles(netRange, rootDir).catch(() => []);
+  const files = netFiles.map((file) => ({ ...file, status: byPath.get(file.path) ?? file.status }));
   return {
     files,
     stats: {
@@ -507,8 +518,10 @@ export function registerSessionDiffRoutes(router: Router, deps: SessionDiffRoute
 
       if (task.column === "done" && task.mergeDetails?.commitSha) {
         const aggregated = await collectDoneTaskFiles(task, scopedStore);
+        const expectedFilesChanged = task.mergeDetails?.filesChanged ?? 0;
+        const aggregationLooksComplete = expectedFilesChanged <= 0 || aggregated.files.length >= expectedFilesChanged;
 
-        if (aggregated.usedAggregation && aggregated.files.length > 0) {
+        if (aggregated.usedAggregation && aggregated.files.length > 0 && aggregationLooksComplete) {
           res.json({
             files: aggregated.files.map((file) => ({
               ...file,
@@ -604,7 +617,6 @@ export function registerSessionDiffRoutes(router: Router, deps: SessionDiffRoute
       const cwd = resolvedWorktree;
 
       const diffBase = await resolveDiffBase(task, cwd, "HEAD", undefined, { enableDisplayRecovery: true });
-      const diffRange = diffBase ? `${diffBase}..HEAD` : "HEAD";
 
       // Only count files actually changed by the task: committed (base..HEAD)
       // + staged + unstaged. Untracked files are intentionally excluded — at
@@ -668,7 +680,9 @@ export function registerSessionDiffRoutes(router: Router, deps: SessionDiffRoute
 
         let patch = "";
         try {
-          patch = await runGitCommand(["diff", diffRange, "--", filePath], cwd, 10000);
+          patch = diffBase
+            ? await runGitCommand(["diff", diffBase, "--", filePath], cwd, 10000)
+            : await runGitCommand(["diff", "HEAD", "--", filePath], cwd, 10000);
         } catch {
           // ignore individual file errors
         }
@@ -705,8 +719,10 @@ export function registerSessionDiffRoutes(router: Router, deps: SessionDiffRoute
 
       if (task.column === "done" && task.mergeDetails?.commitSha) {
         const aggregated = await collectDoneTaskFiles(task, scopedStore);
+        const expectedFilesChanged = task.mergeDetails?.filesChanged ?? 0;
+        const aggregationLooksComplete = expectedFilesChanged <= 0 || aggregated.files.length >= expectedFilesChanged;
 
-        if (aggregated.usedAggregation && aggregated.files.length > 0) {
+        if (aggregated.usedAggregation && aggregated.files.length > 0 && aggregationLooksComplete) {
           res.json(aggregated.files.map((file) => ({ path: file.path, status: file.status, diff: file.patch })));
           return;
         }
@@ -842,7 +858,6 @@ export function registerSessionDiffRoutes(router: Router, deps: SessionDiffRoute
         // ignore unstaged diff failures
       }
 
-      const diffRange = diffBase ? `${diffBase}..HEAD` : "HEAD";
       const files = [];
 
       for (const [filePath, { statusCode, oldPath }] of fileMap.entries()) {
@@ -858,7 +873,9 @@ export function registerSessionDiffRoutes(router: Router, deps: SessionDiffRoute
 
         let diff = "";
         try {
-          diff = await runGitCommand(["diff", diffRange, "--", filePath], cwd, 5000);
+          diff = diffBase
+            ? await runGitCommand(["diff", diffBase, "--", filePath], cwd, 5000)
+            : await runGitCommand(["diff", "HEAD", "--", filePath], cwd, 5000);
         } catch {
           diff = "";
         }
