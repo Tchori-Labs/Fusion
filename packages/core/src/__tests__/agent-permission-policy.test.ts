@@ -15,6 +15,7 @@ describe("agent-permission-policy", () => {
       "unrestricted",
       "approval-required",
       "locked-down",
+      "custom",
     ]);
   });
 
@@ -65,6 +66,6 @@ describe("agent-permission-policy", () => {
     expect(isAgentPermissionPolicyPresetId("unrestricted")).toBe(true);
     expect(isAgentPermissionPolicyPresetId("approval-required")).toBe(true);
     expect(isAgentPermissionPolicyPresetId("locked-down")).toBe(true);
-    expect(isAgentPermissionPolicyPresetId("custom")).toBe(false);
+    expect(isAgentPermissionPolicyPresetId("custom")).toBe(true);
   });
 });

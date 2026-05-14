@@ -126,6 +126,10 @@ function normalizeProjectDefaultPolicy(
     merged[category] = nextValue;
   }
 
+  if (Object.keys(merged).length === 0) {
+    return normalizeAgentPermissionPolicyFromPreset(DEFAULT_AGENT_PERMISSION_POLICY_PRESET_ID);
+  }
+
   return normalizeAgentPermissionPolicy({
     presetId: "custom",
     rules: { ...seed, ...merged },

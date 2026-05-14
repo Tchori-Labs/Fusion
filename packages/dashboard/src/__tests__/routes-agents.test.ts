@@ -1959,7 +1959,7 @@ describe("Agent create/update routes", () => {
       JSON.stringify({
         name: "Invalid Policy Agent",
         role: "executor",
-        permissionPolicy: { presetId: "custom" },
+        permissionPolicy: { presetId: "not-a-preset" },
       }),
       { "Content-Type": "application/json" },
     );
