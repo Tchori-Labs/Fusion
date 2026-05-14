@@ -39,6 +39,7 @@ export const mockStartAgentRun = vi.fn<ApiModule["startAgentRun"]>();
 export const mockUpgradeAgentHeartbeatProcedure = vi.fn<ApiModule["upgradeAgentHeartbeatProcedure"]>();
 export const mockUpdateGlobalSettings = vi.fn<ApiModule["updateGlobalSettings"]>();
 export const mockFetchCompanies = vi.fn<ApiModule["fetchCompanies"]>();
+export const mockFetchSettingsByScope = vi.fn<ApiModule["fetchSettingsByScope"]>();
 export const mockSubscribeSse = vi.fn<SseModule["subscribeSse"]>();
 export const mockConfirm = vi.fn();
 
@@ -83,6 +84,7 @@ vi.mock("../../api", () => ({
   upgradeAgentHeartbeatProcedure: (...args: Parameters<ApiModule["upgradeAgentHeartbeatProcedure"]>) => mockUpgradeAgentHeartbeatProcedure(...args),
   updateGlobalSettings: (...args: Parameters<ApiModule["updateGlobalSettings"]>) => mockUpdateGlobalSettings(...args),
   fetchCompanies: (...args: Parameters<ApiModule["fetchCompanies"]>) => mockFetchCompanies(...args),
+  fetchSettingsByScope: (...args: Parameters<ApiModule["fetchSettingsByScope"]>) => mockFetchSettingsByScope(...args),
   uploadAgentAvatar: vi.fn(),
   deleteAgentAvatar: vi.fn(),
 }));
@@ -336,4 +338,5 @@ export function setupAgentDetailMocks() {
   });
   mockUpdateGlobalSettings.mockResolvedValue({} as any);
   mockFetchCompanies.mockResolvedValue({ companies: [] });
+  mockFetchSettingsByScope.mockResolvedValue({ global: {}, project: {} } as any);
 }
