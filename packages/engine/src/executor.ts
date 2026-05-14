@@ -6546,19 +6546,7 @@ ${failureFeedback}
     });
   }
 
-  /**
-   * Parse structured JSON verdict from workflow step output.
-   *
-   * Looks for a trailing JSON block of the form:
-   *   ```json-workflow-verdict
-   *   {"verdict":"PASS"|"FAIL","notes":"..."}
-   *   ```
-   *
-   * If found, extracts verdict/notes and returns the prose before the block
-   * as `output`.
-   *
-   * Falls back to prose-only parsing (REQUEST REVISION) for backward compat.
-   */
+  /** Parse structured JSON verdict from workflow step output. */
   private parseWorkflowStepOutput(rawOutput: string): {
     output: string;
     verdict?: "APPROVE" | "APPROVE_WITH_NOTES" | "REVISE";
