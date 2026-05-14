@@ -4,7 +4,7 @@ import { GraphTaskNode } from "./GraphTaskNode.js";
 import { GraphToolbar } from "./GraphToolbar.js";
 import { GraphEdges } from "./edges.js";
 import { filterGraphTasks } from "./filters.js";
-import { computeAutoLayout } from "./layout.js";
+import { computeAutoLayout, type LayoutOptions } from "./layout.js";
 import { useGraphData } from "./useGraphData.js";
 import { useGraphInteraction } from "./useGraphInteraction.js";
 import { useDependencyChain } from "./hooks/useDependencyChain.js";
@@ -14,6 +14,7 @@ import "./DependencyGraph.css";
 
 const NODE_WIDTH = 280;
 const NODE_HEIGHT = 100;
+const NARROW_VIEWPORT_WIDTH = 768;
 
 export interface DependencyGraphProps {
   tasks: Task[];
@@ -62,16 +63,23 @@ export function DependencyGraph({
   const pointerDraggedRef = useRef(false);
   const [hoveredTaskId, setHoveredTaskId] = useState<string | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
   const filteredTasks = useMemo(() => filterGraphTasks(tasks), [tasks]);
   const graphData = useGraphData(filteredTasks);
   const { getChain } = useDependencyChain(filteredTasks);
   const activeTaskId = hoveredTaskId ?? selectedTaskId;
   const highlightedTaskIds = useMemo(() => (activeTaskId ? getChain(activeTaskId) : new Set<string>()), [activeTaskId, getChain]);
-
-  const autoLayoutPositions = useMemo(
-    () => computeAutoLayout(graphData, { nodeWidth: NODE_WIDTH, nodeHeight: NODE_HEIGHT, horizontalGap: 40, verticalGap: 80 }),
-    [graphData],
+  const orientation = useMemo<NonNullable<LayoutOptions["orientation"]>>(() => {
+    const width = viewportSize.width || (typeof window !== "undefined" ? window.innerWidth : 0);
+    const height = viewportSize.height || (typeof window !== "undefined" ? window.innerHeight : 0);
+    return height > width || width < NARROW_VIEWPORT_WIDTH ? "horizontal" : "vertical";
+  }, [viewportSize.height, viewportSize.width]);
+  const layoutOptions = useMemo<LayoutOptions>(
+    () => ({ nodeWidth: NODE_WIDTH, nodeHeight: NODE_HEIGHT, horizontalGap: 40, verticalGap: 80, orientation }),
+    [orientation],
   );
+
+  const autoLayoutPositions = useMemo(() => computeAutoLayout(graphData, layoutOptions), [graphData, layoutOptions]);
   const visibleTaskIds = useMemo(() => new Set(filteredTasks.map((task) => task.id)), [filteredTasks]);
   const { savedPositions, persistPositions, clearSavedPositions } = useGraphPositions({ projectId, visibleTaskIds });
   const [positions, setPositions] = useState<Map<string, { x: number; y: number }>>(autoLayoutPositions);
@@ -86,6 +94,36 @@ export function DependencyGraph({
     const merged = savedPositions ? mergePositions(autoLayoutRecord, savedPositions, visibleTaskIds) : autoLayoutRecord;
     setPositions(new Map(Object.entries(merged)));
   }, [autoLayoutPositions, savedPositions, visibleTaskIds]);
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+
+    const updateViewportSize = (width: number, height: number) => {
+      setViewportSize((current) => {
+        if (current.width === width && current.height === height) return current;
+        return { width, height };
+      });
+    };
+
+    if (typeof ResizeObserver === "undefined") {
+      updateViewportSize(
+        viewport.clientWidth || (typeof window !== "undefined" ? window.innerWidth : 0),
+        viewport.clientHeight || (typeof window !== "undefined" ? window.innerHeight : 0),
+      );
+      return;
+    }
+
+    updateViewportSize(viewport.clientWidth, viewport.clientHeight);
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+      updateViewportSize(entry.contentRect.width, entry.contentRect.height);
+    });
+
+    observer.observe(viewport);
+    return () => observer.disconnect();
+  }, []);
 
   const {
     transform,
@@ -157,9 +195,9 @@ export function DependencyGraph({
 
   const handleResetLayout = useCallback(() => {
     clearSavedPositions();
-    const freshLayout = computeAutoLayout(graphData, { nodeWidth: NODE_WIDTH, nodeHeight: NODE_HEIGHT, horizontalGap: 40, verticalGap: 80 });
+    const freshLayout = computeAutoLayout(graphData, layoutOptions);
     setPositions(freshLayout);
-  }, [clearSavedPositions, graphData]);
+  }, [clearSavedPositions, graphData, layoutOptions]);
 
   const handleNodeDragEnd = useCallback(() => {
     const positionRecord: NodePositions = {};
@@ -323,7 +361,7 @@ export function DependencyGraph({
           handleResetLayout();
           const viewport = viewportRef.current;
           if (!viewport) return;
-          const freshLayout = computeAutoLayout(graphData, { nodeWidth: NODE_WIDTH, nodeHeight: NODE_HEIGHT, horizontalGap: 40, verticalGap: 80 });
+          const freshLayout = computeAutoLayout(graphData, layoutOptions);
           const normalizedFreshLayout = new Map<string, { x: number; y: number }>();
           const values = Array.from(freshLayout.values());
           const minX = values.length > 0 ? Math.min(...values.map((position) => position.x)) : 0;
