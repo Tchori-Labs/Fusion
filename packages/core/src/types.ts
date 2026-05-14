@@ -1111,6 +1111,13 @@ export function buildResearchDocumentKey(runId: string): string {
 
 export interface MergeDetails {
   commitSha?: string;
+  /**
+   * When merger used rebase strategy (>=2 substantive commits), this is the
+   * parent SHA on the target branch before the cherry-pick chain. The canonical
+   * rebase display/audit range is `rebaseBaseSha..commitSha`.
+   * Unset for squash merges.
+   */
+  rebaseBaseSha?: string;
   filesChanged?: number;
   insertions?: number;
   deletions?: number;
