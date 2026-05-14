@@ -90,6 +90,36 @@ describe("TaskStore", () => {
       expect(reloaded.tokenUsage).toEqual(tokenUsage);
     });
 
+    it("defaults legacy null cacheWriteTokens rows to 0 without dropping tokenUsage", async () => {
+      const created = await harness.store().createTask({
+        description: "Legacy null cache write",
+        tokenUsage: {
+          inputTokens: 10,
+          outputTokens: 20,
+          cachedTokens: 30,
+          cacheWriteTokens: 40,
+          totalTokens: 100,
+          firstUsedAt: "2026-04-23T15:00:00.000Z",
+          lastUsedAt: "2026-04-23T15:01:00.000Z",
+        },
+      });
+
+      (harness.store() as any).db.prepare(`
+        UPDATE tasks
+        SET tokenUsageCacheWriteTokens = NULL
+        WHERE id = ?
+      `).run(created.id);
+
+      const legacy = await harness.store().getTask(created.id);
+      expect(legacy.tokenUsage).toMatchObject({
+        inputTokens: 10,
+        outputTokens: 20,
+        cachedTokens: 30,
+        cacheWriteTokens: 0,
+        totalTokens: 100,
+      });
+    });
+
     it("round-trips cacheWriteTokens specifically", async () => {
       const tokenUsage = {
         inputTokens: 1,

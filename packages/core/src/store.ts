@@ -1016,7 +1016,6 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
           row.tokenUsageInputTokens === null
           || row.tokenUsageOutputTokens === null
           || row.tokenUsageCachedTokens === null
-          || row.tokenUsageCacheWriteTokens === null
           || row.tokenUsageTotalTokens === null
           || row.tokenUsageFirstUsedAt === null
           || row.tokenUsageLastUsedAt === null
@@ -1028,7 +1027,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
           inputTokens: row.tokenUsageInputTokens,
           outputTokens: row.tokenUsageOutputTokens,
           cachedTokens: row.tokenUsageCachedTokens,
-          cacheWriteTokens: row.tokenUsageCacheWriteTokens,
+          cacheWriteTokens: row.tokenUsageCacheWriteTokens ?? 0,
           totalTokens: row.tokenUsageTotalTokens,
           firstUsedAt: row.tokenUsageFirstUsedAt,
           lastUsedAt: row.tokenUsageLastUsedAt,
