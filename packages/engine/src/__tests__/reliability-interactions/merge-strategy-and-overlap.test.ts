@@ -8,22 +8,7 @@ describeIfGit("reliability interactions: merge strategy + overlap", () => {
   const fixtures: Array<Awaited<ReturnType<typeof makeReliabilityFixture>>> = [];
   afterEach(async () => { while (fixtures.length) await fixtures.pop()!.cleanup(); });
 
-  it.skip("Case 6: auto strategy keeps multi-commit branch history", async () => {
-    const fx = await makeReliabilityFixture({ taskId: "FN-4361-C6", settings: { directMergeCommitStrategy: "auto" } });
-    fixtures.push(fx);
-    await fx.createBranch("fusion/fn-4361-c6");
-    await fx.writeAndCommit("src/a.txt", "1\n", "fix: one");
-    await fx.writeAndCommit("src/b.txt", "2\n", "fix: two");
-    await fx.writeAndCommit("src/c.txt", "3\n", "fix: three");
-    await fx.checkout("main");
-    await fx.store.updateTask(fx.task.id, { branch: "fusion/fn-4361-c6", column: "in-review", steps: [{ name: "impl", status: "done" }] } as any);
-
-    await fx.mergeTask();
-    const subjects = git(fx.rootDir, "git log --format=%s -n 3");
-    expect(subjects).toContain("fix: one");
-    expect(subjects).toContain("fix: two");
-    expect(subjects).toContain("fix: three");
-  });
+  // Case 6 (auto-strategy multi-commit history) is covered by src/__tests__/merger-commit-strategy.real-git.test.ts: auto-routes multi-substantive branches to history-preserving direct merge.
 
   it("Case 7: diff-volume gate detects dropped branch contribution", async () => {
     const fx = await makeReliabilityFixture({ taskId: "FN-4361-C7" });

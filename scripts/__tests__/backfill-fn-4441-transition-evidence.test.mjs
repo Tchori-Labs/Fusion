@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { tsImport } from "tsx/esm/api";
 import { composeTransitionEvidence } from "../backfill-fn-4441-transition-evidence.mjs";
 
@@ -48,7 +51,8 @@ test("composeTransitionEvidence includes required evidence fields", () => {
 
 test("TaskStore upsertTaskDocument increments revision and round-trips latest content", async () => {
   const TaskStore = await loadTaskStore();
-  const store = new TaskStore(process.cwd(), undefined, { inMemoryDb: true });
+  const projectRoot = mkdtempSync(path.join(os.tmpdir(), "fn-4441-transition-evidence-"));
+  const store = new TaskStore(projectRoot, undefined, { inMemoryDb: true });
 
   try {
     await store.createTaskWithReservedId({ description: "seed" }, { taskId: "FN-4441" });
@@ -72,5 +76,6 @@ test("TaskStore upsertTaskDocument increments revision and round-trips latest co
     assert.equal(doc?.content, "second");
   } finally {
     await store.close();
+    rmSync(projectRoot, { recursive: true, force: true });
   }
 });
