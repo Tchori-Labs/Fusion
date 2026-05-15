@@ -7541,7 +7541,7 @@ export async function aiMergeTask(
     }
 
     try {
-      await runPostMergeWorkflowSteps(store, taskId, rootDir, postMergeCwd, settings, options);
+      await runPostMergeWorkflowSteps(store, taskId, rootDir, postMergeCwd, settings, options, audit);
     } catch (err: any) {
       rethrowIfMergeAborted(err);
       mergerLog.error(`${taskId}: post-merge workflow steps error: ${err.message}`);
@@ -9071,6 +9071,7 @@ async function runPostMergeWorkflowSteps(
   cwd: string,
   settings: Settings,
   mergeOptions: MergerOptions = {},
+  auditor?: RunAuditor,
 ): Promise<void> {
   throwIfAborted(mergeOptions.signal, taskId);
   const task = await store.getTask(taskId);
@@ -9130,7 +9131,7 @@ async function runPostMergeWorkflowSteps(
 
     try {
       const result = stepMode === "script"
-        ? await executePostMergeScriptStep(store, taskId, ws, cwd, settings)
+        ? await executePostMergeScriptStep(store, taskId, ws, cwd, settings, auditor)
         : await executePostMergePromptStep(store, taskId, ws, rootDir, cwd, settings, mergeOptions);
       const completedAt = new Date().toISOString();
 
@@ -9180,8 +9181,8 @@ async function runPostMergeWorkflowSteps(
   }
 }
 
-function getPostMergeScriptSandboxBackend(): SandboxBackend {
-  return resolveSandboxBackend();
+function getPostMergeScriptSandboxBackend(auditor?: RunAuditor): SandboxBackend {
+  return resolveSandboxBackend({ auditor });
 }
 
 /** Execute a script-mode post-merge workflow step in the provided execution directory. */
@@ -9191,6 +9192,7 @@ async function executePostMergeScriptStep(
   workflowStep: WorkflowStep,
   cwd: string,
   settings: Settings,
+  auditor?: RunAuditor,
 ): Promise<{ success: boolean; output?: string; error?: string }> {
   const scriptName = workflowStep.scriptName!.trim();
   const scripts = settings.scripts || {};
@@ -9200,7 +9202,7 @@ async function executePostMergeScriptStep(
     return { success: false, error: `Script '${scriptName}' not found in project settings` };
   }
 
-  const backend = getPostMergeScriptSandboxBackend();
+  const backend = getPostMergeScriptSandboxBackend(auditor);
   const result = await backend.run(scriptCommand, {
     cwd,
     encoding: "utf-8",
@@ -9232,8 +9234,9 @@ export async function __executePostMergeScriptStepForTests(
   workflowStep: WorkflowStep,
   cwd: string,
   settings: Settings,
+  auditor?: RunAuditor,
 ): Promise<{ success: boolean; output?: string; error?: string }> {
-  return executePostMergeScriptStep(store, taskId, workflowStep, cwd, settings);
+  return executePostMergeScriptStep(store, taskId, workflowStep, cwd, settings, auditor);
 }
 
 /** Execute a prompt-mode post-merge workflow step using an AI agent in the provided execution directory. */

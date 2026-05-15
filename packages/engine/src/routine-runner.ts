@@ -33,7 +33,9 @@ const MAX_BUFFER = 1024 * 1024;
 const MAX_OUTPUT_LENGTH = 10 * 1024;
 
 function getRoutineCommandSandboxBackend(): SandboxBackend {
-  return resolveSandboxBackend();
+  // FN-4640: routine-runner has no RunAuditor context yet; keep sandbox backend un-audited for now.
+  // Follow-up: FN-4689 wires routine-runner through RunAuditor for sandbox emissions.
+  return resolveSandboxBackend({ auditor: undefined });
 }
 
 /** Options for RoutineRunner constructor */

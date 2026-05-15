@@ -365,8 +365,8 @@ function configuredCommandErrorMessage(result: RunCommandResult): string {
   return parts.length ? parts.join("\n") : "Command failed";
 }
 
-function getConfiguredCommandSandboxBackend(): SandboxBackend {
-  return resolveSandboxBackend();
+function getConfiguredCommandSandboxBackend(auditor?: RunAuditor): SandboxBackend {
+  return resolveSandboxBackend({ auditor });
 }
 
 async function runConfiguredCommand(
@@ -374,8 +374,9 @@ async function runConfiguredCommand(
   cwd: string,
   timeoutMs: number,
   extraEnv?: NodeJS.ProcessEnv,
+  auditor?: RunAuditor,
 ): Promise<RunCommandResult> {
-  const backend = getConfiguredCommandSandboxBackend();
+  const backend = getConfiguredCommandSandboxBackend(auditor);
   const result = await backend.run(command, {
     cwd,
     timeoutMs,
@@ -400,8 +401,9 @@ export async function __runConfiguredCommandForTests(
   cwd: string,
   timeoutMs: number,
   extraEnv?: NodeJS.ProcessEnv,
+  auditor?: RunAuditor,
 ): Promise<RunCommandResult> {
-  return runConfiguredCommand(command, cwd, timeoutMs, extraEnv);
+  return runConfiguredCommand(command, cwd, timeoutMs, extraEnv, auditor);
 }
 
 // ── Tool parameter schemas (module-level for reuse in ToolDefinition generics) ──
@@ -2689,7 +2691,7 @@ export class TaskExecutor {
         if (scriptCommand) {
           const setupStartedAt = Date.now();
           try {
-            const setupResult = await runConfiguredCommand(scriptCommand, worktreePath, 120_000, taskEnv);
+            const setupResult = await runConfiguredCommand(scriptCommand, worktreePath, 120_000, taskEnv, audit);
             if (setupResult.spawnError || setupResult.timedOut || setupResult.exitCode !== 0) {
               throw new Error(configuredCommandErrorMessage(setupResult));
             }
@@ -6758,7 +6760,12 @@ ${failureFeedback}
     await this.store.logEntry(task.id, `Workflow step '${workflowStep.name}' executing script '${scriptName}': ${scriptCommand}`);
 
     try {
-      const scriptResult = await runConfiguredCommand(scriptCommand, worktreePath, 120_000, extraEnv);
+      const scriptResult = await runConfiguredCommand(scriptCommand, worktreePath, 120_000, extraEnv, createRunAuditor(this.store, {
+        runId: this.currentRunContext?.runId ?? generateSyntheticRunId("exec-script", task.id),
+        agentId: this.currentRunContext?.agentId ?? (task.assignedAgentId ?? "executor"),
+        taskId: task.id,
+        phase: "execute",
+      }));
       if (scriptResult.spawnError || scriptResult.timedOut || scriptResult.exitCode !== 0) {
         return { success: false, error: configuredCommandErrorMessage(scriptResult) };
       }
