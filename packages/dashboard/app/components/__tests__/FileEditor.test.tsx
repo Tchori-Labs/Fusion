@@ -26,6 +26,20 @@ describe("FileEditor", () => {
 
   const highlightedTokenSelector = ".cm-line span[class]";
 
+  const setMobileViewport = () => {
+    window.innerWidth = 480;
+    window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+      matches: query.includes("max-width: 768px"),
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    }));
+  };
+
   it("renders CodeMirror editor with file-path aria-label", () => {
     document.documentElement.dataset.theme = "dark";
     render(<FileEditor content="" onChange={vi.fn()} filePath="a.ts" />);
@@ -357,16 +371,56 @@ describe("FileEditor", () => {
       expect(screen.queryByRole("button", { name: /toggle word wrap/i })).not.toBeInTheDocument();
     });
 
-    it("expanding shows all actions in one toolbar actions row", () => {
-      render(<FileEditor content="# Hello" onChange={vi.fn()} filePath="readme.md" onToggleLineNumbers={vi.fn()} />);
-      expandEditorOptions();
+    it.each([
+      "Edit mode",
+      "Preview mode",
+      "Toggle line numbers",
+      "Toggle word wrap",
+    ])("collapsed toolbar removes %s from layout", (ariaLabel) => {
+      const css = loadAllAppCss();
+      const style = document.createElement("style");
+      style.textContent = css;
+      document.head.appendChild(style);
 
-      const editButton = screen.getByRole("button", { name: /edit mode/i });
-      const actionsRow = editButton.closest(".file-editor-toolbar-actions");
-      expect(actionsRow).toBeTruthy();
-      expect(actionsRow).toContainElement(screen.getByRole("button", { name: /preview mode/i }));
-      expect(actionsRow).toContainElement(screen.getByRole("button", { name: /toggle line numbers/i }));
-      expect(actionsRow).toContainElement(screen.getByRole("button", { name: /toggle word wrap/i }));
+      try {
+        const { container } = render(<FileEditor content="# Hello" onChange={vi.fn()} filePath="readme.md" onToggleLineNumbers={vi.fn()} />);
+        const button = container.querySelector(`[aria-label="${ariaLabel}"]`) as HTMLElement | null;
+        expect(button).toBeTruthy();
+
+        const hiddenAncestor = button?.closest("[hidden]") as HTMLElement | null;
+        const hiddenDisplay = hiddenAncestor ? getComputedStyle(hiddenAncestor).display : "";
+        expect(button?.offsetParent === null || hiddenDisplay === "none").toBe(true);
+      } finally {
+        style.remove();
+      }
+    });
+
+    it("expanding shows all actions in one toolbar actions row", () => {
+      const css = loadAllAppCss();
+      const style = document.createElement("style");
+      style.textContent = css;
+      document.head.appendChild(style);
+
+      try {
+        setMobileViewport();
+        render(<FileEditor content="# Hello" onChange={vi.fn()} filePath="readme.md" onToggleLineNumbers={vi.fn()} />);
+        expandEditorOptions();
+
+        const toggleButton = screen.getByRole("button", { name: /toggle editor options/i });
+        const editButton = screen.getByRole("button", { name: /edit mode/i });
+        const actionsRow = editButton.closest(".file-editor-toolbar-actions") as HTMLElement;
+        const toolbar = editButton.closest(".file-editor-toolbar");
+        expect(actionsRow).toBeTruthy();
+        expect(toolbar).toContainElement(toggleButton);
+        expect(toolbar).toContainElement(actionsRow);
+        expect(actionsRow).toContainElement(screen.getByRole("button", { name: /preview mode/i }));
+        expect(actionsRow).toContainElement(screen.getByRole("button", { name: /toggle line numbers/i }));
+        expect(actionsRow).toContainElement(screen.getByRole("button", { name: /toggle word wrap/i }));
+
+        expect(getComputedStyle(actionsRow).width).not.toBe("100%");
+      } finally {
+        style.remove();
+      }
     });
 
     it.each([/edit mode/i, /preview mode/i, /toggle line numbers/i, /toggle word wrap/i])(
