@@ -5842,6 +5842,7 @@ export async function aiMergeTask(
   // every consumer of mergeDetails). Set by the squashIsEmpty / staged===0
   // sites in mergeAttempt + attemptWithSideStrategy.
   let mergeWasEmpty = false;
+  let recoveredMergeSha: string | undefined;
 
   const projectDefaultBranch = typeof settings.baseBranch === "string" ? settings.baseBranch : undefined;
   const mergeTarget = resolveTaskMergeTarget(task, {
@@ -6737,7 +6738,26 @@ export async function aiMergeTask(
                 store,
                 audit,
               );
+              if (finalized.ok && finalized.reason === "branch-already-merged-on-main") {
+                mergeWasEmpty = true;
+                recoveredMergeSha = finalized.mergeSha;
+                mergerLog.log(`${taskId}: verification-fix finalize recovered as already landed on main via=${finalized.strategy} sha=${finalized.mergeSha?.slice(0, 8)}`);
+                await store.appendAgentLog(
+                  taskId,
+                  "Verification fix finalize: task already landed on main — recovered",
+                  "tool_result",
+                  `via=${finalized.strategy} sha=${finalized.mergeSha?.slice(0, 8)}`,
+                  "merger",
+                );
+                await store.logEntry(taskId, `Auto-recovered: verification fix produced no content but task already landed on main at ${finalized.mergeSha?.slice(0, 8)} via ${finalized.strategy}`);
+                return true;
+              }
               if (!finalized.ok) {
+                if (finalized.reason === "fix-produced-no-content" && recoveredMergeSha) {
+                  mergerLog.warn(`${taskId}: finalize returned fix-produced-no-content after recovered merge SHA ${recoveredMergeSha.slice(0, 8)}; treating as recovered`);
+                  mergeWasEmpty = true;
+                  return true;
+                }
                 // Phantom-merge guard: refused to fabricate a commit. Reset
                 // any leftover squash state and propagate failure.
                 const { stdout: currentHeadOut } = await execAsync("git rev-parse HEAD", { cwd: rootDir, encoding: "utf-8" });
@@ -6860,7 +6880,26 @@ export async function aiMergeTask(
               store,
               audit,
             );
+            if (finalized.ok && finalized.reason === "branch-already-merged-on-main") {
+              mergeWasEmpty = true;
+              recoveredMergeSha = finalized.mergeSha;
+              mergerLog.log(`${taskId}: build-fix finalize recovered as already landed on main via=${finalized.strategy} sha=${finalized.mergeSha?.slice(0, 8)}`);
+              await store.appendAgentLog(
+                taskId,
+                "Verification fix finalize: task already landed on main — recovered",
+                "tool_result",
+                `via=${finalized.strategy} sha=${finalized.mergeSha?.slice(0, 8)}`,
+                "merger",
+              );
+              await store.logEntry(taskId, `Auto-recovered: verification fix produced no content but task already landed on main at ${finalized.mergeSha?.slice(0, 8)} via ${finalized.strategy}`);
+              return true;
+            }
             if (!finalized.ok) {
+              if (finalized.reason === "fix-produced-no-content" && recoveredMergeSha) {
+                mergerLog.warn(`${taskId}: build finalize returned fix-produced-no-content after recovered merge SHA ${recoveredMergeSha.slice(0, 8)}; treating as recovered`);
+                mergeWasEmpty = true;
+                return true;
+              }
               // Phantom-merge guard: the verification fix passed but no
               // commit could be produced (no staged content + HEAD never
               // moved). Reset and propagate failure rather than silently
@@ -7060,7 +7099,10 @@ export async function aiMergeTask(
     // Guard 2: the empty-squash success paths in mergeAttempt /
     // attemptWithSideStrategy return true without committing when nothing
     // was staged. The recorded HEAD then has nothing to do with this task.
-    const recordedSha = (isEmptyCommit || mergeWasEmpty) ? undefined : commitSha;
+    let recordedSha = (isEmptyCommit || mergeWasEmpty) ? undefined : commitSha;
+    if (recoveredMergeSha) {
+      recordedSha = recoveredMergeSha;
+    }
 
     const auditSha = recordedSha;
     const postMergeAuditMode = normalizePostMergeAuditMode(settings.postMergeAuditMode);
@@ -7132,7 +7174,7 @@ export async function aiMergeTask(
       mergerLog.warn(
         `${taskId}: local squash produced an empty commit (${commitSha?.slice(0, 8)}) — branch likely contained dupes of main. Skipping commitSha; recovery will backfill when real commit lands.`,
       );
-    } else if (mergeWasEmpty) {
+    } else if (mergeWasEmpty && !recoveredMergeSha) {
       mergerLog.warn(
         `${taskId}: merge succeeded without committing (branch already on main). Skipping commitSha; nothing new landed locally.`,
       );
