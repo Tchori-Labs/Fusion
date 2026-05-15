@@ -61,6 +61,7 @@ import { createAuthMiddleware, authenticateUpgradeRequest, getDaemonToken } from
 import { validateRemoteAuthToken } from "./remote-auth.js";
 import { getCliPackageVersion } from "./cli-package-version.js";
 import {
+  dayHasSamples,
   fileScopeInvariantFailuresPerDay,
   inReviewDurationMetrics,
   inReviewFailureRate7d,
@@ -1167,11 +1168,13 @@ export function createServer(store: TaskStore, options?: ServerOptions): ReturnT
       const postMergeAuditFailures = postMergeByDay.value ? (postMergeByDay.value[day] ?? { block: 0, warn: 0, off: 0 }) : null;
       const fileScopeInvariantFailures = fileScopeByDay.value ? (fileScopeByDay.value[day] ?? 0) : null;
       const recoverAlreadyMergedReviewTasksRecoveries = recoveriesByDay.value ? (recoveriesByDay.value[day] ?? 0) : null;
-      const hasSamples = tasksEnteredInReview > 0
-        || tasksBouncedToInProgress > 0
-        || (postMergeAuditFailures ? postMergeAuditFailures.block + postMergeAuditFailures.warn + postMergeAuditFailures.off > 0 : false)
-        || (typeof fileScopeInvariantFailures === "number" && fileScopeInvariantFailures > 0)
-        || (typeof recoverAlreadyMergedReviewTasksRecoveries === "number" && recoverAlreadyMergedReviewTasksRecoveries > 0);
+      const hasSamples = dayHasSamples({
+        tasksEnteredInReview,
+        tasksBouncedToInProgress,
+        postMergeAuditFailures,
+        fileScopeInvariantFailures,
+        recoverAlreadyMergedReviewTasksRecoveries,
+      });
 
       perDay.push({
         date: day,

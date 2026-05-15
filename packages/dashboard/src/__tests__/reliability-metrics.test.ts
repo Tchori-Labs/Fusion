@@ -4,6 +4,7 @@ import type { ActivityLogEntry, RunAuditEvent } from "@fusion/core";
 
 import {
   bucketByDay,
+  dayHasSamples,
   fileScopeInvariantFailuresPerDay,
   inReviewDurationMetrics,
   inReviewFailureRate7d,
@@ -135,5 +136,53 @@ describe("reliability-metrics", () => {
     const endMs = Date.parse("2026-05-13T00:00:00.000Z");
     expect(inReviewFailureRate7d({ "2026-05-13": 10 }, { "2026-05-13": 2 }, endMs)).toEqual({ value: 0.2 });
     expect(inReviewFailureRate7d({}, {}, endMs)).toEqual({ value: null, reason: "no-in-review-entries" });
+  });
+
+  it("returns no-in-review-entries when all seven days are empty", () => {
+    const endMs = Date.parse("2026-05-13T00:00:00.000Z");
+    expect(inReviewFailureRate7d({ "2026-05-13": 0, "2026-05-12": 0 }, { "2026-05-13": 0 }, endMs)).toEqual({
+      value: null,
+      reason: "no-in-review-entries",
+    });
+  });
+
+  it("filters task movement counts by start/end window", () => {
+    const activity: ActivityLogEntry[] = [
+      moved("2026-05-10T23:59:59.000Z", "FN-1", "todo", "in-review"),
+      moved("2026-05-11T00:00:00.000Z", "FN-2", "todo", "in-review"),
+      moved("2026-05-12T00:00:00.000Z", "FN-3", "in-review", "in-progress"),
+    ];
+
+    const start = Date.parse("2026-05-11T00:00:00.000Z");
+    const end = Date.parse("2026-05-12T00:00:00.000Z");
+
+    expect(tasksEnteredInReviewPerDay(activity, start, end)).toEqual({ "2026-05-11": 1 });
+    expect(tasksBouncedToInProgressPerDay(activity, start, end)).toEqual({ "2026-05-12": 1 });
+  });
+
+  it("reports hasSamples semantics for per-day rows", () => {
+    expect(dayHasSamples({
+      tasksEnteredInReview: 0,
+      tasksBouncedToInProgress: 0,
+      postMergeAuditFailures: null,
+      fileScopeInvariantFailures: null,
+      recoverAlreadyMergedReviewTasksRecoveries: null,
+    })).toBe(false);
+
+    expect(dayHasSamples({
+      tasksEnteredInReview: 0,
+      tasksBouncedToInProgress: 1,
+      postMergeAuditFailures: null,
+      fileScopeInvariantFailures: null,
+      recoverAlreadyMergedReviewTasksRecoveries: null,
+    })).toBe(true);
+
+    expect(dayHasSamples({
+      tasksEnteredInReview: 0,
+      tasksBouncedToInProgress: 0,
+      postMergeAuditFailures: { block: 0, warn: 1, off: 0 },
+      fileScopeInvariantFailures: 0,
+      recoverAlreadyMergedReviewTasksRecoveries: 0,
+    })).toBe(true);
   });
 });

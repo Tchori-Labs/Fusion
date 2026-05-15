@@ -29,6 +29,14 @@ export interface InReviewDurationMetric {
   reason?: NullMetricReason;
 }
 
+export interface ReliabilityPerDayCounts {
+  tasksEnteredInReview: number;
+  tasksBouncedToInProgress: number;
+  postMergeAuditFailures: { block: number; warn: number; off: number } | null;
+  fileScopeInvariantFailures: number | null;
+  recoverAlreadyMergedReviewTasksRecoveries: number | null;
+}
+
 const DAY_MS = 86_400_000;
 
 export function bucketByDay(timestamp: string): string {
@@ -181,6 +189,21 @@ export function mergeAttemptsPerMergedTask(events: RunAuditEvent[], activity: Ac
     max,
     histogram,
   };
+}
+
+export function dayHasSamples(counts: ReliabilityPerDayCounts): boolean {
+  if (counts.tasksEnteredInReview > 0 || counts.tasksBouncedToInProgress > 0) {
+    return true;
+  }
+
+  if (counts.postMergeAuditFailures) {
+    const { block, warn, off } = counts.postMergeAuditFailures;
+    if (block + warn + off > 0) {
+      return true;
+    }
+  }
+
+  return (counts.fileScopeInvariantFailures ?? 0) > 0 || (counts.recoverAlreadyMergedReviewTasksRecoveries ?? 0) > 0;
 }
 
 export function inReviewFailureRate7d(enteredByDay: Record<string, number>, bouncedByDay: Record<string, number>, endMs: number): NullableMetric<number> {
