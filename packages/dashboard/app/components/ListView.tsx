@@ -286,6 +286,7 @@ export function ListView({
   // Hide done tasks state - initialize from localStorage
   const [hideDoneTasks, setHideDoneTasks] = useState<boolean>(() => readHideDoneTasks(projectId));
   const [staleOnlyFilter, setStaleOnlyFilter] = useState<boolean>(() => readStaleOnlyFilter(projectId));
+  const [stalePausedReviewOnlyFilter, setStalePausedReviewOnlyFilter] = useState<boolean>(false);
 
   // Collapsed sections state - initialize from localStorage
   const [collapsedSections, setCollapsedSections] = useState<Set<Column>>(() =>
@@ -335,6 +336,7 @@ export function ListView({
     setVisibleColumns(readVisibleColumns(projectId));
     setHideDoneTasks(readHideDoneTasks(projectId));
     setStaleOnlyFilter(readStaleOnlyFilter(projectId));
+    setStalePausedReviewOnlyFilter(false);
     setCollapsedSections(readCollapsedSections(projectId));
     setSelectedTaskIds(readSelectedTaskIds(projectId));
     const persistedSelection = readSelectedTaskId(projectId);
@@ -533,6 +535,9 @@ export function ListView({
     if (staleOnlyFilter) {
       filtered = filtered.filter((t) => t.ageStaleness != null);
     }
+    if (stalePausedReviewOnlyFilter) {
+      filtered = filtered.filter((t) => t.stalePausedReview != null);
+    }
 
     // Then apply column filter if selected
     const columnFiltered = selectedColumn
@@ -579,7 +584,7 @@ export function ListView({
       });
     }
     return groups;
-  }, [tasks, searchQuery, sortField, sortDirection, hideDoneTasks, staleOnlyFilter, selectedColumn]);
+  }, [tasks, searchQuery, sortField, sortDirection, hideDoneTasks, staleOnlyFilter, stalePausedReviewOnlyFilter, selectedColumn]);
 
   // Calculate total filtered count from groups
   const filteredCount = useMemo(() => {
@@ -1270,6 +1275,14 @@ export function ListView({
       >
         {staleOnlyFilter ? "Show all" : "Stale only"}
       </button>
+      <button
+        className="btn btn-sm list-hide-done-toggle"
+        onClick={() => setStalePausedReviewOnlyFilter((prev) => !prev)}
+        aria-pressed={stalePausedReviewOnlyFilter}
+        title={stalePausedReviewOnlyFilter ? "Show all tasks" : "Show stale paused review tasks only"}
+      >
+        {stalePausedReviewOnlyFilter ? "Show all" : "Stale paused review"}
+      </button>
       <div className="list-drop-zones list-drop-zones--sidebar">
         {COLUMNS.map((column) => {
           const totalCount = tasks.filter((t) => t.column === column).length;
@@ -1370,6 +1383,7 @@ export function ListView({
                     ) : null}
                     {hideDoneTasks ? <span className="list-sidebar-chip">Done hidden</span> : null}
                     {staleOnlyFilter ? <span className="list-sidebar-chip">Stale only</span> : null}
+                    {stalePausedReviewOnlyFilter ? <span className="list-sidebar-chip">Stale paused review</span> : null}
                     {bulkEditEnabled ? (
                       <span className="list-sidebar-chip">Bulk edit</span>
                     ) : null}

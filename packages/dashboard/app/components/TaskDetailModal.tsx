@@ -7,7 +7,7 @@ import { useOverlayDismiss } from "../hooks/useOverlayDismiss";
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { Task, TaskDetail, TaskAttachment, Column, MergeResult, Settings, GlobalSettings, AgentLogEntry, Agent, TaskPriority, TaskSourceIssue, WorkflowStepResult, GithubIssueAction, InReviewStallCode } from "@fusion/core";
+import type { Task, TaskDetail, TaskAttachment, Column, MergeResult, Settings, GlobalSettings, AgentLogEntry, Agent, TaskPriority, TaskSourceIssue, WorkflowStepResult, GithubIssueAction } from "@fusion/core";
 import {
   COLUMN_LABELS,
   DEFAULT_TASK_PRIORITY,
@@ -46,6 +46,7 @@ import { computeBlockerFanoutMap } from "../hooks/useBlockerFanout";
 import { resolveEffectiveGithubRepoDefault } from "./githubTracking";
 import { linkifyFilePaths, linkifyReactChildren } from "../utils/filePathLinkify";
 import { getInReviewStallCopy, shouldShowInReviewStallBadge } from "../utils/inReviewStallCopy";
+import { getStalePausedReviewCopy, shouldShowStalePausedReviewBadge } from "../utils/stalePausedReviewCopy";
 import { getTaskAgeStalenessCopy } from "../utils/taskAgeStalenessCopy";
 import { findInReviewStallLogEntry, IN_REVIEW_STALL_LOG_REGEX } from "../utils/findInReviewStallLogEntry";
 
@@ -55,6 +56,7 @@ interface ModelSelection {
 }
 
 const ACTIVE_STATUSES = new Set(["planning", "researching", "executing", "finalizing", "merging", "merging-fix"]);
+const STALE_PAUSED_REVIEW_LOG_REGEX = /^Stale paused review surfaced \[([^\]]+)\]/;
 
 const markdownLinkifyComponents: Components = {
   p: ({ children, ...props }) => <p {...props}>{linkifyReactChildren(children)}</p>,
@@ -551,7 +553,7 @@ export function TaskDetailContent({
   }, [task.id]);
 
   const [logSubview, setLogSubview] = useState<"activity" | "agent-log">("activity");
-  const [highlightStallCode, setHighlightStallCode] = useState<InReviewStallCode | null>(null);
+  const [highlightStallCode, setHighlightStallCode] = useState<string | null>(null);
   const [descriptionExpanded, setDescriptionExpanded] = useState(false);
   const [attachments, setAttachments] = useState<TaskAttachment[]>(task.attachments || []);
   const [uploading, setUploading] = useState(false);
@@ -2442,7 +2444,8 @@ export function TaskDetailContent({
                       {(() => {
                         let highlightedOnce = false;
                         return [...workingTask.log].reverse().map((entry, i) => {
-                          const stallMatch = entry.action.match(IN_REVIEW_STALL_LOG_REGEX);
+                          const stallMatch = entry.action.match(IN_REVIEW_STALL_LOG_REGEX)
+                            ?? entry.action.match(STALE_PAUSED_REVIEW_LOG_REGEX);
                           const isHighlighted = !highlightedOnce
                             && highlightStallCode != null
                             && stallMatch?.[1] === highlightStallCode;
@@ -3198,6 +3201,49 @@ export function TaskDetailContent({
                         >
                           No log entry yet
                         </span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
+              {shouldShowStalePausedReviewBadge(workingTask) && workingTask.stalePausedReview && (() => {
+                const copy = getStalePausedReviewCopy(workingTask.stalePausedReview);
+                const logMatch = [...(workingTask.log ?? [])].reverse().find((entry) => {
+                  const match = entry.action.match(STALE_PAUSED_REVIEW_LOG_REGEX);
+                  return match?.[1] === workingTask.stalePausedReview?.code;
+                });
+                return (
+                  <div
+                    className={`detail-section detail-in-review-stall detail-in-review-stall--${copy.code}`}
+                    data-stall-code={copy.code}
+                  >
+                    <div className="detail-in-review-stall-header">
+                      <span className="card-status-badge card-status-badge--in-review stale-paused-review">
+                        {copy.badgeLabel}
+                      </span>
+                      <span className="detail-in-review-stall-headline">{copy.headline}</span>
+                    </div>
+                    <div className="detail-in-review-stall-reason">{workingTask.stalePausedReview.reason}</div>
+                    <div className="detail-in-review-stall-description">{copy.description}</div>
+                    <div className="detail-in-review-stall-action">{copy.suggestedAction}</div>
+                    <div className="detail-in-review-stall-meta">
+                      <span>Age {formatDurationCompact(workingTask.stalePausedReview.ageMs)}</span>
+                      <span>Threshold {formatDurationCompact(workingTask.stalePausedReview.thresholdMs)}</span>
+                      <span>Observed {formatTimestamp(workingTask.stalePausedReview.observedAt)}</span>
+                      {logMatch ? (
+                        <button
+                          type="button"
+                          className="btn btn-sm detail-in-review-stall-jump"
+                          onClick={() => {
+                            setActiveTab("logs");
+                            setLogSubview("activity");
+                            setHighlightStallCode(workingTask.stalePausedReview?.code ?? null);
+                          }}
+                        >
+                          View activity log
+                        </button>
+                      ) : (
+                        <span className="detail-in-review-stall-no-log">No log entry yet</span>
                       )}
                     </div>
                   </div>

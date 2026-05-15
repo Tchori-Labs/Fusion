@@ -1781,6 +1781,31 @@ describe("ListView Hide Done Tasks", () => {
     expect(screen.queryByText("FN-002")).toBeNull();
   });
 
+  it("filters tasks when stale paused review filter is enabled", () => {
+    const tasks = [
+      createMockTask({
+        id: "FN-001",
+        column: "in-review",
+        paused: true,
+        stalePausedReview: {
+          code: "stale-paused-review",
+          reason: "Task has remained paused in review beyond threshold",
+          observedAt: "2026-05-14T00:00:00.000Z",
+          ageMs: 86_400_000,
+          thresholdMs: 86_400_000,
+        } as any,
+      }),
+      createMockTask({ id: "FN-002", column: "in-review", paused: true, stalePausedReview: undefined }),
+    ];
+
+    renderListView({ tasks });
+
+    fireEvent.click(screen.getByRole("button", { name: /stale paused review/i }));
+
+    expect(screen.getByText("FN-001")).toBeDefined();
+    expect(screen.queryByText("FN-002")).toBeNull();
+  });
+
   it("persists stale-only preference to localStorage", () => {
     renderListView({ tasks: [createMockTask({ id: "FN-001", column: "in-progress" })] });
     fireEvent.click(screen.getByRole("button", { name: /stale only/i }));

@@ -513,6 +513,56 @@ describe("TaskCard", () => {
     expect(screen.queryByText("Stall")).toBeNull();
   });
 
+  it("renders stale paused review badge for paused in-review signal", () => {
+    render(
+      <TaskCard
+        task={makeTask({
+          column: "in-review",
+          paused: true,
+          stalePausedReview: {
+            code: "stale-paused-review",
+            reason: "Task has remained paused in review beyond threshold",
+            observedAt: "2026-05-14T00:00:00.000Z",
+            ageMs: 86_400_000,
+            thresholdMs: 86_400_000,
+          },
+        })}
+        onOpenDetail={noop}
+        addToast={noop}
+      />,
+    );
+
+    expect(screen.getByText("Paused stall")).toBeDefined();
+  });
+
+  it("hides stale paused review badge when signal missing", () => {
+    render(
+      <TaskCard task={makeTask({ column: "in-review", paused: true, stalePausedReview: undefined })} onOpenDetail={noop} addToast={noop} />,
+    );
+    expect(screen.queryByText("Paused stall")).toBeNull();
+  });
+
+  it("hides stale paused review badge when task is not paused", () => {
+    render(
+      <TaskCard
+        task={makeTask({
+          column: "in-review",
+          paused: false,
+          stalePausedReview: {
+            code: "stale-paused-review",
+            reason: "Task has remained paused in review beyond threshold",
+            observedAt: "2026-05-14T00:00:00.000Z",
+            ageMs: 86_400_000,
+            thresholdMs: 86_400_000,
+          },
+        })}
+        onOpenDetail={noop}
+        addToast={noop}
+      />,
+    );
+    expect(screen.queryByText("Paused stall")).toBeNull();
+  });
+
   it("renders warning task-age staleness badge", () => {
     render(
       <TaskCard

@@ -20,6 +20,7 @@ import { useTaskDiffStats } from "../hooks/useTaskDiffStats";
 import { isTaskStuck } from "../utils/taskStuck";
 import { getStalledReviewSignal } from "../utils/taskStalledReview";
 import { getInReviewStallCopy, shouldShowInReviewStallBadge } from "../utils/inReviewStallCopy";
+import { getStalePausedReviewCopy, shouldShowStalePausedReviewBadge } from "../utils/stalePausedReviewCopy";
 import { getTaskAgeStalenessCopy, shouldShowTaskAgeStalenessBadge } from "../utils/taskAgeStalenessCopy";
 import { getUnifiedTaskProgress } from "../utils/taskProgress";
 import { getEndToEndDurationMs, getTimedDurationMs, getWorkflowRuntimeMs, parseTimestampToMs } from "../utils/taskTiming";
@@ -767,6 +768,8 @@ function TaskCardComponent({
   const showStalledReview = Boolean(stalledReview && task.column === "in-review" && !isPaused);
   const hasInReviewStall = shouldShowInReviewStallBadge(task);
   const stallCopy = task.inReviewStall ? getInReviewStallCopy(task.inReviewStall) : undefined;
+  const hasStalePausedReview = shouldShowStalePausedReviewBadge(task);
+  const stalePausedReviewCopy = task.stalePausedReview ? getStalePausedReviewCopy(task.stalePausedReview) : undefined;
   const hasTaskAgeStaleness = shouldShowTaskAgeStalenessBadge(task);
   const taskAgeStalenessCopy = getTaskAgeStalenessCopy(task.ageStaleness);
   const isAwaitingApproval = task.column === "triage" && task.status === "awaiting-approval";
@@ -1474,6 +1477,15 @@ function TaskCardComponent({
             data-stall-code={stallCopy.code}
           >
             {stallCopy.badgeLabel}
+          </span>
+        )}
+        {hasStalePausedReview && stalePausedReviewCopy && (
+          <span
+            className={`card-status-badge card-status-badge--in-review stale-paused-review stale-paused-review--${stalePausedReviewCopy.code}`}
+            title={`${stalePausedReviewCopy.headline} — ${stalePausedReviewCopy.description}`}
+            data-stale-paused-review-code={stalePausedReviewCopy.code}
+          >
+            {stalePausedReviewCopy.badgeLabel}
           </span>
         )}
         {hasTaskAgeStaleness && taskAgeStalenessCopy && (
