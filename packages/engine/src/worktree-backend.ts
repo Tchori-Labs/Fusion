@@ -6,9 +6,15 @@ import { formatError, worktreePoolLog } from "./logger.js";
 
 const execAsync = promisify(exec);
 const GIT_TIMEOUT_MS = 120_000;
+const GIT_REMOVE_TIMEOUT_MS = 60_000;
 const GIT_MAX_BUFFER = 10 * 1024 * 1024;
 
 export type WorktreeBackendKind = "native" | "worktrunk";
+export type WorktrunkOperation = "create" | "remove" | "sync" | "prune";
+export type WorktrunkOperationErrorCode =
+  | "worktrunk_operation_failed"
+  | "worktrunk_binary_missing"
+  | "worktrunk_unsupported_operation";
 
 type LoggerLike = { log?: (message: string) => void; warn?: (message: string) => void };
 
@@ -41,30 +47,27 @@ export interface WorktreePruneInput {
 }
 
 export interface WorktreeBackend {
-  kind: WorktreeBackendKind;
+  readonly kind: WorktreeBackendKind;
   create(input: WorktreeCreateInput): Promise<{ path: string; branch: string }>;
   remove(input: WorktreeRemoveInput): Promise<void>;
-  sync(input: WorktreeSyncInput): Promise<void>;
+  sync(input: WorktreeSyncInput): Promise<{ skipped: boolean }>;
   prune(input: WorktreePruneInput): Promise<void>;
 }
-
-export type WorktrunkOperation = "create" | "remove" | "sync" | "prune";
-export type WorktrunkOperationErrorCode = "worktrunk_operation_failed" | "worktrunk_binary_missing";
 
 export class WorktrunkOperationError extends Error {
   readonly name = "WorktrunkOperationError";
   readonly operation: WorktrunkOperation;
-  readonly stderr: string;
-  readonly exitCode: number | null;
+  readonly stderr?: string;
+  readonly exitCode?: number | null;
   readonly code: WorktrunkOperationErrorCode;
 
   constructor(input: {
     operation: WorktrunkOperation;
-    stderr: string;
-    exitCode: number | null;
+    stderr?: string;
+    exitCode?: number | null;
     code: WorktrunkOperationErrorCode;
   }) {
-    super(`worktrunk ${input.operation} failed: ${input.stderr || "unknown error"}`);
+    super(`worktrunk ${input.operation} failed: ${input.stderr || input.code}`);
     this.operation = input.operation;
     this.stderr = input.stderr;
     this.exitCode = input.exitCode;
@@ -76,11 +79,15 @@ function quoteShellArg(value: string): string {
   return JSON.stringify(value);
 }
 
-async function runCommand(command: string, cwd: string): Promise<{ stdout: string; stderr: string }> {
+async function runCommand(
+  command: string,
+  cwd: string,
+  timeout: number = GIT_TIMEOUT_MS,
+): Promise<{ stdout: string; stderr: string }> {
   const result = await execAsync(command, {
     cwd,
     encoding: "utf-8",
-    timeout: GIT_TIMEOUT_MS,
+    timeout,
     maxBuffer: GIT_MAX_BUFFER,
   });
   return {
@@ -117,7 +124,7 @@ export class NativeWorktreeBackend implements WorktreeBackend {
           await create(candidateBranch);
           return { path: input.worktreePath, branch: candidateBranch };
         } catch {
-          // try next suffix
+          // continue suffix probing
         }
       }
 
@@ -145,13 +152,13 @@ export class NativeWorktreeBackend implements WorktreeBackend {
   }
 
   async remove(input: WorktreeRemoveInput): Promise<void> {
-    await runCommand(`git worktree remove --force ${quoteShellArg(input.worktreePath)}`, input.rootDir);
+    // FN-4678: removal call sites migrate to this backend in follow-up.
+    await runCommand(`git worktree remove --force ${quoteShellArg(input.worktreePath)}`, input.rootDir, GIT_REMOVE_TIMEOUT_MS);
   }
 
-  async sync(input: WorktreeSyncInput): Promise<void> {
-    await runCommand("git fetch --all --prune", input.worktreePath);
-    const target = input.startPoint ?? "main";
-    await runCommand(`git rebase ${quoteShellArg(target)}`, input.worktreePath);
+  async sync(): Promise<{ skipped: boolean }> {
+    // Native backend has no dedicated sync semantic today.
+    return { skipped: true };
   }
 
   async prune(input: WorktreePruneInput): Promise<void> {
@@ -164,7 +171,7 @@ export class WorktrunkWorktreeBackend implements WorktreeBackend {
 
   constructor(private readonly deps: { binaryPath: string | null; logger?: LoggerLike }) {}
 
-  private async runOperation(operation: WorktrunkOperation, cwd: string): Promise<void> {
+  private throwUnsupported(operation: WorktrunkOperation): never {
     if (!this.deps.binaryPath || !this.deps.binaryPath.trim()) {
       throw new WorktrunkOperationError({
         operation,
@@ -174,44 +181,30 @@ export class WorktrunkWorktreeBackend implements WorktreeBackend {
       });
     }
 
-    try {
-      // FN-4623: replace placeholder with real worktrunk subcommand.
-      await execAsync(`${quoteShellArg(this.deps.binaryPath)} --help`, {
-        cwd,
-        encoding: "utf-8",
-        timeout: GIT_TIMEOUT_MS,
-        maxBuffer: GIT_MAX_BUFFER,
-      });
-    } catch (error) {
-      const err = error as { stderr?: string; code?: number };
-      const stderr = typeof err?.stderr === "string" ? err.stderr : String(err ?? "");
-      this.deps.logger?.warn?.(
-        `[worktree-backend] worktrunk ${operation} failed: ${stderr || formatError(error).detail}`,
-      );
-      throw new WorktrunkOperationError({
-        operation,
-        code: "worktrunk_operation_failed",
-        stderr,
-        exitCode: typeof err?.code === "number" ? err.code : null,
-      });
-    }
+    this.deps.logger?.warn?.(`[worktree-backend] worktrunk ${operation} is not implemented in FN-4685`);
+    // TODO(FN-4623): map backend operations to real worktrunk CLI subcommands.
+    throw new WorktrunkOperationError({
+      operation,
+      code: "worktrunk_unsupported_operation",
+      stderr: "worktrunk backend is not implemented yet",
+      exitCode: null,
+    });
   }
 
-  async create(input: WorktreeCreateInput): Promise<{ path: string; branch: string }> {
-    await this.runOperation("create", input.rootDir);
-    return { path: input.worktreePath, branch: input.branch };
+  async create(): Promise<{ path: string; branch: string }> {
+    return this.throwUnsupported("create");
   }
 
-  async remove(input: WorktreeRemoveInput): Promise<void> {
-    await this.runOperation("remove", input.rootDir);
+  async remove(): Promise<void> {
+    return this.throwUnsupported("remove");
   }
 
-  async sync(input: WorktreeSyncInput): Promise<void> {
-    await this.runOperation("sync", input.worktreePath);
+  async sync(): Promise<{ skipped: boolean }> {
+    return this.throwUnsupported("sync");
   }
 
-  async prune(input: WorktreePruneInput): Promise<void> {
-    await this.runOperation("prune", input.rootDir);
+  async prune(): Promise<void> {
+    return this.throwUnsupported("prune");
   }
 }
 
