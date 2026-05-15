@@ -83,6 +83,7 @@ describe("agent-permission-policy", () => {
 
   it("includes key discoverability examples", () => {
     expect(AGENT_PERMISSION_POLICY_CATEGORY_TOOL_EXAMPLES.network_api).toContain("fn_research_run (web/research)");
+    expect(AGENT_PERMISSION_POLICY_CATEGORY_TOOL_EXAMPLES.network_api).toContain("fn_web_fetch");
     expect(AGENT_PERMISSION_POLICY_CATEGORY_TOOL_EXAMPLES.task_agent_mutation).toContain("fn_task_create");
     expect(AGENT_PERMISSION_POLICY_EXEMPT_TOOL_EXAMPLES).toContain("fn_send_message");
   });
