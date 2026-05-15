@@ -1,7 +1,8 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { CustomProviderForm } from "../CustomProviderForm";
+import * as api from "../../api";
 
 describe("CustomProviderForm", () => {
   it("renders base fields", () => {
@@ -56,5 +57,189 @@ describe("CustomProviderForm", () => {
   it("shows external error state", () => {
     render(<CustomProviderForm onSave={vi.fn()} error="Request failed" />);
     expect(screen.getByText("Request failed")).toBeInTheDocument();
+  });
+});
+
+describe("Detect Models", () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  it("shows the Detect Models button for openai-completions API type", () => {
+    render(
+      <CustomProviderForm
+        onSave={vi.fn()}
+        initialConfig={{
+          id: "my-provider",
+          baseUrl: "https://api.example.com/v1",
+          api: "openai-completions",
+          apiKey: "sk-test",
+          models: [{ id: "gpt-4o", name: "GPT 4o" }],
+        }}
+      />
+    );
+    expect(screen.getByRole("button", { name: /detect models/i })).toBeInTheDocument();
+  });
+
+  it("shows the Detect Models button for openai-responses API type", () => {
+    render(
+      <CustomProviderForm
+        onSave={vi.fn()}
+        initialConfig={{
+          id: "my-provider",
+          baseUrl: "https://api.example.com/v1",
+          api: "openai-responses",
+          apiKey: "sk-test",
+          models: [{ id: "gpt-4o", name: "GPT 4o" }],
+        }}
+      />
+    );
+    expect(screen.getByRole("button", { name: /detect models/i })).toBeInTheDocument();
+  });
+
+  it("shows the Detect Models button for anthropic-messages API type", () => {
+    render(
+      <CustomProviderForm
+        onSave={vi.fn()}
+        initialConfig={{
+          id: "my-provider",
+          baseUrl: "https://api.anthropic.com",
+          api: "anthropic-messages",
+          apiKey: "sk-ant-test",
+          models: [{ id: "claude-3", name: "Claude 3" }],
+        }}
+      />
+    );
+    expect(screen.getByRole("button", { name: /detect models/i })).toBeInTheDocument();
+  });
+
+  it("shows the Detect Models button for google-generative-ai API type", () => {
+    render(
+      <CustomProviderForm
+        onSave={vi.fn()}
+        initialConfig={{
+          id: "my-provider",
+          baseUrl: "https://generativelanguage.googleapis.com",
+          api: "google-generative-ai",
+          apiKey: "sk-google",
+          models: [{ id: "gemini-pro", name: "Gemini Pro" }],
+        }}
+      />
+    );
+    expect(screen.getByRole("button", { name: /detect models/i })).toBeInTheDocument();
+  });
+
+  it("calls probeProviderModels and adds discovered models", async () => {
+    const mockProbe = vi.spyOn(api, "probeProviderModels").mockResolvedValue({
+      models: [
+        { id: "gpt-4o", name: "GPT 4o", reasoning: false },
+        { id: "gpt-4", name: "GPT 4", reasoning: false },
+      ],
+      count: 2,
+    });
+
+    render(
+      <CustomProviderForm
+        onSave={vi.fn()}
+        initialConfig={{
+          id: "my-provider",
+          baseUrl: "https://api.example.com/v1",
+          api: "openai-completions",
+          apiKey: "sk-test",
+          models: [{ id: "", name: "", reasoning: false }],
+        }}
+      />
+    );
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /detect models/i }));
+
+    expect(mockProbe).toHaveBeenCalledWith(
+      expect.objectContaining({
+        baseUrl: "https://api.example.com/v1",
+        apiKey: "sk-test",
+        apiType: "openai-compatible",
+      })
+    );
+
+    // Models should be added to the list
+    expect(screen.getByDisplayValue("gpt-4o")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("gpt-4")).toBeInTheDocument();
+  });
+
+  it("deduplicates models when detecting", async () => {
+    const mockProbe = vi.spyOn(api, "probeProviderModels").mockResolvedValue({
+      models: [
+        { id: "gpt-4o", name: "GPT 4o", reasoning: false },
+        { id: "gpt-4", name: "GPT 4", reasoning: false },
+      ],
+      count: 2,
+    });
+
+    render(
+      <CustomProviderForm
+        onSave={vi.fn()}
+        initialConfig={{
+          id: "my-provider",
+          baseUrl: "https://api.example.com/v1",
+          api: "openai-completions",
+          apiKey: "sk-test",
+          models: [
+            { id: "gpt-4o", name: "GPT 4o", reasoning: false },
+            { id: "", name: "", reasoning: false },
+          ],
+        }}
+      />
+    );
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /detect models/i }));
+
+    // gpt-4o should appear only once (existing + deduplicated)
+    const gpt4oInputs = screen.queryAllByDisplayValue("gpt-4o");
+    expect(gpt4oInputs).toHaveLength(1);
+    // gpt-4 should be added
+    expect(screen.getByDisplayValue("gpt-4")).toBeInTheDocument();
+  });
+
+  it("shows error when detection fails", async () => {
+    const mockProbe = vi.spyOn(api, "probeProviderModels").mockRejectedValue(
+      new Error("Provider returned 401 Unauthorized")
+    );
+
+    render(
+      <CustomProviderForm
+        onSave={vi.fn()}
+        initialConfig={{
+          id: "my-provider",
+          baseUrl: "https://api.example.com/v1",
+          api: "openai-completions",
+          apiKey: "sk-invalid",
+          models: [{ id: "", name: "", reasoning: false }],
+        }}
+      />
+    );
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /detect models/i }));
+
+    expect(screen.getByText("Provider returned 401 Unauthorized")).toBeInTheDocument();
+  });
+
+  it("disables button when baseUrl is empty", () => {
+    render(
+      <CustomProviderForm
+        onSave={vi.fn()}
+        initialConfig={{
+          id: "my-provider",
+          baseUrl: "",
+          api: "openai-completions",
+          apiKey: "sk-test",
+          models: [{ id: "", name: "", reasoning: false }],
+        }}
+      />
+    );
+    const detectBtn = screen.getByRole("button", { name: /detect models/i });
+    expect(detectBtn).toBeDisabled();
   });
 });

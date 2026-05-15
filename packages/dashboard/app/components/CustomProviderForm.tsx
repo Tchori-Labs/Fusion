@@ -1,5 +1,7 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
+import { Loader2, Search } from "lucide-react";
 import type { CustomProviderConfig, CustomProviderModelInput } from "../api";
+import { probeProviderModels } from "../api";
 import "./CustomProviderForm.css";
 
 // Reserved built-in IDs (including hidden/deprecated aliases) to prevent custom-provider collisions.
@@ -42,6 +44,8 @@ export function CustomProviderForm({ initialConfig, onSave, onCancel, saving = f
   const [apiKey, setApiKey] = useState(initialConfig?.apiKey ?? "");
   const [models, setModels] = useState<CustomProviderModelInput[]>(initialConfig?.models?.length ? initialConfig.models : [emptyModel()]);
   const [validationError, setValidationError] = useState<string | null>(null);
+  const [detecting, setDetecting] = useState(false);
+  const [detectError, setDetectError] = useState<string | null>(null);
 
   const canRemoveModel = models.length > 1;
 
@@ -54,6 +58,68 @@ export function CustomProviderForm({ initialConfig, onSave, onCancel, saving = f
   function removeModel(index: number) {
     setModels((prev) => (prev.length <= 1 ? prev : prev.filter((_, i) => i !== index)));
   }
+
+  // Detect Models is available for all API types that expose a /models endpoint:
+  // - openai-completions / openai-responses → openai-compatible
+  // - anthropic-messages → anthropic-compatible
+  // - google-generative-ai → google-generative-ai
+  const probeApiType = api === "anthropic-messages"
+    ? "anthropic-compatible"
+    : api === "google-generative-ai"
+      ? "google-generative-ai"
+      : "openai-compatible";
+
+  const handleDetectModels = useCallback(async () => {
+    const trimmedBaseUrl = baseUrl.trim();
+    if (!trimmedBaseUrl) {
+      setDetectError("Base URL is required to detect models.");
+      return;
+    }
+
+    setDetecting(true);
+    setDetectError(null);
+
+    try {
+      const result = await probeProviderModels({
+        baseUrl: trimmedBaseUrl,
+        apiKey: apiKey.trim() || undefined,
+        apiType: probeApiType,
+      });
+
+      if (result.models.length === 0) {
+        setDetectError("No models found. The provider may require an API key.");
+        return;
+      }
+
+      // Merge discovered models, avoiding duplicates by ID
+      const existingIds = new Set(models.map((m) => m.id.trim()));
+      const newModels = result.models
+        .filter((m) => !existingIds.has(m.id.trim()))
+        .map((m) => ({
+          id: m.id,
+          name: m.name || m.id,
+          reasoning: Boolean(m.reasoning),
+          contextWindow: m.contextWindow,
+          maxTokens: m.maxTokens,
+        }));
+
+      if (newModels.length > 0) {
+        // Replace empty default rows with discovered models
+        setModels((prev) => {
+          const nonEmpty = prev.filter((m) => m.id.trim().length > 0);
+          return [...nonEmpty, ...newModels];
+        });
+      } else {
+        setDetectError("All discovered models are already in the list.");
+      }
+    } catch (err) {
+      setDetectError(
+        err instanceof Error ? err.message : "Failed to detect models",
+      );
+    } finally {
+      setDetecting(false);
+    }
+  }, [baseUrl, apiKey, probeApiType, models]);
 
   function validate(): string | null {
     if (!id.trim()) return "Provider ID is required.";
@@ -187,9 +253,29 @@ export function CustomProviderForm({ initialConfig, onSave, onCancel, saving = f
             </div>
           ))}
         </div>
-        <button type="button" className="btn btn-sm" onClick={() => setModels((prev) => [...prev, emptyModel()])} disabled={saving}>
-          + Add model
-        </button>
+        <div className="custom-provider-form__model-actions" style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+          <button type="button" className="btn btn-sm" onClick={() => setModels((prev) => [...prev, emptyModel()])} disabled={saving}>
+            + Add model
+          </button>
+          <button
+            type="button"
+            className="btn btn-sm"
+            onClick={() => void handleDetectModels()}
+            disabled={saving || detecting || !baseUrl.trim()}
+            title="Call the provider's /models endpoint to discover available models"
+          >
+            {detecting ? (
+              <>
+                <Loader2 className="spin" size={14} /> Detecting…
+              </>
+            ) : (
+              <>
+                <Search size={14} /> Detect Models
+              </>
+            )}
+          </button>
+        </div>
+        {detectError ? <div className="form-error" style={{ marginTop: "4px" }}>{detectError}</div> : null}
       </div>
 
       {mergedError ? <div className="form-error">{mergedError}</div> : null}

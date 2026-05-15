@@ -3,16 +3,17 @@ import {
   addCustomProvider,
   deleteCustomProvider,
   fetchCustomProviders,
+  probeProviderModels,
   updateCustomProvider,
   type CustomProvider,
 } from "../api";
-import { AlertCircle, Loader2, Pencil, Plus, Trash2 } from "lucide-react";
+import { AlertCircle, Loader2, Pencil, Plus, Search, Trash2 } from "lucide-react";
 import { OnboardingDisclosure } from "./OnboardingDisclosure";
 import "./CustomProvidersSection.css";
 
 type ProviderApiType = CustomProvider["apiType"];
 
-const API_TYPES: ProviderApiType[] = ["openai-compatible", "anthropic-compatible"];
+const API_TYPES: ProviderApiType[] = ["openai-compatible", "anthropic-compatible", "google-generative-ai"];
 
 type LegacyProvider = {
   id: string;
@@ -74,6 +75,8 @@ export function CustomProvidersSection({ embedded = false, onProviderChange }: C
   const [models, setModels] = useState("");
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [detecting, setDetecting] = useState(false);
+  const [detectError, setDetectError] = useState<string | null>(null);
 
   const loadProviders = useCallback(async () => {
     setLoading(true);
@@ -112,6 +115,8 @@ export function CustomProvidersSection({ embedded = false, onProviderChange }: C
     setApiKey("");
     setModels("");
     setFormError(null);
+    setDetectError(null);
+    setDetecting(false);
     setIsFormOpen(false);
   }, []);
 
@@ -123,6 +128,8 @@ export function CustomProvidersSection({ embedded = false, onProviderChange }: C
     setApiKey("");
     setModels("");
     setFormError(null);
+    setDetectError(null);
+    setDetecting(false);
     setIsFormOpen(true);
   }, []);
 
@@ -134,6 +141,8 @@ export function CustomProvidersSection({ embedded = false, onProviderChange }: C
     setApiKey(provider.apiKey ?? "");
     setModels((provider.models ?? []).map((model) => model.id).join(", "));
     setFormError(null);
+    setDetectError(null);
+    setDetecting(false);
     setIsFormOpen(true);
   }, []);
 
@@ -164,6 +173,48 @@ export function CustomProvidersSection({ embedded = false, onProviderChange }: C
 
     return null;
   }, [apiType, baseUrl, name]);
+
+  // Detect Models is available for all API types that expose a /models endpoint
+  const handleDetectModels = useCallback(async () => {
+    const trimmedBaseUrl = baseUrl.trim();
+    if (!trimmedBaseUrl) {
+      setDetectError("Base URL is required to detect models.");
+      return;
+    }
+
+    setDetecting(true);
+    setDetectError(null);
+
+    try {
+      const result = await probeProviderModels({
+        baseUrl: trimmedBaseUrl,
+        apiKey: apiKey.trim() || undefined,
+        apiType,
+      });
+
+      if (result.models.length > 0) {
+        setModels((prev) => {
+          const existingIds = new Set(
+            prev.split(",").map((s) => s.trim()).filter(Boolean),
+          );
+          const newIds = result.models
+            .map((m) => m.id.trim())
+            .filter((id) => !existingIds.has(id));
+          if (newIds.length === 0) return prev;
+          const existing = prev.trim();
+          return newIds.join(", ") + (existing ? ", " + existing : "");
+        });
+      } else {
+        setDetectError("No models found. The provider may require an API key.");
+      }
+    } catch (err) {
+      setDetectError(
+        err instanceof Error ? err.message : "Failed to detect models",
+      );
+    } finally {
+      setDetecting(false);
+    }
+  }, [baseUrl, apiKey, apiType]);
 
   const handleSave = useCallback(async () => {
     const validationError = validateForm();
@@ -327,6 +378,27 @@ export function CustomProvidersSection({ embedded = false, onProviderChange }: C
                       />
                     </div>
 
+                    <div style={{ display: "flex", gap: "8px", alignItems: "center", marginTop: "4px" }}>
+                      <button
+                        type="button"
+                        className="btn btn-sm"
+                        onClick={() => void handleDetectModels()}
+                        disabled={saving || detecting || !baseUrl.trim()}
+                        title="Auto-detect models from the provider's /models endpoint"
+                      >
+                        {detecting ? (
+                          <>
+                            <Loader2 className="spin" size={14} /> Detecting…
+                          </>
+                        ) : (
+                          <>
+                            <Search size={14} /> Detect Models
+                          </>
+                        )}
+                      </button>
+                    </div>
+                    {detectError ? <div className="custom-provider-form-error">{detectError}</div> : null}
+
                     {formError ? <div className="custom-provider-form-error">{formError}</div> : null}
 
                     <div className="custom-provider-form-actions">
@@ -420,6 +492,27 @@ export function CustomProvidersSection({ embedded = false, onProviderChange }: C
               disabled={saving}
             />
           </div>
+
+          <div style={{ display: "flex", gap: "8px", alignItems: "center", marginTop: "4px" }}>
+            <button
+              type="button"
+              className="btn btn-sm"
+              onClick={() => void handleDetectModels()}
+              disabled={saving || detecting || !baseUrl.trim()}
+              title="Auto-detect models from the provider's /models endpoint"
+            >
+              {detecting ? (
+                <>
+                  <Loader2 className="spin" size={14} /> Detecting…
+                </>
+              ) : (
+                <>
+                  <Search size={14} /> Detect Models
+                </>
+              )}
+            </button>
+          </div>
+          {detectError ? <div className="custom-provider-form-error">{detectError}</div> : null}
 
           {formError ? <div className="custom-provider-form-error">{formError}</div> : null}
 

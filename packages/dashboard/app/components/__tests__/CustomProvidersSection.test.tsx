@@ -20,6 +20,7 @@ vi.mock("lucide-react", () => ({
   Loader2: ({ className }: { className?: string }) => <svg data-testid="icon-loader" className={className} />,
   Pencil: () => <svg data-testid="icon-pencil" />,
   Plus: () => <svg data-testid="icon-plus" />,
+  Search: () => <svg data-testid="icon-search" />,
   Trash2: () => <svg data-testid="icon-trash" />,
 }));
 
