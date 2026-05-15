@@ -43,3 +43,40 @@ If you see `bwrap: setting up uid map: Permission denied`, unprivileged user nam
 ### Related settings
 
 See `docs/settings-reference.md` for full sandbox settings schema and precedence.
+
+## macOS `sandbox-exec` backend
+
+Fusion supports an opt-in macOS sandbox backend using Apple's `sandbox-exec` (Seatbelt).
+
+- Enable with `sandbox.backend = "sandbox-exec"`
+- Default remains `native`
+- If unavailable, behavior follows `failureMode` (`fail-hard` or `fallback-native`)
+
+### Install / availability
+
+`/usr/bin/sandbox-exec` ships with macOS. If detection fails, install Xcode Command Line Tools and retry.
+
+### Policy mapping
+
+`policyToSbplProfile()` translates policy into an SBPL profile:
+
+- Base deny policy with additive allows
+- Writable paths: worktree, pnpm store, `/private/tmp`, and user temp (`/private/var/folders/.../T/`)
+- Read paths: repo root (when needed), Node binary directory, and curated system/runtime paths (`/usr`, `/bin`, `/sbin`, `/System`, `/Library`, resolver/cert/hosts/services/timezone paths)
+- Network: `allowNetwork=true` enables outbound and local bind, `allowNetwork=false` denies network
+
+### Port 4040 guard
+
+Port 4040 is always blocked in the emitted SBPL profile (`(deny network-bind (local ip "*:4040"))`), and policy rejects explicit 4040 allowance unless `allowPort4040Override=true` is set.
+
+### `.fusion/` write guard
+
+Writable paths under `.fusion/` (including `.fusion/fusion.db` and `.fusion/tasks/**`) are rejected by policy validation.
+
+### Troubleshooting
+
+If commands fail with `sandbox-exec: ...: Operation not permitted`, expand `allowedReadPaths`/`allowedWritePaths` for required inputs/outputs.
+
+### Deprecation note
+
+Apple marks `sandbox-exec` as deprecated. It remains functional for many workflows, but `failureMode = "fallback-native"` is the recommended hedge when host support varies.
