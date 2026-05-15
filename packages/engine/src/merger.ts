@@ -7073,6 +7073,7 @@ export async function aiMergeTask(
     let filesChanged: number | undefined;
     let insertions: number | undefined;
     let deletions: number | undefined;
+    let landedFiles: string[] | undefined;
 
     try {
       const statsCommand = selectedPostMergeAuditStrategy === "rebase" && rebaseMergeBaseSha
@@ -7192,9 +7193,32 @@ export async function aiMergeTask(
     const recordedInsertions = mergeWasEmpty ? 0 : insertions;
     const recordedDeletions = mergeWasEmpty ? 0 : deletions;
 
+    if (!isEmptyCommit && !mergeWasEmpty && recordedSha) {
+      try {
+        const landedFilesCommand = selectedPostMergeAuditStrategy === "rebase" && rebaseMergeBaseSha
+          ? `git diff --name-only ${quoteArg(`${rebaseMergeBaseSha}..${recordedSha}`)}`
+          : `git show --name-only --format= ${quoteArg(recordedSha)}`;
+        const { stdout: landedFilesOutput } = await execAsync(landedFilesCommand, {
+          cwd: rootDir,
+          encoding: "utf-8",
+          maxBuffer: 2 * 1024 * 1024,
+        });
+        const parsedLandedFiles = landedFilesOutput
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter(Boolean);
+        if (parsedLandedFiles.length > 0) {
+          landedFiles = Array.from(new Set(parsedLandedFiles));
+        }
+      } catch {
+        // non-fatal
+      }
+    }
+
     const mergeDetails: MergeDetails = {
       commitSha: recordedSha,
       rebaseBaseSha: selectedPostMergeAuditStrategy === "rebase" && !mergeWasEmpty ? rebaseMergeBaseSha : undefined,
+      landedFiles,
       filesChanged: recordedFilesChanged,
       insertions: recordedInsertions,
       deletions: recordedDeletions,
@@ -7209,7 +7233,10 @@ export async function aiMergeTask(
       autoResolvedCount: result.autoResolvedCount,
     };
 
-    await store.updateTask(taskId, { mergeDetails });
+    await store.updateTask(taskId, {
+      mergeDetails,
+      modifiedFiles: landedFiles && landedFiles.length > 0 ? landedFiles : undefined,
+    });
     if (recordedSha) {
       const currentTask = await store.getTask(taskId);
       if (currentTask?.lineageId) {

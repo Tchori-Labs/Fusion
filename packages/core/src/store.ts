@@ -5297,6 +5297,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     let filesChanged: number | undefined;
     let insertions: number | undefined;
     let deletions: number | undefined;
+    let landedFiles: string[] | undefined;
 
     const headResult = await this.runGitCommand("git rev-parse HEAD");
     if (headResult.exitCode === 0) {
@@ -5321,8 +5322,22 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       deletions = undefined;
     }
 
+    if (commitSha) {
+      const landedFilesResult = await this.runGitCommand(`git show --name-only --format= "${commitSha}"`);
+      if (landedFilesResult.exitCode === 0) {
+        const parsedLandedFiles = landedFilesResult.stdout
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter(Boolean);
+        if (parsedLandedFiles.length > 0) {
+          landedFiles = Array.from(new Set(parsedLandedFiles));
+        }
+      }
+    }
+
     return {
       commitSha,
+      landedFiles,
       filesChanged,
       insertions,
       deletions,
@@ -5447,6 +5462,9 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         result.merged = true;
         const mergeDetails = await this.collectMergeDetails(id, branch, task, mergeCommitMessage, mergeTarget);
         task.mergeDetails = mergeDetails;
+        if (mergeDetails.landedFiles && mergeDetails.landedFiles.length > 0) {
+          task.modifiedFiles = mergeDetails.landedFiles;
+        }
         Object.assign(result, mergeDetails);
       } else {
         // Squash conflict — reset and report
