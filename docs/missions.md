@@ -122,6 +122,14 @@ When missions are created through the interview planning workflow, Fusion automa
 - **Verification fields**: Milestone and slice verification criteria from the interview are stored in dedicated `verification` fields rather than concatenated into descriptions
 - **Partial plans handled**: Auto-generation is robust to partial plans (missing slices/features or empty criteria) without throwing errors
 
+### Milestone Text Field Semantics
+
+Milestones now carry three complementary free-text fields:
+
+- `description` — narrative scope of the phase
+- `verification` — informal "how to confirm" notes
+- `acceptanceCriteria` — structured acceptance/assertion text (the canonical pass/fail bar), parallel to feature-level `acceptanceCriteria`
+
 ## Slice Activation and Progress
 
 Slices represent staged execution windows.

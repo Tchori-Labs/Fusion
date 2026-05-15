@@ -2610,7 +2610,7 @@ export default function kbExtension(pi: ExtensionAPI) {
     name: "fn_milestone_update",
     label: "fn: Update Milestone",
     description:
-      "Update an existing milestone's title, description, or acceptance criteria. " +
+      "Update an existing milestone's title, description, or acceptance criteria (the structured pass/fail bar, distinct from verification's free-form how-to-confirm notes). " +
       "Partial patches leave untouched fields intact.",
     promptSnippet: "Update an existing mission milestone",
     promptGuidelines: [

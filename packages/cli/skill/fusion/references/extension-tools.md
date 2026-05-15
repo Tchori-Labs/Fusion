@@ -261,7 +261,7 @@ Update an existing feature's title, description, or acceptance criteria. Partial
 
 ### fn_milestone_update
 
-Update an existing milestone's title, description, or acceptance criteria. Partial patches leave untouched fields intact.
+Update an existing milestone's title, description, or acceptance criteria (the structured pass/fail bar, distinct from verification's free-form how-to-confirm notes). Partial patches leave untouched fields intact.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
