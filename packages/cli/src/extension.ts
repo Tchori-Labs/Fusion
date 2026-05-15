@@ -2604,6 +2604,83 @@ export default function kbExtension(pi: ExtensionAPI) {
     },
   });
 
+  // ── fn_milestone_update ───────────────────────────────────────────
+
+  pi.registerTool({
+    name: "fn_milestone_update",
+    label: "fn: Update Milestone",
+    description:
+      "Update an existing milestone's title, description, or acceptance criteria. " +
+      "Partial patches leave untouched fields intact.",
+    promptSnippet: "Update an existing mission milestone",
+    promptGuidelines: [
+      "Use to revise milestone details without re-creating it",
+      "Mission linkage and ordering are preserved",
+      "Provide only the fields you want to change",
+    ],
+    parameters: Type.Object({
+      id: Type.String({ description: "Milestone ID to update (e.g., MS-001)" }),
+      title: Type.Optional(Type.String({ description: "Updated milestone title" })),
+      description: Type.Optional(Type.String({ description: "Updated milestone description" })),
+      acceptanceCriteria: Type.Optional(
+        Type.String({ description: "Updated acceptance criteria for completing the milestone" })
+      ),
+    }),
+
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const store = await getStore(ctx.cwd);
+      const missionStore = store.getMissionStore();
+
+      const existingMilestone = missionStore.getMilestone(params.id);
+      if (!existingMilestone) {
+        return {
+          content: [{ type: "text", text: `Milestone ${params.id} not found` }],
+          isError: true,
+          details: { error: "Milestone not found" },
+        };
+      }
+
+      const updates: { title?: string; description?: string; acceptanceCriteria?: string } = {};
+
+      if ("title" in params) {
+        updates.title = params.title?.trim();
+      }
+      if ("description" in params) {
+        updates.description = params.description?.trim();
+      }
+      if ("acceptanceCriteria" in params) {
+        updates.acceptanceCriteria = params.acceptanceCriteria?.trim();
+      }
+
+      if (Object.keys(updates).length === 0) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: "No fields to update (provide at least one of: title, description, acceptanceCriteria)",
+            },
+          ],
+          isError: true,
+          details: { error: "No fields to update" },
+        };
+      }
+
+      const milestone = missionStore.updateMilestone(params.id, updates);
+
+      return {
+        content: [{ type: "text", text: `Updated ${milestone.id}: "${milestone.title}"` }],
+        details: {
+          milestoneId: milestone.id,
+          missionId: milestone.missionId,
+          title: milestone.title,
+          description: milestone.description,
+          acceptanceCriteria: milestone.acceptanceCriteria,
+          status: milestone.status,
+        },
+      };
+    },
+  });
+
   // ── fn_agent_stop ─────────────────────────────────────────────────
 
   pi.registerTool({

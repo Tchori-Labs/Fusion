@@ -203,6 +203,7 @@ describe.skipIf(!SHOULD_RUN_LEGACY_EXTENSION_INTEGRATION)("fn pi extension (lega
         "fn_slice_activate",
         "fn_feature_link_task",
         "fn_feature_update",
+        "fn_milestone_update",
         "fn_agent_stop",
         "fn_agent_start",
         "fn_agent_create",
@@ -1657,6 +1658,138 @@ describe.skipIf(!SHOULD_RUN_LEGACY_EXTENSION_INTEGRATION)("fn pi extension (lega
 
       expect(result.isError).toBe(true);
       expect(result.content[0].text).toContain("No fields to update");
+    });
+  });
+
+  describe("fn_milestone_update", () => {
+    it("patches title, description, and acceptanceCriteria", async () => {
+      const missionTool = api.tools.get("fn_mission_create")!;
+      const milestoneTool = api.tools.get("fn_milestone_add")!;
+      const updateTool = api.tools.get("fn_milestone_update")!;
+
+      const mission = await missionTool.execute("m1", { title: "Mission" }, undefined, undefined, makeCtx(tmpDir));
+      const milestone = await milestoneTool.execute(
+        "ms1",
+        { missionId: mission.details.missionId, title: "Milestone", description: "Original" },
+        undefined,
+        undefined,
+        makeCtx(tmpDir),
+      );
+
+      const result = await updateTool.execute(
+        "mu1",
+        { id: milestone.details.milestoneId, title: "Updated Milestone", description: "Updated description", acceptanceCriteria: "AC new" },
+        undefined,
+        undefined,
+        makeCtx(tmpDir),
+      );
+
+      expect(result.content[0].text).toContain("Updated");
+      expect(result.details.title).toBe("Updated Milestone");
+      expect(result.details.description).toBe("Updated description");
+      expect(result.details.acceptanceCriteria).toBe("AC new");
+    });
+
+    it("partial patch updates only acceptanceCriteria", async () => {
+      const missionTool = api.tools.get("fn_mission_create")!;
+      const milestoneTool = api.tools.get("fn_milestone_add")!;
+      const updateTool = api.tools.get("fn_milestone_update")!;
+
+      const mission = await missionTool.execute("m1", { title: "Mission" }, undefined, undefined, makeCtx(tmpDir));
+      const milestone = await milestoneTool.execute(
+        "ms1",
+        { missionId: mission.details.missionId, title: "Milestone", description: "Original" },
+        undefined,
+        undefined,
+        makeCtx(tmpDir),
+      );
+
+      await updateTool.execute(
+        "mu2",
+        { id: milestone.details.milestoneId, acceptanceCriteria: "Only AC" },
+        undefined,
+        undefined,
+        makeCtx(tmpDir),
+      );
+
+      const store = new TaskStore(tmpDir);
+      await store.init();
+      const persisted = store.getMissionStore().getMilestone(milestone.details.milestoneId);
+
+      expect(persisted?.title).toBe("Milestone");
+      expect(persisted?.description).toBe("Original");
+      expect(persisted?.acceptanceCriteria).toBe("Only AC");
+    });
+
+    it("returns error when milestone not found", async () => {
+      const updateTool = api.tools.get("fn_milestone_update")!;
+      const result = await updateTool.execute(
+        "mu3",
+        { id: "MS-999", title: "Updated" },
+        undefined,
+        undefined,
+        makeCtx(tmpDir),
+      );
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("Milestone MS-999 not found");
+    });
+
+    it("returns error when no fields supplied", async () => {
+      const missionTool = api.tools.get("fn_mission_create")!;
+      const milestoneTool = api.tools.get("fn_milestone_add")!;
+      const updateTool = api.tools.get("fn_milestone_update")!;
+
+      const mission = await missionTool.execute("m1", { title: "Mission" }, undefined, undefined, makeCtx(tmpDir));
+      const milestone = await milestoneTool.execute(
+        "ms1",
+        { missionId: mission.details.missionId, title: "Milestone" },
+        undefined,
+        undefined,
+        makeCtx(tmpDir),
+      );
+
+      const result = await updateTool.execute(
+        "mu4",
+        { id: milestone.details.milestoneId },
+        undefined,
+        undefined,
+        makeCtx(tmpDir),
+      );
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("No fields to update");
+    });
+
+    it("trims incoming field values", async () => {
+      const missionTool = api.tools.get("fn_mission_create")!;
+      const milestoneTool = api.tools.get("fn_milestone_add")!;
+      const updateTool = api.tools.get("fn_milestone_update")!;
+
+      const mission = await missionTool.execute("m1", { title: "Mission" }, undefined, undefined, makeCtx(tmpDir));
+      const milestone = await milestoneTool.execute(
+        "ms1",
+        { missionId: mission.details.missionId, title: "Milestone" },
+        undefined,
+        undefined,
+        makeCtx(tmpDir),
+      );
+
+      await updateTool.execute(
+        "mu5",
+        { id: milestone.details.milestoneId, title: "  Trimmed  ", description: "  Desc  ", acceptanceCriteria: "  AC  " },
+        undefined,
+        undefined,
+        makeCtx(tmpDir),
+      );
+
+      const store = new TaskStore(tmpDir);
+      await store.init();
+      const persisted = store.getMissionStore().getMilestone(milestone.details.milestoneId);
+
+      expect(persisted?.title).toBe("Trimmed");
+      expect(persisted?.description).toBe("Desc");
+      expect(persisted?.acceptanceCriteria).toBe("AC");
     });
   });
 
