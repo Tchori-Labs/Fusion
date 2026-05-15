@@ -6,6 +6,7 @@ interface GraphEdgesProps {
   positions: Map<string, GraphPosition>;
   nodeWidth?: number;
   nodeHeight?: number;
+  nodeHeights?: ReadonlyMap<string, number>;
   highlightedEdgeIds?: Set<string>;
 }
 
@@ -17,6 +18,7 @@ export function GraphEdges({
   positions,
   nodeWidth = DEFAULT_NODE_WIDTH,
   nodeHeight = DEFAULT_NODE_HEIGHT,
+  nodeHeights,
   highlightedEdgeIds,
 }: GraphEdgesProps) {
   const hasHighlights = Boolean(highlightedEdgeIds && highlightedEdgeIds.size > 0);
@@ -44,7 +46,7 @@ export function GraphEdges({
         const edgeId = `${edge.source}->${edge.target}`;
         const isActiveHighlight = hasHighlights && (highlightedEdgeIds?.has(edgeId) ?? false);
         const x1 = source.x + nodeWidth / 2;
-        const y1 = source.y + nodeHeight;
+        const y1 = source.y + (nodeHeights?.get(edge.source) ?? nodeHeight);
         const x2 = target.x + nodeWidth / 2;
         const y2 = target.y;
         const controlY = y1 + (y2 - y1) / 2;

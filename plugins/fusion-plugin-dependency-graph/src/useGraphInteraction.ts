@@ -172,11 +172,13 @@ export function useGraphInteraction() {
     const nodeWidth = layoutOptions?.nodeWidth ?? 280;
     const nodeHeight = layoutOptions?.nodeHeight ?? 100;
 
-    const entries = Array.from(positions.values());
-    const minX = Math.min(...entries.map((p) => p.x));
-    const minY = Math.min(...entries.map((p) => p.y));
-    const maxX = Math.max(...entries.map((p) => p.x + nodeWidth));
-    const maxY = Math.max(...entries.map((p) => p.y + nodeHeight));
+    const entries = Array.from(positions.entries());
+    const minX = Math.min(...entries.map(([, p]) => p.x));
+    const minY = Math.min(...entries.map(([, p]) => p.y));
+    const maxX = Math.max(...entries.map(([, p]) => p.x + nodeWidth));
+    const maxY = Math.max(
+      ...entries.map(([taskId, p]) => p.y + (layoutOptions?.measuredHeights?.get(taskId) ?? nodeHeight)),
+    );
 
     const graphWidth = Math.max(1, maxX - minX);
     const graphHeight = Math.max(1, maxY - minY);

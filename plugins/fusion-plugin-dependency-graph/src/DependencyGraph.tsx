@@ -227,9 +227,13 @@ export function DependencyGraph({
     const viewport = viewportRef.current;
     if (!viewport) return;
 
-    fitToGraph(positions, viewport.clientWidth, viewport.clientHeight, { nodeWidth: NODE_WIDTH, nodeHeight: NODE_HEIGHT });
+    fitToGraph(positions, viewport.clientWidth, viewport.clientHeight, {
+      nodeWidth: NODE_WIDTH,
+      nodeHeight: NODE_HEIGHT,
+      measuredHeights,
+    });
     initialFitDoneRef.current = true;
-  }, [filteredTasks.length, fitToGraph, positions, savedPositions]);
+  }, [filteredTasks.length, fitToGraph, measuredHeights, positions, savedPositions]);
 
   const bounds = useMemo(() => {
     const values = Array.from(positions.values());
@@ -240,7 +244,7 @@ export function DependencyGraph({
     const minX = Math.min(...values.map((pos) => pos.x));
     const minY = Math.min(...values.map((pos) => pos.y));
     const maxX = Math.max(...values.map((pos) => pos.x + NODE_WIDTH));
-    const maxY = Math.max(...values.map((pos) => pos.y + NODE_HEIGHT));
+    const maxY = Math.max(...Array.from(positions.entries()).map(([taskId, pos]) => pos.y + (measuredHeights.get(taskId) ?? NODE_HEIGHT)));
 
     return {
       minX,
@@ -250,7 +254,7 @@ export function DependencyGraph({
       width: Math.max(0, maxX - minX),
       height: Math.max(0, maxY - minY),
     };
-  }, [positions]);
+  }, [measuredHeights, positions]);
 
   const normalizedPositions = useMemo(() => {
     if (positions.size === 0) return positions;
@@ -333,7 +337,11 @@ export function DependencyGraph({
         onKeyDown={(event) => {
           const viewport = viewportRef.current;
           if (!viewport) return;
-          handleKeyDown(event, viewport.clientWidth, viewport.clientHeight, normalizedPositions, { nodeWidth: NODE_WIDTH, nodeHeight: NODE_HEIGHT });
+          handleKeyDown(event, viewport.clientWidth, viewport.clientHeight, normalizedPositions, {
+            nodeWidth: NODE_WIDTH,
+            nodeHeight: NODE_HEIGHT,
+            measuredHeights,
+          });
         }}
         tabIndex={0}
         onClick={() => {
@@ -350,6 +358,7 @@ export function DependencyGraph({
               positions={normalizedPositions}
               nodeWidth={NODE_WIDTH}
               nodeHeight={NODE_HEIGHT}
+              nodeHeights={measuredHeights}
               highlightedEdgeIds={
                 highlightedTaskIds.size > 0
                   ? new Set(
@@ -441,7 +450,11 @@ export function DependencyGraph({
           for (const [taskId, position] of freshLayout.entries()) {
             normalizedFreshLayout.set(taskId, { x: position.x - minX, y: position.y - minY });
           }
-          fitToGraph(normalizedFreshLayout, viewport.clientWidth, viewport.clientHeight, { nodeWidth: NODE_WIDTH, nodeHeight: NODE_HEIGHT });
+          fitToGraph(normalizedFreshLayout, viewport.clientWidth, viewport.clientHeight, {
+            nodeWidth: NODE_WIDTH,
+            nodeHeight: NODE_HEIGHT,
+            measuredHeights,
+          });
         }}
         onResetView={() => {
           handleResetLayout();
