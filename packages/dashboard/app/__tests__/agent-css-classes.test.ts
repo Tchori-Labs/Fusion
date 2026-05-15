@@ -89,6 +89,7 @@ describe("Agent CSS classes", () => {
     expect(orgChartSection).toContain("--org-chart-sibling-gap: var(--space-xl)");
     expect(orgChartSection).toContain("--org-chart-children-offset: calc(var(--space-lg) + var(--space-sm))");
     expect(orgChartSection).toContain("--org-chart-connector-color: color-mix(in srgb, var(--text-muted) 60%, transparent)");
+    expect(orgChartSection).toMatch(/\.agent-org-chart-canvas\s*\{[^}]*--org-chart-connector-color:/);
     expect(orgChartSection).toContain("min-height: var(--org-chart-node-width)");
     expect(orgChartSection).toContain("touch-action: none");
     expect(orgChartSection).toContain("overflow: hidden");
