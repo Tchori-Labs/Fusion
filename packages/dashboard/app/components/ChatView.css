@@ -392,6 +392,85 @@
   max-width: 100%;
 }
 
+.chat-room-switcher-menu {
+  position: relative;
+  min-width: 0;
+}
+
+.chat-room-switcher-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  padding: 0;
+  font: inherit;
+  line-height: normal;
+  cursor: pointer;
+}
+
+.chat-room-switcher-trigger:hover {
+  color: var(--text);
+  background: var(--card-hover);
+}
+
+.chat-room-switcher-trigger:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring-strong);
+}
+
+.chat-room-switcher-trigger > svg {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.chat-room-switcher-dropdown {
+  position: absolute;
+  top: calc(100% + var(--space-xs));
+  left: 0;
+  min-width: calc(var(--space-xl) * 6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  padding: var(--space-xs);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+  z-index: 4;
+  max-height: calc(var(--space-xl) * 10);
+  overflow-y: auto;
+}
+
+.chat-room-switcher-option {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  padding: var(--space-sm) var(--space-md);
+  line-height: normal;
+}
+
+.chat-room-switcher-option:hover {
+  background: var(--card-hover);
+}
+
+.chat-room-switcher-option:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring-strong);
+}
+
+.chat-room-switcher-option--active {
+  background: color-mix(in srgb, var(--todo) 12%, transparent);
+}
+
 .chat-mobile-session-trigger {
   width: 100%;
   max-width: 100%;
@@ -1632,6 +1711,13 @@
 
   .chat-mobile-session-menu {
     width: 100%;
+  }
+
+  .chat-room-switcher-dropdown {
+    left: 0;
+    right: auto;
+    min-width: calc(var(--space-xl) * 5);
+    max-width: min(calc(var(--space-xl) * 10), calc(100vw - var(--space-2xl)));
   }
 
   .chat-thread-header-identity .chat-thread-header-title,

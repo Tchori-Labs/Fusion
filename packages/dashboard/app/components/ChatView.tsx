@@ -932,6 +932,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
   const [isUserScrolling, setIsUserScrolling] = useState(false);
   const [copyFeedbackByMessageId, setCopyFeedbackByMessageId] = useState<Record<string, CopyFeedbackState>>({});
   const [mobileSessionMenuOpen, setMobileSessionMenuOpen] = useState(false);
+  const [roomSwitcherOpen, setRoomSwitcherOpen] = useState(false);
   const { pushNav } = useNavigationHistoryContext();
 
   // File mention state and hook
@@ -957,6 +958,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const mobileSessionMenuRef = useRef<HTMLDivElement>(null);
+  const roomSwitcherRef = useRef<HTMLDivElement>(null);
   const isUserScrollingRef = useRef(false);
   const lastAnchoredThreadStateRef = useRef<{ threadId: string; loaded: boolean; hasMessages: boolean } | null>(null);
   const previousChatScopeRef = useRef<"direct" | "rooms" | null>(null);
@@ -2142,10 +2144,40 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
   }, [mobileSessionMenuOpen]);
 
   useEffect(() => {
+    if (!roomSwitcherOpen) {
+      return;
+    }
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (roomSwitcherRef.current?.contains(event.target as Node)) {
+        return;
+      }
+      setRoomSwitcherOpen(false);
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setRoomSwitcherOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [roomSwitcherOpen]);
+
+  useEffect(() => {
     if (!isMobile || chatScope !== "direct" || sidebarVisible) {
       setMobileSessionMenuOpen(false);
     }
   }, [isMobile, chatScope, sidebarVisible]);
+
+  useEffect(() => {
+    setRoomSwitcherOpen(false);
+  }, [rooms.activeRoom?.id]);
 
   const setCopyFeedback = useCallback((messageId: string, feedback: CopyFeedbackState) => {
     const existingTimeout = copyFeedbackTimeoutsRef.current.get(messageId);
@@ -2518,7 +2550,42 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
                     <ChevronLeft size={16} />
                   </button>
                 )}
-                <div className="chat-thread-header-title">#{rooms.activeRoom.name}</div>
+                <div className="chat-room-switcher-menu" ref={roomSwitcherRef}>
+                  <button
+                    type="button"
+                    className="chat-room-switcher-trigger"
+                    data-testid="chat-room-switcher-trigger"
+                    aria-haspopup="menu"
+                    aria-expanded={roomSwitcherOpen}
+                    onClick={() => setRoomSwitcherOpen((open) => !open)}
+                  >
+                    <span className="chat-thread-header-title">#{rooms.activeRoom.name}</span>
+                    <ChevronDown size={16} aria-hidden="true" />
+                  </button>
+                  {roomSwitcherOpen && (
+                    <div
+                      role="menu"
+                      className="chat-room-switcher-dropdown"
+                      data-testid="chat-room-switcher-dropdown"
+                    >
+                      {rooms.rooms.map((room) => (
+                        <button
+                          key={room.id}
+                          type="button"
+                          role="menuitem"
+                          className={`chat-room-switcher-option${room.id === rooms.activeRoom?.id ? " chat-room-switcher-option--active" : ""}`}
+                          data-testid={`chat-room-switcher-option-${room.id}`}
+                          onClick={() => {
+                            rooms.selectRoom(room.id);
+                            setRoomSwitcherOpen(false);
+                          }}
+                        >
+                          #{room.name}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
                 <div className="chat-room-thread-members">
                   {rooms.activeRoomMembers.map((member) => (
                     <AgentAvatar

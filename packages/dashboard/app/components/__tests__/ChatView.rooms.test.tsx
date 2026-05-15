@@ -691,6 +691,70 @@ describe("ChatView — rooms (FN-3805..FN-3811 contract)", () => {
     }
   });
 
+  describe("room switcher dropdown", () => {
+    it("renders trigger with active room and menu semantics", () => {
+      setup({}, { activeRoom: roomA, rooms: [roomA] });
+
+      render(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
+
+      const trigger = screen.getByTestId("chat-room-switcher-trigger");
+      expect(trigger).toHaveTextContent("#Room A");
+      expect(trigger).toHaveAttribute("aria-haspopup", "menu");
+    });
+
+    it("opens dropdown, lists rooms, and marks active option", async () => {
+      const roomB = { ...roomA, id: "room-b", name: "Room B", slug: "room-b" };
+      setup({}, { activeRoom: roomA, rooms: [roomA, roomB] });
+
+      render(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
+
+      await userEvent.click(screen.getByTestId("chat-room-switcher-trigger"));
+
+      const dropdown = screen.getByTestId("chat-room-switcher-dropdown");
+      expect(dropdown).toBeInTheDocument();
+      expect(screen.getByTestId("chat-room-switcher-option-room-a")).toHaveClass("chat-room-switcher-option--active");
+      expect(screen.getByTestId("chat-room-switcher-option-room-b")).toBeInTheDocument();
+    });
+
+    it("selects a different room and closes dropdown", async () => {
+      const roomB = { ...roomA, id: "room-b", name: "Room B", slug: "room-b" };
+      const selectRoom = vi.fn();
+      setup({}, { activeRoom: roomA, rooms: [roomA, roomB], selectRoom });
+
+      render(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
+
+      await userEvent.click(screen.getByTestId("chat-room-switcher-trigger"));
+      await userEvent.click(screen.getByTestId("chat-room-switcher-option-room-b"));
+
+      expect(selectRoom).toHaveBeenCalledWith("room-b");
+      expect(screen.queryByTestId("chat-room-switcher-dropdown")).not.toBeInTheDocument();
+    });
+
+    it("closes dropdown on Escape", async () => {
+      const roomB = { ...roomA, id: "room-b", name: "Room B", slug: "room-b" };
+      setup({}, { activeRoom: roomA, rooms: [roomA, roomB] });
+
+      render(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
+
+      await userEvent.click(screen.getByTestId("chat-room-switcher-trigger"));
+      fireEvent.keyDown(document, { key: "Escape" });
+
+      expect(screen.queryByTestId("chat-room-switcher-dropdown")).not.toBeInTheDocument();
+    });
+
+    it("closes dropdown on outside click", async () => {
+      const roomB = { ...roomA, id: "room-b", name: "Room B", slug: "room-b" };
+      setup({}, { activeRoom: roomA, rooms: [roomA, roomB] });
+
+      render(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
+
+      await userEvent.click(screen.getByTestId("chat-room-switcher-trigger"));
+      fireEvent.mouseDown(screen.getByText("Room hello"));
+
+      expect(screen.queryByTestId("chat-room-switcher-dropdown")).not.toBeInTheDocument();
+    });
+  });
+
   it("keeps direct mode behavior unchanged when rooms are enabled", async () => {
     localStorage.setItem("fusion:chat-scope", "direct");
     const addToast = vi.fn();
