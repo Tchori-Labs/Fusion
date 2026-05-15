@@ -1523,7 +1523,7 @@ export function Header({
         {!isCompact && onOpenFiles && (
           <button
             className={`btn-icon${filesOpen ? " btn-icon--active" : ""}`}
-            onClick={onOpenFiles}
+            onClick={() => onOpenFiles()}
             title="Browse files"
             data-testid="files-toggle-btn"
           >

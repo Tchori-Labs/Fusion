@@ -113,6 +113,16 @@ describe("Header", () => {
     expect(onOpenSettings).toHaveBeenCalled();
   });
 
+  it("calls onOpenFiles with zero arguments from desktop files button", () => {
+    const onOpenFiles = vi.fn();
+    renderHeader({ onOpenFiles }, "desktop");
+
+    fireEvent.click(screen.getByTestId("files-toggle-btn"));
+
+    expect(onOpenFiles).toHaveBeenCalledTimes(1);
+    expect(onOpenFiles.mock.calls[0]).toEqual([]);
+  });
+
   it("calls onOpenGitHubImport when import button is clicked", () => {
     const onOpenGitHubImport = vi.fn();
     renderHeader({ onOpenGitHubImport });
