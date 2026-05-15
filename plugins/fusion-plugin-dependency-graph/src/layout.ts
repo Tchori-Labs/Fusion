@@ -13,7 +13,7 @@ export interface LayoutOptions {
   measuredHeights?: ReadonlyMap<string, number>;
 }
 
-const DEFAULT_LAYOUT_OPTIONS: Required<LayoutOptions> = {
+const DEFAULT_LAYOUT_OPTIONS: Omit<Required<LayoutOptions>, "measuredHeights"> = {
   nodeWidth: 280,
   nodeHeight: 100,
   horizontalGap: 40,
