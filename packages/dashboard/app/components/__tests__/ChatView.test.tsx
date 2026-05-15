@@ -3942,6 +3942,60 @@ describe("ChatView mobile behavior", () => {
     }
   });
 
+  it("shows jump-to-latest in rooms after scrolling away from bottom and jumps back on click", async () => {
+    const restoreMatchMedia = mockDesktopViewport();
+    localStorage.setItem("fusion:chat-scope", "rooms");
+    try {
+      setupMockChat({ activeSession: null, messages: [] });
+      setupMockRooms({
+        activeRoom: createRoomFixture("general"),
+        rooms: [createRoomFixture("general")],
+        messages: [
+          {
+            id: "room-msg-001",
+            roomId: "room-general",
+            role: "assistant",
+            content: "One",
+            thinkingOutput: null,
+            metadata: null,
+            senderAgentId: null,
+            mentions: [],
+            createdAt: "2026-05-12T00:00:00.000Z",
+          },
+        ],
+      });
+
+      render(<ChatView projectId="proj-123" addToast={vi.fn()} experimentalFeatures={{ chatRooms: true }} />);
+
+      const messagesContainer = document.querySelector(".chat-messages") as HTMLDivElement;
+      let scrollTopValue = 0;
+      Object.defineProperty(messagesContainer, "scrollHeight", { configurable: true, get: () => 1000 });
+      Object.defineProperty(messagesContainer, "clientHeight", { configurable: true, get: () => 200 });
+      Object.defineProperty(messagesContainer, "scrollTop", {
+        configurable: true,
+        get: () => scrollTopValue,
+        set: (value: number) => {
+          scrollTopValue = value;
+        },
+      });
+
+      expect(screen.queryByTestId("chat-jump-to-latest")).not.toBeInTheDocument();
+
+      scrollTopValue = 600;
+      fireEvent.scroll(messagesContainer);
+      expect(screen.getByTestId("chat-jump-to-latest")).toBeInTheDocument();
+
+      await userEvent.click(screen.getByTestId("chat-jump-to-latest"));
+      expect(scrollTopValue).toBe(1000);
+      await waitFor(() => {
+        expect(screen.queryByTestId("chat-jump-to-latest")).not.toBeInTheDocument();
+      });
+    } finally {
+      localStorage.removeItem("fusion:chat-scope");
+      restoreMatchMedia.mockRestore();
+    }
+  });
+
   it("FN-3884: snaps to bottom when opening a session with loaded messages", async () => {
     const restoreMatchMedia = mockDesktopViewport();
     try {
