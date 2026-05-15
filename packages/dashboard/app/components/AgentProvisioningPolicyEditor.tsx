@@ -1,0 +1,113 @@
+import "./AgentProvisioningPolicyEditor.css";
+import {
+  AGENT_PROVISIONING_APPROVAL_MODES,
+  type AgentProvisioningApprovalMode,
+  type ProjectSettings,
+} from "@fusion/core";
+
+interface Props {
+  value: ProjectSettings["agentProvisioning"] | undefined;
+  onChange(next: ProjectSettings["agentProvisioning"] | undefined): void;
+  disabled?: boolean;
+}
+
+const MODE_LABELS: Record<AgentProvisioningApprovalMode, { label: string; description: string }> = {
+  always: {
+    label: "Always require approval",
+    description: "All fn_agent_create/fn_agent_delete requests require approval unless caller is trusted.",
+  },
+  "trusted-only": {
+    label: "Trusted-only",
+    description: "Trusted roles/agent IDs bypass approval; other callers require approval.",
+  },
+  never: {
+    label: "Never require approval",
+    description: "Allow provisioning without approval for non-privileged callers.",
+  },
+};
+
+function tokenizeList(value: string): string[] {
+  return Array.from(
+    new Set(
+      value
+        .split(/[\n,]+/)
+        .map((entry) => entry.trim())
+        .filter((entry) => entry.length > 0),
+    ),
+  );
+}
+
+export function AgentProvisioningPolicyEditor({ value, onChange, disabled = false }: Props) {
+  const approvalMode = value?.approvalMode ?? "trusted-only";
+  const alwaysApproveDelete = value?.alwaysApproveDelete ?? true;
+
+  const update = (patch: Partial<NonNullable<ProjectSettings["agentProvisioning"]>>) => {
+    onChange({ ...(value ?? {}), ...patch });
+  };
+
+  return (
+    <div className="agent-provisioning-policy-editor card">
+      <div className="form-group">
+        <label htmlFor="agent-provisioning-approval-mode">Approval mode</label>
+        <select
+          id="agent-provisioning-approval-mode"
+          className="select"
+          value={approvalMode}
+          onChange={(event) => update({ approvalMode: event.target.value as AgentProvisioningApprovalMode })}
+          disabled={disabled}
+        >
+          {AGENT_PROVISIONING_APPROVAL_MODES.map((mode) => (
+            <option key={mode} value={mode}>
+              {MODE_LABELS[mode].label}
+            </option>
+          ))}
+        </select>
+        <small className="agent-provisioning-policy-help">{MODE_LABELS[approvalMode].description}</small>
+      </div>
+
+      <div className="form-group">
+        <label className="checkbox-label" htmlFor="agent-provisioning-always-approve-delete">
+          <input
+            id="agent-provisioning-always-approve-delete"
+            type="checkbox"
+            checked={alwaysApproveDelete}
+            onChange={(event) => update({ alwaysApproveDelete: event.target.checked })}
+            disabled={disabled}
+          />
+          Always require approval for fn_agent_delete
+        </label>
+      </div>
+
+      <div className="form-group">
+        <label htmlFor="agent-provisioning-trusted-roles">Trusted roles</label>
+        <textarea
+          id="agent-provisioning-trusted-roles"
+          className="input agent-provisioning-policy-textarea"
+          value={(value?.trustedRoles ?? []).join(", ")}
+          onChange={(event) => update({ trustedRoles: tokenizeList(event.target.value) })}
+          disabled={disabled}
+          placeholder="reviewer, ceo"
+          rows={2}
+        />
+      </div>
+
+      <div className="form-group">
+        <label htmlFor="agent-provisioning-trusted-agent-ids">Trusted agent IDs</label>
+        <textarea
+          id="agent-provisioning-trusted-agent-ids"
+          className="input agent-provisioning-policy-textarea"
+          value={(value?.trustedAgentIds ?? []).join(", ")}
+          onChange={(event) => update({ trustedAgentIds: tokenizeList(event.target.value) })}
+          disabled={disabled}
+          placeholder="agent-abc123"
+          rows={2}
+        />
+      </div>
+
+      <p className="agent-provisioning-policy-help">
+        These settings govern durable provisioning tools only: <code>fn_agent_create</code> and <code>fn_agent_delete</code>.
+        Ephemeral <code>fn_spawn_agent</code> requests stay under the task/agent mutation approval gate (FN-3973).
+      </p>
+    </div>
+  );
+}
