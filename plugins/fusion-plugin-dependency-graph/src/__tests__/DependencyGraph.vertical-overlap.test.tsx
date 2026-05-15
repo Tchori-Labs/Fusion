@@ -61,9 +61,9 @@ describe("DependencyGraph FN-4549 vertical overlap", () => {
       />,
     );
 
-    setNodeHeight("A", 320);
+    setNodeHeight("A", 180);
     setNodeHeight("B", 240);
-    setNodeHeight("C", 180);
+    setNodeHeight("C", 320);
     triggerResize();
 
     await waitFor(() => {
@@ -76,10 +76,10 @@ describe("DependencyGraph FN-4549 vertical overlap", () => {
       const topC = Number.parseFloat(nodeC.style.top);
 
       expect(Number.isFinite(topA)).toBe(true);
-      expect(topB).toBeGreaterThan(topA);
-      expect(topC).toBeGreaterThan(topB);
-      expect(topB).toBeGreaterThanOrEqual(topA + 320);
-      expect(topC).toBeGreaterThanOrEqual(topB + 240);
+      expect(topB).toBeGreaterThan(topC);
+      expect(topA).toBeGreaterThan(topB);
+      expect(topB).toBeGreaterThanOrEqual(topC + 320);
+      expect(topA).toBeGreaterThanOrEqual(topB + 240);
     });
   });
 });

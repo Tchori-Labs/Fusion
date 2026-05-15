@@ -81,15 +81,15 @@ describe("computeAutoLayout", () => {
           orientation: "vertical",
           nodeHeight,
           verticalGap,
-          measuredHeights: new Map([["A", 300]]),
+          measuredHeights: new Map([["C", 300]]),
         },
       );
 
       const aY = positions.get("A")?.y ?? 0;
       const bY = positions.get("B")?.y ?? 0;
       const cY = positions.get("C")?.y ?? 0;
-      expect(bY).toBeGreaterThanOrEqual(aY + 300 + verticalGap);
-      expect(cY).toBeGreaterThanOrEqual(bY + nodeHeight + verticalGap);
+      expect(bY).toBeGreaterThanOrEqual(cY + 300 + verticalGap);
+      expect(aY).toBeGreaterThanOrEqual(bY + nodeHeight + verticalGap);
     });
 
     it("uses per-layer max measured heights for wide layers", () => {

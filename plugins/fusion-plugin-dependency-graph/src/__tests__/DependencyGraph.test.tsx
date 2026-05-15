@@ -15,7 +15,7 @@ const onPointerUp = vi.fn();
 const setGraphBounds = vi.fn();
 const clearSavedPositions = vi.fn();
 let mockSavedPositions: NodePositions | null = null;
-let resizeObserverCallback: ResizeObserverCallback | null = null;
+let resizeObserverCallbacks: ResizeObserverCallback[] = [];
 
 vi.mock("@fusion/dashboard/app/components/TaskCard", () => ({
   TaskCard: ({ task, onOpenDetail, disableDrag }: { task: Task; onOpenDetail: (task: Task) => void; disableDrag?: boolean }) => (
@@ -58,7 +58,9 @@ function setViewportSize(width: number, height: number): void {
   if (!viewport) throw new Error("missing viewport");
   Object.defineProperty(viewport, "clientWidth", { value: width, configurable: true });
   Object.defineProperty(viewport, "clientHeight", { value: height, configurable: true });
-  resizeObserverCallback?.([{ contentRect: { width, height } } as ResizeObserverEntry], {} as ResizeObserver);
+  resizeObserverCallbacks.forEach((callback) => {
+    callback([{ contentRect: { width, height } } as ResizeObserverEntry], {} as ResizeObserver);
+  });
 }
 
 function readNodePosition(taskId: string): { left: number; top: number } {
@@ -82,13 +84,13 @@ describe("DependencyGraph", () => {
     setGraphBounds.mockReset();
     clearSavedPositions.mockReset();
     mockSavedPositions = null;
-    resizeObserverCallback = null;
+    resizeObserverCallbacks = [];
 
     vi.stubGlobal(
       "ResizeObserver",
       class {
         constructor(callback: ResizeObserverCallback) {
-          resizeObserverCallback = callback;
+          resizeObserverCallbacks.push(callback);
         }
 
         observe() {}
