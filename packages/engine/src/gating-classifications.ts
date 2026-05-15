@@ -64,9 +64,13 @@ export const NETWORK_API_TOOLS: ReadonlySet<string> = new Set([
   "fn_research_run",
   "fn_research_cancel",
   "fn_research_retry",
+  "fn_web_fetch", // FN-4603: outbound HTTP fetch should be network-classified.
 ]);
 
-export const ACTION_GATE_NETWORK_API_TOOLS: ReadonlySet<string> = new Set(["fn_research_run"]);
+export const ACTION_GATE_NETWORK_API_TOOLS: ReadonlySet<string> = new Set([
+  "fn_research_run",
+  "fn_web_fetch", // FN-4603: honor network_api approval policy for web fetches.
+]);
 
 export const READONLY_FN_TOOLS: ReadonlySet<string> = new Set([
   "fn_task_list",
