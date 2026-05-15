@@ -1404,7 +1404,10 @@ function TaskCardComponent({
         );
       }
 
-      const modifiedCount = task.modifiedFiles?.length;
+      const landedFallbackCount = task.mergeDetails?.landedFiles?.length;
+      const modifiedCount = landedFallbackCount && landedFallbackCount > 0
+        ? landedFallbackCount
+        : task.modifiedFiles?.length;
       if (!diffLoading && (modifiedCount ?? 0) > 0) {
         return (
           <button
@@ -1415,7 +1418,7 @@ function TaskCardComponent({
             title="Captured from worktree during execution; may not match the landed diff. Open the task to view the recorded merge."
           >
             <Folder size={12} />
-            <span>{modifiedCount} {modifiedCount === 1 ? "file" : "files"} touched during execution</span>
+            <span>{modifiedCount} {modifiedCount === 1 ? "file" : "files"} {landedFallbackCount ? "in merged commit" : "touched during execution"}</span>
           </button>
         );
       }

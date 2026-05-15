@@ -2444,6 +2444,31 @@ describe("TaskCard", () => {
     expect(filesChangedButton).toBeNull();
   });
 
+  it("prefers landedFiles fallback label for done tasks when lineage stats are unavailable", () => {
+    const onOpenDetailWithTab = vi.fn();
+    useTaskDiffStatsMock.mockReturnValue({ stats: null, loading: false });
+
+    render(
+      <TaskCard
+        task={makeTask({
+          column: "done",
+          mergeDetails: { landedFiles: ["a.ts", "b.ts"] },
+          modifiedFiles: ["a.ts", "b.ts", "c.ts", "d.ts", "e.ts", "f.ts"],
+        })}
+        onOpenDetail={noop}
+        addToast={noop}
+        onOpenDetailWithTab={onOpenDetailWithTab}
+      />,
+    );
+
+    const landedButton = screen.getByRole("button", { name: "2 files in merged commit" });
+    expect(landedButton).toBeDefined();
+
+    fireEvent.click(landedButton);
+    expect(onOpenDetailWithTab).toHaveBeenCalledTimes(1);
+    expect(onOpenDetailWithTab.mock.calls[0]?.[1]).toBe("changes");
+  });
+
   it("shows execution-touched fallback label for done tasks when lineage stats are unavailable", () => {
     const onOpenDetailWithTab = vi.fn();
     useTaskDiffStatsMock.mockReturnValue({ stats: null, loading: false });

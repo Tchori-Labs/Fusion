@@ -570,7 +570,31 @@ describe("TaskChangesTab — regression: non-done tasks and done-without-commitS
     expect(mockFetchTaskDiff).toHaveBeenCalledWith("FN-001", undefined, undefined);
   });
 
-  it("done task without commitSha falls back to modifiedFiles when available", async () => {
+  it("done task without commitSha prefers landedFiles over stale modifiedFiles", async () => {
+    mockFetchTaskDiff.mockResolvedValue({ files: [], stats: { filesChanged: 0, additions: 0, deletions: 0 } });
+
+    render(
+      <TaskChangesTab
+        taskId="FN-001"
+        worktree={undefined}
+        column="done"
+        mergeDetails={{ filesChanged: 0, insertions: 0, deletions: 0, landedFiles: ["packages/cli/src/commands/__tests__/settings.test.ts"] }}
+        modifiedFiles={["packages/cli/src/commands/__tests__/settings.test.ts", "packages/cli/src/commands/__tests__/task.test.ts"]}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("1 file in the merged commit.")).toBeTruthy();
+    });
+    expect(screen.getByText("These are files captured from the merged commit metadata. The lineage-backed diff is unavailable for this task.")).toBeTruthy();
+    expect(screen.getByText("packages/cli/src/commands/__tests__/settings.test.ts")).toBeTruthy();
+    expect(screen.queryByText("packages/cli/src/commands/__tests__/task.test.ts")).toBeNull();
+    expect(screen.queryByText(/Error loading changes:/)).toBeNull();
+    expect(screen.queryByText("Files Changed (2)")).toBeNull();
+    expect(mockFetchTaskDiff).toHaveBeenCalledWith("FN-001", undefined, undefined);
+  });
+
+  it("done task without commitSha falls back to modifiedFiles when landedFiles unavailable", async () => {
     mockFetchTaskDiff.mockResolvedValue({ files: [], stats: { filesChanged: 0, additions: 0, deletions: 0 } });
 
     render(

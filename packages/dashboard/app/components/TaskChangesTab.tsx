@@ -49,9 +49,10 @@ function getStatusLabel(status: "added" | "modified" | "deleted" | "unknown"): s
 }
 
 function renderModifiedFilesFallback(
-  modifiedFiles: string[],
+  fileList: string[],
   isDone: boolean,
   mergeDetails?: MergeDetails,
+  source: "landed" | "execution" = "execution",
 ) {
   return (
     <div className="detail-section task-changes-tab">
@@ -72,16 +73,18 @@ function renderModifiedFilesFallback(
       )}
       <div className="task-changes-state task-changes-state--empty">
         <FileCode size={24} />
-        <p>{modifiedFiles.length} file{modifiedFiles.length === 1 ? "" : "s"} modified during execution.</p>
+        <p>{fileList.length} file{fileList.length === 1 ? "" : "s"} {source === "landed" ? "in the merged commit" : "modified during execution"}.</p>
         <span className="task-changes-state-hint">
           {isDone
             // FN-4647: done-task fallback must explicitly describe executor-captured scope.
-            ? "These are files captured from the worktree during execution. They may differ from the files that actually landed on main. The lineage-backed diff is unavailable for this task."
+            ? source === "landed"
+              ? "These are files captured from the merged commit metadata. The lineage-backed diff is unavailable for this task."
+              : "These are files captured from the worktree during execution. They may differ from the files that actually landed on main. The lineage-backed diff is unavailable for this task."
             : "The live worktree diff is empty. Showing the last file paths captured during execution — patches unavailable."}
         </span>
       </div>
       <div className="changes-file-list task-changes-file-list--compact">
-        {modifiedFiles.map((path) => (
+        {fileList.map((path) => (
           <div key={path} className="changes-file-item">
             <div className="changes-file-header changes-file-header--static">
               <span
@@ -302,8 +305,11 @@ export function TaskChangesTab({ taskId, worktree, projectId, column, mergeDetai
 
   if (files.length === 0) {
     if (isDone && !isDoneWithCommit) {
-      if (modifiedFiles && modifiedFiles.length > 0) {
-        return renderModifiedFilesFallback(modifiedFiles, true, mergeDetails);
+      const doneFallbackFiles = mergeDetails?.landedFiles && mergeDetails.landedFiles.length > 0
+        ? mergeDetails.landedFiles
+        : modifiedFiles;
+      if (doneFallbackFiles && doneFallbackFiles.length > 0) {
+        return renderModifiedFilesFallback(doneFallbackFiles, true, mergeDetails, mergeDetails?.landedFiles?.length ? "landed" : "execution");
       }
 
       const summaryFiles = mergeDetails?.filesChanged;
@@ -326,7 +332,7 @@ export function TaskChangesTab({ taskId, worktree, projectId, column, mergeDetai
       );
     }
 
-    if (modifiedFiles && modifiedFiles.length > 0) {
+    if (!isDone && modifiedFiles && modifiedFiles.length > 0) {
       return renderModifiedFilesFallback(modifiedFiles, isDone, mergeDetails);
     }
 
