@@ -64,6 +64,7 @@ import { ensureBundledDependencyGraphPluginInstalled, ensureBundledPluginInstall
 import { registerCustomProviders, reregisterCustomProviders } from "./custom-provider-registry.js";
 import { syncStartupModels } from "./startup-model-sync.js";
 import { DashboardTUI, DashboardLogSink, isTTYAvailable, type SystemInfo, type GitStatus, type GitCommit, type GitCommitDetail, type GitBranch, type GitWorktree, type FileEntry, type FileReadResult, type TaskStep as TUITaskStep, type TaskLogEntry as TUITaskLogEntry, type TaskDetailData, type TaskEvent } from "./dashboard-tui/index.js";
+import { DASHBOARD_STARTUP_STATUS, runTuiStartupPrelude } from "./dashboard-startup-chain.js";
 
 // Re-export for backward compatibility with tests
 export { promptForPort };
@@ -816,10 +817,8 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
         await store.getGlobalSettingsStore().updateSettings(patch);
       },
     });
-    // Start the TUI
-    await tui.start();
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    tui.setLoadingStatus("Initializing task store…");
+    // Start the TUI and yield once so Ink can paint before init work.
+    await runTuiStartupPrelude(tui);
 
     // Wire the TUI into the log sink so all console output routes through TUI
     logSink.setTUI(tui);
@@ -835,7 +834,7 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
 
   store = new TaskStore(cwd);
   await store.init();
-  if (tui) tui.setLoadingStatus("Starting file watcher…");
+  if (tui) tui.setLoadingStatus(DASHBOARD_STARTUP_STATUS.startingFileWatcher);
   await store.watch();
 
   // Set up database health check for diagnostics
@@ -1034,10 +1033,10 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
   // and are properly managed throughout their lifecycle (creation, state
   // transitions, termination). Passed to TaskExecutor for agent spawning.
   //
-  if (tui) tui.setLoadingStatus("Initializing agent store…");
+  if (tui) tui.setLoadingStatus(DASHBOARD_STARTUP_STATUS.initializingAgentStore);
   agentStore = new AgentStore({ rootDir: store.getFusionDir() });
   await agentStore.init();
-  if (tui) tui.setLoadingStatus("Starting agents…");
+  if (tui) tui.setLoadingStatus(DASHBOARD_STARTUP_STATUS.startingAgents);
 
   // ── Reactive TUI Updates ─────────────────────────────────────────────
   //
@@ -1468,7 +1467,7 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
   let localNodeIdForMesh: string | undefined;
 
   // Start the AI engine (unless in dev mode)
-  if (tui) tui.setLoadingStatus("Starting engine…");
+  if (tui) tui.setLoadingStatus(DASHBOARD_STARTUP_STATUS.startingEngine);
   if (!opts.dev) {
     // ── ProjectEngineManager: uniform engine lifecycle for all projects ──
     //

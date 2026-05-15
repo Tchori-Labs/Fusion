@@ -210,6 +210,16 @@ describe("DashboardApp smoke", () => {
     unmount();
   });
 
+  it("renders ready duration when startup has completed", () => {
+    const controller = newController();
+    const { lastFrame, unmount, rerender } = render(renderDashboardAppNode(controller));
+    controller.setSystemInfo({ ...makeSystemInfo(), startupDurationMs: 1234 });
+    controller.setReady(true);
+    rerender(renderDashboardAppNode(controller));
+    expect(lastFrame() ?? "").toContain("Ready in 1.2s");
+    unmount();
+  });
+
   it("shows interactive empty-state when no data source is wired", () => {
     const controller = newController();
     controller.setSystemInfo(makeSystemInfo());
