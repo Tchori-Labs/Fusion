@@ -717,7 +717,7 @@ describe("schema migration", () => {
       { id: "WS-001", mode: "prompt", gateMode: "advisory" },
       { id: "WS-002", mode: "script", gateMode: "advisory" },
     ]);
-    expect(db.getSchemaVersion()).toBe(79);
+    expect(db.getSchemaVersion()).toBe(80);
 
     db.close();
   });
@@ -767,7 +767,7 @@ describe("schema migration", () => {
       reviewerContextRetryCount: 0,
       reviewerFallbackRetryCount: 0,
     });
-    expect(db.getSchemaVersion()).toBe(79);
+    expect(db.getSchemaVersion()).toBe(80);
 
     db.close();
   });
@@ -831,7 +831,7 @@ describe("schema migration", () => {
       { id: "WS-002", mode: "script", enabled: 1, gateMode: "advisory" },
       { id: "WS-003", mode: "prompt", enabled: 0, gateMode: "advisory" },
     ]);
-    expect(db.getSchemaVersion()).toBe(79);
+    expect(db.getSchemaVersion()).toBe(80);
 
     db.close();
   });
