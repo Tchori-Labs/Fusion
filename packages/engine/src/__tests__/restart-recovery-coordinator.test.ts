@@ -5,6 +5,8 @@ import {
   extractMissingWorktreePathFromSessionStartFailure,
   isMissingWorktreeSessionStartFailure,
   isRecoverableMissingWorktreeReviewFailure,
+  isRecoverableMissingWorktreeReviewFailureNoProgress,
+  isRecoverableMissingWorktreeReviewFailureWithProgress,
 } from "../restart-recovery-coordinator.js";
 
 function createTask(overrides: Partial<Task>): Task {
@@ -44,7 +46,7 @@ describe("RestartRecoveryCoordinator", () => {
     expect(extractMissingWorktreePathFromSessionStartFailure("Refusing to start coding agent in incomplete worktree:")).toBeNull();
   });
 
-  it("identifies recoverable in-review missing-worktree failures with step progress", () => {
+  it("identifies recoverable in-review missing-worktree failures with and without step progress", () => {
     const baseTask = createTask({
       column: "in-review",
       paused: false,
@@ -56,9 +58,13 @@ describe("RestartRecoveryCoordinator", () => {
     expect(isRecoverableMissingWorktreeReviewFailure({ ...baseTask, error: "Refusing to start coding agent in incomplete worktree: /tmp/wt" })).toBe(true);
     expect(isRecoverableMissingWorktreeReviewFailure({ ...baseTask, error: "Refusing to start coding agent in unregistered git worktree: /tmp/wt" })).toBe(true);
 
-    expect(isRecoverableMissingWorktreeReviewFailure({ ...baseTask, paused: true, error: "Refusing to start coding agent in missing worktree: /tmp/wt" })).toBe(false);
-    expect(isRecoverableMissingWorktreeReviewFailure({ ...baseTask, error: "other" })).toBe(false);
-    expect(isRecoverableMissingWorktreeReviewFailure({ ...baseTask, steps: [{ id: "s2", title: "y", status: "pending" }] as any, error: "Refusing to start coding agent in missing worktree: /tmp/wt" })).toBe(false);
+    expect(isRecoverableMissingWorktreeReviewFailureWithProgress({ ...baseTask, paused: true, error: "Refusing to start coding agent in missing worktree: /tmp/wt" })).toBe(false);
+    expect(isRecoverableMissingWorktreeReviewFailureWithProgress({ ...baseTask, error: "other" })).toBe(false);
+    expect(isRecoverableMissingWorktreeReviewFailureWithProgress({ ...baseTask, steps: [{ id: "s2", title: "y", status: "pending" }] as any, error: "Refusing to start coding agent in missing worktree: /tmp/wt" })).toBe(false);
+
+    const noProgressTask = { ...baseTask, steps: [{ id: "s2", title: "y", status: "pending" }] as any, error: "Refusing to start coding agent in missing worktree: /tmp/wt" };
+    expect(isRecoverableMissingWorktreeReviewFailureNoProgress(noProgressTask)).toBe(true);
+    expect(isRecoverableMissingWorktreeReviewFailure(noProgressTask)).toBe(true);
   });
 
   it("requeues interrupted failed tasks with no progress, then resumes remaining orphans", async () => {

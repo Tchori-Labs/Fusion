@@ -119,7 +119,7 @@ export function probeFts5(db: DatabaseSync): boolean {
 
 // ── Schema Definition ────────────────────────────────────────────────
 
-const SCHEMA_VERSION = 81;
+const SCHEMA_VERSION = 82;
 
 function normalizeTaskComments(
   steeringComments: SteeringComment[] | undefined,
@@ -213,6 +213,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   workflowStepRetries INTEGER,
   recoveryRetryCount INTEGER,
   taskDoneRetryCount INTEGER DEFAULT 0,
+  worktreeSessionRetryCount INTEGER DEFAULT 0,
   mergeConflictBounceCount INTEGER DEFAULT 0,
   mergeAuditBounceCount INTEGER DEFAULT 0,
   nextRecoveryAt TEXT,
@@ -3314,6 +3315,12 @@ export class Database {
             )
             .run();
         }
+      });
+    }
+
+    if (version < 82) {
+      this.applyMigration(82, () => {
+        this.addColumnIfMissing("tasks", "worktreeSessionRetryCount", "INTEGER DEFAULT 0");
       });
     }
 

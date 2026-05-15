@@ -26,6 +26,7 @@ describe("computeRetrySummary", () => {
       stuckKill: 0,
       recovery: 0,
       taskDone: 0,
+      worktreeSession: 0,
       workflowStep: 0,
       verification: 0,
       postReviewFix: 0,
@@ -42,27 +43,29 @@ describe("computeRetrySummary", () => {
       stuckKillCount: 1,
       recoveryRetryCount: 2,
       taskDoneRetryCount: 3,
-      workflowStepRetries: 4,
+      worktreeSessionRetryCount: 4,
+      workflowStepRetries: 5,
       verificationFailureCount: 5,
       postReviewFixCount: 6,
       mergeConflictBounceCount: 7,
       branchConflictRecoveryCount: 8,
       reviewerContextRetryCount: 9,
-      reviewerFallbackRetryCount: 10,
+      reviewerFallbackRetryCount: 11,
     }));
 
     expect(summary).toEqual({
       stuckKill: 1,
       recovery: 2,
       taskDone: 3,
-      workflowStep: 4,
+      worktreeSession: 4,
+      workflowStep: 5,
       verification: 5,
       postReviewFix: 6,
       mergeConflict: 7,
       branchConflict: 8,
       reviewerContext: 9,
-      reviewerFallback: 10,
-      total: 55,
+      reviewerFallback: 11,
+      total: 61,
     });
   });
 

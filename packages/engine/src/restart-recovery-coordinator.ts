@@ -52,12 +52,25 @@ export function extractMissingWorktreePathFromSessionStartFailure(error: unknown
   return pathPart.length > 0 ? pathPart : null;
 }
 
-export function isRecoverableMissingWorktreeReviewFailure(task: Task): boolean {
+export function isRecoverableMissingWorktreeReviewFailureWithProgress(task: Task): boolean {
   return task.column === "in-review"
     && !task.paused
     && task.status === "failed"
     && isMissingWorktreeSessionStartFailure(task.error)
     && hasStepProgress(task);
+}
+
+export function isRecoverableMissingWorktreeReviewFailureNoProgress(task: Task): boolean {
+  return task.column === "in-review"
+    && !task.paused
+    && task.status === "failed"
+    && isMissingWorktreeSessionStartFailure(task.error)
+    && !hasStepProgress(task);
+}
+
+export function isRecoverableMissingWorktreeReviewFailure(task: Task): boolean {
+  return isRecoverableMissingWorktreeReviewFailureWithProgress(task)
+    || isRecoverableMissingWorktreeReviewFailureNoProgress(task);
 }
 
 export class RestartRecoveryCoordinator {
