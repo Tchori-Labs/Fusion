@@ -2754,7 +2754,7 @@ export class TaskExecutor {
         livenessFailure = `unresolvable_worktree:${error instanceof Error ? error.message : String(error)}`;
       }
 
-      if (!livenessFailure && !isInsideWorktreesDir(this.rootDir, worktreePath)) {
+      if (!livenessFailure && !isInsideWorktreesDir(this.rootDir, worktreePath, settings)) {
         livenessFailure = "outside_worktrees_dir";
       }
 
