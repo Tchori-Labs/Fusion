@@ -2710,6 +2710,14 @@ describe("SettingsModal", () => {
       expect(screen.getByLabelText("Chat Rooms")).toBeInTheDocument();
     });
 
+    it("shows sandbox in the Experimental Features list", async () => {
+      renderModal();
+
+      await openExperimentalFeaturesSection();
+
+      expect(screen.getByLabelText("Sandbox (command isolation)")).toBeInTheDocument();
+    });
+
     it("shows agentOnboarding in the Experimental Features list", async () => {
       renderModal();
 
