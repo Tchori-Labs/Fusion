@@ -3300,6 +3300,44 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     });
   }
 
+  async getTaskColumns(ids: string[]): Promise<Map<string, Column>> {
+    if (ids.length === 0) {
+      return new Map();
+    }
+
+    const uniqueIds = [...new Set(ids)];
+    const placeholders = uniqueIds.map(() => "?").join(",");
+    const rows = this.db
+      .prepare(`SELECT id, "column" FROM tasks WHERE id IN (${placeholders})`)
+      .all(...uniqueIds) as Array<{ id: string; column: Column }>;
+
+    const activeById = new Map<string, Column>();
+    for (const row of rows) {
+      activeById.set(row.id, row.column);
+    }
+
+    const missingIds: string[] = [];
+    for (const id of uniqueIds) {
+      if (!activeById.has(id)) {
+        missingIds.push(id);
+      }
+    }
+
+    const archivedSet = missingIds.length > 0 ? this.archiveDb.filterArchived(missingIds) : new Set<string>();
+
+    const result = new Map<string, Column>();
+    for (const id of uniqueIds) {
+      const activeColumn = activeById.get(id);
+      if (activeColumn !== undefined) {
+        result.set(id, activeColumn);
+      } else if (archivedSet.has(id)) {
+        result.set(id, "archived");
+      }
+    }
+
+    return result;
+  }
+
   async listTasks(options?: {
     limit?: number;
     offset?: number;
