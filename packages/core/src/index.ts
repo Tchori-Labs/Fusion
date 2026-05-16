@@ -32,6 +32,11 @@ export {
   getCreateAiSessionFactory,
   type AgentMessage,
 } from "./ai-engine-loader.js";
+export {
+  setTaskCreatedHook,
+  getTaskCreatedHook,
+  type TaskCreatedHook,
+} from "./task-creation-hooks.js";
 
 // ── Prompt Overrides ─────────────────────────────────────────────────
 export {
