@@ -6829,22 +6829,14 @@ export async function aiMergeTask(
       "merger",
     );
 
-    try {
-      await audit.git({
-        type: "merge:start",
-        target: branch,
-        metadata: {
-          phase: `merge-attempt-${attemptNum}`,
-          attemptNum,
-          mergeConflictStrategy,
-          attemptLabel,
-        },
-      });
-    } catch (auditErr: unknown) {
-      mergerLog.warn(
-        `${taskId}: failed to emit run_audit event for merge-attempt-${attemptNum}: ${auditErr instanceof Error ? auditErr.message : String(auditErr)}`,
-      );
-    }
+    await emitMergeAttemptAuditEvent({
+      audit,
+      branch,
+      attemptNum,
+      mergeConflictStrategy,
+      attemptLabel,
+      taskId,
+    });
 
     // Capture HEAD before the squash so the verification-fix finalizer can
     // tell whether the AI agent actually created a commit (HEAD moved) or
