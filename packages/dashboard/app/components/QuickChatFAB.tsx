@@ -1760,6 +1760,9 @@ export function QuickChatFAB({
   }, [sessionMenuOpen]);
 
   const inputPlaceholder = useMemo(() => {
+    if (chatRoomsEnabled && roomsState.activeRoom) {
+      return `Message #${roomsState.activeRoom.name}`;
+    }
     if (chatMode === "agent") {
       if (selectedAgent) {
         return `Message ${selectedAgent.name || selectedAgent.id}`;
@@ -1771,7 +1774,7 @@ export function QuickChatFAB({
       return `Message ${selectedModelTag}`;
     }
     return "Select a model to start chatting";
-  }, [chatMode, selectedAgent, selectedModelTag]);
+  }, [chatMode, chatRoomsEnabled, roomsState.activeRoom?.name, selectedAgent, selectedModelTag]);
 
   const handleSessionSwitch = useCallback((sessionId: string) => {
     const selectedSession = sessions.find((session) => session.id === sessionId);
