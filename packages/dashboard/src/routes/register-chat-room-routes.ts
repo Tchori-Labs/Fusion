@@ -332,6 +332,21 @@ export function registerChatRoomRoutes(ctx: ApiRoutesContext): void {
     }
   });
 
+  router.delete("/chat/rooms/:id/messages", rateLimit(RATE_LIMITS.mutation), async (req, res) => {
+    try {
+      const roomId = String(req.params.id);
+      const { chatStore } = await resolveRoomScopedServices(req, getRequestedProjectId(req));
+      const room = chatStore.getRoom(roomId);
+      if (!room) throw notFound(`Chat room ${roomId} not found`);
+
+      const deletedCount = chatStore.clearRoomMessages(roomId);
+      res.json({ success: true, deletedCount });
+    } catch (err: unknown) {
+      if (err instanceof ApiError) throw err;
+      rethrowAsApiError(err, "Failed to clear chat room messages");
+    }
+  });
+
   router.post("/chat/rooms/:id/messages/:messageId/attachments", rateLimit(RATE_LIMITS.mutation), async (req, res) => {
     try {
       const roomId = String(req.params.id);
@@ -371,6 +386,7 @@ export function registerChatRoomRoutes(ctx: ApiRoutesContext): void {
       "GET /chat/rooms/:id/messages",
       "POST /chat/rooms/:id/messages",
       "DELETE /chat/rooms/:id/messages/:messageId",
+      "DELETE /chat/rooms/:id/messages",
       "POST /chat/rooms/:id/messages/:messageId/attachments",
     ];
     chatLogger.info("room routes registered", { chatRoomRoutes });

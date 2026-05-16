@@ -269,6 +269,32 @@ describe("Chat Room API Routes", () => {
     expect(del2.status).toBe(404);
   });
 
+  it("clears all messages in a room", async () => {
+    const room = chatStore.createRoom({ name: "Clear API" });
+    chatStore.addRoomMessage(room.id, { role: "user", content: "one" });
+    chatStore.addRoomMessage(room.id, { role: "assistant", content: "two" });
+    chatStore.addRoomMessage(room.id, { role: "user", content: "three" });
+
+    const res = await request(app, "DELETE", `/api/chat/rooms/${room.id}/messages`);
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ success: true, deletedCount: 3 });
+    expect(chatStore.getRoomMessages(room.id)).toEqual([]);
+  });
+
+  it("returns 404 when clearing messages for an unknown room", async () => {
+    const res = await request(app, "DELETE", "/api/chat/rooms/room-missing/messages");
+    expect(res.status).toBe(404);
+  });
+
+  it("keeps per-message delete route behavior after adding room-clear endpoint", async () => {
+    const room = chatStore.createRoom({ name: "Route ordering" });
+    const message = chatStore.addRoomMessage(room.id, { role: "user", content: "one" });
+
+    const res = await request(app, "DELETE", `/api/chat/rooms/${room.id}/messages/${message.id}`);
+    expect(res.status).toBe(200);
+    expect(chatStore.getRoomMessage(message.id)).toBeUndefined();
+  });
+
   it("handles message attachments route", async () => {
     const room = chatStore.createRoom({ name: "Files" });
     const message = chatStore.addRoomMessage(room.id, { role: "user", content: "hello" });
