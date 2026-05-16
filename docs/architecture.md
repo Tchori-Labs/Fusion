@@ -962,6 +962,8 @@ The client treats mapping persistence as part of onboarding success. If mapping 
 | POST | `/api/update-check/refresh` | Clear cached update data and force a fresh npm update check. |
 | GET | `/api/updates/check` | Perform an on-demand npm registry check for the latest `@runfusion/fusion` version (no cache). |
 
+When adding a new node settings/auth sync endpoint, add it to the `ENDPOINTS` catalog in `packages/dashboard/src/__tests__/routes-nodes-sync-contract.test.ts` so the auth/error/payload parity matrix covers it.
+
 ### Agent stats endpoint
 
 | Method | Path | Description |
