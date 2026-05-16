@@ -56,6 +56,16 @@ export function useCurrentProject(
 
   const nodeKey = getNodeKey(nodeId);
 
+  const pickFallbackProject = useCallback((projects: ProjectInfo[]): ProjectInfo | null => {
+    return projects.find((p) => p.status === "active") || projects[0] || null;
+  }, []);
+
+  const setListDrivenSelection = useCallback((project: ProjectInfo | null) => {
+    absentCountRef.current = 0;
+    autoDefaultCountRef.current = 0;
+    setCurrentProjectState(project);
+  }, []);
+
   // Load from global settings on mount
   useEffect(() => {
     let cancelled = false;
@@ -147,11 +157,10 @@ export function useCurrentProject(
         absentCountRef.current = 0;
       } else {
         absentCountRef.current += 1;
+        // Keep threshold-based tolerance: 1-2 missing polls are treated as transient list-shrink drops.
         if (absentCountRef.current >= CONSECUTIVE_ABSENCE_THRESHOLD) {
-          // Project was sustainably absent - clear selection and default to first active
-          absentCountRef.current = 0;
-          const firstActive = availableProjects.find((p) => p.status === "active");
-          setCurrentProjectState(firstActive || availableProjects[0] || null);
+          // Project was sustainably absent - fallback through shared list-driven selection reset.
+          setListDrivenSelection(pickFallbackProject(availableProjects));
         }
         return;
       }
@@ -174,14 +183,18 @@ export function useCurrentProject(
           autoDefaultCountRef.current = 0;
           // No selection but projects available - default to first active
           // after consecutive poll confirmation.
-          const firstActive = availableProjects.find((p) => p.status === "active");
-          if (firstActive) {
-            setCurrentProjectState(firstActive);
-          }
+          setListDrivenSelection(pickFallbackProject(availableProjects));
         }
       }
     }
-  }, [currentProject, availableProjects, loading, nodeKey]);
+  }, [
+    currentProject,
+    availableProjects,
+    loading,
+    nodeKey,
+    pickFallbackProject,
+    setListDrivenSelection,
+  ]);
 
   const setCurrentProject = useCallback(
     (project: ProjectInfo | null) => {
