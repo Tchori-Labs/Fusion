@@ -57,6 +57,7 @@ For a full walkthrough (installation, onboarding, first task, and daily workflow
 | [Contributing](./contributing.md) | Local development setup, testing, release flow, and contributor conventions |
 | [Docker](./docker.md) | Container builds, deployment, and persistence configuration |
 | [Code Signing](./CODE_SIGNING.md) | macOS and Windows code signing configuration for release binaries |
+| [Sandbox Backends](./sandbox.md) | Pluggable sandbox backends for executor command isolation (bubblewrap, spawn-based) |
 | [Mobile](../MOBILE.md) | Capacitor/PWA mobile development setup and workflow |
 
 ### Plugins
@@ -94,6 +95,7 @@ For a full walkthrough (installation, onboarding, first task, and daily workflow
 | [Experiment Finalize Flow](./research/experiment-finalize.md) | Experiment finalize contract: branch grouping, dry-run planning, and session completion semantics |
 | [Experiment Session Model](./research/experiment-session-model.md) | Experiment session data model: state transitions, iteration tracking, and persisted run state |
 | [Experiment Session MVP Spec](./research/experiment-session-mvp-spec.md) | MVP specification for the experiment session feature: scope, invariants, and delivery milestones |
+| [Sandbox Options Research (FN-4635)](./research/sandbox-options.md) | Pluggable sandbox options research: threat model, backend evaluation, and spawn-based isolation design |
 
 ## External Resources
 
