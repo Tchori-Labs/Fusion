@@ -1,4 +1,5 @@
 import { BubblewrapBackend } from "./bubblewrap-backend.js";
+import { ContainerSandboxBackend } from "./container.js";
 import { NativeSandboxBackend } from "./native.js";
 import { SandboxExecBackend } from "./sandbox-exec-backend.js";
 import { withSandboxAudit } from "./audit.js";
@@ -39,6 +40,10 @@ export function resolveSandboxBackend(options?: {
 
     if (options?.backendId === "bubblewrap" && process.platform === "linux") {
       return new BubblewrapBackend();
+    }
+
+    if (options?.backendId === "podman" || options?.backendId === "docker") {
+      return new ContainerSandboxBackend({ runtime: options.backendId });
     }
 
     if (options?.backendId === "sandbox-exec") {

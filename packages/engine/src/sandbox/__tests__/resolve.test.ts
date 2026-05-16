@@ -22,6 +22,18 @@ describe("resolveSandboxBackend", () => {
     expect(backend).toBeInstanceOf(NativeSandboxBackend);
   });
 
+  it("returns container backend for podman", () => {
+    expect(resolveSandboxBackend({ backendId: "podman" }).capabilities().id).toBe("podman");
+  });
+
+  it("returns container backend for docker", () => {
+    expect(resolveSandboxBackend({ backendId: "docker" }).capabilities().id).toBe("docker");
+  });
+
+  it("returns native for unknown backend", () => {
+    expect(resolveSandboxBackend({ backendId: "unknown-backend" as any })).toBeInstanceOf(NativeSandboxBackend);
+  });
+
   it("returns sandbox-exec on darwin when requested", async () => {
     const { SandboxExecBackend } = await import("../sandbox-exec-backend.js");
     const backend = resolveSandboxBackend({ backendId: "sandbox-exec" });
