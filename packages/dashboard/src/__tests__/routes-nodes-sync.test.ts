@@ -1050,7 +1050,60 @@ describe("Node settings sync routes", () => {
         version: 1,
         checksum: expect.any(String),
       }));
-      expect(postedBody).not.toHaveProperty("sourceNodeId");
+      expect(postedBody.sourceNodeId).toEqual(expect.any(String));
+      expect(postedBody.sourceNodeId.length).toBeGreaterThan(0);
+
+      const { createHash } = await import("node:crypto");
+      const expectedChecksum = createHash("sha256")
+        .update(JSON.stringify({
+          global: postedBody.global,
+          projects: postedBody.projects,
+          exportedAt: postedBody.exportedAt,
+          version: postedBody.version,
+        }))
+        .digest("hex");
+      expect(postedBody.checksum).toBe(expectedChecksum);
+    });
+
+    it("accepts the exact push payload in inbound sync-receive round-trip", async () => {
+      const remoteNode = createMockRemoteNode();
+      mockGetNode.mockResolvedValue(remoteNode);
+      mockFetch.mockResolvedValue({ ok: true, json: () => Promise.resolve({ success: true }) });
+
+      const pushRes = await request(
+        app,
+        "POST",
+        "/api/nodes/node-remote-001/settings/push",
+        JSON.stringify({}),
+        { "content-type": "application/json" },
+      );
+
+      expect(pushRes.status).toBe(200);
+      const [, fetchOptions] = mockFetch.mock.calls[0] as [string, { body?: string }];
+      const pushedPayloadBody = fetchOptions.body;
+      expect(typeof pushedPayloadBody).toBe("string");
+
+      const localNode = createMockLocalNode();
+      mockListNodes.mockResolvedValue([localNode]);
+      mockApplyRemoteSettings.mockResolvedValue({
+        success: true,
+        globalCount: 2,
+        projectCount: 1,
+        authCount: 0,
+      });
+
+      const inboundRes = await request(
+        app,
+        "POST",
+        "/api/settings/sync-receive",
+        pushedPayloadBody,
+        { "content-type": "application/json", Authorization: `Bearer ${localNode.apiKey}` },
+      );
+
+      expect(inboundRes.status).toBe(200);
+      expect(inboundRes.body.success).toBe(true);
+      expect(inboundRes.body.error).toBeUndefined();
+      expect(mockApplyRemoteSettings).toHaveBeenCalled();
     });
 
     it.each([
