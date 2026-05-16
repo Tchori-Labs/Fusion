@@ -2346,13 +2346,31 @@ export class HeartbeatMonitor {
             pendingRoomMessages.truncatedCount,
           );
 
+          // Fetch unread messages when messageStore is available (for all trigger types)
+          if (this.messageStore) {
+            try {
+              pendingMessages = this.messageStore.getInbox(agentId, "agent", { read: false, limit: 10 });
+            } catch (inboxErr) {
+              heartbeatLog.warn(`Failed to fetch inbox messages for ${agentId}: ${inboxErr instanceof Error ? inboxErr.message : String(inboxErr)}`);
+            }
+          }
+
+          const wakeInboxEmpty =
+            pendingMessages.length === 0
+            && pendingRoomMessages.total === 0
+            && (effectiveTriggeringCommentIds?.length ?? 0) === 0;
+
           // Derive a stable wake reason from source, triggerDetail, and trigger
           // type so the agent can change its strategy based on *why* it woke up.
           // Mirrors paperclip's PAPERCLIP_WAKE_REASON (see plan: wake delta).
           const deriveWakeReason = (): string => {
             if (effectiveTriggeringCommentType) return `comment_${effectiveTriggeringCommentType}`;
-            if (triggerDetail === "wake-on-message") return "message_received";
-            if (triggerDetail === "wake-on-message-forced") return "message_received_urgent";
+            if (triggerDetail === "wake-on-message") {
+              return wakeInboxEmpty ? "message_received_already_consumed" : "message_received";
+            }
+            if (triggerDetail === "wake-on-message-forced") {
+              return wakeInboxEmpty ? "message_received_urgent_already_consumed" : "message_received_urgent";
+            }
             if (triggerDetail === "wake-on-comment") return "comment_mention";
             if (triggerDetail === "task-assigned") return "task_assigned";
             if (source === "timer") return "timer";
@@ -2362,6 +2380,19 @@ export class HeartbeatMonitor {
             return triggerDetail || source;
           };
           const wakeReason = deriveWakeReason();
+
+          if (wakeInboxEmpty && (triggerDetail === "wake-on-message" || triggerDetail === "wake-on-message-forced")) {
+            heartbeatLog.log("wake-empty-inbox", {
+              agentId,
+              runId: run.id,
+              triggerDetail,
+              source,
+            });
+          }
+
+          const wakeInboxSnapshotLine = wakeInboxEmpty
+            ? "- inbox snapshot: empty (already consumed)"
+            : `- inbox snapshot: ${pendingMessages.length} message(s)`;
 
           // Per-agent override of the default HEARTBEAT_PROCEDURE: if the agent
           // configured a heartbeatProcedurePath pointing to a markdown file in
@@ -2401,15 +2432,6 @@ export class HeartbeatMonitor {
 
           if (isNoTaskRun) {
             // No-task heartbeat: agent has identity but no assigned task
-            // Fetch unread messages when messageStore is available (for all trigger types)
-            if (this.messageStore) {
-              try {
-                pendingMessages = this.messageStore.getInbox(agentId, "agent", { read: false, limit: 10 });
-              } catch (inboxErr) {
-                heartbeatLog.warn(`Failed to fetch inbox messages for ${agentId}: ${inboxErr instanceof Error ? inboxErr.message : String(inboxErr)}`);
-              }
-            }
-
             // Build pending messages section
             const pendingMessagesLines: string[] = [];
             if (pendingMessages.length > 0) {
@@ -2449,6 +2471,7 @@ export class HeartbeatMonitor {
               `- wake reason: ${wakeReason}`,
               `- assigned task: none`,
               `- pending messages: ${pendingMessages.length}`,
+              wakeInboxSnapshotLine,
               `- pending room messages: ${pendingRoomMessages.total}`,
               `- auto-claim relevant tasks: ${autoClaimEnabled ? (promptCandidateLimit === 0 ? "disabled (prompt-suppressed)" : "enabled") : "disabled"}`,
               "",
@@ -2496,15 +2519,6 @@ export class HeartbeatMonitor {
           } else {
             // Task-scoped heartbeat: agent has an assigned task
             const taskTitle = taskDetail!.title ?? taskDetail!.description.slice(0, 100);
-
-            // Fetch unread messages when messageStore is available (for all trigger types)
-            if (this.messageStore) {
-              try {
-                pendingMessages = this.messageStore.getInbox(agentId, "agent", { read: false, limit: 10 });
-              } catch (inboxErr) {
-                heartbeatLog.warn(`Failed to fetch inbox messages for ${agentId}: ${inboxErr instanceof Error ? inboxErr.message : String(inboxErr)}`);
-              }
-            }
 
             const triggeringCommentLines: string[] = [];
             if (effectiveTriggeringCommentIds && effectiveTriggeringCommentIds.length > 0) {
@@ -2564,6 +2578,7 @@ export class HeartbeatMonitor {
               `- wake reason: ${wakeReason}`,
               `- assigned task: ${taskId}`,
               `- pending messages: ${pendingMessages.length}`,
+              wakeInboxSnapshotLine,
               `- pending room messages: ${pendingRoomMessages.total}`,
               `- triggering comments: ${effectiveTriggeringCommentIds?.length ?? 0}`,
               "",
