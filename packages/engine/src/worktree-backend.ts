@@ -1,4 +1,4 @@
-import { exec, execFile } from "node:child_process";
+import { exec } from "node:child_process";
 import { access } from "node:fs/promises";
 import { basename, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -8,7 +8,6 @@ import { inspectBranchConflict } from "./branch-conflicts.js";
 import { formatError } from "./logger.js";
 
 const execAsync = promisify(exec);
-const execFileAsync = promisify(execFile);
 const NATIVE_TIMEOUT_MS = 120_000;
 const REMOVE_TIMEOUT_MS = 60_000;
 const MAX_BUFFER = 10 * 1024 * 1024;
@@ -306,7 +305,8 @@ export class WorktrunkWorktreeBackend implements WorktreeBackend {
     this.deps.logger?.log?.(`[worktree-backend] running worktrunk command: ${binaryPath} ${args.join(" ")}`);
 
     try {
-      return await execFileAsync(binaryPath, args, {
+      const command = `${quoteShellArg(binaryPath)} ${args.map((arg) => quoteShellArg(arg)).join(" ")}`;
+      return await execAsync(command, {
         cwd: opts.cwd,
         encoding: "utf-8",
         timeout: WORKTRUNK_TIMEOUTS_MS[opts.operation],
@@ -341,17 +341,22 @@ export class WorktrunkWorktreeBackend implements WorktreeBackend {
     if (input.startPoint) args.push("--base", input.startPoint);
     await this.runWorktrunk(args, { cwd: input.rootDir, operation: "create" });
 
-    const { stdout } = await execAsync("git worktree list --porcelain", {
-      cwd: input.rootDir,
-      encoding: "utf-8",
-      timeout: WORKTRUNK_TIMEOUTS_MS.layout,
-      maxBuffer: MAX_BUFFER,
-    });
-    const rows = parseWorktreesFromPorcelain(stdout);
-    const resolved =
-      rows.find((row) => row.branch === input.branch)?.path ??
-      rows.find((row) => row.path.endsWith(input.branch) || row.path === input.worktreePath)?.path ??
-      input.worktreePath;
+    let resolved = input.worktreePath;
+    try {
+      const { stdout } = await execAsync("git worktree list --porcelain", {
+        cwd: input.rootDir,
+        encoding: "utf-8",
+        timeout: WORKTRUNK_TIMEOUTS_MS.layout,
+        maxBuffer: MAX_BUFFER,
+      });
+      const rows = parseWorktreesFromPorcelain(stdout);
+      resolved =
+        rows.find((row) => row.branch === input.branch)?.path ??
+        rows.find((row) => row.path.endsWith(input.branch) || row.path === input.worktreePath)?.path ??
+        input.worktreePath;
+    } catch {
+      resolved = input.worktreePath;
+    }
     return { path: resolved, branch: input.branch };
   }
 

@@ -645,7 +645,12 @@ Guardrails: this routine does **not** retry merges, does **not** apply to mixed/
 
 ### Worktree and naming helpers
 - `WorktreePool` (`worktree-pool.ts`) — idle worktree reuse
-- `WorktreeBackend` (`worktree-backend.ts`) — abstraction for worktree operations used by `acquireTaskWorktree`. `native` (default) preserves existing `git worktree` behavior (including sibling-branch retry semantics), while `resolveWorktreeBackend(settings)` selects `worktrunk` when `settings.worktrunk?.enabled === true`. `worktrunk.onFailure` controls fail-hard vs fallback-native create behavior and emits `worktree:worktrunk-*` run-audit events for create/fallback paths.
+- `WorktreeBackend` (`worktree-backend.ts`) — abstraction for worktree operations used by `acquireTaskWorktree`. `native` (default) preserves existing `git worktree` behavior (including sibling-branch retry semantics), while `resolveWorktreeBackend(settings)` selects `worktrunk` when `settings.worktrunk?.enabled === true`.
+  - Worktrunk path delegates five decisions with per-op timeouts: `create` (120s), `sync` (180s), `prune` (60s), `remove` (60s), and layout resolution (5s).
+  - Direct worktrunk CLI delegates: `create` → `wt switch --create ... --no-hooks --no-cd`, `remove` → `wt remove --foreground`.
+  - Worktrunk-aware fallback implementations where worktrunk lacks a dedicated primitive: `sync` uses git fetch+rebase semantics, and `prune` uses `git worktree list --porcelain` plus per-branch `remove` calls.
+  - Layout precedence: when `worktrunk.enabled=true`, `resolveTaskWorktreePathForBackend(...)` defers to backend `resolveWorktreePath(...)` (using `wt config show --format json` template data with default `{{ repo_path }}/.worktrees/{{ branch | sanitize }}` fallback); otherwise it remains byte-identical to FN-4606 `resolveTaskWorktreePath(...)` behavior.
+  - `worktrunk.onFailure` controls fail-hard vs fallback-native create behavior and emits `worktree:worktrunk-*` run-audit events for create/fallback paths.
 - `WorktreeNames` (`worktree-names.ts`) — deterministic worktree/branch naming
 
 ### Observability and reflection

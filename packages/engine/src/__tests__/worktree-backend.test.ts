@@ -6,15 +6,13 @@ import {
   resolveWorktreeBackend,
 } from "../worktree-backend.js";
 
-const { execMock, execFileMock, accessMock } = vi.hoisted(() => {
+const { execMock, accessMock } = vi.hoisted(() => {
   const mock = vi.fn();
-  const fileMock = vi.fn();
   (mock as any)[Symbol.for("nodejs.util.promisify.custom")] = mock;
-  (fileMock as any)[Symbol.for("nodejs.util.promisify.custom")] = fileMock;
-  return { execMock: mock, execFileMock: fileMock, accessMock: vi.fn() };
+  return { execMock: mock, accessMock: vi.fn() };
 });
 
-vi.mock("node:child_process", () => ({ exec: execMock, execFile: execFileMock }));
+vi.mock("node:child_process", () => ({ exec: execMock }));
 vi.mock("node:fs/promises", () => ({ access: accessMock }));
 vi.mock("../branch-conflicts.js", () => ({
   inspectBranchConflict: vi.fn().mockResolvedValue({ kind: "stale" }),
@@ -22,7 +20,6 @@ vi.mock("../branch-conflicts.js", () => ({
 
 beforeEach(() => {
   execMock.mockReset();
-  execFileMock.mockReset();
   accessMock.mockReset();
   accessMock.mockResolvedValue(undefined);
 });
@@ -142,7 +139,7 @@ describe("WorktrunkWorktreeBackend", () => {
   });
 
   it("throws operation failed with stderr/exitCode", async () => {
-    execFileMock.mockRejectedValue({ stderr: "bad news", status: 7 });
+    execMock.mockRejectedValue({ stderr: "bad news", status: 7 });
     const backend = new WorktrunkWorktreeBackend({ binaryPath: "worktrunk" });
 
     await expect(
@@ -156,8 +153,9 @@ describe("WorktrunkWorktreeBackend", () => {
   });
 
   it("invokes create mapping with timeout/maxBuffer and cwd", async () => {
-    execFileMock.mockResolvedValue({ stdout: "", stderr: "" });
-    execMock.mockResolvedValue({ stdout: "worktree /repo/.worktrees/fusion/fn-1\n", stderr: "" });
+    execMock
+      .mockResolvedValueOnce({ stdout: "", stderr: "" })
+      .mockResolvedValueOnce({ stdout: "worktree /repo/.worktrees/fusion/fn-1\n", stderr: "" });
     const backend = new WorktrunkWorktreeBackend({ binaryPath: "worktrunk" });
 
     await backend.create({
@@ -168,15 +166,15 @@ describe("WorktrunkWorktreeBackend", () => {
       taskId: "FN-1",
     });
 
-    expect(execFileMock).toHaveBeenCalledWith(
-      "worktrunk",
-      ["switch", "--create", "fusion/fn-1", "--no-hooks", "--no-cd", "--base", "main"],
+    expect(execMock).toHaveBeenNthCalledWith(
+      1,
+      '"worktrunk" "switch" "--create" "fusion/fn-1" "--no-hooks" "--no-cd" "--base" "main"',
       expect.objectContaining({ cwd: "/repo", timeout: 120000, maxBuffer: 10485760 }),
     );
   });
 
   it("invokes remove mapping", async () => {
-    execFileMock.mockResolvedValue({ stdout: "", stderr: "" });
+    execMock.mockResolvedValue({ stdout: "", stderr: "" });
     const backend = new WorktrunkWorktreeBackend({ binaryPath: "worktrunk" });
 
     await backend.remove({
@@ -185,15 +183,14 @@ describe("WorktrunkWorktreeBackend", () => {
       branch: "fusion/fn-1",
     });
 
-    expect(execFileMock).toHaveBeenCalledWith(
-      "worktrunk",
-      ["remove", "--foreground", "fusion/fn-1"],
+    expect(execMock).toHaveBeenCalledWith(
+      '"worktrunk" "remove" "--foreground" "fusion/fn-1"',
       expect.objectContaining({ cwd: "/repo", timeout: 60000, maxBuffer: 10485760 }),
     );
   });
 
   it("treats remove not-found style failures as idempotent success", async () => {
-    execFileMock.mockRejectedValue({ stderr: "branch not found", status: 1 });
+    execMock.mockRejectedValue({ stderr: "branch not found", status: 1 });
     const backend = new WorktrunkWorktreeBackend({ binaryPath: "worktrunk" });
 
     await expect(
@@ -202,7 +199,7 @@ describe("WorktrunkWorktreeBackend", () => {
   });
 
   it("maps ENOENT to worktrunk_binary_missing", async () => {
-    execFileMock.mockRejectedValue({ code: "ENOENT", stderr: "not found" });
+    execMock.mockRejectedValue({ code: "ENOENT", stderr: "not found" });
     const backend = new WorktrunkWorktreeBackend({ binaryPath: "worktrunk" });
 
     await expect(
@@ -216,7 +213,7 @@ describe("WorktrunkWorktreeBackend", () => {
   });
 
   it("maps SIGTERM timeout to worktrunk_timeout", async () => {
-    execFileMock.mockRejectedValue({ signal: "SIGTERM", stderr: "timed out" });
+    execMock.mockRejectedValue({ signal: "SIGTERM", stderr: "timed out" });
     const backend = new WorktrunkWorktreeBackend({ binaryPath: "worktrunk" });
 
     await expect(
@@ -276,21 +273,20 @@ describe("WorktrunkWorktreeBackend", () => {
   });
 
   it("resolves worktrunk path from wt config show template", async () => {
-    execFileMock.mockResolvedValue({ stdout: '{"config":{"worktree-path":"{{ repo_path }}/../{{ repo }}.{{ branch | sanitize }}"}}', stderr: "" });
+    execMock.mockResolvedValue({ stdout: '{"config":{"worktree-path":"{{ repo_path }}/../{{ repo }}.{{ branch | sanitize }}"}}', stderr: "" });
     const backend = new WorktrunkWorktreeBackend({ binaryPath: "worktrunk" });
 
     await expect(
       backend.resolveWorktreePath({ rootDir: "/repo/project", worktreeName: "ignored", branch: "fusion/fn-1" }),
     ).resolves.toBe("/repo/project.fusion-fn-1");
-    expect(execFileMock).toHaveBeenCalledWith(
-      "worktrunk",
-      ["config", "show", "--format", "json"],
+    expect(execMock).toHaveBeenCalledWith(
+      '"worktrunk" "config" "show" "--format" "json"',
       expect.objectContaining({ cwd: "/repo/project", timeout: 5000, maxBuffer: 10485760 }),
     );
   });
 
   it("falls back to default layout template when config cannot be read", async () => {
-    execFileMock.mockRejectedValue(new Error("missing config"));
+    execMock.mockRejectedValue(new Error("missing config"));
     const backend = new WorktrunkWorktreeBackend({ binaryPath: "worktrunk" });
 
     await expect(
@@ -299,22 +295,24 @@ describe("WorktrunkWorktreeBackend", () => {
   });
 
   it("prunes by listing worktrees and removing worktrunk managed entries", async () => {
-    execMock.mockResolvedValue({
-      stdout:
-        "worktree /repo\nbranch refs/heads/main\n\nworktree /repo/.worktrees/fusion-fn-1\nbranch refs/heads/fusion/fn-1\n\n",
-      stderr: "",
-    });
-    execFileMock.mockResolvedValue({ stdout: "", stderr: "" });
+    execMock
+      .mockResolvedValueOnce({
+        stdout:
+          "worktree /repo\nbranch refs/heads/main\n\nworktree /repo/.worktrees/fusion-fn-1\nbranch refs/heads/fusion/fn-1\n\n",
+        stderr: "",
+      })
+      .mockResolvedValueOnce({ stdout: "", stderr: "" });
     const backend = new WorktrunkWorktreeBackend({ binaryPath: "worktrunk" });
 
     await expect(backend.prune({ rootDir: "/repo" })).resolves.toBeUndefined();
-    expect(execMock).toHaveBeenCalledWith(
+    expect(execMock).toHaveBeenNthCalledWith(
+      1,
       "git worktree list --porcelain",
       expect.objectContaining({ cwd: "/repo", timeout: 60000, maxBuffer: 10485760 }),
     );
-    expect(execFileMock).toHaveBeenCalledWith(
-      "worktrunk",
-      ["remove", "--foreground", "fusion/fn-1"],
+    expect(execMock).toHaveBeenNthCalledWith(
+      2,
+      '"worktrunk" "remove" "--foreground" "fusion/fn-1"',
       expect.objectContaining({ cwd: "/repo", timeout: 60000, maxBuffer: 10485760 }),
     );
   });
