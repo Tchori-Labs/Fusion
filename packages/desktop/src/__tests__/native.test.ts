@@ -301,6 +301,7 @@ describe("native integrations", () => {
       const { setupAutoUpdater } = await importNativeModule();
 
       setupAutoUpdater(mocks.browserWindow as never);
+      await vi.dynamicImportSettled();
 
       expect(mocks.autoUpdater.autoDownload).toBe(true);
       expect(mocks.autoUpdater.autoInstallOnAppQuit).toBe(true);
@@ -310,6 +311,7 @@ describe("native integrations", () => {
       const { setupAutoUpdater } = await importNativeModule();
 
       setupAutoUpdater(mocks.browserWindow as never);
+      await vi.dynamicImportSettled();
 
       expect(mocks.autoUpdater.on).toHaveBeenCalledWith("update-available", expect.any(Function));
       expect(mocks.autoUpdater.on).toHaveBeenCalledWith("update-downloaded", expect.any(Function));
@@ -321,6 +323,7 @@ describe("native integrations", () => {
       const { setupAutoUpdater } = await importNativeModule();
 
       setupAutoUpdater(mocks.browserWindow as never);
+      await vi.dynamicImportSettled();
       mocks.updaterHandlers.get("update-available")?.({ version: "1.2.0" });
 
       const latestNotification = mocks.notificationInstances.at(-1);
@@ -337,6 +340,7 @@ describe("native integrations", () => {
       const { setupAutoUpdater } = await importNativeModule();
 
       setupAutoUpdater(mocks.browserWindow as never);
+      await vi.dynamicImportSettled();
       mocks.updaterHandlers.get("update-downloaded")?.({ version: "1.2.0" });
 
       const latestNotification = mocks.notificationInstances.at(-1);
@@ -353,6 +357,7 @@ describe("native integrations", () => {
       const { setupAutoUpdater } = await importNativeModule();
 
       setupAutoUpdater(mocks.browserWindow as never);
+      await vi.dynamicImportSettled();
 
       expect(() => mocks.updaterHandlers.get("error")?.(new Error("network"))).not.toThrow();
     });
@@ -362,7 +367,7 @@ describe("native integrations", () => {
       mocks.autoUpdater.checkForUpdates.mockRejectedValueOnce(new Error("dev mode"));
 
       expect(() => setupAutoUpdater(mocks.browserWindow as never)).not.toThrow();
-      await Promise.resolve();
+      await vi.dynamicImportSettled();
     });
 
     it("wraps setup in try/catch when updater throws during registration", async () => {
@@ -372,6 +377,7 @@ describe("native integrations", () => {
       });
 
       expect(() => setupAutoUpdater(mocks.browserWindow as never)).not.toThrow();
+      await vi.dynamicImportSettled();
     });
   });
 
