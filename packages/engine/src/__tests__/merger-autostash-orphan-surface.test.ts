@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { execSync } from "node:child_process";
@@ -48,7 +48,34 @@ function assertIsolatedWorkspace(dir: string): void {
   expect(resolve(dir).startsWith(resolve(repoRoot))).toBe(false);
 }
 
-describe("autostash orphan surface", () => {
+function sleepSync(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function cleanupTempDir(dir?: string): void {
+  if (!dir) return;
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
+    try {
+      if (!existsSync(dir)) return;
+      rmSync(dir, { recursive: true, force: true });
+      if (!existsSync(dir)) return;
+    } catch (error) {
+      if (attempt === 5) {
+        throw error;
+      }
+    }
+
+    sleepSync(attempt * 25);
+  }
+
+  if (existsSync(dir)) {
+    throw new Error(`failed to clean temp dir: ${dir}`);
+  }
+}
+
+// FN-4807: keep this real-git stash suite bounded but above Vitest's default
+// to avoid workspace-contention false timeouts without weakening subprocess guards.
+describe("autostash orphan surface", { timeout: 30_000 }, () => {
   let dir: string;
 
   beforeEach(() => {
@@ -58,7 +85,7 @@ describe("autostash orphan surface", () => {
   });
 
   afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
+    cleanupTempDir(dir);
   });
 
   it("lists fusion-merger-autostash entries and ignores unrelated stashes", async () => {
