@@ -76,7 +76,7 @@ describe("requireSandboxProvisioningApproval", () => {
         requester: { actorId: "agent-1", actorType: "agent", actorName: "Executor" },
         settings: undefined,
         createApprovalRequest: vi.fn(async () => null),
-        findApprovalByDedupeKey: vi.fn(async () => ({ id: "apr-1", status: "approved" })),
+        findApprovalByDedupeKey: vi.fn(async () => ({ id: "apr-1", status: "approved" as const })),
       },
     });
 
@@ -93,7 +93,7 @@ describe("requireSandboxProvisioningApproval", () => {
           requester: { actorId: "agent-1", actorType: "agent", actorName: "Executor" },
           settings: undefined,
           createApprovalRequest: vi.fn(async () => null),
-          findApprovalByDedupeKey: vi.fn(async () => ({ id: "apr-1", status: "denied" })),
+          findApprovalByDedupeKey: vi.fn(async () => ({ id: "apr-1", status: "denied" as const })),
         },
       }),
     ).rejects.toBeInstanceOf(SandboxProvisioningPendingError);
@@ -143,6 +143,10 @@ describe("requireSandboxProvisioningApproval", () => {
     }).catch((error) => error as SandboxProvisioningPendingError);
 
     const [firstError, secondError] = await Promise.all([first, second]);
-    expect(firstError.dedupeKey).toBe(secondError.dedupeKey);
+    expect(firstError).toBeInstanceOf(SandboxProvisioningPendingError);
+    expect(secondError).toBeInstanceOf(SandboxProvisioningPendingError);
+    expect((firstError as SandboxProvisioningPendingError).dedupeKey).toBe(
+      (secondError as SandboxProvisioningPendingError).dedupeKey,
+    );
   });
 });

@@ -1,4 +1,11 @@
-import { AgentStore, ApprovalRequestStore, type ApprovalRequest, type ApprovalRequestActorSnapshot, type ApprovalRequestStatus } from "@fusion/core";
+import {
+  AgentStore,
+  ApprovalRequestStore,
+  extractSandboxProvisioningRequest,
+  type ApprovalRequest,
+  type ApprovalRequestActorSnapshot,
+  type ApprovalRequestStatus,
+} from "@fusion/core";
 import { executeApprovedAgentProvisioning } from "@fusion/engine";
 import { ApiError, badRequest, conflict, notFound } from "../api-error.js";
 import type { ApiRoutesContext } from "./types.js";
@@ -98,6 +105,12 @@ function toDetailDto(
   };
 }
 
+let sandboxProvisioningExecutor: ((request: ApprovalRequest) => Promise<void>) | null = null;
+
+export function registerSandboxProvisioningExecutor(fn: ((request: ApprovalRequest) => Promise<void>) | null): void {
+  sandboxProvisioningExecutor = fn;
+}
+
 function emitProvisioningDecisionAudit(params: {
   scopedStore: import("@fusion/core").TaskStore;
   request: ApprovalRequest;
@@ -124,6 +137,43 @@ function emitProvisioningDecisionAudit(params: {
   if (request.taskId) event.taskId = request.taskId;
   if (request.runId) event.runId = request.runId;
   scopedStore.recordRunAuditEvent(event);
+}
+
+function emitSandboxProvisioningDecisionAudit(params: {
+  scopedStore: import("@fusion/core").TaskStore;
+  request: ApprovalRequest;
+  decision: "approved" | "denied";
+  runtimeLogger: ApiRoutesContext["runtimeLogger"];
+}): void {
+  const { scopedStore, request, decision, runtimeLogger } = params;
+  if (request.targetAction.category !== "sandbox_provisioning") return;
+
+  try {
+    const details = extractSandboxProvisioningRequest(request);
+    const mutationType = decision === "approved" ? "sandbox:provisioning:approve" : "sandbox:provisioning:deny";
+    const event: Parameters<typeof scopedStore.recordRunAuditEvent>[0] = {
+      agentId: request.requester.actorId,
+      domain: "database",
+      mutationType,
+      target: request.targetAction.resourceId || details.operation,
+      metadata: {
+        approvalRequestId: request.id,
+        backendId: details.backendId,
+        operation: details.operation,
+        requesterAgentId: request.requester.actorId,
+      },
+      runId: request.id,
+    };
+    if (request.taskId) event.taskId = request.taskId;
+    if (request.runId) event.runId = request.runId;
+    scopedStore.recordRunAuditEvent(event);
+  } catch (error) {
+    runtimeLogger.warn("Failed to emit sandbox provisioning decision audit", {
+      requestId: request.id,
+      decision,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
 async function resumeAfterDecision(params: {
@@ -247,6 +297,24 @@ export function registerApprovalRoutes(ctx: ApiRoutesContext): void {
           emitProvisioningDecisionAudit({ scopedStore, request: updated, decision: "approved" });
         } else {
           emitProvisioningDecisionAudit({ scopedStore, request: updated, decision: "denied" });
+        }
+      }
+
+      if (updated.targetAction.category === "sandbox_provisioning") {
+        if (body.decision === "approve") {
+          if (sandboxProvisioningExecutor) {
+            try {
+              await sandboxProvisioningExecutor(updated);
+            } catch (error) {
+              runtimeLogger.warn("Sandbox provisioning executor failed", {
+                requestId: updated.id,
+                error: error instanceof Error ? error.message : String(error),
+              });
+            }
+          }
+          emitSandboxProvisioningDecisionAudit({ scopedStore, request: updated, decision: "approved", runtimeLogger });
+        } else {
+          emitSandboxProvisioningDecisionAudit({ scopedStore, request: updated, decision: "denied", runtimeLogger });
         }
       }
 
