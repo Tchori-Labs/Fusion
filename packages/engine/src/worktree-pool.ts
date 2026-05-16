@@ -7,7 +7,12 @@ import { assertCleanBranchAtBase, inspectBranchConflict } from "./branch-conflic
 import { worktreePoolLog } from "./logger.js";
 import { isInsideConfiguredWorktreesDir, resolveWorktreesDir } from "./worktree-paths.js";
 
-export { WorktrunkOperationError, resolveWorktreeBackend } from "./worktree-backend.js";
+export {
+  NativeWorktreeBackend,
+  WorktrunkOperationError,
+  WorktrunkWorktreeBackend,
+  resolveWorktreeBackend,
+} from "./worktree-backend.js";
 export type { WorktreeBackend, WorktreeBackendKind } from "./worktree-backend.js";
 
 const execAsync = promisify(exec);
