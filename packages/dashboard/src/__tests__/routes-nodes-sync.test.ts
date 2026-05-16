@@ -977,7 +977,6 @@ describe("Node settings sync routes", () => {
       ["GET", "/api/nodes/node-remote-001/settings"],
       ["POST", "/api/nodes/node-remote-001/settings/push"],
       ["POST", "/api/nodes/node-remote-001/settings/pull"],
-      ["GET", "/api/nodes/node-remote-001/settings/sync-status"],
       ["POST", "/api/nodes/node-remote-001/auth/sync"],
     ])("returns 400 and skips fetch when outbound endpoint lacks node apiKey (%s %s)", async (method, path) => {
       const remoteNode = createMockRemoteNode({ apiKey: undefined });
@@ -989,6 +988,18 @@ describe("Node settings sync routes", () => {
 
       expect(res.status).toBe(400);
       expect(res.body.error).toContain("apiKey");
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it("returns remoteReachable=false and empty diffs when sync-status node is missing apiKey", async () => {
+      const remoteNode = createMockRemoteNode({ apiKey: undefined });
+      mockGetNode.mockResolvedValue(remoteNode);
+
+      const res = await get(app, "/api/nodes/node-remote-001/settings/sync-status");
+
+      expect(res.status).toBe(200);
+      expect(res.body.remoteReachable).toBe(false);
+      expect(res.body.diff).toEqual({ global: [], project: [] });
       expect(mockFetch).not.toHaveBeenCalled();
     });
 
