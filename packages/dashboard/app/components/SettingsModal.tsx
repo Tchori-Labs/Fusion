@@ -49,6 +49,7 @@ import { useMobileKeyboard } from "../hooks/useMobileKeyboard";
 import { useMobileScrollLock } from "../hooks/useMobileScrollLock";
 import { useNodes } from "../hooks/useNodes";
 import { useViewportMode } from "../hooks/useViewportMode";
+import { useWorktrunkInstallStatus } from "../hooks/useWorktrunkInstallStatus";
 import { NodeHealthDot } from "./NodeHealthDot";
 import { filterVisibleOnboardingAndSettingsProviders } from "./providerVisibility";
 
@@ -374,6 +375,8 @@ interface SettingsModalProps {
   onDashboardFontScaleChange?: (scalePct: number) => void;
   /** Optional callback when user wants to reopen the onboarding guide */
   onReopenOnboarding?: () => void;
+  /** Optional callback to open approvals/mailbox view. */
+  onOpenApprovals?: (approvalId?: string) => void;
 }
 
 export function SettingsModal({
@@ -388,8 +391,10 @@ export function SettingsModal({
   dashboardFontScalePct = 100,
   onDashboardFontScaleChange,
   onReopenOnboarding,
+  onOpenApprovals,
 }: SettingsModalProps) {
   const { confirm } = useConfirm();
+  const worktrunkInstall = useWorktrunkInstallStatus(projectId);
   const viewportMode = useViewportMode();
   useMobileScrollLock(true);
   const { keyboardOverlap, viewportHeight, viewportOffsetTop, keyboardOpen } = useMobileKeyboard({
@@ -4165,6 +4170,46 @@ export function SettingsModal({
               <small>
                 <code>fail</code> stops on worktrunk errors for explicit operator recovery; <code>fallback-native</code> keeps progress moving by switching to Fusion&apos;s built-in worktree backend.
               </small>
+            </div>
+            <div className="form-group" data-testid="worktrunk-install-affordance">
+              {worktrunkInstall.status === "installed" && (
+                <small className="settings-muted">
+                  worktrunk {worktrunkInstall.version ?? ""} installed at {worktrunkInstall.installPath ?? "~/.fusion/bin/worktrunk"}
+                </small>
+              )}
+              {(worktrunkInstall.status === "missing" || worktrunkInstall.status === "installing") && (
+                <>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={() => void worktrunkInstall.requestInstall()}
+                    disabled={worktrunkInstall.requesting || worktrunkInstall.status === "installing"}
+                  >
+                    Install worktrunk binary
+                  </button>
+                  <small className="settings-muted">Enable worktrunk and request approval to install the pinned release.</small>
+                </>
+              )}
+              {worktrunkInstall.status === "pending-approval" && (
+                <>
+                  <small className="settings-muted">Awaiting approval — open Approvals to continue.</small>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => onOpenApprovals?.(worktrunkInstall.pendingApprovalId)}
+                  >
+                    Open Approvals
+                  </button>
+                </>
+              )}
+              {(worktrunkInstall.status === "denied" || worktrunkInstall.status === "failed") && (
+                <>
+                  <small style={{ color: "var(--color-error)" }}>{worktrunkInstall.error ?? "Worktrunk install failed."}</small>
+                  <button type="button" className="btn btn-secondary" onClick={() => void worktrunkInstall.requestInstall()}>
+                    Try again
+                  </button>
+                </>
+              )}
             </div>
           </>
         );

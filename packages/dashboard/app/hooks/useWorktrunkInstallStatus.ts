@@ -1,0 +1,94 @@
+import { useCallback, useEffect, useState } from "react";
+import { subscribeSse } from "../sse-bus";
+
+export type WorktrunkInstallUiStatus = "installed" | "missing" | "pending-approval" | "installing" | "denied" | "failed";
+
+interface WorktrunkInstallStatusResponse {
+  status: WorktrunkInstallUiStatus;
+  version?: string;
+  installPath?: string;
+  pendingApprovalId?: string;
+  error?: string;
+}
+
+function withProjectId(path: string, projectId?: string): string {
+  if (!projectId) return path;
+  const separator = path.includes("?") ? "&" : "?";
+  return `${path}${separator}projectId=${encodeURIComponent(projectId)}`;
+}
+
+async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(path, {
+    credentials: "same-origin",
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      ...(init?.headers ?? {}),
+    },
+  });
+  const payload = (await response.json()) as T;
+  if (!response.ok) {
+    throw new Error((payload as { error?: string }).error ?? `Request failed (${response.status})`);
+  }
+  return payload;
+}
+
+export function useWorktrunkInstallStatus(projectId?: string) {
+  const [status, setStatus] = useState<WorktrunkInstallStatusResponse>({ status: "missing" });
+  const [requesting, setRequesting] = useState(false);
+
+  const refresh = useCallback(async () => {
+    try {
+      const next = await requestJson<WorktrunkInstallStatusResponse>(withProjectId("/api/worktrunk/status", projectId));
+      setStatus(next);
+    } catch (err) {
+      setStatus({ status: "failed", error: err instanceof Error ? err.message : "Failed to load worktrunk status" });
+    }
+  }, [projectId]);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  useEffect(() => {
+    const unsubscribe = subscribeSse(withProjectId("/api/events", projectId), {
+      events: {
+        "approval:updated": () => {
+          if (status.pendingApprovalId) void refresh();
+        },
+        "approval:decided": () => {
+          if (status.pendingApprovalId) void refresh();
+        },
+      },
+    });
+    return unsubscribe;
+  }, [projectId, refresh, status.pendingApprovalId]);
+
+  const requestInstall = useCallback(async () => {
+    setRequesting(true);
+    setStatus((current) => ({ ...current, status: "installing", error: undefined }));
+    try {
+      const result = await requestJson<WorktrunkInstallStatusResponse & { approvalRequestId?: string }>(
+        withProjectId("/api/worktrunk/install-request", projectId),
+        { method: "POST", body: JSON.stringify({}) },
+      );
+      setStatus({
+        status: result.status,
+        version: result.version,
+        installPath: result.installPath,
+        pendingApprovalId: result.pendingApprovalId ?? result.approvalRequestId,
+        error: result.error,
+      });
+    } catch (err) {
+      setStatus({ status: "failed", error: err instanceof Error ? err.message : "Failed to request install" });
+    } finally {
+      setRequesting(false);
+    }
+  }, [projectId]);
+
+  return {
+    ...status,
+    requestInstall,
+    requesting,
+  };
+}

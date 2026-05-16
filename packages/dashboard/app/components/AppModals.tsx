@@ -76,6 +76,8 @@ interface AppModalsProps {
   onSettingsClose?: () => void;
   /** Optional callback to reopen the onboarding guide from Settings. Closes Settings and opens ModelOnboardingModal. */
   onReopenOnboarding?: () => void;
+  /** Optional callback to open mailbox approvals from Settings. */
+  onOpenApprovals?: (approvalId?: string) => void;
 }
 
 export function AppModals({
@@ -94,6 +96,7 @@ export function AppModals({
   settings,
   onSettingsClose,
   onReopenOnboarding,
+  onOpenApprovals,
 }: AppModalsProps) {
   const [firstCreatedTask, setFirstCreatedTask] = useState<Task | null>(null);
   const detailTask = modalManager.detailTask
@@ -194,6 +197,7 @@ export function AppModals({
               dashboardFontScalePct={settings.dashboardFontScalePct}
               onDashboardFontScaleChange={settings.setDashboardFontScalePct}
               onReopenOnboarding={onReopenOnboarding}
+              onOpenApprovals={onOpenApprovals}
             />
           </Suspense>
         </ModalErrorBoundary>

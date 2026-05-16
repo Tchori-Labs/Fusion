@@ -60,6 +60,7 @@ const mockFetchCursorCliStatus = vi.fn();
 const mockSetCursorCliEnabled = vi.fn();
 const mockUseWorkspaceFileBrowser = vi.fn();
 const mockConfirm = vi.fn();
+const mockUseWorktrunkInstallStatus = vi.fn();
 
 vi.mock("../../api", async (importOriginal) => {
   const { createDashboardApiMock } = await import("../../test/mockApi");
@@ -159,6 +160,10 @@ vi.mock("../PiExtensionsManager", () => ({
 
 vi.mock("../../hooks/useWorkspaceFileBrowser", () => ({
   useWorkspaceFileBrowser: (...args: unknown[]) => mockUseWorkspaceFileBrowser(...args),
+}));
+
+vi.mock("../../hooks/useWorktrunkInstallStatus", () => ({
+  useWorktrunkInstallStatus: (...args: unknown[]) => mockUseWorktrunkInstallStatus(...args),
 }));
 
 vi.mock("../FileBrowser", () => ({
@@ -405,6 +410,15 @@ describe("SettingsModal", () => {
       qmdInstallCommand: "bun install -g @tobilu/qmd",
     });
     mockFetchGitRemotesDetailed.mockResolvedValue([]);
+    mockUseWorktrunkInstallStatus.mockReturnValue({
+      status: "missing",
+      requestInstall: vi.fn(),
+      requesting: false,
+      version: undefined,
+      installPath: undefined,
+      pendingApprovalId: undefined,
+      error: undefined,
+    });
     mockFetchDashboardHealth.mockResolvedValue({ status: "ok", version: "1.2.3", uptime: 123 });
     mockCheckForUpdates.mockResolvedValue(undefined);
     mockFetchRemoteSettings.mockResolvedValue({
@@ -2137,6 +2151,42 @@ describe("SettingsModal", () => {
       expect(worktreesDirInput).toBeDisabled();
       expect(browseButton).toBeDisabled();
       expect(screen.getByText(/Disabled because Worktrunk integration is enabled/i)).toBeInTheDocument();
+    });
+
+    it.each([
+      { status: "missing", button: "Install worktrunk binary", action: "request" },
+      { status: "pending-approval", button: "Open Approvals", action: "open" },
+      { status: "denied", button: "Try again", action: "request" },
+      { status: "installed", text: "installed at" },
+    ])("renders install affordance state %#", async (scenario) => {
+      const requestInstall = vi.fn();
+      const onOpenApprovals = vi.fn();
+      mockUseWorktrunkInstallStatus.mockReturnValue({
+        status: scenario.status,
+        requestInstall,
+        requesting: false,
+        version: "v1.2.3",
+        installPath: "~/.fusion/bin/worktrunk",
+        pendingApprovalId: "apr-1",
+        error: "Denied",
+      });
+
+      renderModal({ initialSection: "worktrees", onOpenApprovals });
+      await waitForSettingsModalReady();
+
+      if (scenario.text) {
+        expect(screen.getByText(/installed at/i)).toBeInTheDocument();
+        return;
+      }
+
+      const button = screen.getByRole("button", { name: scenario.button });
+      await userEvent.click(button);
+
+      if (scenario.action === "request") {
+        expect(requestInstall).toHaveBeenCalledTimes(1);
+      } else {
+        expect(onOpenApprovals).toHaveBeenCalledWith("apr-1");
+      }
     });
 
     it.each(["fail", "fallback-native"])("saves worktrunk payload and defaults onFailure on first enable (%s)", async (onFailure) => {

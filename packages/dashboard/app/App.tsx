@@ -1899,6 +1899,7 @@ function AppInner() {
         settings={{ prAuthAvailable, themeMode, colorTheme, dashboardFontScalePct, setThemeMode, setColorTheme, setDashboardFontScalePct }}
         onSettingsClose={handleSettingsClose}
         onReopenOnboarding={reopenOnboardingWithNav}
+        onOpenApprovals={() => handleTaskViewChange("mailbox")}
       />
       <AuthTokenRecoveryDialog open={authTokenRecoveryOpen} />
             {shellApi && (
