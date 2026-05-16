@@ -32,14 +32,16 @@ describe("acquireTaskWorktree backend wiring", () => {
     store.logEntry.mockClear();
   });
 
-  it("uses native backend by default with expected git argv", async () => {
+  it("uses native backend by default and emits no worktrunk audit", async () => {
     execMock.mockResolvedValue({ stdout: "", stderr: "" });
+    const audit = { git: vi.fn().mockResolvedValue(undefined) };
 
     const result = await acquireTaskWorktree({
       task,
       rootDir: "/repo",
       store,
       settings: { worktreeNaming: "task-id" } as any,
+      audit,
     });
 
     expect(result.branch).toBe("fusion/fn-1");
@@ -48,26 +50,54 @@ describe("acquireTaskWorktree backend wiring", () => {
       'git worktree add -b "fusion/fn-1" "/repo/.worktrees/fn-1"',
       expect.objectContaining({ cwd: "/repo" }),
     );
+    expect(audit.git).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "worktree:worktrunk-create" }),
+    );
   });
 
-  it("prefers explicit createWorktree override over resolved backend", async () => {
-    const createWorktree = vi.fn().mockResolvedValue({ path: "/tmp/override", branch: "fusion/fn-override" });
+  it("routes through worktrunk backend when enabled and emits audit once", async () => {
+    execMock.mockResolvedValue({ stdout: "", stderr: "" });
+    const audit = { git: vi.fn().mockResolvedValue(undefined) };
 
-    const result = await acquireTaskWorktree({
+    await acquireTaskWorktree({
       task,
       rootDir: "/repo",
       store,
       settings: { worktreeNaming: "task-id", worktrunk: { enabled: true, binaryPath: "worktrunk" } } as any,
-      createWorktree,
+      audit,
     });
 
-    expect(result.worktreePath).toBe("/tmp/override");
-    expect(result.branch).toBe("fusion/fn-override");
-    expect(createWorktree).toHaveBeenCalledTimes(1);
+    expect(execMock).toHaveBeenCalledWith(
+      '"worktrunk" switch --create "fusion/fn-1"',
+      expect.objectContaining({ cwd: "/repo" }),
+    );
+    expect(audit.git).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "worktree:worktrunk-create",
+        metadata: expect.objectContaining({ branch: "fusion/fn-1", taskId: "FN-1" }),
+      }),
+    );
+    expect(
+      audit.git.mock.calls.filter(([event]) => event?.type === "worktree:worktrunk-create"),
+    ).toHaveLength(1);
+  });
+
+  it("throws worktrunk_binary_missing with no binaryPath", async () => {
+    await expect(
+      acquireTaskWorktree({
+        task,
+        rootDir: "/repo",
+        store,
+        settings: { worktreeNaming: "task-id", worktrunk: { enabled: true } } as any,
+      }),
+    ).rejects.toMatchObject({ name: "WorktrunkOperationError", code: "worktrunk_binary_missing" });
+
     expect(execMock).not.toHaveBeenCalled();
   });
 
-  it("throws WorktrunkOperationError when worktrunk is enabled", async () => {
+  it("throws worktrunk_operation_failed and preserves stderr", async () => {
+    execMock.mockRejectedValue({ stderr: "worktrunk exploded", code: 17 });
+
     await expect(
       acquireTaskWorktree({
         task,
@@ -75,19 +105,19 @@ describe("acquireTaskWorktree backend wiring", () => {
         store,
         settings: { worktreeNaming: "task-id", worktrunk: { enabled: true, binaryPath: "worktrunk" } } as any,
       }),
-    ).rejects.toMatchObject({ name: "WorktrunkOperationError", code: "worktrunk_unsupported_operation" });
-
-    expect(execMock).not.toHaveBeenCalled();
+    ).rejects.toMatchObject({
+      name: "WorktrunkOperationError",
+      code: "worktrunk_operation_failed",
+      stderr: "worktrunk exploded",
+      exitCode: 17,
+    });
   });
 
-  it("uses custom backend option instead of selector", async () => {
+  it("uses explicit backend override", async () => {
     const create = vi.fn().mockResolvedValue({ path: "/tmp/backend", branch: "fusion/fn-backend" });
     const backend: WorktreeBackend = {
       kind: "native",
       create,
-      remove: vi.fn().mockResolvedValue(undefined),
-      sync: vi.fn().mockResolvedValue({ skipped: true }),
-      prune: vi.fn().mockResolvedValue(undefined),
     };
 
     const result = await acquireTaskWorktree({
