@@ -867,6 +867,8 @@ describe("GitHubClient", () => {
         body: "Body 1",
         url: "https://github.com/owner/repo/issues/1",
         labels: [{ name: "bug" }],
+        state: "OPEN" as const,
+        updatedAt: "2026-05-16T08:00:00Z",
       },
       {
         number: 2,
@@ -874,6 +876,8 @@ describe("GitHubClient", () => {
         body: "Body 2",
         url: "https://github.com/owner/repo/issues/2",
         labels: [{ name: "feature" }],
+        state: "CLOSED" as const,
+        updatedAt: "2026-05-15T08:00:00Z",
       },
     ];
 
@@ -887,10 +891,12 @@ describe("GitHubClient", () => {
         "--repo", "owner/repo",
         "--state", "open",
         "--limit", "30",
-        "--json", "number,title,body,url,labels",
+        "--json", "number,title,body,url,labels,state,updatedAt",
       ]);
       expect(result).toHaveLength(2);
       expect(result[0].number).toBe(1);
+      expect(result[0].state).toBe("open");
+      expect(result[0].updatedAt).toBe("2026-05-16T08:00:00Z");
     });
 
     it("respects limit parameter", async () => {
@@ -912,6 +918,16 @@ describe("GitHubClient", () => {
       expect(result[0].number).toBe(1);
     });
 
+    it("supports explicit all-state issue listings", async () => {
+      mockRunGhJsonAsync.mockResolvedValue(mockIssues);
+
+      await client.listIssues("owner", "repo", { state: "all" });
+
+      expect(mockRunGhJsonAsync).toHaveBeenCalledWith(
+        expect.arrayContaining(["--state", "all"]),
+      );
+    });
+
     it("falls back to REST API when gh CLI fails and token is available", async () => {
       mockRunGhJsonAsync.mockRejectedValue(new Error("gh failed"));
 
@@ -926,6 +942,18 @@ describe("GitHubClient", () => {
             body: "API body",
             html_url: "https://github.com/owner/repo/issues/1",
             labels: [{ name: "api" }],
+            state: "open",
+            updated_at: "2026-05-16T10:00:00Z",
+          },
+          {
+            number: 3,
+            title: "API Pull Request",
+            body: "PR body",
+            html_url: "https://github.com/owner/repo/issues/3",
+            labels: [{ name: "api" }],
+            state: "open",
+            updated_at: "2026-05-16T10:00:00Z",
+            pull_request: {},
           },
         ]),
       });
@@ -935,6 +963,8 @@ describe("GitHubClient", () => {
 
       expect(mockFetch).toHaveBeenCalled();
       expect(result).toHaveLength(1);
+      expect(result[0].state).toBe("open");
+      expect(result[0].updatedAt).toBe("2026-05-16T10:00:00Z");
 
       vi.restoreAllMocks();
     });

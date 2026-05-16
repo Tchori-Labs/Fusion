@@ -361,6 +361,77 @@ beforeEach(async () => {
 });
 
 
+describe("GET /github/issues/recent", () => {
+  let store: TaskStore;
+  let listIssuesSpy: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    store = createMockStore();
+    mockIsGhAuthenticated.mockReturnValue(true);
+    listIssuesSpy = vi.fn();
+    vi.spyOn(GitHubClient.prototype, "listIssues").mockImplementation(listIssuesSpy);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function buildApp() {
+    const app = express();
+    app.use(express.json());
+    app.use("/api", createApiRoutes(store));
+    return app;
+  }
+
+  it("returns filtered recent issues and caches responses", async () => {
+    const gitRepo = getSharedGitTestRepo();
+    execFileSync("git", ["-C", gitRepo.repoDir, "remote", "set-url", "origin", "https://github.com/owner/repo.git"], { stdio: "pipe" });
+    store.getRootDir = vi.fn().mockReturnValue(gitRepo.repoDir);
+
+    listIssuesSpy.mockResolvedValue([
+      { number: 42, title: "Feature polish", body: null, html_url: "https://github.com/owner/repo/issues/42", labels: [], state: "open", updatedAt: "2026-05-16T00:00:00Z" },
+      { number: 12, title: "Fix tests", body: null, html_url: "https://github.com/owner/repo/issues/12", labels: [], state: "closed", updatedAt: "2026-05-15T00:00:00Z" },
+      { number: 99, title: "Draft PR", body: null, html_url: "https://github.com/owner/repo/pull/99", labels: [], state: "open", updatedAt: "2026-05-14T00:00:00Z" },
+    ]);
+
+    const first = await REQUEST(buildApp(), "GET", "/api/github/issues/recent?q=feat&limit=20");
+    const second = await REQUEST(buildApp(), "GET", "/api/github/issues/recent?q=42&limit=20");
+
+    expect(first.status).toBe(200);
+    expect(first.body).toHaveLength(1);
+    expect(first.body[0]).toMatchObject({ number: 42, repository: "owner/repo", state: "open" });
+
+    expect(second.status).toBe(200);
+    expect(second.body).toHaveLength(1);
+    expect(second.body[0].number).toBe(42);
+
+    const all = await REQUEST(buildApp(), "GET", "/api/github/issues/recent");
+    expect(all.body.some((item: { number: number }) => item.number === 99)).toBe(false);
+    expect(listIssuesSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns empty list when no remote exists", async () => {
+    const res = await REQUEST(buildApp(), "GET", "/api/github/issues/recent");
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([]);
+    expect(listIssuesSpy).not.toHaveBeenCalled();
+  });
+
+  it("returns empty list when not authenticated", async () => {
+    const gitRepo = getSharedGitTestRepo();
+    execFileSync("git", ["-C", gitRepo.repoDir, "remote", "set-url", "origin", "https://github.com/owner/repo.git"], { stdio: "pipe" });
+    store.getRootDir = vi.fn().mockReturnValue(gitRepo.repoDir);
+    mockIsGhAuthenticated.mockReturnValueOnce(false);
+
+    const res = await REQUEST(buildApp(), "GET", "/api/github/issues/recent");
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([]);
+    expect(listIssuesSpy).not.toHaveBeenCalled();
+  });
+});
+
 describe("POST /github/issues/fetch", () => {
   let store: TaskStore;
   let listIssuesSpy: ReturnType<typeof vi.fn>;

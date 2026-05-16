@@ -117,6 +117,19 @@ export async function getGitHubRemotes(cwd?: string): Promise<GitRemote[]> {
   }
 }
 
+const RECENT_ISSUES_CACHE_TTL_MS = 60_000;
+
+// Intentionally module-scoped and TTL-only. We do not proactively invalidate on remote
+// changes because the 60s window is short and keeps per-keystroke chat lookups cheap.
+const recentIssuesCache = new Map<string, { fetchedAt: number; items: Array<{
+  number: number;
+  title: string;
+  state: "open" | "closed";
+  htmlUrl: string;
+  repository: string;
+  updatedAt?: string;
+}> }>();
+
 export async function isGitRepo(cwd?: string): Promise<boolean> {
   try {
     await runGitCommand(["rev-parse", "--git-dir"], cwd, 5000);
@@ -2041,6 +2054,66 @@ export function registerGitGitHubRoutes(ctx: ApiRoutesContext): void {
   });
 
 // ── GitHub Import Routes ──────────────────────────────────────────
+
+  /**
+   * GET /api/github/issues/recent
+   * Returns recent issues for the first GitHub remote (prefer origin when present).
+   */
+  router.get("/github/issues/recent", async (req, res) => {
+    try {
+      const { store: scopedStore } = await getProjectContext(req);
+      const rootDir = scopedStore.getRootDir();
+      const remotes = await getGitHubRemotes(rootDir);
+      const remote = remotes.find((item) => item.name === "origin") ?? remotes[0];
+
+      if (!remote || !isGhAuthenticated()) {
+        res.json([]);
+        return;
+      }
+
+      const rawLimit = Number.parseInt(String(req.query.limit ?? "20"), 10);
+      const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(rawLimit, 100)) : 20;
+      const q = typeof req.query.q === "string" ? req.query.q.trim().toLowerCase() : "";
+
+      const cacheKey = `${remote.owner}/${remote.repo}`;
+      const now = Date.now();
+      const cached = recentIssuesCache.get(cacheKey);
+
+      let items = cached?.items;
+      if (!cached || now - cached.fetchedAt > RECENT_ISSUES_CACHE_TTL_MS) {
+        const client = new GitHubClient(githubToken);
+        try {
+          const issues = await client.listIssues(remote.owner, remote.repo, { limit: 100, state: "all" });
+          items = issues
+            .filter((issue) => issue.html_url.includes("/issues/"))
+            .map((issue) => ({
+              number: issue.number,
+              title: issue.title,
+              state: issue.state ?? "open",
+              htmlUrl: issue.html_url,
+              repository: cacheKey,
+              updatedAt: issue.updatedAt,
+            }));
+          recentIssuesCache.set(cacheKey, { fetchedAt: now, items });
+        } catch {
+          res.json([]);
+          return;
+        }
+      }
+
+      const filtered = (items ?? []).filter((issue) => {
+        if (!q) return true;
+        return String(issue.number).startsWith(q) || issue.title.toLowerCase().includes(q);
+      });
+
+      res.json(filtered.slice(0, limit));
+    } catch (err: unknown) {
+      if (err instanceof ApiError) {
+        throw err;
+      }
+      rethrowAsApiError(err);
+    }
+  });
 
   /**
    * POST /api/github/issues/fetch

@@ -2062,19 +2062,21 @@ export class GitHubClient {
   }
 
   /**
-   * List open issues from a repository.
+   * List issues from a repository.
    * Uses gh CLI if available, otherwise falls back to REST API.
    */
   async listIssues(
     owner: string,
     repo: string,
-    options?: { limit?: number; labels?: string[] }
+    options?: { limit?: number; labels?: string[]; state?: "open" | "all" }
   ): Promise<Array<{
     number: number;
     title: string;
     body: string | null;
     html_url: string;
     labels: Array<{ name: string }>;
+    state?: "open" | "closed";
+    updatedAt?: string;
   }>> {
     if (this.hasGhAuth()) {
       try {
@@ -2096,16 +2098,19 @@ export class GitHubClient {
   private async listIssuesWithGh(
     owner: string,
     repo: string,
-    options?: { limit?: number; labels?: string[] }
+    options?: { limit?: number; labels?: string[]; state?: "open" | "all" }
   ): Promise<Array<{
     number: number;
     title: string;
     body: string | null;
     html_url: string;
     labels: Array<{ name: string }>;
+    state?: "open" | "closed";
+    updatedAt?: string;
   }>> {
     const limit = options?.limit ?? 30;
-    
+    const state = options?.state ?? "open";
+
     // gh issue list doesn't support label filtering directly, so we fetch and filter client-side
     const issues = await runGhJsonAsync<Array<{
       number: number;
@@ -2113,12 +2118,14 @@ export class GitHubClient {
       body: string;
       url: string;
       labels: Array<{ name: string }>;
+      state: "OPEN" | "CLOSED";
+      updatedAt: string;
     }>>([
       "issue", "list",
       "--repo", `${owner}/${repo}`,
-      "--state", "open",
+      "--state", state,
       "--limit", String(Math.min(limit, 100)),
-      "--json", "number,title,body,url,labels",
+      "--json", "number,title,body,url,labels,state,updatedAt",
     ]);
 
     let result = issues.map((issue) => ({
@@ -2127,6 +2134,8 @@ export class GitHubClient {
       body: issue.body,
       html_url: issue.url,
       labels: issue.labels,
+      state: this.mapGhIssueState(issue.state),
+      updatedAt: issue.updatedAt,
     }));
 
     // Filter by labels if specified (client-side filtering)
@@ -2144,18 +2153,21 @@ export class GitHubClient {
   private async listIssuesWithApi(
     owner: string,
     repo: string,
-    options?: { limit?: number; labels?: string[] }
+    options?: { limit?: number; labels?: string[]; state?: "open" | "all" }
   ): Promise<Array<{
     number: number;
     title: string;
     body: string | null;
     html_url: string;
     labels: Array<{ name: string }>;
+    state?: "open" | "closed";
+    updatedAt?: string;
   }>> {
     const limit = options?.limit ?? 30;
-    
+    const state = options?.state ?? "open";
+
     const params = new URLSearchParams();
-    params.append("state", "open");
+    params.append("state", state);
     params.append("per_page", String(Math.min(limit, 100)));
     if (options?.labels && options.labels.length > 0) {
       params.append("labels", options.labels.join(","));
@@ -2179,11 +2191,24 @@ export class GitHubClient {
       body: string | null;
       html_url: string;
       labels: Array<{ name: string }>;
+      state: string;
+      updated_at: string;
       pull_request?: unknown;
     }>;
 
     // Filter out pull requests (they have a pull_request property)
-    return data.filter((issue) => !issue.pull_request).slice(0, limit);
+    return data
+      .filter((issue) => !issue.pull_request)
+      .map((issue) => ({
+        number: issue.number,
+        title: issue.title,
+        body: issue.body,
+        html_url: issue.html_url,
+        labels: issue.labels,
+        state: this.mapIssueState(issue.state),
+        updatedAt: issue.updated_at,
+      }))
+      .slice(0, limit);
   }
 
   /**
