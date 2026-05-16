@@ -863,6 +863,24 @@ describe("SettingsModal", () => {
       expect(ephemeralToggle.checked).toBe(true);
     });
 
+    it("renders and saves chat auto-cleanup retention", async () => {
+      renderModal({ initialSection: "general" });
+      await waitForSettingsModalReady();
+
+      const cleanupSelect = screen.getByLabelText("Auto-cleanup old chats") as HTMLSelectElement;
+      expect(cleanupSelect.value).toBe("0");
+
+      await userEvent.selectOptions(cleanupSelect, "14");
+      await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+      await waitFor(() => {
+        expect(mockUpdateSettings).toHaveBeenCalled();
+      });
+
+      const payload = mockUpdateSettings.mock.calls[0][0] as Record<string, unknown>;
+      expect(payload.chatAutoCleanupDays).toBe(14);
+    });
+
     it("renders and saves chat room compaction controls", async () => {
       renderModal({ initialSection: "general" });
       await waitForSettingsModalReady();

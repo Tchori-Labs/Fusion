@@ -2149,6 +2149,26 @@ export function SettingsModal({
               </label>
               <small>Show the floating chat button in the dashboard. Chat is still accessible from the Chat tab in the mobile navigation.</small>
             </div>
+            <h4 className="settings-section-heading settings-section-heading--spaced">Chat history</h4>
+            <div className="form-group">
+              <label htmlFor="chatAutoCleanupDays">Auto-cleanup old chats</label>
+              <select
+                id="chatAutoCleanupDays"
+                className="select"
+                value={form.chatAutoCleanupDays ?? 0}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, chatAutoCleanupDays: Number(e.target.value) || 0 }))
+                }
+              >
+                <option value={0}>Off</option>
+                <option value={7}>7 days</option>
+                <option value={14}>14 days</option>
+                <option value={30}>30 days</option>
+                <option value={60}>60 days</option>
+                <option value={90}>90 days</option>
+              </select>
+              <small>Delete chat sessions and rooms that have been idle for this many days. Default: Off.</small>
+            </div>
             <h4 className="settings-section-heading settings-section-heading--spaced">Chat Rooms</h4>
             <div className="form-group">
               <label htmlFor="chatRoomRecentVerbatimMessages">Recent verbatim room messages</label>
