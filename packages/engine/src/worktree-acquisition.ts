@@ -8,7 +8,12 @@ import { hydrateWorktreeDb } from "./worktree-db-hydrate.js";
 import { formatError } from "./logger.js";
 import { isBranchConflictError } from "./branch-conflicts.js";
 import { type WorktreePool, isUsableTaskWorktree } from "./worktree-pool.js";
-import { WorktrunkOperationError, resolveWorktreeBackend, type WorktreeBackend } from "./worktree-backend.js";
+import {
+  NativeWorktreeBackend,
+  WorktrunkOperationError,
+  resolveWorktreeBackend,
+  type WorktreeBackend,
+} from "./worktree-backend.js";
 import type { RunAuditor } from "./run-audit.js";
 
 const execAsync = promisify(exec);
@@ -220,28 +225,46 @@ export async function acquireTaskWorktree(opts: AcquireTaskWorktreeOptions): Pro
           await audit?.git({
             type: "worktree:worktrunk-create",
             target: created.path,
-            metadata: { branch: created.branch, taskId: task.id },
+            metadata: { branch: created.branch },
           });
         }
         return created;
       } catch (error) {
         if (backend.kind === "worktrunk" && error instanceof WorktrunkOperationError) {
-          // TODO(FN-4625): honor worktrunk.onFailure fallback semantics.
-          throw error;
+          if (settings.worktrunk?.onFailure === "fallback-native") {
+            logger?.warn?.(`${task.id}: worktrunk create failed, falling back to native backend: ${error.stderr ?? error.message}`);
+            await audit?.git({
+              type: "worktree:worktrunk-fallback",
+              target: path,
+              metadata: {
+                branch,
+                operation: "create",
+                stderr: error.stderr,
+              },
+            });
+            const nativeBackend = new NativeWorktreeBackend({ logger: logger ?? undefined });
+            return nativeBackend.create({
+              rootDir,
+              branch,
+              worktreePath: path,
+              startPoint,
+              taskId,
+              allowSiblingBranchRename: allowRename,
+            });
+          }
         }
         throw error;
       }
     };
 
-  // Removal call sites in executor.ts, merger.ts, and self-healing.ts are not
-  // migrated in this task. See FN-4678.
+  // Removal/sync/prune call sites in executor.ts, merger.ts, worktree-pool.ts,
+  // and self-healing.ts remain on native git worktree commands in this task;
+  // migration follows in FN-4678.
   const created = await createWorktreeImpl(branchName, worktreePath, task.id, baseBranch ?? undefined, allowSiblingBranchRename);
   worktreePath = created.path;
   branch = created.branch;
   await store.updateTask(task.id, { worktree: created.path, branch: created.branch });
-  if (backend.kind !== "worktrunk") {
-    await audit?.git({ type: "worktree:create", target: created.path, metadata: { branch: created.branch } });
-  }
+  await audit?.git({ type: "worktree:create", target: created.path, metadata: { branch: created.branch } });
   await audit?.git({ type: "branch:create", target: created.branch });
   if (created.branch !== branchName) {
     logger?.log(`Branch conflict resolved: using ${created.branch} instead of ${branchName}`);
