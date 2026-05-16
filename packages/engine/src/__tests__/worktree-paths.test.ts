@@ -4,6 +4,7 @@ import { join, resolve } from "node:path";
 import {
   isInsideConfiguredWorktreesDir,
   resolveTaskWorktreePath,
+  resolveTaskWorktreePathForBackend,
   resolveWorktreesDir,
 } from "../worktree-paths.js";
 
@@ -46,5 +47,18 @@ describe("worktree-paths", () => {
   it("legacy .worktrees default still works for containment checks", () => {
     expect(isInsideConfiguredWorktreesDir(rootDir, undefined, join(rootDir, ".worktrees", "fn-1"))).toBe(true);
     expect(isInsideConfiguredWorktreesDir(rootDir, undefined, join(rootDir, "fn-1"))).toBe(false);
+  });
+
+  it("delegates to worktrunk backend path resolver", async () => {
+    const resolver = async () => "/tmp/custom/fusion-fn-1";
+    await expect(
+      resolveTaskWorktreePathForBackend(rootDir, "fn-1", undefined, { kind: "worktrunk", resolveWorktreePath: resolver }, "fusion/fn-1"),
+    ).resolves.toBe("/tmp/custom/fusion-fn-1");
+  });
+
+  it("falls back to native resolver for non-worktrunk backends", async () => {
+    await expect(
+      resolveTaskWorktreePathForBackend(rootDir, "fn-1", { worktreesDir: "../{repo}.worktrees" } as any, { kind: "native" }, "fusion/fn-1"),
+    ).resolves.toBe(resolve(rootDir, "../repo-name.worktrees/fn-1"));
   });
 });

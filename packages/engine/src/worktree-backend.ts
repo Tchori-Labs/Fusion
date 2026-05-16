@@ -1,5 +1,6 @@
 import { exec, execFile } from "node:child_process";
 import { access } from "node:fs/promises";
+import { basename, resolve } from "node:path";
 import { promisify } from "node:util";
 import type { Settings } from "@fusion/core";
 import { resolveTaskWorktreePath } from "./worktree-paths.js";
@@ -116,6 +117,24 @@ function getErrorExitCode(error: unknown): number | null {
   const value = error as Record<string, unknown>;
   if (typeof value.status === "number") return value.status;
   if (typeof value.code === "number") return value.code;
+  return null;
+}
+
+function findStringByKey(value: unknown, key: string): string | null {
+  if (!value || typeof value !== "object") return null;
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findStringByKey(item, key);
+      if (found) return found;
+    }
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  if (typeof record[key] === "string") return record[key] as string;
+  for (const nested of Object.values(record)) {
+    const found = findStringByKey(nested, key);
+    if (found) return found;
+  }
   return null;
 }
 
@@ -408,18 +427,28 @@ export class WorktrunkWorktreeBackend implements WorktreeBackend {
   async resolveWorktreePath(input: { rootDir: string; worktreeName: string; branch: string }): Promise<string> {
     const template = await this.resolveWorktrunkTemplate(input.rootDir);
     const sanitizedBranch = input.branch.replace(/[\\/]/g, "-");
-    return template.replace(/\{\{\s*branch\s*\|\s*sanitize\s*\}\}/g, sanitizedBranch).replace(/\{\{\s*branch\s*\}\}/g, input.branch);
+    const expanded = template
+      .replace(/^~(?=$|[\\/])/, process.env.HOME ?? "~")
+      .replace(/\{\{\s*repo_path\s*\}\}/g, input.rootDir)
+      .replace(/\{\{\s*repo\s*\}\}/g, basename(input.rootDir))
+      .replace(/\{\{\s*branch\s*\|\s*sanitize\s*\}\}/g, sanitizedBranch)
+      .replace(/\{\{\s*branch\s*\}\}/g, input.branch);
+    return resolve(input.rootDir, expanded);
   }
 
   private async resolveWorktrunkTemplate(rootDir: string): Promise<string> {
-    const { stdout } = await execAsync("git config --get worktrunk.worktree-path", {
-      cwd: rootDir,
-      encoding: "utf-8",
-      timeout: WORKTRUNK_TIMEOUTS_MS.layout,
-      maxBuffer: MAX_BUFFER,
-    });
-    const configured = stdout.trim();
-    return configured || `${rootDir}/.worktrees/{{ branch | sanitize }}`;
+    try {
+      const { stdout } = await this.runWorktrunk(["config", "show", "--format", "json"], {
+        cwd: rootDir,
+        operation: "layout",
+      });
+      const parsed = JSON.parse(stdout) as Record<string, unknown>;
+      const fromJson = findStringByKey(parsed, "worktree-path");
+      if (fromJson) return fromJson;
+    } catch {
+      // fall back to documented default template when config cannot be read.
+    }
+    return "{{ repo_path }}/.worktrees/{{ branch | sanitize }}";
   }
 }
 

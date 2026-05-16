@@ -112,6 +112,13 @@ describe("NativeWorktreeBackend", () => {
       expect.objectContaining({ cwd: "/repo", timeout: 120000, maxBuffer: 10485760 }),
     );
   });
+
+  it("resolves native worktree path via configured worktreesDir", async () => {
+    const backend = new NativeWorktreeBackend({ settings: { worktreesDir: "../{repo}.worktrees" } as any });
+    await expect(
+      backend.resolveWorktreePath({ rootDir: "/repo/project", worktreeName: "fn-1", branch: "fusion/fn-1" }),
+    ).resolves.toBe("/repo/project.worktrees/fn-1");
+  });
 });
 
 describe("WorktrunkWorktreeBackend", () => {
@@ -266,6 +273,29 @@ describe("WorktrunkWorktreeBackend", () => {
     await expect(
       backend.sync({ rootDir: "/repo", worktreePath: "/repo/.worktrees/fn-1", branch: "main" }),
     ).rejects.toMatchObject({ code: "worktrunk_sync_conflict", operation: "sync" });
+  });
+
+  it("resolves worktrunk path from wt config show template", async () => {
+    execFileMock.mockResolvedValue({ stdout: '{"config":{"worktree-path":"{{ repo_path }}/../{{ repo }}.{{ branch | sanitize }}"}}', stderr: "" });
+    const backend = new WorktrunkWorktreeBackend({ binaryPath: "worktrunk" });
+
+    await expect(
+      backend.resolveWorktreePath({ rootDir: "/repo/project", worktreeName: "ignored", branch: "fusion/fn-1" }),
+    ).resolves.toBe("/repo/project.fusion-fn-1");
+    expect(execFileMock).toHaveBeenCalledWith(
+      "worktrunk",
+      ["config", "show", "--format", "json"],
+      expect.objectContaining({ cwd: "/repo/project", timeout: 5000, maxBuffer: 10485760 }),
+    );
+  });
+
+  it("falls back to default layout template when config cannot be read", async () => {
+    execFileMock.mockRejectedValue(new Error("missing config"));
+    const backend = new WorktrunkWorktreeBackend({ binaryPath: "worktrunk" });
+
+    await expect(
+      backend.resolveWorktreePath({ rootDir: "/repo/project", worktreeName: "ignored", branch: "fusion/fn-1" }),
+    ).resolves.toBe("/repo/project/.worktrees/fusion-fn-1");
   });
 
   it("prunes by listing worktrees and removing worktrunk managed entries", async () => {
