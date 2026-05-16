@@ -79,7 +79,7 @@ describe("reliability interactions: worktrunk worktree removal routing", () => {
 
   it("worktree-pool cleanup registered branch calls native backend remove", async () => {
     const removeSpy = vi.spyOn(NativeWorktreeBackend.prototype, "remove").mockResolvedValue(undefined);
-    readdirSpy.mockReturnValue([{ isDirectory: () => true, name: "fn-1" }]);
+    readdirSpy.mockReturnValue([{ isDirectory: () => true, name: "fn-1" }] as any);
     execSpy.mockImplementation((cmd: string, _opts: unknown, cb: (err: unknown, stdout: string, stderr: string) => void) => {
       if (cmd.includes("git worktree list --porcelain")) {
         cb(null, "worktree /repo/.worktrees/fn-1\n", "");
