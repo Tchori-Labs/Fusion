@@ -32,6 +32,8 @@ import { runCommandAsync } from "./run-command.js";
 import { createLogger } from "./logger.js";
 import { validateNodeOverrideChange } from "./node-override-guard.js";
 import { sanitizeTitle } from "./ai-summarize.js";
+import { getErrorMessage } from "./error-message.js";
+import { getTaskCreatedHook } from "./task-creation-hooks.js";
 import { assertProjectRootDir } from "./project-root-guard.js";
 import { generateTaskLineageId, normalizeTaskCommitAssociation } from "./task-lineage.js";
 import { createDistributedTaskIdAllocator, reconcileTaskIdState, resolveLocalNodeId, type DistributedTaskIdAllocator } from "./distributed-task-id.js";
@@ -2904,6 +2906,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       updatedAt?: string;
       prompt?: string;
       applyDefaultWorkflowSteps?: boolean;
+      invokeTaskCreatedHook?: boolean;
     },
   ): Promise<Task> {
     if (!input.description?.trim()) {
@@ -2951,10 +2954,14 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       createdAt: options.createdAt,
       updatedAt: options.updatedAt,
       promptOverride: options.prompt,
+      invokeTaskCreatedHook: options.invokeTaskCreatedHook,
     });
   }
 
   async applyReplicatedTaskCreate(payload: MeshReplicatedTaskCreatePayload): Promise<MeshReplicatedTaskApplyResult> {
+    // Intentionally does not invoke the post-create hook. Replicated tasks mirror
+    // state from an origin node; rerunning side effects here (e.g. GitHub issue
+    // creation) would duplicate external artifacts.
     const existing = this.readTaskFromDb(payload.taskId);
     if (existing) {
       const existingDetail = await this.getTask(payload.taskId);
@@ -2970,6 +2977,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       updatedAt: payload.updatedAt,
       prompt: payload.prompt,
       applyDefaultWorkflowSteps: false,
+      invokeTaskCreatedHook: false,
     });
 
     return { task, applied: true };
@@ -2988,6 +2996,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       createdAt?: string;
       updatedAt?: string;
       promptOverride?: string;
+      invokeTaskCreatedHook?: boolean;
     },
   ): Promise<Task> {
     const now = options?.createdAt ?? new Date().toISOString();
@@ -3066,7 +3075,20 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     await writeFile(join(dir, "PROMPT.md"), prompt);
 
     this.emit("task:created", task);
+    if (options?.invokeTaskCreatedHook !== false) {
+      await this.invokeTaskCreatedHook(task);
+    }
     return task;
+  }
+
+  private async invokeTaskCreatedHook(task: Task): Promise<void> {
+    const taskCreatedHook = getTaskCreatedHook();
+    if (!taskCreatedHook) return;
+    try {
+      await taskCreatedHook(task, this);
+    } catch (error) {
+      storeLog.warn(`[task-created-hook] ${task.id}: ${getErrorMessage(error)}`);
+    }
   }
 
   /**
@@ -3118,6 +3140,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
 
         if (this.isWatching) this.taskCache.set(newId, { ...newTask });
         this.emit("task:created", newTask);
+        await this.invokeTaskCreatedHook(newTask);
         return newTask;
       },
     });
@@ -3208,6 +3231,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
 
         if (this.isWatching) this.taskCache.set(newId, { ...newTask });
         this.emit("task:created", newTask);
+        await this.invokeTaskCreatedHook(newTask);
         return newTask;
       },
     });
