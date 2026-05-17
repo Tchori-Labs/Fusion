@@ -207,6 +207,8 @@ export interface SelfHealingOptions {
   chatStore?: ChatStore;
   /** Optional MessageStore for maintenance mail-retention cleanup. */
   messageStore?: MessageStore;
+  /** Optional notifier for board-stall unrecovered alerts. */
+  ntfyNotifier?: Pick<NtfyNotifier, "notifyBoardStallUnrecovered">;
 }
 
 const APPROVED_TRIAGE_RECOVERY_GRACE_MS = 60_000;
@@ -2584,22 +2586,31 @@ export class SelfHealingManager {
         let ntfyDispatched = false;
         if (ntfyAllowed) {
           try {
-            const settings = await this.store.getSettings();
-            const enabled = Boolean(settings.ntfyEnabled && settings.ntfyTopic);
-            const events = resolveNtfyEvents(settings.ntfyEvents);
-            if (enabled && isNtfyEventEnabled(events, "board-stall-unrecovered")) {
-              const clickUrl = buildNtfyClickUrl({ dashboardHost: settings.ntfyDashboardHost });
-              await sendNtfyNotification({
-                ntfyBaseUrl: settings.ntfyBaseUrl,
-                ntfyAccessToken: settings.ntfyAccessToken,
-                topic: settings.ntfyTopic!,
-                title: "Board stall unrecovered",
-                message: `Auto-recovery could not clear board stall. Holders: ${window.pendingVerification.holderIds.join(", ") || "none"}. Followers blocked: ${window.pendingVerification.followerCount}.`,
-                priority: "high",
-                clickUrl,
+            if (this.options.ntfyNotifier) {
+              await this.options.ntfyNotifier.notifyBoardStallUnrecovered({
+                holderIds: window.pendingVerification.holderIds,
+                followerCount: window.pendingVerification.followerCount,
               });
               window.lastNtfyAt = now;
               ntfyDispatched = true;
+            } else {
+              const settings = await this.store.getSettings();
+              const enabled = Boolean(settings.ntfyEnabled && settings.ntfyTopic);
+              const events = resolveNtfyEvents(settings.ntfyEvents);
+              if (enabled && isNtfyEventEnabled(events, "board-stall-unrecovered")) {
+                const clickUrl = buildNtfyClickUrl({ dashboardHost: settings.ntfyDashboardHost });
+                await sendNtfyNotification({
+                  ntfyBaseUrl: settings.ntfyBaseUrl,
+                  ntfyAccessToken: settings.ntfyAccessToken,
+                  topic: settings.ntfyTopic!,
+                  title: "Board stall unrecovered",
+                  message: `Auto-recovery could not clear board stall. Holders: ${window.pendingVerification.holderIds.join(", ") || "none"}. Followers blocked: ${window.pendingVerification.followerCount}.`,
+                  priority: "high",
+                  clickUrl,
+                });
+                window.lastNtfyAt = now;
+                ntfyDispatched = true;
+              }
             }
           } catch {
             ntfyDispatched = false;
