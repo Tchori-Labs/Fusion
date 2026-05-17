@@ -425,6 +425,72 @@ describe("native integrations", () => {
     });
   });
 
+  describe("clampWindowStateToVisibleDisplay", () => {
+    const baseState = {
+      x: 100,
+      y: 100,
+      width: 800,
+      height: 600,
+      isMaximized: false,
+    };
+
+    it("passes through when x/y are undefined", async () => {
+      const { clampWindowStateToVisibleDisplay } = await importNativeModule();
+      const state = { width: 800, height: 600, isMaximized: false };
+
+      expect(clampWindowStateToVisibleDisplay(state, [{ workArea: { x: 0, y: 0, width: 1920, height: 1080 } }])).toEqual(
+        state,
+      );
+    });
+
+    it("passes through when fully on screen", async () => {
+      const { clampWindowStateToVisibleDisplay } = await importNativeModule();
+
+      expect(
+        clampWindowStateToVisibleDisplay(baseState, [{ workArea: { x: 0, y: 0, width: 1920, height: 1080 } }]),
+      ).toEqual(baseState);
+    });
+
+    it("drops position when fully off-screen", async () => {
+      const { clampWindowStateToVisibleDisplay } = await importNativeModule();
+      const state = { ...baseState, x: -3000, y: -2000 };
+
+      expect(
+        clampWindowStateToVisibleDisplay(state, [{ workArea: { x: 0, y: 0, width: 1920, height: 1080 } }]),
+      ).toEqual({ width: 800, height: 600, isMaximized: false });
+    });
+
+    it("drops position when overlap is below 64x64 threshold", async () => {
+      const { clampWindowStateToVisibleDisplay } = await importNativeModule();
+      const state = { ...baseState, x: 1870, y: 1030 };
+
+      expect(
+        clampWindowStateToVisibleDisplay(state, [{ workArea: { x: 0, y: 0, width: 1920, height: 1080 } }]),
+      ).toEqual({ width: 800, height: 600, isMaximized: false });
+    });
+
+    it("keeps position when overlap meets 64x64 threshold", async () => {
+      const { clampWindowStateToVisibleDisplay } = await importNativeModule();
+      const state = { ...baseState, x: 1856, y: 1016 };
+
+      expect(
+        clampWindowStateToVisibleDisplay(state, [{ workArea: { x: 0, y: 0, width: 1920, height: 1080 } }]),
+      ).toEqual(state);
+    });
+
+    it("keeps position when overlap is on a secondary display", async () => {
+      const { clampWindowStateToVisibleDisplay } = await importNativeModule();
+      const state = { ...baseState, x: 2000, y: 100 };
+
+      expect(
+        clampWindowStateToVisibleDisplay(state, [
+          { workArea: { x: 0, y: 0, width: 1920, height: 1080 } },
+          { workArea: { x: 1920, y: 0, width: 1920, height: 1080 } },
+        ]),
+      ).toEqual(state);
+    });
+  });
+
   describe("window state", () => {
     it("loadWindowState returns parsed state", async () => {
       const { loadWindowState } = await importNativeModule();

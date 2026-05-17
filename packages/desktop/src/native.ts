@@ -17,6 +17,53 @@ export interface WindowState {
   isMaximized: boolean;
 }
 
+export interface DisplayWorkAreaLike {
+  workArea: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+}
+
+const MIN_VISIBLE_OVERLAP_PX = 64;
+
+export function clampWindowStateToVisibleDisplay(
+  state: WindowState,
+  displays: DisplayWorkAreaLike[],
+): WindowState {
+  if (state.x === undefined || state.y === undefined) {
+    return state;
+  }
+
+  const windowLeft = state.x;
+  const windowTop = state.y;
+  const windowRight = state.x + state.width;
+  const windowBottom = state.y + state.height;
+
+  const hasSufficientOverlap = displays.some(({ workArea }) => {
+    const displayLeft = workArea.x;
+    const displayTop = workArea.y;
+    const displayRight = workArea.x + workArea.width;
+    const displayBottom = workArea.y + workArea.height;
+
+    const overlapWidth = Math.max(0, Math.min(windowRight, displayRight) - Math.max(windowLeft, displayLeft));
+    const overlapHeight = Math.max(0, Math.min(windowBottom, displayBottom) - Math.max(windowTop, displayTop));
+
+    return overlapWidth >= MIN_VISIBLE_OVERLAP_PX && overlapHeight >= MIN_VISIBLE_OVERLAP_PX;
+  });
+
+  if (hasSufficientOverlap) {
+    return state;
+  }
+
+  return {
+    width: state.width,
+    height: state.height,
+    isMaximized: state.isMaximized,
+  };
+}
+
 export type DesktopLaunchMode = "choose" | "local" | "remote";
 
 export interface DesktopRemoteProfileLike {
