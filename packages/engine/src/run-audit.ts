@@ -135,6 +135,26 @@ export type DatabaseMutationType =
   | "task:auto-recover-finalize-already-on-main"
   | "task:auto-recover-branch-misbound"
   | "task:auto-recover-node-unreachable"
+  /**
+   * Metadata shape for node:handoff:* and node:lease:* events:
+   * ```ts
+   * {
+   *   taskId: string;
+   *   ownerNodeId: string | null;        // task.checkoutNodeId at decision time
+   *   ownerNodeHealth: "offline" | "error" | "online" | "unknown";
+   *   localNodeId: string;
+   *   handoffPolicy: "block" | "reassign-to-local" | "reassign-any-healthy" | undefined;
+   *   decisionReason: string;             // HandoffDecision.reason (e.g. "handoff_blocked_by_policy")
+   *   source: "scheduler.dispatch" | "mesh-lease.recover";
+   *   epoch?: number;                     // for node:lease:recovered: the post-recovery checkoutLeaseEpoch
+   *   recoveryReason?: string;            // for node:lease:recovered: caller-provided reason + isLeaseRecoverable reason
+   * }
+   * ```
+   */
+  | "node:handoff:parked"
+  | "node:handoff:reassign-local"
+  | "node:handoff:reassign-any"
+  | "node:lease:recovered"
   | "task:auto-recover-lease-released"
   | "task:auto-recover-lease-already-healed"
   | "task:auto-recover-lease-foreign-owner"
