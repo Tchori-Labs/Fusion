@@ -1520,6 +1520,12 @@ export default function kbExtension(pi: ExtensionAPI) {
       scope: Type.Optional(Type.Union([Type.Literal("project"), Type.Literal("global")], { description: "Optional scope" })),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const fnCtx = ctx as typeof ctx & {
+        agentId?: string;
+        agentName?: string;
+        runId?: string;
+        taskId?: string;
+      };
       const store = await getStore(ctx.cwd);
       const secretsStore = await store.getSecretsStore();
       const scopes: SecretScope[] = params.scope ? [params.scope] : ["project", "global"];
@@ -1546,19 +1552,19 @@ export default function kbExtension(pi: ExtensionAPI) {
       });
 
       if (decision.policy === "deny") {
-        emitSecretAudit(store, ctx as { runId?: string; agentId?: string; taskId?: string }, "secret:approval-denied", `${resolvedScope}:${params.key}`);
+        emitSecretAudit(store, fnCtx, "secret:approval-denied", `${resolvedScope}:${params.key}`);
         return { content: [{ type: "text", text: "Secret access denied by policy." }], details: { error: "denied", key: params.key, scope: resolvedScope, policySource: decision.source } };
       }
 
       if (decision.policy === "prompt") {
         const { ApprovalRequestStore } = await import("@fusion/core");
         const approvalStore = new ApprovalRequestStore(store.getDatabase());
-        const dedupeKey = `secret-read:${resolvedScope}:${params.key}:${ctx.agentId ?? "unknown"}`;
-        const existing = approvalStore.findLatestByDedupeKey({ requesterActorId: ctx.agentId ?? "user", taskId: (ctx as { taskId?: string }).taskId, dedupeKey });
+        const dedupeKey = `secret-read:${resolvedScope}:${params.key}:${fnCtx.agentId ?? "unknown"}`;
+        const existing = approvalStore.findLatestByDedupeKey({ requesterActorId: fnCtx.agentId ?? "user", taskId: fnCtx.taskId, dedupeKey });
         const request = existing && existing.status === "pending"
           ? existing
           : approvalStore.create({
-            requester: { actorId: ctx.agentId ?? "user", actorType: "agent", actorName: ctx.agentName ?? ctx.agentId ?? "Agent" },
+            requester: { actorId: fnCtx.agentId ?? "user", actorType: "agent", actorName: fnCtx.agentName ?? fnCtx.agentId ?? "Agent" },
             targetAction: {
               category: "secrets_access",
               action: "read",
@@ -1567,19 +1573,19 @@ export default function kbExtension(pi: ExtensionAPI) {
               resourceId: record.id,
               context: { approvalDedupeKey: dedupeKey, key: params.key, scope: resolvedScope },
             },
-            ...(ctx.runId ? { runId: ctx.runId } : {}),
-            ...((ctx as { taskId?: string }).taskId ? { taskId: (ctx as { taskId?: string }).taskId } : {}),
+            ...(fnCtx.runId ? { runId: fnCtx.runId } : {}),
+            ...(fnCtx.taskId ? { taskId: fnCtx.taskId } : {}),
           });
 
-        emitSecretAudit(store, ctx as { runId?: string; agentId?: string; taskId?: string }, "secret:approval-requested", `${resolvedScope}:${params.key}`);
+        emitSecretAudit(store, fnCtx, "secret:approval-requested", `${resolvedScope}:${params.key}`);
         return {
           content: [{ type: "text", text: `Secret access requires approval. Request ${request.id} is pending. Approve via POST /api/approvals/:id/decision.` }],
           details: { outcome: "pending_approval", approvalRequestId: request.id, key: params.key, scope: resolvedScope },
         };
       }
 
-      const revealed = await secretsStore.revealSecret(record.id, resolvedScope, { agentId: ctx.agentId ?? null });
-      emitSecretAudit(store, ctx as { runId?: string; agentId?: string; taskId?: string }, "secret:read", `${resolvedScope}:${params.key}`, { key: params.key, scope: resolvedScope });
+      const revealed = await secretsStore.revealSecret(record.id, resolvedScope, { agentId: fnCtx.agentId ?? null });
+      emitSecretAudit(store, fnCtx, "secret:read", `${resolvedScope}:${params.key}`, { key: params.key, scope: resolvedScope });
       return {
         content: [{ type: "text", text: `Loaded secret '${params.key}' from ${resolvedScope} scope.` }],
         details: { key: params.key, value: revealed.plaintextValue, scope: resolvedScope },
