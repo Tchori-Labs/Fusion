@@ -680,6 +680,8 @@ See [docs/task-management.md](./docs/task-management.md) for the archive and res
 
 This guide documents the dashboard's design system so that any AI agent or developer building new UI components follows established conventions automatically.
 
+The dashboard `index.html` shell is templated server-side at request time: the server injects a per-user `<link rel="modulepreload">` bootstrap script for the last-used `taskView` chunk. The chunk map is derived from Vite's `dist/client/.vite/manifest.json`, and the inline preload logic reads `kb-dashboard-current-project` plus `kb:<projectId>:kb-dashboard-task-view` from localStorage.
+
 ### CSS Architecture
 
 The dashboard's CSS has been split into modular per-component files alongside a consolidated global stylesheet:
