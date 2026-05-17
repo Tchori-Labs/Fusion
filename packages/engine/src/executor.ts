@@ -8428,6 +8428,19 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
     // and confuse every tool that walks git state.
     await this.assertWorktreePathNotNested(path, taskId);
 
+    const installGuardOrCleanup = async () => {
+      try {
+        await installTaskWorktreeIdentityGuard({ worktreePath: path, taskId });
+      } catch (error) {
+        try {
+          await execAsync(`rm -rf "${path}"`, { cwd: this.rootDir });
+        } catch {
+          executorLog.log(`Warning: failed to remove worktree after identity-guard install failure: ${path}`);
+        }
+        throw error;
+      }
+    };
+
     // If directory exists but is not a registered worktree, remove it first
     if (existsSync(path)) {
       const isRegistered = await this.isRegisteredWorktree(path);
@@ -8481,19 +8494,6 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
           executorLog.log(`Warning: failed to remove partial worktree directory after creation failure: ${path}`);
         }
         throw err;
-      }
-    };
-
-    const installGuardOrCleanup = async () => {
-      try {
-        await installTaskWorktreeIdentityGuard({ worktreePath: path, taskId });
-      } catch (error) {
-        try {
-          await execAsync(`rm -rf "${path}"`, { cwd: this.rootDir });
-        } catch {
-          executorLog.log(`Warning: failed to remove worktree after identity-guard install failure: ${path}`);
-        }
-        throw error;
       }
     };
 
