@@ -1,7 +1,7 @@
 import express, { type Router } from "express";
 import { randomUUID } from "node:crypto";
 import { join, dirname } from "node:path";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { createSecureServer as createHttp2SecureServer, type Http2SecureServer } from "node:http2";
 import type { Server as HttpServer } from "node:http";
@@ -659,6 +659,7 @@ export function createServer(store: TaskStore, options?: ServerOptions): ReturnT
 
   let cachedIndexClientDir: string | null = null;
   let cachedIndexHtml: string | null = null;
+  let cachedIndexMtimeMs: number | null = null;
   let cachedTemplatedIndexHtml: string | null = null;
 
   const buildViewPreloadInjection = (chunkMap: Record<string, string>): string => {
@@ -671,14 +672,29 @@ export function createServer(store: TaskStore, options?: ServerOptions): ReturnT
       ? process.env.FUSION_CLIENT_DIR
       : clientDir;
 
-    if (cachedTemplatedIndexHtml && cachedIndexClientDir === resolvedClientDir) {
+    const indexPath = join(resolvedClientDir, "index.html");
+    // Invalidate the cache when index.html changes on disk (e.g. a release
+    // upgrade or rebuild replaces the file). Without this, the server keeps
+    // serving stale HTML pointing at chunk hashes that no longer exist —
+    // recoverable only by restarting the server.
+    let indexMtimeMs: number | null = null;
+    try {
+      indexMtimeMs = statSync(indexPath).mtimeMs;
+    } catch {
+      indexMtimeMs = null;
+    }
+
+    const dirChanged = cachedIndexClientDir !== resolvedClientDir;
+    const mtimeChanged = indexMtimeMs !== null && cachedIndexMtimeMs !== indexMtimeMs;
+
+    if (cachedTemplatedIndexHtml && !dirChanged && !mtimeChanged) {
       return cachedTemplatedIndexHtml;
     }
 
-    const indexPath = join(resolvedClientDir, "index.html");
-    if (!cachedIndexHtml || cachedIndexClientDir !== resolvedClientDir) {
+    if (!cachedIndexHtml || dirChanged || mtimeChanged) {
       cachedIndexHtml = readFileSync(indexPath, "utf8");
       cachedIndexClientDir = resolvedClientDir;
+      cachedIndexMtimeMs = indexMtimeMs;
     }
 
     const chunkMap = loadViewChunkManifest(resolvedClientDir);
@@ -698,8 +714,14 @@ export function createServer(store: TaskStore, options?: ServerOptions): ReturnT
       res.setHeader("Content-Type", "text/html; charset=utf-8");
       res.setHeader("Cache-Control", "no-store, max-age=0");
       res.status(200).send(html);
-    } catch {
-      res.status(404).end();
+    } catch (err) {
+      console.error("[dashboard] serveIndexHtml failed:", err);
+      // Drop the cached HTML so the next request retries from disk rather
+      // than re-throwing the same failure until the server restarts.
+      cachedIndexHtml = null;
+      cachedTemplatedIndexHtml = null;
+      cachedIndexMtimeMs = null;
+      res.status(503).type("text/plain").send("Dashboard temporarily unavailable. Retrying...");
     }
   };
 

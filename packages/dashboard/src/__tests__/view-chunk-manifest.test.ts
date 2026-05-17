@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
@@ -76,17 +76,44 @@ describe("view chunk manifest", () => {
     const first = loadViewChunkManifest(clientDir);
     expect(first.agents).toBe("/assets/AgentsView-old.js");
 
+    resetViewChunkManifestCache();
     writeFileSync(
       manifestPath,
       JSON.stringify({
         [VIEW_SOURCE_MAP.agents]: { file: "assets/AgentsView-new.js" },
       }),
     );
+    const refreshed = loadViewChunkManifest(clientDir);
+    expect(refreshed.agents).toBe("/assets/AgentsView-new.js");
 
-    const cached = loadViewChunkManifest(clientDir);
-    expect(cached.agents).toBe("/assets/AgentsView-old.js");
+    rmSync(clientDir, { recursive: true, force: true });
+  });
 
-    resetViewChunkManifestCache();
+  it("cache auto-invalidates when manifest mtime changes", () => {
+    const clientDir = makeClientDir("mtime");
+    mkdirSync(join(clientDir, ".vite"), { recursive: true });
+    const manifestPath = join(clientDir, ".vite", "manifest.json");
+    writeFileSync(
+      manifestPath,
+      JSON.stringify({
+        [VIEW_SOURCE_MAP.agents]: { file: "assets/AgentsView-old.js" },
+      }),
+    );
+
+    const first = loadViewChunkManifest(clientDir);
+    expect(first.agents).toBe("/assets/AgentsView-old.js");
+
+    writeFileSync(
+      manifestPath,
+      JSON.stringify({
+        [VIEW_SOURCE_MAP.agents]: { file: "assets/AgentsView-new.js" },
+      }),
+    );
+    // Force a distinctly newer mtime so the cache key changes even on
+    // coarse-grained filesystems.
+    const future = new Date(Date.now() + 5_000);
+    utimesSync(manifestPath, future, future);
+
     const refreshed = loadViewChunkManifest(clientDir);
     expect(refreshed.agents).toBe("/assets/AgentsView-new.js");
 

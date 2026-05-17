@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 type TaskViewId = string;
@@ -29,7 +29,12 @@ export const VIEW_SOURCE_MAP: Record<TaskViewId, string> = {
   "stash-recovery": "components/StashRecoveryView.tsx",
 };
 
-const manifestCache = new Map<string, Record<TaskViewId, string>>();
+type ManifestCacheEntry = {
+  entries: Record<TaskViewId, string>;
+  mtimeMs: number | null;
+};
+
+const manifestCache = new Map<string, ManifestCacheEntry>();
 const warnedMissingManifest = new Set<string>();
 const warnedMissingEntries = new Set<string>();
 
@@ -43,16 +48,27 @@ function warnOnce(set: Set<string>, key: string, message: string): void {
 
 export function loadViewChunkManifest(clientDir: string): Record<TaskViewId, string> {
   const cacheKey = resolve(clientDir);
-  const cached = manifestCache.get(cacheKey);
-  if (cached) {
-    return cached;
+  const manifestPath = join(cacheKey, ".vite", "manifest.json");
+
+  // Stat first so a release-upgrade that replaces the manifest invalidates
+  // the cache automatically. Without this, the server keeps handing out
+  // stale chunk paths and the browser 404s on every lazy view until restart.
+  let mtimeMs: number | null = null;
+  try {
+    mtimeMs = statSync(manifestPath).mtimeMs;
+  } catch {
+    mtimeMs = null;
   }
 
-  const manifestPath = join(cacheKey, ".vite", "manifest.json");
+  const cached = manifestCache.get(cacheKey);
+  if (cached && cached.mtimeMs === mtimeMs) {
+    return cached.entries;
+  }
+
   if (!existsSync(manifestPath)) {
     warnOnce(warnedMissingManifest, cacheKey, `[dashboard] View chunk manifest missing: ${manifestPath}`);
     const empty: Record<TaskViewId, string> = {};
-    manifestCache.set(cacheKey, empty);
+    manifestCache.set(cacheKey, { entries: empty, mtimeMs });
     return empty;
   }
 
@@ -73,12 +89,12 @@ export function loadViewChunkManifest(clientDir: string): Record<TaskViewId, str
       resolvedEntries[viewId] = `/${entry.file}`;
     }
 
-    manifestCache.set(cacheKey, resolvedEntries);
+    manifestCache.set(cacheKey, { entries: resolvedEntries, mtimeMs });
     return resolvedEntries;
   } catch {
     warnOnce(warnedMissingManifest, `${cacheKey}:parse`, `[dashboard] Failed to parse view chunk manifest: ${manifestPath}`);
     const empty: Record<TaskViewId, string> = {};
-    manifestCache.set(cacheKey, empty);
+    manifestCache.set(cacheKey, { entries: empty, mtimeMs });
     return empty;
   }
 }
