@@ -15,6 +15,10 @@ vi.mock("../worktree-hooks.js", () => ({
   installTaskWorktreeIdentityGuard: vi.fn().mockResolvedValue(undefined),
 }));
 
+vi.mock("../worktree-hooks.js", () => ({
+  installTaskWorktreeIdentityGuard: vi.fn().mockResolvedValue(undefined),
+}));
+
 // ── Shared test fixtures ──────────────────────────────────────────────
 
 function makePrompt(steps: string[]): string {
