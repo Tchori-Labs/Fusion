@@ -95,6 +95,28 @@ describe("useCurrentProject", () => {
     expect(result.current.currentProject?.id).toBe("proj_2");
   });
 
+  it("passes long maxAge for current-project cache reads", () => {
+    renderHook(() => useCurrentProject(mockProjects));
+
+    expect(mockReadCache).toHaveBeenCalledWith(
+      swrCache.SWR_CACHE_KEYS.CURRENT_PROJECT_ID,
+      { maxAgeMs: swrCache.SWR_LONG_MAX_AGE_MS },
+    );
+  });
+
+  it("falls back to settings-driven selection when cache miss occurs", async () => {
+    mockReadCache.mockReturnValueOnce(null);
+    (fetchGlobalSettings as ReturnType<typeof vi.fn>).mockResolvedValue({
+      dashboardCurrentProjectIdByNode: { local: "proj_1" },
+    });
+
+    const { result } = renderHook(() => useCurrentProject(mockProjects));
+
+    await waitFor(() => {
+      expect(result.current.currentProject?.id).toBe("proj_1");
+    });
+  });
+
   it("loads saved project from global settings", async () => {
     (fetchGlobalSettings as ReturnType<typeof vi.fn>).mockResolvedValue({
       dashboardCurrentProjectIdByNode: { local: "proj_1" },

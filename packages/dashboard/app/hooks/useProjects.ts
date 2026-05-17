@@ -10,7 +10,7 @@ import {
   type ProjectInfoWithSource,
   type ProjectNodeAvailability,
 } from "../api";
-import { SWR_CACHE_KEYS, clearCache, readCache, writeCache } from "../utils/swrCache";
+import { SWR_CACHE_KEYS, SWR_DEFAULT_MAX_AGE_MS, clearCache, readCache, writeCache } from "../utils/swrCache";
 
 export interface UseProjectsResult {
   /** List of all registered projects (local + remote) */
@@ -77,7 +77,7 @@ function normalizeProjects(projects: ProjectInfoWithSource[]): ProjectInfoWithSo
  */
 export function useProjects(): UseProjectsResult {
   const [projects, setProjects] = useState<ProjectInfoWithSource[]>(() => {
-    const cached = readCache<ProjectInfoWithSource[]>(SWR_CACHE_KEYS.PROJECTS);
+    const cached = readCache<ProjectInfoWithSource[]>(SWR_CACHE_KEYS.PROJECTS, { maxAgeMs: SWR_DEFAULT_MAX_AGE_MS });
     if (!Array.isArray(cached)) {
       return [];
     }

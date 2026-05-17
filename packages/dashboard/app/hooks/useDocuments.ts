@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import type { TaskDocumentWithTask } from "@fusion/core";
 import { fetchAllDocuments, fetchProjectMarkdownFiles, type MarkdownFileEntry } from "../api";
-import { readCache, SWR_CACHE_KEYS, writeCache } from "../utils/swrCache";
+import { readCache, SWR_CACHE_KEYS, SWR_DEFAULT_MAX_AGE_MS, writeCache } from "../utils/swrCache";
 
 export interface UseDocumentsResult {
   /** List of all documents across tasks */
@@ -38,7 +38,7 @@ export function useDocuments(options?: {
     if (!cacheKey) {
       return [];
     }
-    const cached = readCache<TaskDocumentWithTask[]>(cacheKey);
+    const cached = readCache<TaskDocumentWithTask[]>(cacheKey, { maxAgeMs: SWR_DEFAULT_MAX_AGE_MS });
     return Array.isArray(cached) ? cached : [];
   });
   const [projectFiles, setProjectFiles] = useState<MarkdownFileEntry[]>([]);
@@ -129,7 +129,7 @@ export function useDocuments(options?: {
       return;
     }
 
-    const cached = readCache<TaskDocumentWithTask[]>(cacheKey);
+    const cached = readCache<TaskDocumentWithTask[]>(cacheKey, { maxAgeMs: SWR_DEFAULT_MAX_AGE_MS });
     if (Array.isArray(cached)) {
       setDocuments(cached);
       initialLoadCompleteRef.current = true;

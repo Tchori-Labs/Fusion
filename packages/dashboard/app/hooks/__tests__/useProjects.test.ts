@@ -82,6 +82,18 @@ describe("useProjects", () => {
     expect(result.current.projects[0]?.id).toBe("live-project");
   });
 
+  it("passes maxAge for project cache hydration", () => {
+    mockHasNodeMappingsSupport.mockReturnValue(false);
+    mockFetchProjectsAcrossNodes.mockResolvedValue([]);
+
+    renderHook(() => useProjects());
+
+    expect(mockReadCache).toHaveBeenCalledWith(
+      swrCache.SWR_CACHE_KEYS.PROJECTS,
+      { maxAgeMs: swrCache.SWR_DEFAULT_MAX_AGE_MS },
+    );
+  });
+
   it("cache miss keeps loading flow until fetch resolves", async () => {
     let resolveFetch: ((projects: ProjectInfoWithSource[]) => void) | undefined;
     mockFetchProjectsAcrossNodes.mockImplementationOnce(

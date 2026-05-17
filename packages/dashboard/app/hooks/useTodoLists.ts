@@ -10,7 +10,7 @@ import {
   deleteTodoItem,
   reorderTodoItems,
 } from "../api";
-import { readCache, SWR_CACHE_KEYS, writeCache } from "../utils/swrCache";
+import { readCache, SWR_CACHE_KEYS, SWR_DEFAULT_MAX_AGE_MS, writeCache } from "../utils/swrCache";
 
 type ToastType = "info" | "success" | "error" | "warning";
 
@@ -53,7 +53,7 @@ export function useTodoLists(options: UseTodoListsOptions = {}): UseTodoListsRes
 
   const cacheKey = `${SWR_CACHE_KEYS.TODO_LISTS_PREFIX}${projectId ?? "global"}`;
   const [lists, setLists] = useState<TodoList[]>(() => {
-    const cached = readCache<TodoList[]>(cacheKey);
+    const cached = readCache<TodoList[]>(cacheKey, { maxAgeMs: SWR_DEFAULT_MAX_AGE_MS });
     return Array.isArray(cached) ? cached : [];
   });
   const [items, setItems] = useState<TodoItem[]>([]);
@@ -68,7 +68,7 @@ export function useTodoLists(options: UseTodoListsOptions = {}): UseTodoListsRes
   useEffect(() => {
     let cancelled = false;
 
-    const cachedLists = readCache<TodoList[]>(cacheKey);
+    const cachedLists = readCache<TodoList[]>(cacheKey, { maxAgeMs: SWR_DEFAULT_MAX_AGE_MS });
     const hasCachedLists = Array.isArray(cachedLists) && cachedLists.length > 0;
 
     if (hasCachedLists) {

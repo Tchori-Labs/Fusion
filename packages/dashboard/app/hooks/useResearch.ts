@@ -16,7 +16,7 @@ import {
 } from "../api";
 import { subscribeSse } from "../sse-bus";
 import type { ResearchAvailability, ResearchRunDetail, ResearchRunListItem } from "../research-types";
-import { readCache, SWR_CACHE_KEYS, writeCache } from "../utils/swrCache";
+import { readCache, SWR_CACHE_KEYS, SWR_DEFAULT_MAX_AGE_MS, SWR_LONG_MAX_AGE_MS, writeCache } from "../utils/swrCache";
 
 const SEARCH_DEBOUNCE_MS = 300;
 const POLL_INTERVAL_MS = 4000;
@@ -106,8 +106,8 @@ export function useResearch(options?: { projectId?: string }) {
   const cacheSuffix = projectId ?? "";
   const runsCacheKey = `${SWR_CACHE_KEYS.RESEARCH_RUNS_PREFIX}${cacheSuffix}`;
   const selectedIdCacheKey = `${SWR_CACHE_KEYS.RESEARCH_SELECTED_ID_PREFIX}${cacheSuffix}`;
-  const initialRuns = readCache<ResearchRunListItem[]>(runsCacheKey);
-  const initialSelectedId = readCache<string | null>(selectedIdCacheKey);
+  const initialRuns = readCache<ResearchRunListItem[]>(runsCacheKey, { maxAgeMs: SWR_DEFAULT_MAX_AGE_MS });
+  const initialSelectedId = readCache<string | null>(selectedIdCacheKey, { maxAgeMs: SWR_LONG_MAX_AGE_MS });
   const hasHydratedRef = useRef(Array.isArray(initialRuns) && initialRuns.length > 0);
   const [runs, setRuns] = useState<ResearchRunListItem[]>(() => (Array.isArray(initialRuns) ? initialRuns : []));
   const [selectedRunId, setSelectedRunId] = useState<string | null>(initialSelectedId ?? null);
@@ -127,8 +127,8 @@ export function useResearch(options?: { projectId?: string }) {
       projectContextVersionRef.current++;
     }
 
-    const cachedRuns = readCache<ResearchRunListItem[]>(runsCacheKey);
-    const cachedSelectedId = readCache<string | null>(selectedIdCacheKey);
+    const cachedRuns = readCache<ResearchRunListItem[]>(runsCacheKey, { maxAgeMs: SWR_DEFAULT_MAX_AGE_MS });
+    const cachedSelectedId = readCache<string | null>(selectedIdCacheKey, { maxAgeMs: SWR_LONG_MAX_AGE_MS });
     const hasCachedRuns = Array.isArray(cachedRuns) && cachedRuns.length > 0;
 
     setRuns(Array.isArray(cachedRuns) ? cachedRuns : []);

@@ -3,7 +3,7 @@ import type { Task, Column, TaskCreateInput, MergeResult, GithubIssueAction } fr
 import { normalizeColumn } from "@fusion/core";
 import * as api from "../api";
 import { subscribeSse } from "../sse-bus";
-import { readCache, SWR_CACHE_KEYS, writeCache } from "../utils/swrCache";
+import { readCache, SWR_CACHE_KEYS, SWR_DEFAULT_MAX_AGE_MS, writeCache } from "../utils/swrCache";
 
 const loggedTaskCacheHitProjects = new Set<string>();
 
@@ -99,7 +99,7 @@ export function useTasks(options?: UseTasksOptions) {
     if (!projectId) {
       return [];
     }
-    const cachedTasks = readCache<Task[]>(`${SWR_CACHE_KEYS.TASKS_PREFIX}${projectId}`);
+    const cachedTasks = readCache<Task[]>(`${SWR_CACHE_KEYS.TASKS_PREFIX}${projectId}`, { maxAgeMs: SWR_DEFAULT_MAX_AGE_MS });
     if (Array.isArray(cachedTasks) && cachedTasks.length > 0 && !loggedTaskCacheHitProjects.has(projectId)) {
       loggedTaskCacheHitProjects.add(projectId);
       console.info("[swr-cache] hit tasks=", cachedTasks.length, "projectId=", projectId);
@@ -107,6 +107,7 @@ export function useTasks(options?: UseTasksOptions) {
     return Array.isArray(cachedTasks) ? cachedTasks.map(normalizeTask) : [];
   });
   const [isStale, setIsStale] = useState(true);
+  const [lastRefreshErrorAt, setLastRefreshErrorAt] = useState<number | null>(null);
   // Once the user expands the archived column, we keep including archived tasks
   // in subsequent refreshes for the lifetime of this hook instance.
   const [includeArchived, setIncludeArchived] = useState(false);
@@ -160,6 +161,7 @@ export function useTasks(options?: UseTasksOptions) {
         writeCache(`${SWR_CACHE_KEYS.TASKS_PREFIX}${requestProjectId}`, cachedPayload, { maxBytes: 500_000 });
       }
       setIsStale(false);
+      setLastRefreshErrorAt(null);
       // Record when we received fresh server data for stuck detection
       lastFetchTimeMs.current = Date.now();
     } catch {
@@ -167,11 +169,11 @@ export function useTasks(options?: UseTasksOptions) {
       if (fetchVersionRef.current !== requestVersion || projectId !== requestProjectId) {
         return;
       }
+      setLastRefreshErrorAt(Date.now());
       if (options?.clearOnError) {
         setTasks([]);
         return;
       }
-      setTasks((current) => current);
     }
   }, [projectId]);
   refreshTasksRef.current = refreshTasks;
@@ -203,7 +205,7 @@ export function useTasks(options?: UseTasksOptions) {
       return;
     }
 
-    const cachedTasks = readCache<Task[]>(`${SWR_CACHE_KEYS.TASKS_PREFIX}${projectId}`);
+    const cachedTasks = readCache<Task[]>(`${SWR_CACHE_KEYS.TASKS_PREFIX}${projectId}`, { maxAgeMs: SWR_DEFAULT_MAX_AGE_MS });
     if (Array.isArray(cachedTasks)) {
       if (cachedTasks.length > 0 && !loggedTaskCacheHitProjects.has(projectId)) {
         loggedTaskCacheHitProjects.add(projectId);
@@ -536,5 +538,5 @@ export function useTasks(options?: UseTasksOptions) {
     lastFetchTimeMs.current = Date.now();
   }, []);
 
-  return { tasks, isStale, createTask, moveTask, pauseTask, unpauseTask, deleteTask, mergeTask, retryTask, resetTask, duplicateTask, updateTask, archiveTask, unarchiveTask, archiveAllDone, loadArchivedTasks, includeArchived, refreshTasks, ingestCreatedTasks, lastFetchTimeMs: lastFetchTimeMs.current };
+  return { tasks, isStale, lastRefreshErrorAt, createTask, moveTask, pauseTask, unpauseTask, deleteTask, mergeTask, retryTask, resetTask, duplicateTask, updateTask, archiveTask, unarchiveTask, archiveAllDone, loadArchivedTasks, includeArchived, refreshTasks, ingestCreatedTasks, lastFetchTimeMs: lastFetchTimeMs.current };
 }

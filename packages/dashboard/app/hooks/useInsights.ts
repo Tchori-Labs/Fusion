@@ -21,7 +21,7 @@ import {
   fetchInsightRuns,
   getInsightCreateTaskData,
 } from "../api";
-import { readCache, SWR_CACHE_KEYS, writeCache } from "../utils/swrCache";
+import { readCache, SWR_CACHE_KEYS, SWR_DEFAULT_MAX_AGE_MS, SWR_LONG_MAX_AGE_MS, writeCache } from "../utils/swrCache";
 
 // Canonical insight categories (in display order)
 export const INSIGHT_CATEGORIES: InsightCategory[] = [
@@ -132,8 +132,8 @@ export function useInsights(projectId?: string): UseInsightsResult {
   const cacheSuffix = projectId ?? "";
   const insightsCacheKey = `${SWR_CACHE_KEYS.INSIGHTS_PREFIX}${cacheSuffix}`;
   const latestRunCacheKey = `${SWR_CACHE_KEYS.INSIGHT_LATEST_RUN_PREFIX}${cacheSuffix}`;
-  const initialInsights = readCache<Insight[]>(insightsCacheKey);
-  const initialLatestRun = readCache<InsightRun | null>(latestRunCacheKey);
+  const initialInsights = readCache<Insight[]>(insightsCacheKey, { maxAgeMs: SWR_DEFAULT_MAX_AGE_MS });
+  const initialLatestRun = readCache<InsightRun | null>(latestRunCacheKey, { maxAgeMs: SWR_LONG_MAX_AGE_MS });
   const hasHydratedRef = useRef(Array.isArray(initialInsights) && initialInsights.length > 0);
 
   const [allInsights, setAllInsights] = useState<Insight[]>(() => (Array.isArray(initialInsights) ? initialInsights : []));
@@ -423,8 +423,8 @@ export function useInsights(projectId?: string): UseInsightsResult {
   }, [allInsights]);
 
   useEffect(() => {
-    const cachedInsights = readCache<Insight[]>(insightsCacheKey);
-    const cachedRun = readCache<InsightRun | null>(latestRunCacheKey);
+    const cachedInsights = readCache<Insight[]>(insightsCacheKey, { maxAgeMs: SWR_DEFAULT_MAX_AGE_MS });
+    const cachedRun = readCache<InsightRun | null>(latestRunCacheKey, { maxAgeMs: SWR_LONG_MAX_AGE_MS });
     const hasCachedInsights = Array.isArray(cachedInsights) && cachedInsights.length > 0;
 
     setAllInsights(Array.isArray(cachedInsights) ? cachedInsights : []);

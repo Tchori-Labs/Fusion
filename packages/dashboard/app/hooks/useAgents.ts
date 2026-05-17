@@ -3,7 +3,7 @@ import type { Agent, AgentState, AgentCapability, AgentStats } from "../api";
 import { fetchAgents, fetchAgentStats } from "../api";
 import { isEphemeralAgent } from "@fusion/core";
 import { subscribeSse } from "../sse-bus";
-import { readCache, SWR_CACHE_KEYS, writeCache } from "../utils/swrCache";
+import { readCache, SWR_CACHE_KEYS, SWR_DEFAULT_MAX_AGE_MS, writeCache } from "../utils/swrCache";
 
 interface UseAgentsOptions {
   filterState?: AgentState | "all";
@@ -18,11 +18,11 @@ interface AgentFilter {
 
 export function useAgents(projectId?: string, options?: UseAgentsOptions) {
   const [agents, setAgents] = useState<Agent[]>(() => {
-    const cached = readCache<Agent[]>(SWR_CACHE_KEYS.AGENTS);
+    const cached = readCache<Agent[]>(SWR_CACHE_KEYS.AGENTS, { maxAgeMs: SWR_DEFAULT_MAX_AGE_MS });
     return Array.isArray(cached) ? cached : [];
   });
   const [stats, setStats] = useState<AgentStats | null>(() => {
-    const cached = readCache<AgentStats>(SWR_CACHE_KEYS.AGENT_STATS);
+    const cached = readCache<AgentStats>(SWR_CACHE_KEYS.AGENT_STATS, { maxAgeMs: SWR_DEFAULT_MAX_AGE_MS });
     return cached ?? null;
   });
   const [isLoading, setIsLoading] = useState(false);

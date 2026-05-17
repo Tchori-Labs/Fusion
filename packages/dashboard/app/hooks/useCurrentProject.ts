@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import type { ProjectInfo } from "../api";
 import { fetchGlobalSettings, updateGlobalSettings } from "../api";
-import { readCache, SWR_CACHE_KEYS, writeCache } from "../utils/swrCache";
+import { readCache, SWR_CACHE_KEYS, SWR_LONG_MAX_AGE_MS, writeCache } from "../utils/swrCache";
 
 // Legacy localStorage key for migration - no longer used as primary storage
 const LEGACY_STORAGE_KEY = "kb-dashboard-current-project";
@@ -27,7 +27,7 @@ export function useCurrentProject(
   options: UseCurrentProjectOptions = {},
 ): UseCurrentProjectResult {
   const { nodeId = null } = options;
-  const cachedProjectId = readCache<string>(SWR_CACHE_KEYS.CURRENT_PROJECT_ID);
+  const cachedProjectId = readCache<string>(SWR_CACHE_KEYS.CURRENT_PROJECT_ID, { maxAgeMs: SWR_LONG_MAX_AGE_MS });
   const cachedProject =
     typeof cachedProjectId === "string" && cachedProjectId.length > 0
       ? availableProjects.find((project) => project.id === cachedProjectId) ?? null

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { EvalCategoryScore, EvalEvidenceReference, EvalFollowUpSuggestion } from "@fusion/core";
 import { getEval, listEvalRuns, listEvals } from "../api";
-import { readCache, SWR_CACHE_KEYS, writeCache } from "../utils/swrCache";
+import { readCache, SWR_CACHE_KEYS, SWR_DEFAULT_MAX_AGE_MS, writeCache } from "../utils/swrCache";
 
 const FILTER_DEBOUNCE_MS = 300;
 const POLL_INTERVAL_MS = 15_000;
@@ -78,8 +78,8 @@ export function useEvals(options?: { projectId?: string }) {
   const cacheSuffix = projectId ?? "";
   const runsCacheKey = `${SWR_CACHE_KEYS.EVALS_RUNS_PREFIX}${cacheSuffix}`;
   const resultsCacheKey = `${SWR_CACHE_KEYS.EVALS_RESULTS_PREFIX}${cacheSuffix}`;
-  const initialRuns = readCache<Array<{ id: string; createdAt: string; completedAt?: string; status: string; evaluatedTaskCount: number }>>(runsCacheKey);
-  const initialResults = readCache<NormalizedEvalSummary[]>(resultsCacheKey);
+  const initialRuns = readCache<Array<{ id: string; createdAt: string; completedAt?: string; status: string; evaluatedTaskCount: number }>>(runsCacheKey, { maxAgeMs: SWR_DEFAULT_MAX_AGE_MS });
+  const initialResults = readCache<NormalizedEvalSummary[]>(resultsCacheKey, { maxAgeMs: SWR_DEFAULT_MAX_AGE_MS });
   const hasHydratedRef = useRef(
     (Array.isArray(initialRuns) && initialRuns.length > 0) || (Array.isArray(initialResults) && initialResults.length > 0),
   );
@@ -169,8 +169,8 @@ export function useEvals(options?: { projectId?: string }) {
     }
     previousProjectIdRef.current = projectId;
 
-    const cachedRuns = readCache<Array<{ id: string; createdAt: string; completedAt?: string; status: string; evaluatedTaskCount: number }>>(runsCacheKey);
-    const cachedResults = readCache<NormalizedEvalSummary[]>(resultsCacheKey);
+    const cachedRuns = readCache<Array<{ id: string; createdAt: string; completedAt?: string; status: string; evaluatedTaskCount: number }>>(runsCacheKey, { maxAgeMs: SWR_DEFAULT_MAX_AGE_MS });
+    const cachedResults = readCache<NormalizedEvalSummary[]>(resultsCacheKey, { maxAgeMs: SWR_DEFAULT_MAX_AGE_MS });
     const hasCached =
       (Array.isArray(cachedRuns) && cachedRuns.length > 0) ||
       (Array.isArray(cachedResults) && cachedResults.length > 0);

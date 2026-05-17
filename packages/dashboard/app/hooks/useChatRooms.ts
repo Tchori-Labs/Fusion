@@ -12,7 +12,7 @@ import {
 } from "../api";
 import { subscribeSse } from "../sse-bus";
 import { getScopedItem, removeScopedItem, setScopedItem } from "../utils/projectStorage";
-import { readCache, SWR_CACHE_KEYS, writeCache } from "../utils/swrCache";
+import { readCache, SWR_CACHE_KEYS, SWR_DEFAULT_MAX_AGE_MS, SWR_LONG_MAX_AGE_MS, writeCache } from "../utils/swrCache";
 
 const ACTIVE_ROOM_STORAGE_KEY = "fusion:chat-active-room";
 
@@ -74,13 +74,13 @@ export function useChatRooms(
   const roomsCacheKey = `${SWR_CACHE_KEYS.CHAT_ROOMS}:${projectId ?? "global"}`;
   const activeRoomCacheKey = `${SWR_CACHE_KEYS.ACTIVE_CHAT_ROOM_ID}:${projectId ?? "global"}`;
   const [rooms, setRooms] = useState<ChatRoom[]>(() => {
-    const cached = readCache<ChatRoom[]>(roomsCacheKey);
+    const cached = readCache<ChatRoom[]>(roomsCacheKey, { maxAgeMs: SWR_DEFAULT_MAX_AGE_MS });
     return Array.isArray(cached) ? cached : [];
   });
   const [roomsLoading, setRoomsLoading] = useState(() => rooms.length === 0);
   const [roomsError, setRoomsError] = useState<string | null>(null);
   const [activeRoom, setActiveRoom] = useState<ChatRoom | null>(() => {
-    const cachedRoomId = readCache<string>(activeRoomCacheKey);
+    const cachedRoomId = readCache<string>(activeRoomCacheKey, { maxAgeMs: SWR_LONG_MAX_AGE_MS });
     if (!cachedRoomId) {
       return null;
     }
@@ -141,7 +141,7 @@ export function useChatRooms(
       writeCache(roomsCacheKey, sortedRooms, { maxBytes: 500_000 });
       setRoomsError(null);
 
-      const persistedRoomId = readCache<string>(activeRoomCacheKey) ?? getScopedItem(ACTIVE_ROOM_STORAGE_KEY, projectId);
+      const persistedRoomId = readCache<string>(activeRoomCacheKey, { maxAgeMs: SWR_LONG_MAX_AGE_MS }) ?? getScopedItem(ACTIVE_ROOM_STORAGE_KEY, projectId);
       if (persistedRoomId) {
         const persistedRoom = sortedRooms.find((room) => room.id === persistedRoomId) ?? null;
         if (persistedRoom) {

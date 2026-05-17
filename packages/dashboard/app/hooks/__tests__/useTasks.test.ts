@@ -166,6 +166,48 @@ describe("useTasks", () => {
     });
   });
 
+  it("passes maxAge to task cache hydration reads", () => {
+    renderHook(() => useTasks({ projectId: "proj-1" }));
+
+    expect(mockReadCache).toHaveBeenCalledWith(
+      `${swrCache.SWR_CACHE_KEYS.TASKS_PREFIX}proj-1`,
+      { maxAgeMs: swrCache.SWR_DEFAULT_MAX_AGE_MS },
+    );
+  });
+
+  it("failed refresh keeps stale indicator and records lastRefreshErrorAt until success", async () => {
+    mockFetchTasks.mockRejectedValueOnce(new Error("offline"));
+
+    const { result } = renderHook(() => useTasks({ projectId: "proj-1" }));
+
+    await waitFor(() => {
+      expect(result.current.lastRefreshErrorAt).toEqual(expect.any(Number));
+    });
+    expect(result.current.isStale).toBe(true);
+
+    mockFetchTasks.mockResolvedValueOnce([createMockTask({ id: "FN-RECOVERED" })]);
+    await act(async () => {
+      await result.current.refreshTasks();
+    });
+
+    expect(result.current.isStale).toBe(false);
+    expect(result.current.lastRefreshErrorAt).toBeNull();
+  });
+
+  it("initial clearOnError path clears tasks", async () => {
+    mockReadCache.mockReturnValueOnce([createMockTask({ id: "FN-CACHED" })]);
+    mockFetchTasks.mockRejectedValueOnce(new Error("offline"));
+
+    const { result } = renderHook(() => useTasks({ projectId: "proj-1" }));
+
+    expect(result.current.tasks[0]?.id).toBe("FN-CACHED");
+
+    await waitFor(() => {
+      expect(result.current.tasks).toEqual([]);
+    });
+    expect(result.current.isStale).toBe(true);
+  });
+
   it("writes through task cache on successful fetch", async () => {
     mockFetchTasks.mockResolvedValueOnce([createMockTask({ id: "FN-LIVE" })]);
 
@@ -178,6 +220,12 @@ describe("useTasks", () => {
         { maxBytes: 500_000 },
       );
     });
+
+    const raw = JSON.parse(
+      localStorage.getItem(`${swrCache.SWR_CACHE_KEYS.TASKS_PREFIX}proj-1`) ?? "null",
+    ) as { savedAt?: number; data?: unknown };
+    expect(typeof raw.savedAt).toBe("number");
+    expect(Array.isArray(raw.data)).toBe(true);
   });
 
   it("caps task cache writes to first 500 entries", async () => {
