@@ -14,7 +14,7 @@
   - `cachedSettingsPayload`, `cachedSharedStatePayload`
 - Candidate set: all matches under `packages/core`, `packages/engine`, `packages/dashboard`, `packages/cli` excluding `__tests__`.
 
-## Write-path ↔ cache invariants (initial inventory)
+## Write-path ↔ cache invariants
 
 | Write site | Cache / snapshot that must refresh | Current invalidation behavior |
 |---|---|---|
@@ -30,3 +30,16 @@
 | `PeerExchangeService.updateGlobalSettings()` (`packages/engine/src/peer-exchange-service.ts`) | `cachedSettingsPayload`, `cachedSharedStatePayload` | Explicitly nulls both caches; effectiveness depends on callers invoking it |
 | `DaemonTokenManager.rotateToken*` (`packages/core/src/daemon-token.ts`) | other `GlobalSettingsStore` instances reading `daemonToken` | Writes via its private `GlobalSettingsStore` only; no cross-instance invalidation |
 | `FirstRunExperience.completeSetup()` (`packages/core/src/first-run.ts`) | other global settings store instances reading `setupComplete` | Writes via private `GlobalSettingsStore`; no cross-instance invalidation |
+
+## Suspect call-site audit (Step 2)
+
+| Suspect | Status | Evidence |
+|---|---|---|
+| `register-custom-provider-routes.ts` writes global settings but does not fan out invalidation | **Bug** | Route writes at lines 461/499/530 with no `invalidateAllGlobalSettingsCaches()` call, unlike `/settings/global` and auth toggles.
+| `POST /settings/sync-receive` + `CentralCore.applyRemoteSettings()` handling | **Bug (global sync path)** + **Not-a-bug (project TaskStore event path)** | Inbound route only calls `central.applyRemoteSettings(payload)` (line 65), and `applyRemoteSettings()` explicitly does not apply global settings (central-core lines 3546-3552). Project settings in `CentralCore` are central-registry sync snapshots, not per-project `TaskStore` config state; bypassing `TaskStore.updateSettings()` here is expected.
+| `PeerExchangeService.updateGlobalSettings()` has no wiring | **Bug** | Method exists and clears cached sync payload (peer-exchange-service lines 102-107), but dashboard/daemon startup paths construct/start `PeerExchangeService` without subscribing to settings changes (dashboard line 1549, daemon setup path has no bridge).
+| `GlobalSettingsStore.cachedSettings` per-instance cache topology | **Already-handled with caveat** | Cross-store invalidation is done in selected routes via `invalidateAllGlobalSettingsCaches()`; gaps are route-specific (e.g., custom-provider routes) not store-implementation bugs.
+| Long-lived executor/heartbeat/merger snapshots | **Not a bug** | Settings are repeatedly fetched (`await store.getSettings()`) in-run; no single startup snapshot reused for model/budget/workflow decisions.
+| `getSettingsFast()` / `getSettingsByScopeFast()` missing workflow-steps | **Not a bug (contracted behavior)** | Store docs explicitly state fast path skips workflow-step hydration (store line 2340+ and 2406+ comments).
+| `daemon-token.ts` direct `GlobalSettingsStore.updateSettings` | **Not a bug (documented caveat)** | Token reads/writes use one manager instance; cross-instance staleness only exists until explicit invalidation/read-through in other instances.
+| `first-run.ts` direct `GlobalSettingsStore.updateSettings` | **Not a bug (documented caveat)** | `setupComplete` is written at end of setup flow and subsequently read in new flows; no observed long-lived stale consumer in same call chain.
