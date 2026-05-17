@@ -4,15 +4,15 @@
 
 Do not file, plan, or implement tasks that adjust button mobile-responsiveness, touch-target sizing, or mobile reflow of header/action button rows anywhere in the dashboard (TaskCard, SettingsModal, ChatView, MissionManager, AgentsView, FAB, etc.). **Keep buttons as they are.**
 
-This supersedes earlier guidance in this document about mobile touch targets, primary/secondary control sizing on mobile, and `.touch-target` minimums for buttons. The CSS guidance for non-button elements still applies. The `Frontend UX Design` workflow step (WS-006) is disabled and must stay disabled.
+This supersedes earlier guidance about mobile touch targets, primary/secondary control sizing on mobile, and `.touch-target` minimums for buttons. The `Frontend UX Design` workflow step (WS-006) is disabled and must stay disabled.
 
-If you find yourself opening `SettingsModal.css`, `TaskCard.css`, `ChatView.css`, or similar files inside an `@media (max-width: 768px)` block to touch a `.btn`, `.modal-close`, `.settings-header-actions`, `.card-*` button, or similar control — stop. Confirm with the user in chat before proceeding.
+If you find yourself opening `SettingsModal.css`, `TaskCard.css`, `ChatView.css`, etc. inside an `@media (max-width: 768px)` block to touch a `.btn`, `.modal-close`, `.settings-header-actions`, or `.card-*` button — stop. Confirm with the user in chat before proceeding.
 
-Exceptions only for: explicit named user request in chat that overrides this directive.
+Exception: explicit named user request in chat that overrides this directive.
 
 ## Finalizing Changes
 
-When making changes that affect published packages, create a changeset file:
+When a change affects the published `@runfusion/fusion` package, add a changeset:
 
 ```bash
 cat > .changeset/<short-description>.md << 'EOF'
@@ -24,125 +24,91 @@ Short description of the change.
 EOF
 ```
 
-Bump types:
-- **patch**: bug fixes, internal changes
-- **minor**: new features, new CLI commands, new tools
-- **major**: breaking changes
+Bump types: **patch** (bug fixes / internal), **minor** (new features / CLI / tools), **major** (breaking). Commit the changeset alongside the code change.
 
-Include the changeset file in the same commit as the code change. The filename should be a short kebab-case description (e.g., `fix-merge-conflict.md`, `add-retry-button.md`).
-
-Only create changesets for changes that affect the published `@runfusion/fusion` package — user-facing features, bug fixes, CLI changes, tool changes. Do NOT create changesets for internal docs (AGENTS.md, README), CI config, or refactors that don't change behavior.
+Do NOT create changesets for internal docs (AGENTS.md, README), CI config, or behavior-preserving refactors. The other workspace packages (`@fusion/core`, `@fusion/dashboard`, `@fusion/engine`) are private — no changesets for them.
 
 ## Releasing
 
-Always use the repo release script for npm releases:
+Always use the repo release script:
 
 ```bash
 pnpm release --yes
 ```
 
-Do not run `changeset version`, `pnpm publish`, manual git tags, or manual release commits as a substitute for the script. `scripts/release.mjs` is the source of truth for release flow: it performs preflight checks, applies changesets, updates the lockfile and root changelog, builds, commits the version bump, publishes npm packages, pushes `main`, and pushes the version tag.
-
-The release script is also the required path for keeping both public npm packages in sync:
-- `@runfusion/fusion`
-- `runfusion.ai`
+`scripts/release.mjs` is the source of truth: preflight, apply changesets, update lockfile + root changelog, build, commit, publish, push `main`, push tag. Do not run `changeset version`, `pnpm publish`, or manual git tags as a substitute. The script also keeps `@runfusion/fusion` and `runfusion.ai` in sync.
 
 ## Package Structure
 
-- `@fusion/core` — domain model, task store (private, not published)
-- `@fusion/dashboard` — web UI + API server (private, not published)
-- `@fusion/engine` — AI agents: triage, executor, reviewer, merger, scheduler (private, not published)
+- `@fusion/core` — domain model, task store (private)
+- `@fusion/dashboard` — web UI + API server (private)
+- `@fusion/engine` — triage, executor, reviewer, merger, scheduler (private)
 - `@runfusion/fusion` — CLI + pi extension (published to npm)
 
-Only `@runfusion/fusion` is published. The others are internal workspace packages.
+Only `@runfusion/fusion` is published. The others get inlined into the CLI bundle via tsup `noExternal: [/^@fusion\//]`.
 
 ### Importing across `@fusion/*` packages
 
-Because `@fusion/core`, `@fusion/dashboard`, and `@fusion/engine` are **not** on npm, the published CLI bundle (`packages/cli/dist/bin.js`) only works because tsup is configured with `noExternal: [/^@fusion\//]` — every `@fusion/*` import gets inlined into the bundle.
-
-For that inlining to happen the import must be **statically analyzable**. The following anti-pattern silently breaks on the published `npm i -g @runfusion/fusion`:
+For the inlining to work, `@fusion/*` imports must be **statically analyzable**. The following anti-pattern silently breaks the published CLI (FN-2613, Runfusion/Fusion#9):
 
 ```ts
 // ❌ BROKEN: variable specifier defeats static analysis
 const engineModule = "@fusion/engine";
 const engine = await import(/* @vite-ignore */ engineModule);
-createFnAgent = engine.createFnAgent;
 ```
 
-esbuild leaves the dynamic `import("@fusion/engine")` in the output, the package isn't installed at runtime, the import throws, the catch silently sets the binding to `undefined`, and the next call fails with a confusing TypeError like `createFnAgent2 is not a function` (issue Runfusion/Fusion#9, FN-2613). Affects every AI flow in the dashboard.
+esbuild leaves the dynamic import in the output, the package isn't installed at runtime, the catch swallows the error, and downstream calls fail with `createFnAgent2 is not a function`.
 
 **Rules:**
-
-1. **Default to a static import** — `import { createFnAgent } from "@fusion/engine"` — so esbuild can bundle it and tests can `vi.mock("@fusion/engine", …)` it.
-2. **The one exception is `@fusion/core` itself**, which can't statically import engine without a circular dependency (engine → core). Core uses dependency injection: `setCreateFnAgent` (in `packages/core/src/ai-engine-loader.ts`) is called by `packages/engine/src/index.ts` at module load. Don't add new dynamic `import("@fusion/engine")` calls in core — extend the loader instead.
-3. **Never reintroduce the `engineModule = "@fusion/engine"` + `await import(/* @vite-ignore */ engineModule)` trick.** If you find one, treat it as a bug.
-4. Test mocking still works with static imports — vitest's module-level `vi.mock("@fusion/engine", …)` hoists above the static import.
+1. Default to static imports: `import { createFnAgent } from "@fusion/engine"`.
+2. Exception: `@fusion/core` cannot statically import engine (circular). Core uses DI via `setCreateFnAgent` in `packages/core/src/ai-engine-loader.ts`, called from `packages/engine/src/index.ts`. Don't add new dynamic `import("@fusion/engine")` in core — extend the loader.
+3. Never reintroduce the `engineModule = "@fusion/engine"` trick. Treat any sighting as a bug.
+4. `vi.mock("@fusion/engine", …)` hoists above static imports — mocking still works.
 
 ## Storage Model
 
-Fusion uses a hybrid storage architecture: structured metadata lives in SQLite (`.fusion/fusion.db`) while large blob files (PROMPT.md, attachments) remain on the filesystem under `.fusion/tasks/{ID}/`. The database runs in WAL mode for concurrent access.
-
-See [docs/storage.md](./docs/storage.md) for the full storage architecture documentation.
+Hybrid: structured metadata in SQLite (`.fusion/fusion.db`, WAL mode), large blobs (PROMPT.md, attachments) on disk under `.fusion/tasks/{ID}/`. See [docs/storage.md](./docs/storage.md).
 
 ## Multi-Project Support
 
-Fusion supports multiple projects with a central registry at `~/.fusion/fusion-central.db`. Each project has its own SQLite database at `.fusion/fusion.db`. See [docs/multi-project.md](./docs/multi-project.md) for details on:
-- CentralCore API and project registration
-- Isolation modes (in-process, child-process)
-- Global concurrency management
+Central registry at `~/.fusion/fusion-central.db`; per-project DB at `.fusion/fusion.db`. See [docs/multi-project.md](./docs/multi-project.md) for CentralCore API, isolation modes, and global concurrency.
 
 ## Testing
 
-Tests are required. Typechecks and manual verification are not substitutes for real tests with assertions.
+Tests are required. Typechecks and manual verification are not substitutes for assertions.
 
-Use the narrowest command that exercises the behavior you changed, then broaden before reporting completion. Prefer local verification over waiting for GitHub Actions.
+Use the narrowest command that exercises the behavior you changed, then broaden before reporting completion.
 
 ```bash
-pnpm test              # changed-only workspace tests; falls back to the workspace quality gate in safety contexts
-pnpm test:full         # full workspace quality gate, clean-worktree compatible
+pnpm test              # changed-only workspace tests; falls back to full gate in safety contexts
+pnpm test:full         # full workspace quality gate
 pnpm lint              # lint all packages
-pnpm build             # build workspace packages, excluding desktop/mobile
+pnpm build             # build workspace packages (excludes desktop/mobile)
 pnpm verify:workspace  # canonical pre-merge gate: lint -> test:full -> build
 ```
 
-`pnpm test:full` is the default broad local gate. It runs each package's default test script with capped worker fanout:
-
-```bash
-FUSION_TEST_TOTAL_WORKERS=4 FUSION_TEST_CONCURRENCY=2 pnpm -r --workspace-concurrency=2 test
-```
-
-Do not casually raise worker counts to make a run faster; dashboard/jsdom and integration-heavy packages can become slower or unstable when oversubscribed. Use `VITEST_MAX_WORKERS=<n>` only for targeted package-level investigation.
+`pnpm test:full` runs each package's default test script with capped worker fanout (`FUSION_TEST_TOTAL_WORKERS=4 FUSION_TEST_CONCURRENCY=2 pnpm -r --workspace-concurrency=2 test`). Do not casually raise worker counts; dashboard/jsdom and integration-heavy packages destabilize when oversubscribed. Use `VITEST_MAX_WORKERS=<n>` only for targeted package-level investigation.
 
 ### Fresh-worktree dist bootstrap
 
-- `pnpm test` auto-runs `scripts/ensure-test-artifacts.mjs` to rebuild only missing/stale dist artifacts needed by tests.
-- Wired package lanes also auto-bootstrap: `pnpm --filter @fusion/dashboard test` and `pnpm --filter @fusion-plugin-examples/dependency-graph test`.
-- If you hit opaque `Failed to resolve import "./cli-spawn.js"` (or similar dist-entry import failures), treat it as bootstrap regression and file against FN-4605; do not work around with a manual blanket `pnpm build`.
+`pnpm test` auto-runs `scripts/ensure-test-artifacts.mjs` to rebuild missing/stale dist artifacts. Dashboard and `dependency-graph` package lanes auto-bootstrap too. If you hit opaque `Failed to resolve import "./cli-spawn.js"` (or similar), treat it as bootstrap regression against FN-4605 — don't work around with a manual `pnpm build`.
 
 ### Dashboard Test Lanes
 
-Dashboard has a curated default gate plus explicit exhaustive lanes:
-
 ```bash
-pnpm --filter @fusion/dashboard test                # curated app/API quality gate
+pnpm --filter @fusion/dashboard test                # curated app/API quality gate (default)
 pnpm --filter @fusion/dashboard test:deep           # exhaustive app + API suite
-pnpm --filter @fusion/dashboard test:app            # exhaustive React/jsdom app tests
-pnpm --filter @fusion/dashboard test:api            # exhaustive Node API/server tests
+pnpm --filter @fusion/dashboard test:app            # exhaustive React/jsdom
+pnpm --filter @fusion/dashboard test:api            # exhaustive Node API/server
 pnpm --filter @fusion/dashboard test:browser-smoke  # local browser CSS/layout smoke
 pnpm --filter @fusion/dashboard test:build          # built client output contract
 ```
 
-Run the default dashboard gate for ordinary dashboard work. Run `test:deep` when changing broad dashboard architecture, shared modal/view infrastructure, route registration, or anything that could invalidate the curated selection. Run `test:browser-smoke` for layout, responsive, navigation, modal, or CSS changes. Run `test:build` for Vite/build output, lazy-loading, chunking, static asset, or client-dist changes.
+Run `test:deep` when changing broad dashboard architecture, shared modal/view infrastructure, or route registration. Run `test:browser-smoke` for layout/responsive/navigation/modal/CSS changes. Run `test:build` for Vite output, lazy-loading, chunking, or client-dist changes.
 
-### Engine test helper convention
+When adding a new test file under `app/components/__tests__`, also add its basename to `qualityAppTests` in `packages/dashboard/vitest.config.ts` — otherwise the curated gate silently skips it.
 
-`packages/engine/src/__tests__/executor-test-helpers.ts` now defaults `isUsableTaskWorktree` to `true` via a helper-level `worktree-pool` mock so fabricated worktree paths continue to pass FN-4114 liveness gating without real `git worktree add` setup.
-To test failure paths, override per test with `vi.spyOn(worktreePool, "isUsableTaskWorktree").mockResolvedValueOnce(false)` (or `.mockResolvedValue(false)` in a scoped `beforeEach`).
-This is test-only scaffolding; production liveness assertions in `packages/engine/src/executor.ts` remain unchanged.
-
-### Package-Specific Test Commands
-
-Common targeted lanes:
+### Targeted commands
 
 ```bash
 pnpm --filter @fusion/core test
@@ -152,73 +118,76 @@ pnpm test:scripts
 node --test scripts/__tests__/*.test.mjs
 ```
 
-For a single Vitest file, prefer package-local `exec vitest` so argument forwarding does not accidentally run the whole package:
+For a single Vitest file, use package-local `exec vitest`:
 
 ```bash
 pnpm --filter @fusion/core exec vitest run src/__tests__/central-db.test.ts --silent=passed-only --reporter=dot
-pnpm --filter @fusion/dashboard exec vitest run --project dashboard-app-quality app/components/__tests__/TaskCard.test.tsx --silent=passed-only --reporter=dot
 ```
+
+### Engine test helper convention
+
+`packages/engine/src/__tests__/executor-test-helpers.ts` defaults `isUsableTaskWorktree` to `true` via a helper-level `worktree-pool` mock. To test failure paths, override with `vi.spyOn(worktreePool, "isUsableTaskWorktree").mockResolvedValueOnce(false)`. Production liveness assertions in `executor.ts` are unchanged.
 
 ### Before Reporting Done
 
-- For code changes: run the affected package tests and any directly relevant browser/build lane.
-- For cross-package, shared test infrastructure, or CI changes: run `pnpm test:full`.
-- For production/bundling-sensitive changes: run `pnpm build`.
-- For final verification on substantial work: run `pnpm verify:workspace` unless there is a clear reason to split the commands and report them separately.
-- If you intentionally do not run a relevant lane, say why.
+- Code changes: affected package tests + any directly relevant browser/build lane.
+- Cross-package, shared test infrastructure, or CI changes: `pnpm test:full`.
+- Production/bundling-sensitive changes: `pnpm build`.
+- Substantial work: `pnpm verify:workspace`.
+- If you skip a relevant lane, say why.
 
 ### Test File Organization
 
-All test files have been moved into `__tests__/` subdirectories alongside the code they test:
-
-- Test for `src/foo.ts` → `src/__tests__/foo.test.ts`
-- Test for `app/components/Bar.tsx` → `app/components/__tests__/Bar.test.tsx`
-
-When writing new tests, follow this convention. A few legacy co-located test files may remain, but `__tests__/` is the standard.
+Test for `src/foo.ts` → `src/__tests__/foo.test.ts`. Test for `app/components/Bar.tsx` → `app/components/__tests__/Bar.test.tsx`. `__tests__/` is the standard.
 
 ### What NOT to write
 
-New tests should cover behavior a user could notice break, not implementation shape. Don't write:
+Tests should cover behavior a user could notice break, not implementation shape. Don't write:
 
-- **CSS-class permutation tests** — iterating `status × column × flag` to assert `cardClass()` output. Use a single `it.each` for the boolean matrix, not one `it` per combination.
-- **Field-presence tests** when a payload-roundtrip test for the same field already exists — toggling and asserting the save payload implicitly requires the field to be present.
-- **React.memo tautologies** — `React.memo(Probe)` + rerender + assert-called-once tests React's behavior, not ours. If you need to verify a custom comparator (e.g. `areTaskCardPropsEqual`), test *that* directly — one case.
-- **Mock-the-world wiring tests** — if a test mocks 8+ dependencies just to render a component, either (a) it's a legitimate glue-component test (shim child components with `() => null`), or (b) delete it and rely on an integration test one level up.
-- **Structural CSS assertions** — "tab container uses .class-name not inline style". Consolidate into one aggregate layout-contract test per component.
+- **CSS-class permutation tests** — use one `it.each` for the boolean matrix, not one `it` per combination.
+- **Field-presence tests** when a payload-roundtrip test already exercises the same field.
+- **React.memo tautologies** — testing `React.memo` tests React, not us. Test custom comparators directly, one case.
+- **Mock-the-world wiring tests** — if a test mocks 8+ deps just to render a component, shim children with `() => null` or delete and rely on an integration test one level up.
+- **Structural CSS assertions** — "tab uses .class-name not inline style". Consolidate into one aggregate layout-contract test per component.
 
-Prefer `it.each` over copy-pasted `it()` blocks. When trimming: keep the first case + the opposite case + any precedence/override case; drop linear iterations.
+Prefer `it.each` over copy-pasted `it()` blocks. When trimming, keep: first case + opposite case + any precedence/override case.
 
 ### What TO keep unconditionally
 
-- Tests linked to an FN-ticket in `describe`/`it` names — these guard real regressions.
+- Tests linked to an FN-ticket in describe/it names — these guard real regressions.
 - Integration tests exercising real SQLite, real worker pool, or spawned processes.
 - Lean core/engine unit tests with low mock burden.
 
 ## Port 4040 is Reserved
 
-Port 4040 is the production dashboard port. A user's live dashboard session is typically running there. **Agents must NEVER:**
-- Run `kill`, `kill -9`, `pkill`, or `killall` against processes on port 4040
-- Start a test server on port 4040 — always use `--port 0` for random free port
+Port 4040 is the production dashboard port. A user's live session is typically running there. **Agents must NEVER:**
+- Run `kill`, `kill -9`, `pkill`, or `killall` against processes on port 4040.
+- Start a test server on port 4040 — always use `--port 0` for a random free port.
 
-## Architecture
+## Architecture invariants
 
-- Merge deadlock self-healing now layers `recoverAlreadyMergedReviewTasks()`, `clearStaleBlockedBy()`, and `reclaimSelfOwnedBranchConflicts()` in `packages/engine/src/self-healing.ts`, plus the paused-aware in-review scope filter in `packages/engine/src/scheduler.ts` (`inReviewWithWorktree` excludes `paused` tasks). `reclaimSelfOwnedBranchConflicts()` now also recovers paused `branch-conflict-unrecoverable` review rows when ownership is self-proven, auto-reclaims `fusion/<task-id>` branches that are still live-mapped but have zero unique commits vs main by force-removing the stale worktree and deleting the branch, and clears `task.worktree`/`task.branch` so retries recreate a fresh checkout. `inspectBranchConflict()` backs this with a patch-id fallback for degraded/empty `git cherry` output before declaring zero-unique-commit subsumption, treats ghost live-worktree admin entries (mapping path missing on disk) as `stale-resolved`, and classifies tips already reachable from the integration target as `tip-already-merged` so stale cached `baseCommitSha` values are invalidated instead of enumerating main's forward progress as stranded commits. FN-4546 adds a separate `reclaim-stale-active-branches` stage in startup and maintenance sweeps to close the gap where an active task owns a `fusion/<task-id>` branch with zero unique commits but has no usable worktree mapping; that stage now prunes the stale branch, clears task branch/worktree/base metadata, and emits `branch:stale-active-reclaim` audit telemetry. FN-4601 hardens executor recovery on this path: the no-`fn_task_done` retry loop now re-validates live worktree/branch bindings before recreating a session and treats missing/incomplete/unregistered-worktree session-start failures as recoverable by clearing stale metadata and requeueing to `todo` with preserved progress. Orphan `fusion/*` branches are still resolved by prune-or-rescue logic (subsumed branches pruned; unique-commit branches rescued into triage tasks instead of force delete). Completion fan-out now runs synchronously on `in-review → done` via `SelfHealingManager.reconcileCompletedTask()`, so downstream stale `blockedBy` links and residual `fusion/<task-id>` branch/worktree artifacts are reconciled immediately instead of waiting for periodic sweeps. Finalize integrity evidence classification now includes a benign `no-changes-finalized` outcome for verification-only done tasks with no owned commits and no surviving branch, allowing stale `modifiedFiles` snapshots to be cleared without raising `missing-evidence` warnings. `surfaceInReviewStalls()` also now auto-disposes repeated identical in-review stalls (same code + reason) once `inReviewStallDeadlockThreshold` is reached (default `3`) by pausing with `pausedReason: "in-review-stall-deadlock"`, setting `status: "failed"`, and emitting `task:in-review-stall-deadlock-disposed` audit telemetry. When `worktrunk.enabled` is true, self-healing maintenance defers native prune/idle cleanup/worktree-cap layout sweeps to the worktrunk backend while keeping branch-level reclaim and orphan-branch rescue native.
-- Restart recovery is coordinated through `RestartRecoveryCoordinator` (`packages/engine/src/restart-recovery-coordinator.ts`), which classifies interrupted `in-progress` runs at runtime startup: no-progress `fn_task_done` failures are safely requeued to `todo`, then remaining orphaned work is resumed via the executor. Session-start unusable-worktree detection now treats all `assertValidWorktreeSession()` variants (`missing worktree`, `incomplete worktree`, and `unregistered git worktree`) as recoverable for self-healing auto-requeue, including zero-progress `in-review` failures that now retry with a bounded `worktreeSessionRetryCount` cap (`MAX_WORKTREE_SESSION_RETRIES=3`) before escalating for human inspection.
-- Task title/ID integrity hardening (FN-4898): active task title writes now normalize foreign embedded `FN-NNN` tokens via `packages/core/src/task-title-id-drift.ts` before persistence (create/update/duplicate/refine/summarization paths), preserving lineage in `sourceParentTaskId`/description markers instead of title embeds. Core DB schema version advanced 83 → 84 with a deterministic active-task migration; archived title normalization runs in `ArchiveDatabase` and updates both `archived_tasks.title` and `taskJson.title` in lockstep.
+Detailed mechanism logs live in `docs/architecture.md` and `docs/design/`. The contracts agents must respect:
+
+- **Orphan `fusion/*` branches**: prune-or-rescue, never force-delete. Subsumed branches pruned; unique-commit branches rescued into triage tasks.
+- **Stale active branches**: self-healing's `reclaim-stale-active-branches` stage prunes a `fusion/<task-id>` branch with zero unique commits when no usable worktree mapping exists, then clears `task.branch`/`task.worktree`/`task.baseCommitSha`.
+- **Completion fan-out is synchronous**: `SelfHealingManager.reconcileCompletedTask()` runs on `in-review → done`. Downstream stale `blockedBy` links and residual `fusion/<task-id>` branch/worktree artifacts are reconciled immediately, not on a periodic sweep.
+- **In-review stall deadlock**: identical stalls (same code + reason) repeated past `inReviewStallDeadlockThreshold` (default 3) auto-pause with `pausedReason: "in-review-stall-deadlock"` and `status: "failed"`.
+- **Restart recovery**: `RestartRecoveryCoordinator` classifies interrupted `in-progress` runs. Unusable-worktree session-start failures (`missing`, `incomplete`, `unregistered git worktree`) are recoverable; retries are capped at `MAX_WORKTREE_SESSION_RETRIES=3` before escalating.
+- **Task title/ID drift (FN-4898)**: active and archived title writes normalize foreign embedded `FN-NNN` tokens via `packages/core/src/task-title-id-drift.ts`. Lineage is preserved in `sourceParentTaskId` / description markers, not title embeds.
+- **Worktrunk-managed lifecycles**: when `worktrunk.enabled`, self-healing defers prune/idle/worktree-cap sweeps to the worktrunk backend; branch-level reclaim and orphan rescue stay native.
 
 ## Engine Process Rules
 
-The engine (`packages/engine`) runs the executor, merger, scheduler, IPC host, and dashboard-facing activity loop on a single Node event loop. **Blocking that loop stalls every task concurrently in-flight.**
+The engine runs the executor, merger, scheduler, IPC host, and dashboard activity loop on a single Node event loop. **Blocking that loop stalls every task in-flight.**
 
 ### Never use `execSync` for User-Configured Commands
 
-`execSync` blocks the entire event loop until the child process exits. Any command from project settings — `testCommand`, `buildCommand`, `workflow step scripts`, etc. — **must** run via `promisify(exec)` with `timeout`. Never use `execSync` for user-configured commands.
+Any command from project settings — `testCommand`, `buildCommand`, workflow step scripts — **must** run via `promisify(exec)` with a `timeout`:
 
 ```ts
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
 const execAsync = promisify(exec);
-
 const { stdout, stderr } = await execAsync(command, {
   cwd: worktreePath,
   timeout: 120_000,
@@ -226,10 +195,11 @@ const { stdout, stderr } = await execAsync(command, {
 });
 ```
 
-`execSync` is only acceptable for short, deterministic git plumbing (`git rev-parse`, `git branch -d`, `git worktree remove`, etc.). When in doubt, use async.
-User-configured command wiring lives under `packages/engine/src/sandbox/` (FN-4636 seam); keep internal git plumbing on direct async exec paths.
+`execSync` is only acceptable for short deterministic git plumbing (`git rev-parse`, `git branch -d`, `git worktree remove`). User-configured command wiring lives under `packages/engine/src/sandbox/` (FN-4636 seam); keep internal git plumbing on direct async exec.
 
-User-initiated `moveTask(in-progress → todo)` is a hard cancel contract: executor listeners must abort active sessions before dispose, stop step/workflow subprocesses, and leave the task parked in `todo` with `userPaused` semantics intact. Engine-initiated rebounds (pause, stuck recovery, workflow rerun, self-healing) must continue to use default `moveSource: "engine"` plus the appropriate `preserve*` flags (`preserveResumeState`, `preserveProgress`, `preserveWorktree`) and must not set `userPaused`.
+### Move-Task contract
+
+User-initiated `moveTask(in-progress → todo)` is a hard cancel: executor listeners must abort active sessions before dispose, stop step/workflow subprocesses, and leave the task parked in `todo` with `userPaused` semantics intact. Engine-initiated rebounds (pause, stuck recovery, workflow rerun, self-healing) use default `moveSource: "engine"` plus the appropriate `preserve*` flags and must not set `userPaused`.
 
 ## Git Conventions
 
@@ -239,790 +209,241 @@ User-initiated `moveTask(in-progress → todo)` is a hard cancel contract: execu
 
 ## Merging Branches Into Main
 
-Two rules, learned the hard way (FN-2370 silently reverted three commits' work):
+Hard-won rules (FN-2370 silently reverted three commits' worth of work):
 
-1. **If a branch contains commits that duplicate work already on main, rebase the branch onto main and drop the duplicates *before* merging.** This usually happens when a branch was rebased from a stale base while the same work was also landed directly on main. Subjects that match recent main commits are the tell — `git log main..branch --format=%s` should not overlap with `git log <base>..main --format=%s`. Auto-resolvers cannot tell which side of a duplicated change is canonical and will silently drop refinements from the newer side.
-
-2. **Prefer rebase-and-merge over squash for branches spanning multiple substantive commits.** Fusion's direct merger now defaults `directMergeCommitStrategy="auto"`, which keeps squash for branches with 0–1 substantive commits but automatically switches multi-substantive branches to a history-preserving rebase/cherry-pick path. Use the project setting `directMergeCommitStrategy` or the task-level `**Direct Merge Commit Strategy:** auto|always-squash|always-rebase` PROMPT line when you need to force a route.
-
-History-preserving cherry-pick merges now treat git's explicit empty-pick signatures (`The previous cherry-pick is now empty`, `nothing to commit, working tree clean`, and the `--skip`/`--allow-empty` hints) as "already on main" no-ops: empty commits are skipped, fully-subsumed branches auto-complete to `done`, and no empty commit is created.
-
-Verification-fix finalize now has a last-chance already-on-main classifier: when finalize sees `fix-produced-no-content`, the merger probes for task trailers/lineage already landed on the integration target and recovers as success instead of throwing a false `task:failed`. Residual in-review misbound branch tips are also auto-recovered by self-healing (`recover-branch-misbound-in-review`) when the branch tip lacks the task trailer but main already carries it; recovery emits `task:auto-recover-finalize-already-on-main` and `task:auto-recover-branch-misbound` run-audit events.
-
-Executor contamination handling now does a single-shot auto-recovery when every foreign-attributed commit is already upstream by patch-id equivalence: it drops only the already-upstream commits, requeues the task, and records a guard so a second contamination event escalates directly to paused human adjudication. FN-4499 adds a bootstrap-misbinding safety branch: `classifyBootstrapMisbinding` detects contamination ranges with foreign-only attribution (0 own commits, 0 non-attributed commits), the executor re-anchors with `reanchorBranchToBase`, emits `branch:reanchor` audit metadata, and requeues to `todo` before the standard FN-4428 classifier path; any failed re-anchor or non-bootstrap signal still falls back to the existing contamination pause flow.
-
-After any squash that auto-resolved conflicts, the merger runs the post-squash audit before auto-completing the task. Outcome depends on `postMergeAuditMode`: `warn` is the default (logs findings and continues), `block` is the stricter opt-in mode (refuses completion on findings), and `off` skips the audit. For rebase-strategy merges, overlap-only findings are also auto-cleared when deterministic verification has already proven the merged tree.
-
-When audit findings still block completion, Fusion now runs an auto-recovery pipeline (Stages 1–5) governed by `mergeAuditAutoRecovery` (`deterministic-only` → `programmatic` → `ai-assisted` → `off`). Stages include deterministic short-circuiting, per-file survival checks, optional single-commit AI restoration, bounded audit-bounce retries, and finally park-with-follow-up if unresolved.
-
-Before those auto-resolved squash commits are written, the merger also runs a per-file diff-volume gate: it compares each file's staged squash delta against the branch's net delta vs its merge-base, and blocks the merge in `in-review` when a non-allowlisted file loses too much branch volume. This is the pre-commit guard against FN-3936-style silent drops where fallback resolution kept a branch's commit message but discarded the branch's main file edits.
+1. **Drop duplicate commits before merging.** If a branch contains commits that duplicate work already on main, rebase to drop them. Auto-resolvers cannot tell which side is canonical and will silently discard refinements. `git log main..branch --format=%s` should not overlap with `git log <base>..main --format=%s`.
+2. **Rebase over squash for multi-commit branches.** Fusion's direct merger defaults `directMergeCommitStrategy="auto"`: squash for 0–1 substantive commits, history-preserving rebase/cherry-pick otherwise. Force via project setting or `**Direct Merge Commit Strategy:** auto|always-squash|always-rebase` in PROMPT.
+3. **Empty cherry-picks are no-ops.** Cherry-pick merges treat git's empty-pick signatures as "already on main" — empty commits skipped, fully-subsumed branches auto-complete, no empty commit created.
+4. **Already-on-main classifier.** Verification-fix finalize and self-healing both recover when a task's lineage is already landed (emits `task:auto-recover-finalize-already-on-main`, `task:auto-recover-branch-misbound`).
+5. **Contamination auto-recovery.** When every foreign-attributed commit is upstream by patch-id, the executor drops them and requeues. A second contamination event escalates to paused human adjudication. FN-4499 adds a bootstrap-misbinding safety branch (foreign-only attribution → `reanchorBranchToBase` + requeue) before the contamination classifier.
+6. **Post-squash audit on auto-resolved conflicts.** `postMergeAuditMode`: `warn` (default), `block` (refuse on findings), `off`. Rebase-strategy overlap-only findings auto-clear when deterministic verification has proven the merged tree. When findings still block, the `mergeAuditAutoRecovery` pipeline runs (Stages 1–5: deterministic → programmatic → ai-assisted → bounded retries → park-with-follow-up).
+7. **Pre-commit diff-volume gate.** Before writing an auto-resolved squash commit, the merger compares each file's staged squash delta against branch net delta vs merge-base. Non-allowlisted files losing too much branch volume block the merge in `in-review`. Guard against FN-3936-style silent drops.
+8. **Smart-prefer-main overlap guard.** When `mergeConflictStrategy="smart-prefer-main"`, recent main commits (30-commit lookback) overlapping branch-modified files flip to prefer-branch by default (`mergeStrategyOverlapBehavior="flip-to-prefer-branch"`).
 
 ### Gitignored-path guard on squash merges
 
-The merger now strips gitignored paths from the staged squash set before writing the merge commit (including verification-fix rebuild paths). Any staged path that matches `.gitignore` (for example `.fusion/`, `.worktrees/`, `.pi/`, `.factory/`, `node_modules/`, `dist/`) is explicitly unstaged and logged.
+The merger strips gitignored paths from staged squash sets before commit (standard, Attempt 3 fallback, and verification-fix rebuild). Any staged ignored path is unstaged and logged.
 
-Agents must **never** bypass `.gitignore` with `git add -f .fusion/...` (or force-add any ignored scratch artifact). Findings, diagnosis, and test-plan notes belong in task documents via `fn_task_document_write`, not committed files.
+**Agents must never** `git add -f .fusion/...` or force-add any ignored scratch artifact. Findings, diagnosis, and test-plan notes belong in task documents via `fn_task_document_write`, not committed files.
 
 ### File-Scope invariant on squash merges
 
-Every squash commit path now enforces a file-scope invariant immediately before writing the commit: the staged file set must overlap the task's declared `## File Scope` from `PROMPT.md`. The invariant runs on the standard squash path, the Attempt 3 `-X ours/theirs` fallback, and the verification-fix rebuild/finalize path. When the staged files have zero overlap with a non-empty declared scope, the merger throws a structured `FileScopeViolationError`, logs the declared scope + staged files to the merger agent log, resets the pre-squash state, and leaves the task in `in-review` for inspection instead of landing the commit.
+Every squash commit path enforces a file-scope invariant immediately before commit: the staged set must overlap the task's declared `## File Scope` from `PROMPT.md`. Zero overlap with a non-empty scope throws `FileScopeViolationError`, resets pre-squash state, and parks the task in `in-review`.
 
-Tasks can opt out per task via `task.scopeOverride = true`; when present, the merger bypasses the invariant and logs `task.scopeOverrideReason` when provided. Empty declared file scopes are not enforced.
+Per-task opt-out: `task.scopeOverride = true` (log `task.scopeOverrideReason` when set). Empty scopes are not enforced.
 
-File Scope entries are validated when PROMPT.md is written: non-path tokens (git refs, URLs, SHAs, bare identifiers) are rejected with `InvalidFileScopeError`, and entries must be repo-relative paths/globs.
+File Scope entries are validated when PROMPT.md is written — non-path tokens (git refs, URLs, SHAs, bare identifiers) are rejected with `InvalidFileScopeError`.
 
-When `mergeConflictStrategy="smart-prefer-main"`, the merger also runs an overlap guard before the Attempt 3 `-X ours` fallback. If recent `main` commits (30-commit lookback) touched files the task branch also changed, the default `mergeStrategyOverlapBehavior="flip-to-prefer-branch"` makes those overlapping files prefer the task branch instead of silently discarding branch hardening; `warn-only` preserves the legacy fallback while logging the risk, and `ignore` disables the guard.
+### Manual audit script
 
-For manual follow-up, standalone auditing, or post-incident inspection, the script remains available:
-
-```
-node scripts/audit-squash-merge.mjs <squash-sha>
-```
-
-Review every flagged item yourself (no human handoff): for every duplicate-cherry-pick subject, diff the matching main commit against HEAD and confirm its net contribution survived; for every touched-file overlap, confirm the recent main commits' changes still appear in HEAD. If anything was silently dropped, restore it as a follow-up commit on the same branch before reporting the merge complete. Only if the audit is clean (or all losses have been restored) is the merge done.
-
-## Node Dashboard
-
-Fusion has a Node Dashboard view for managing mesh network nodes. See [docs/architecture.md](./docs/architecture.md) for dashboard components and API endpoints.
-
-**Node Settings Sync API Endpoints:**
-
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/nodes/:id/settings` | Fetch settings from a remote node |
-| POST | `/api/nodes/:id/settings/push` | Push local settings to a remote node |
-| POST | `/api/nodes/:id/settings/pull` | Pull settings from a remote node |
-| GET | `/api/nodes/:id/settings/sync-status` | Get sync status and diff summary (includes `actionableDenialReason` when remote probe fails) |
-| POST | `/api/nodes/:id/auth/sync` | Sync model auth credentials |
-| POST | `/api/nodes/:id/secrets/push` | Push local secrets snapshot to a remote node *(planned; follow-up FN-4867)* |
-| POST | `/api/nodes/:id/secrets/pull` | Pull remote secrets snapshot into local node *(planned; follow-up FN-4867)* |
-| POST | `/api/settings/sync-receive` | Receive pushed settings (inbound) |
-| POST | `/api/settings/auth-receive` | Receive auth credentials (inbound) |
-| POST | `/api/secrets/sync-receive` | Receive pushed secrets payload (inbound) *(planned; follow-up FN-4867)* |
-| GET | `/api/settings/auth-export` | Export local auth credentials |
-
-All remote node endpoints require the target node to have an `apiKey` configured. Inbound endpoints validate the `Authorization: Bearer <apiKey>` header against the local node's apiKey.
+For post-incident inspection: `node scripts/audit-squash-merge.mjs <squash-sha>`. Review every flagged item yourself — for each duplicate-cherry-pick subject, diff the matching main commit against HEAD and confirm survival. Restore any silent drops on the same branch before reporting merge complete.
 
 ## Pi Extension (`packages/cli/src/extension.ts`)
 
-The pi extension provides tools and a `/fn` command for interacting with fn from within a pi session. It ships as part of `@runfusion/fusion`.
+The pi extension ships as part of `@runfusion/fusion` and provides tools + a `/fn` command for chat agents.
 
-**Update the extension when:**
-- CLI commands change (behavior, flags, or output)
-- Task store / Agent store API changes (method signatures or behavior)
-- New user-facing features are added that chat agents should be able to use
+**Update when:**
+- CLI commands change (behavior, flags, output)
+- Task store / Agent store API changes
+- New user-facing features chat agents should be able to use
 
-**Don't add tools for engine-internal operations** (move, step updates, logging, merge) — those are handled by the engine's own agents.
+**Don't add tools for engine-internal operations** (move, step updates, logging, merge) — those are owned by the engine's own agents.
 
 The extension has no skills — tool descriptions give the LLM everything it needs.
 
-### WebFetch tool (`fn_web_fetch`)
+### `fn_web_fetch`
 
-Use `fn_web_fetch` for lightweight URL reads from agent/chat sessions. It performs an HTTP GET, follows redirects, extracts readable text (including HTML→text and JSON pretty-print), and returns bounded content.
+Lightweight URL read from agent/chat sessions. HTTP GET, follows redirects, extracts readable text (HTML→text and JSON pretty-print), bounded.
 
-`fn_web_fetch` is a universal baseline capability and is available by default across all agent roles/surfaces (executor, step-session, reviewer, merger, triage, and heartbeat, including engineer/custom direct-report paths routed through heartbeat). It is gated under the `network_api` action-gate category (FN-4603), so projects requiring network approvals will prompt on fetches.
+Universal baseline: available by default across executor, step-session, reviewer, merger, triage, and heartbeat (including engineer/custom direct-report paths). Gated under the `network_api` action-gate category (FN-4603).
 
-- Default limits: `timeoutMs=30000` and `maxBytes=512000` (500 KB)
-- Security: blocks private/loopback/link-local hosts (including DNS-resolved private addresses) unless explicitly overridden in internal/test contexts
-- Scope: read-only fetch (no JS rendering, no auth flows, no POST/cookie workflows)
-- Use `agent-browser` skill when pages require JavaScript execution, interactive navigation, or richer browser behavior
+- Defaults: `timeoutMs=30000`, `maxBytes=512000` (500 KB)
+- Blocks private/loopback/link-local hosts (including DNS-resolved) unless explicitly overridden in internal/test contexts
+- Read-only (no JS rendering, no auth flows, no POST/cookie workflows)
+- Use the `agent-browser` skill when JS rendering or interactive navigation is required
 
-### `fn_secret_get`
+## Agent Coordination Tools
 
-`fn_secret_get` is planned as the agent-facing secret-read tool, but it is not shipped in `packages/cli/src/extension.ts` yet in this branch.
+Seven coordination tools support spawning, provisioning, discovery, delegation, and direct-report config. Detailed parameter contracts live in tool descriptions and `docs/agents.md`.
 
-- Status: pending follow-up **FN-4867**
-- Do not assume parameters/response contract until implementation lands
-- Use [docs/secrets.md](./docs/secrets.md) for current shipped capabilities and pending integration status
-
-## Agent Spawning (`spawn_agent` tool)
-
-The executor agent can spawn child agents that run in parallel. Each spawned agent:
-1. Runs in its own git worktree (branched from the parent's worktree)
-2. Receives a task prompt describing what to do
-3. Executes autonomously until completion or termination
-4. Reports status back to the parent via AgentStore
-
-### Parameters
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `name` | `string` | Name for the child agent |
-| `role` | `string` | Role: `"triage"`, `"executor"`, `"reviewer"`, `"merger"`, `"engineer"`, or `"custom"` |
-| `task` | `string` | Task description for the child agent to execute |
-
-### Settings
-
-- `maxSpawnedAgentsPerParent` (default: `5`) — Maximum children per parent agent
-- `maxSpawnedAgentsGlobal` (default: `20`) — Maximum total spawned agents per executor instance
-
-### Lifecycle
-
-- Child agents are tracked in `AgentStore` with `reportsTo` set to the parent task ID
-- When the parent session ends, all spawned children are terminated
-- State transitions: `idle` → `active` → `running` → `active` (success) or `error` (failure)
-
-### Error Handling
-
-- Per-parent and global limits are enforced with descriptive error messages
-- Failures during agent creation or worktree setup return error results
-- State update failures are non-blocking (logged but don't prevent execution)
-
-## Agent Delegation Tools
-
-Six tools enable inter-agent coordination — discovering agents, provisioning/decommissioning direct reports, delegating tasks, and managing direct-report configuration.
-
-### `agent_create` Tool
-
-Create a non-ephemeral agent that reports to the caller (or, for CEO-level callers, any `reportsTo` target).
-
-Provisioning is policy-gated via `projectSettings.agentProvisioning` (`approvalMode`, `trustedRoles`, `trustedAgentIds`, `alwaysApproveDelete`). Tool responses use `details.outcome` values `created`, `deleted`, `pending_approval`, or `denied`. Pending requests are resolved via dashboard/API approval decision route (`POST /api/approvals/:id/decision`), which executes deferred provisioning on approve.
-
-### `agent_delete` Tool
-
-Delete a non-ephemeral direct report. If the target holds a task checkout lease, deletion is blocked unless `force: true`. Assigned tasks can be reassigned via `reassign_to` or released/unassigned.
-
-Provisioning policy also applies to deletes (`details.outcome`: `deleted`, `pending_approval`, or `denied`). Provisioning emits audit events `agent:create:{requested,approved,denied}` and `agent:delete:{requested,approved,denied}` tied to the originating run/task metadata.
-
-FN-3973 decision: `spawn_agent` remains under generic action-gate `task_agent_mutation` governance and is intentionally excluded from durable `agentProvisioning` policy. Rationale: spawned children are ephemeral (`metadata.type = "spawned"`), parent-task scoped (`reportsTo=<taskId>`), and auto-terminated with parent teardown.
-
-### `list_agents` Tool
-
-List all available agents in the system. Shows each agent's name, role, state, personality (soul), and current assignment.
-
-**Parameters:**
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `role` | `string` (optional) | Filter by agent role/capability (e.g., `"executor"`, `"reviewer"`) |
-| `state` | `string` (optional) | Filter by agent state (e.g., `"idle"`, `"active"`, `"running"`) |
-| `includeEphemeral` | `boolean` (optional) | Include ephemeral/runtime agents (default: `false`) |
-
-**Example usage:**
-```
-// Find all idle executor agents
-list_agents({ role: "executor", state: "idle" })
-
-// See all agents including runtime task-workers
-list_agents({ includeEphemeral: true })
-```
-
-### `delegate_task` Tool
-
-Create a new task and assign it to a specific agent for execution. The task goes to `todo` and will be picked up by the target agent on their next heartbeat cycle.
-
-**Parameters:**
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `agent_id` | `string` (required) | The agent ID to delegate work to |
-| `description` | `string` (required) | What needs to be done |
-| `dependencies` | `string[]` (optional) | Task IDs this new task depends on |
-| `override` | `boolean` (optional) | Set true to bypass executor-role assignment policy |
-
-**Example workflow — CEO agent discovers QA agent and delegates testing:**
-
-```
-// 1. Discover available agents
-list_agents({ role: "qa" })
-// → Returns QA agent with id "qa-agent-001"
-
-// 2. Delegate the testing task
-delegate_task({
-  agent_id: "qa-agent-001",
-  description: "Run integration tests for the authentication module",
-  dependencies: ["FN-100"]  // depends on implementation being done
-})
-// → Created FN-105: Delegated to QA Agent (qa-agent-001).
-//   The task will be picked up on their next heartbeat cycle.
-```
-
-**Error cases:**
-- `"ERROR: Agent {agent_id} not found"` — The agent ID does not exist
-- `"ERROR: Cannot delegate to ephemeral/runtime agent {agent_id}"` — Cannot delegate to runtime task-worker agents (use `spawn_agent` for parallel worktree tasks instead)
-- `"ERROR: Agent {agent_id} has role \"...\"; implementation task <new> requires an \"executor\"-role agent. Pass override=true to bypass."` — Non-executor target blocked unless `override: true`
-
-### `get_agent_config` Tool
-
-Read full configuration for a direct-report agent (soul, instructions, runtime heartbeat settings, and memory).
-
-**Parameters:**
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `agent_id` | `string` (required) | The direct-report agent ID to inspect |
-
-**Authorization rule:** caller can only read agents where `target.reportsTo === caller.id`.
-
-### `update_agent_config` Tool
-
-Update configuration for a direct-report, non-ephemeral agent.
-
-**Parameters:**
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `agent_id` | `string` (required) | The direct-report agent ID to update |
-| `soul` | `string` (optional) | Agent personality/identity text |
-| `instructions_text` | `string` (optional) | Inline custom instructions |
-| `instructions_path` | `string` (optional) | Path to instructions markdown |
-| `heartbeat_procedure_path` | `string` (optional) | Path to heartbeat procedure markdown |
-| `heartbeat_interval_ms` | `number` (optional) | Heartbeat polling interval (min 1000) |
-| `heartbeat_timeout_ms` | `number` (optional) | Heartbeat timeout (min 5000) |
-| `max_concurrent_runs` | `number` (optional) | Max concurrent heartbeat runs (min 1) |
-| `message_response_mode` | `"immediate" \| "on-heartbeat"` (optional) | Message response behavior |
-
-**Authorization rule:** caller can only update agents where `target.reportsTo === caller.id`.
-
-**Error cases:**
-- `"ERROR: Agent {agent_id} not found"`
-- `"ERROR: You can only update configuration of agents that report to you"`
-- `"ERROR: Cannot update ephemeral/runtime agent {agent_id}"`
-
-**Note:** These coordination tools are available to executor and heartbeat agents when the relevant stores are configured.
+- `spawn_agent` — Parent-task-scoped ephemeral child in its own worktree. Limits via `maxSpawnedAgentsPerParent` (default 5) and `maxSpawnedAgentsGlobal` (default 20). Auto-terminated with parent. Gated under generic `task_agent_mutation` (FN-3973 explicitly excludes it from durable `agentProvisioning` policy).
+- `agent_create` / `agent_delete` — Non-ephemeral provisioning of direct reports. Policy-gated via `projectSettings.agentProvisioning` (`approvalMode`, `trustedRoles`, `trustedAgentIds`, `alwaysApproveDelete`). Tool responses use `details.outcome`: `created` / `deleted` / `pending_approval` / `denied`. Pending requests resolve via `POST /api/approvals/:id/decision`. Audit events: `agent:{create,delete}:{requested,approved,denied}`.
+- `list_agents` — Discovery with `role`/`state`/`includeEphemeral` filters.
+- `delegate_task` — Create + assign task to a specific agent. Implementation tasks require executor-role target unless `override: true`. Cannot target ephemeral agents (use `spawn_agent`).
+- `get_agent_config` / `update_agent_config` — Read/write soul, instructions, heartbeat interval/timeout, max concurrent runs, message response mode. **Authorization**: caller can only act on agents where `target.reportsTo === caller.id`. Cannot operate on ephemeral agents.
 
 ## Checkout Leasing
 
-Task ownership supports explicit checkout leases. Agents should be aware of:
+- 409 Conflict = ownership contention. Response: `{ error, currentHolder, taskId }`. **Never auto-retry 409.**
+- `HeartbeatMonitor.executeHeartbeat()` validates checkout before work begins; mismatched `checkedOutBy` exits with `reason: "checkout_conflict"`. Heartbeat does not auto-checkout — callers obtain the lease.
+- With `CentralClaimStore` wired, the authoritative owner is the central `taskClaims` row; per-project lease fields mirror it. `MeshLeaseManager.recoverAbandonedLease()` releases central first then local. `reconcileLeaseRow(taskId)` converges divergent state on the next tick (emits `task:auto-recover-lease-*`). Without a claim store, behavior remains single-node per-project.
 
-### Conflict Semantics
+## Agent Runtime Config
 
-- Checkout conflicts return **409 Conflict** when another agent already holds the lease
-- Response shape: `{ error: "Task is already checked out", currentHolder, taskId }`
-- Clients **must not retry 409 automatically** — this is ownership contention, not a transient failure
+Per-agent overrides via `runtimeConfig`:
+- **Heartbeat**: `heartbeatIntervalMs`, `heartbeatTimeoutMs`, `maxConcurrentRuns`. Triggered by timer, task assignment, or on-demand (`POST /api/agents/:id/runs`).
+- **Budgets**: per-agent token budget tracking; `HeartbeatMonitor.executeHeartbeat()` skips when `isOverBudget` or `isOverThreshold` (timer triggers). Hard caps pause the agent.
+- **Performance ratings**: 1–5 scale with trend analysis, injected into system prompts.
 
-### Heartbeat Enforcement
-
-`HeartbeatMonitor.executeHeartbeat()` validates checkout before work begins:
-- If `task.checkedOutBy` is set to another agent, the run exits with `reason: "checkout_conflict"`
-- Heartbeat execution does not auto-checkout — callers are responsible for obtaining checkout before starting work
-
-When a `CentralClaimStore` is wired, the authoritative lease owner is the central `taskClaims` row in `~/.fusion/fusion-central.db`; per-project task lease fields are treated as a synchronization mirror of that central result. Lease recovery follows FN-4819 §2.5: `MeshLeaseManager.recoverAbandonedLease()` releases central claim ownership first, then clears local lease fields and bumps the local epoch. If one write succeeds and the other fails, `reconcileLeaseRow(taskId)` converges local vs central state on the next scheduler/self-healing tick and emits `task:auto-recover-lease-*` run-audit telemetry. Without a claim store configured, checkout behavior remains the existing single-node per-project lease flow.
-
-## Per-Agent Heartbeat Configuration
-
-Each agent can override heartbeat behavior via `runtimeConfig`. Key settings:
-- `heartbeatIntervalMs` — How often heartbeats are triggered
-- `heartbeatTimeoutMs` — Time without heartbeat before agent is considered unresponsive
-- `maxConcurrentRuns` — Max concurrent heartbeat runs per agent
-
-See [docs/agents.md](./docs/agents.md) for the full configuration reference.
-
-## Budget Governance
-
-Per-agent token budget tracking controls costs and prevents runaway AI spending. Budget enforcement happens at multiple points:
-
-- **HeartbeatMonitor.executeHeartbeat()** — Checks budget before creating sessions; skips when `isOverBudget: true` or `isOverThreshold: true` (for timer triggers)
-- **HeartbeatTriggerScheduler.onTimerTick()** — Skips timer ticks when budget is exceeded
-
-Agents can be paused by budget exhaustion. See [docs/agents.md](./docs/agents.md) for the full budget configuration reference.
-
-## Heartbeat Trigger Scheduling
-
-`HeartbeatTriggerScheduler` manages three trigger mechanisms:
-- **Timer** — Periodic wakeup based on `heartbeatIntervalMs`
-- **Assignment** — Automatic wakeup when a task is assigned
-- **On-demand** — Manual trigger via `POST /api/agents/:id/runs`
-
-See [docs/agents.md](./docs/agents.md) for WakeContext and API details.
-
-## Agent Performance Ratings
-
-Agent performance ratings allow users and agents to provide feedback that influences future behavior through system prompt injection. Ratings use a 1–5 scale with trend analysis (improving/declining/stable).
-
-See [docs/agents.md](./docs/agents.md) for the full API and dashboard configuration reference.
-
-## Engine Diagnostic Logging
-
-The task executor, scheduler, and related subsystems use structured logging via `createLogger()` from `packages/engine/src/logger.ts`. All log lines are prefixed with the subsystem name.
-
-### Key Diagnostic Points
-
-When debugging agent execution issues (agents stuck on "starting"), check these log points:
-
-1. **`[executor] TaskExecutor constructed`** — Confirms the executor initialized with expected options
-2. **`[executor] [event:task:moved] FN-XXX → in-progress`** — Confirms the scheduler moved the task
-3. **`[executor] execute() called for FN-XXX`** — Confirms execute() was entered
-4. **`[executor] FN-XXX: worktree ready at ...`** — Confirms worktree creation
-5. **`[executor] FN-XXX: creating agent session`** — Confirms model resolution and session creation started
-6. **`[pi] createFnAgent called`** — Confirms the agent factory was invoked
-7. **`[pi] Session created successfully`** — Confirms the AI session was created
-8. **`[executor] FN-XXX: calling promptWithFallback()...`** — Confirms the prompt was sent
-9. **`[stuck-detector] Tracking task FN-XXX`** — Confirms heartbeat monitoring started
-10. **`[auto-claim-snapshot] rebuild generated=N reason=<ttl|invalidate>`** — Confirms project-wide auto-claim snapshot rebuild cadence
-11. **`[auto-claim-prompt] agent=<id> chars=<n> count=<n>`** — Tracks rendered no-task candidate section size
-12. **`[prompt-size] prompt-size { agentId, role, runId, template, systemChars, execChars, totalChars, isNoTaskRun }`** — Per-heartbeat prompt-size audit record
-13. **`[wake-trigger-diagnostics] agent=<id> run=<id> triggerDetail=<wake-on-message*> source=<source> messageId=<id|none> from=<type:id|none> forced=<bool> createdAt=<iso|none> inboxUnreadCount=<n> wakeMessageStillUnread=<true|false|unknown> pendingRoomMessages=<n>`** — Correlates wake-on-message triggers with inbox snapshot state to diagnose empty-inbox false-positive wakes
-14. **`[retry-burned] retry-burned { taskId, agentId, role, category, attempt, total, breakdown }`** — Unified retry-burn telemetry and retry-cap circuit-breaker context
-15. **`Worktree init command failed (first test run will likely fail): ...` task log entries** — FN-4834: when `worktreeInitCommand` fails, diagnostic stderr is now written to the entry `outcome` (stdout/spawnError fallback), so dashboard logs preserve init failure details without rerunning.
-16. **`[executor] FN-XXX: fn_task_done refused (<class>) — <reason>`** — FN-4851 refusal diagnostics for `summary-claims-incomplete`, `bulk-step-completion-without-review`, and `pending-code-review-revise`; all three consume the shared `taskDoneRetryCount` budget and escalate to `in-review` once retries are exhausted.
-17. **`[room-ambiguity] agent=<id> run=<id> room=<id> messageId=<id> branch=<resolved|clarification> candidates=<n>`** — Heartbeat room-thread ambiguity classifier trace for deictic follow-ups, including the deterministic branch and candidate count.
-
-### Semaphore Resilience
-
-`AgentSemaphore` (`packages/engine/src/concurrency.ts`) has defensive guards:
-- `limit` getter returns minimum 1 (prevents indefinite blocking)
-- `availableCount` returns 0 for invalid limits (NaN, Infinity, ≤0)
-
-## Terminal UI (TUI) — Now Part of `fn` CLI
-
-The `@fusion/tui` package has been merged into the `fn` CLI. The Ink-based TUI (status panel, logs, tail-follow, cursor visibility) is now invoked as part of the `fn` command.
-
-**Invocation:**
-- Running `fn` with no arguments defaults to the dashboard (web UI by default)
-- The TUI surfaces inside the dashboard command when configured
-- Implementation lives in `packages/cli/src/commands/dashboard-tui/`
-
-There is no separate `@fusion/tui` package or `pnpm tui` command anymore. Refer to `packages/cli/src/commands/dashboard-tui/` for current TUI implementation details.
-
----
-
-## Headless Node Mode (`fn serve`)
-
-The `fn serve` command starts Fusion as a headless node (API server + AI engine, no frontend). It binds to `0.0.0.0` by default for remote accessibility.
-
-See [docs/architecture.md](./docs/architecture.md) for the full reference including health endpoint and startup banner.
-
-## Secrets
-
-Fusion includes encrypted secret storage in project (`.fusion/fusion.db` → `secrets`) and global (`~/.fusion/fusion-central.db` → `secrets_global`) scopes.
-
-- Encryption: AES-256-GCM ciphertext + nonce storage; plaintext is not persisted
-- Per-secret access policy metadata: `auto` | `prompt` | `deny`
-- Policy default: `secretsAccessPolicy` with resolution `row → global default → "prompt"`
-- Master key today is provided through the core `MasterKeyProvider` abstraction
-
-See [docs/secrets.md](./docs/secrets.md) for implementation details and current availability gaps (FN-4867: tool/sync/env materialization wiring).
+See [docs/agents.md](./docs/agents.md) for the full contract.
 
 ## Settings
 
-fn uses a two-tier settings hierarchy:
-- **Global settings** — User preferences in `~/.fusion/settings.json` (theme, models, notifications)
-- **Project settings** — Project-specific settings in `.fusion/config.json` (concurrency, worktrees, commands)
+Two tiers: global (`~/.fusion/settings.json`) overridden by project (`.fusion/config.json`). Configure via dashboard Settings modal or `fn settings`. Full reference: [docs/settings-reference.md](./docs/settings-reference.md).
 
-Project settings override global settings. Configure via the dashboard **Settings** modal or `fn settings` CLI.
+### Model selection hierarchy
 
-See [docs/settings-reference.md](./docs/settings-reference.md) for the complete settings reference.
+All three lanes (planning / executor / reviewer) follow the same 5-tier precedence:
 
-### Settings Hierarchy for Model Selection
+1. Per-task override (`planningModelProvider`/`Id`, `modelProvider`/`Id`, `validatorModelProvider`/`Id`)
+2. Project lane (`planningProvider`/`Id`, `executionProvider`/`Id`, `validatorProvider`/`Id`)
+3. Global lane (`planningGlobalProvider`/`Id`, `executionGlobalProvider`/`Id`, `validatorGlobalProvider`/`Id`)
+4. Project `defaultProviderOverride` / `defaultModelIdOverride`
+5. Global `defaultProvider` / `defaultModelId` → automatic resolution
 
-**For Task Specification (Triage):**
-1. Per-task `planningModelProvider`/`planningModelId`
-2. Project `planningProvider`/`planningModelId`
-3. Global `planningGlobalProvider`/`planningGlobalModelId`
-4. Project `defaultProviderOverride`/`defaultModelIdOverride`
-5. Global `defaultProvider`/`defaultModelId`
-6. Automatic provider/model resolution
+### Per-task token budget precedence
 
-**For Task Execution (Executor):**
-1. Per-task `modelProvider`/`modelId`
-2. Project `executionProvider`/`executionModelId`
-3. Global `executionGlobalProvider`/`executionGlobalModelId`
-4. Project `defaultProviderOverride`/`defaultModelIdOverride`
-5. Global `defaultProvider`/`defaultModelId`
-6. Automatic provider/model resolution
-
-**For Code/Spec Review (Reviewer):**
-1. Per-task `validatorModelProvider`/`validatorModelId`
-2. Project `validatorProvider`/`validatorModelId`
-3. Global `validatorGlobalProvider`/`validatorGlobalModelId`
-4. Project `defaultProviderOverride`/`defaultModelIdOverride`
-5. Global `defaultProvider`/`defaultModelId`
-6. Automatic provider/model resolution
-
-### Per-Task Token Budget Precedence
-
-Task token budgets resolve in this order:
-1. Per-task `task.tokenBudgetOverride`
+1. `task.tokenBudgetOverride`
 2. Project `taskTokenBudget.perSize[task.size]`
 3. Project `taskTokenBudget.soft/hard`
 4. Global `taskTokenBudget.perSize[task.size]`
 5. Global `taskTokenBudget.soft/hard`
 
-Hard-cap hits pause the task with `pausedReason: "token_budget_exceeded"`; soft-cap hits emit a one-shot alert per task.
+Hard cap → pause with `pausedReason: "token_budget_exceeded"`. Soft cap → one-shot alert per task.
 
-## Per-Task Model Overrides
+### Model presets
 
-Tasks can override project/global AI model settings on a per-task basis:
-- **Executor Model** — The model used to implement the task
-- **Validator Model** — The model used for code and plan review
-- **Planning Model** — The model used for task specification
+Standardize executor/validator pairs; auto-selectable by task size (Small → Budget, Medium → Normal, Large → Complex). See settings reference.
 
-When both provider and modelId are set, the task override is used instead of global defaults. Set via the task detail modal's **Model** tab.
+## Missions
 
-## Model Presets
-
-Model presets let teams standardize AI model choices. Each preset contains executor/validator model pairs. Presets can be auto-selected by task size (Small → Budget, Medium → Normal, Large → Complex).
-
-See [docs/settings-reference.md](./docs/settings-reference.md) for the full configuration reference.
-
-## Mission Autopilot
-
-Missions can run in autopilot mode for autonomous progression. When enabled:
-- Autopilot watches task completion events
-- Automatically activates the next slice when the current one finishes
-- Progresses through: `inactive → watching → activating → completing`
-
-See [docs/missions.md](./docs/missions.md) for the full autopilot reference.
-
-## Mission Planning Context
-
-When features are triaged to tasks, the system enriches descriptions with full mission hierarchy context (mission → milestone → slice → feature), giving implementation agents comprehensive context.
-
-Mission planning tools span `fn_mission_create`, `fn_milestone_add` / `fn_milestone_update`, `fn_slice_add` / `fn_slice_activate`, and `fn_feature_add` / `fn_feature_update` / `fn_feature_link_task`. Both `fn_milestone_update` and `fn_feature_update` accept partial patches, so only provided fields are written and omitted fields remain unchanged. See [docs/missions.md#mission-planning-tools-pi-extension](./docs/missions.md#mission-planning-tools-pi-extension) for full parameter tables.
-
-See [docs/missions.md](./docs/missions.md) for the planning context system and interview flow documentation.
+- **Autopilot** — watches task completion and activates the next slice. States: `inactive → watching → activating → completing`. See [docs/missions.md](./docs/missions.md).
+- **Planning context** — feature → task triage enriches descriptions with full mission → milestone → slice → feature hierarchy.
+- **Planning tools** — `fn_mission_create`, `fn_milestone_add`/`update`, `fn_slice_add`/`activate`, `fn_feature_add`/`update`/`link_task`. `fn_milestone_update` and `fn_feature_update` accept partial patches.
 
 ## Workflow Steps
 
-Workflow steps are reusable quality gates that run at configurable lifecycle phases:
-- Workflow steps support `gateMode`: `gate` failures block merge/remediation, while `advisory` failures are recorded as `advisory_failure` and do not block merge or trigger auto-revive.
-- **Pre-merge** — After task implementation, before merge (can block)
-- **Post-merge** — After successful merge (informational only)
-
-Steps can be defined as **prompt** (AI agent review) or **script** (deterministic command).
-
-See [docs/workflow-steps.md](./docs/workflow-steps.md) for the full reference including templates, API, and execution details.
+Reusable quality gates at configurable lifecycle phases. **Pre-merge** can block; **post-merge** is informational. `gateMode` is `gate` (failure blocks merge/remediation) or `advisory` (records `advisory_failure`, no block, no auto-revive). Defined as **prompt** (AI review) or **script** (deterministic command). See [docs/workflow-steps.md](./docs/workflow-steps.md).
 
 ## Run Audit
 
-The run-audit system records every mutation performed by the engine across four domains:
-- **Database** — task:create, task:update, task:move, etc.
+Every engine mutation is recorded across four domains:
+- **Database** — task:create, task:update, task:move, `room:ambiguity:branch` (deictic message routing telemetry), etc.
 - **Git** — worktree:create, commit:create, merge:resolve, etc.
-- **Filesystem** — file:write, prompt:write, attachment:create, secret:env-write, secret:env-write-skipped, secret:env-cleanup, secret:env-cleanup-skipped, etc.
-- **Sandbox** — backend lifecycle (`sandbox:prepare`, `sandbox:run`, `sandbox:failure`, `sandbox:fallback`) from `SandboxBackend` wiring in executor/merger/routine-runner.
-- **Database (`room:ambiguity:branch`)** — per-deictic room-message telemetry tagging ambiguity branch selection (`resolved` vs `clarification`) with room/message IDs, candidate count, and cue metadata (no plaintext content).
+- **Filesystem** — file:write, prompt:write, attachment:create, `secret:env-*`, etc.
+- **Sandbox** — `sandbox:prepare`, `sandbox:run`, `sandbox:failure`, `sandbox:fallback`.
 
-Events are tied to specific run IDs for end-to-end traceability. See [docs/architecture.md](./docs/architecture.md) for the audit API reference.
+Events are tied to run IDs end-to-end. See [docs/architecture.md](./docs/architecture.md) for the audit API.
 
 ## Archive Cleanup
 
-Archived tasks can be cleaned up from the filesystem while preserving metadata. Restored tasks keep all metadata but lose attachments and agent logs.
+Archived tasks can be cleaned up while preserving metadata. Restored tasks keep metadata but lose attachments and agent logs. See [docs/task-management.md](./docs/task-management.md).
 
-See [docs/task-management.md](./docs/task-management.md) for the archive and restore reference.
+## Secrets
+
+AES-256-GCM-encrypted storage in project (`secrets`) and global (`secrets_global`) scopes. Per-secret access policy (`auto`/`prompt`/`deny`) resolved as `row → global default → "prompt"`. Master key via the core `MasterKeyProvider` abstraction. See [docs/secrets.md](./docs/secrets.md) for current capabilities and the pending agent-tool wiring (FN-4867).
+
+## Node Dashboard
+
+Mesh-network node management UI. Settings/auth/secrets sync endpoints documented in [docs/architecture.md](./docs/architecture.md). All remote endpoints require the target node's `apiKey`; inbound endpoints validate `Authorization: Bearer <apiKey>`.
+
+## Headless Node Mode (`fn serve`)
+
+Starts API server + AI engine without a frontend. Binds `0.0.0.0` by default. Health endpoint + startup banner in [docs/architecture.md](./docs/architecture.md).
+
+## Terminal UI
+
+The Ink-based TUI is part of `fn` (no separate `@fusion/tui` package). Implementation: `packages/cli/src/commands/dashboard-tui/`.
+
+## Engine Diagnostic Logging
+
+Structured logging via `createLogger()` from `packages/engine/src/logger.ts`. All lines prefixed with subsystem name. See [docs/diagnostics.md](./docs/diagnostics.md) for the full key-diagnostic-points catalog. Notable subsystems include `[executor]`, `[scheduler]`, `[stuck-detector]`, `[auto-claim-snapshot]`, `[prompt-size]`, `[wake-trigger-diagnostics]`, `[retry-burned]`, and `[room-ambiguity]`.
+
+`AgentSemaphore` (`packages/engine/src/concurrency.ts`) has defensive guards: `limit` getter returns minimum 1; `availableCount` returns 0 for invalid limits.
 
 ## Dashboard UI Styling Guide
 
-This guide documents the dashboard's design system so that any AI agent or developer building new UI components follows established conventions automatically.
+The dashboard's CSS is split into a global stylesheet (`packages/dashboard/app/styles.css`) and per-component files (`packages/dashboard/app/components/ComponentName.css`). Each `ComponentName.tsx` imports its stylesheet at the top.
 
-The dashboard `index.html` shell is templated server-side at request time: the server injects a per-user `<link rel="modulepreload">` bootstrap script for the last-used `taskView` chunk. The chunk map is derived from Vite's `dist/client/.vite/manifest.json`, and the inline preload logic reads `kb-dashboard-current-project` plus `kb:<projectId>:kb-dashboard-task-view` from localStorage.
+**Rule:** New CSS for a component goes in `app/components/ComponentName.css`, NOT `styles.css`. Only design tokens, primitives (`.btn`, `.card`, `.modal`, `.form-input`), and cross-component `@media` overrides belong in the global file.
 
-### CSS Architecture
+The `index.html` shell is templated server-side: the server injects a per-user `<link rel="modulepreload">` for the last-used `taskView` chunk, sourced from Vite's `dist/client/.vite/manifest.json` and `kb:<projectId>:kb-dashboard-task-view` in localStorage.
 
-The dashboard's CSS has been split into modular per-component files alongside a consolidated global stylesheet:
+### Design tokens
 
-- **Global stylesheet**: `packages/dashboard/app/styles.css` (~4,500 lines)
-  - Design tokens (spacing, colors, shadows, transitions, fonts)
-  - Primitives (`.btn`, `.card`, `.modal`, `.form-input`)
-  - Cross-component `@media` overrides and base breakpoints
-- **Per-component stylesheets**: `packages/dashboard/app/components/ComponentName.css` (56 files)
-  - Each component that needs CSS has a co-located `ComponentName.css`
-  - Each `ComponentName.tsx` must import its stylesheet at the top: `import "./ComponentName.css";`
+`styles.css` is the source of truth for tokens (`--space-*`, `--radius-*`, `--shadow-*`, `--transition-*`, `--font-*`, `--header-height`, `--mobile-nav-height`, `--standalone-bottom-gap`, `--overlay-padding-top`) and color variables (`--bg`, `--surface`, `--card`, `--text`, `--text-muted`, status colors `--triage`/`--todo`/`--in-progress`/`--in-review`/`--done`, semantic `--color-success`/`--color-error`/`--color-warning`/`--color-info`, status backgrounds `--status-*-bg`).
 
-**Rule:** New CSS for a component goes in `app/components/ComponentName.css`, NOT in `styles.css`. Only genuinely global rules (design tokens, primitives, cross-component `@media` blocks) belong in `styles.css`.
+**Always reference tokens. Never hardcode pixels, hex, or `rgba()` in component CSS** — the only exception is inside `:root`/theme blocks where tokens are *defined*. For translucent backgrounds use `color-mix(in srgb, var(--color) X%, transparent)`, not `rgba()`.
 
-### CSS Testing and Lazy-Loaded Views
+### Theme system
 
-For CSS regression tests, use the helper at `packages/dashboard/app/test/cssFixture.ts`:
+Dark/light modes via `data-theme`; 54 color themes via `data-color-theme` (lazy-loaded from `app/public/theme-data.css`).
+
+- **Base tokens** (`--bg`, `--surface`, etc.) — redefine in `:root`, `[data-theme="light"]`, and every theme block.
+- **Semantic tokens** (`--autopilot-pulse`, `--event-error-text`, `--badge-mission-*`, `--fab-*`) — `:root` + `[data-theme="light"]` only; no per-color-theme overrides.
+- **Status tokens** (`--triage`, `--todo`, etc.) — redefine per theme block.
+
+`status-colors-theme.test.ts` iterates all theme blocks to catch regressions.
+
+### Component classes
+
+Reuse existing primitives from `styles.css`:
+- **Buttons**: `.btn`, `.btn-primary`, `.btn-danger`, `.btn-warning`, `.btn-sm`, `.btn-icon`, `.btn-icon--active`, `.btn-badge`. All inherit `:focus-visible` via `--focus-ring-strong` and `:active` via `transform: scale(0.97)`.
+- **Modals**: `.modal-overlay[.open]`, `.modal`, `.modal-lg`, `.modal-header`, `.modal-close`, `.modal-actions`, `.modal-actions-left/right`. Overlay pads top with `--overlay-padding-top`.
+- **Forms**: `.form-group`, `.input`, `.select`, `.checkbox-label`, `.form-error`. Inputs in `.form-group` get focus styles automatically.
+- **Cards**: `.card`, `.card-header`, `.card-id`, `.card-title`, `.card-meta`, `.card-status-badge--{triage,todo,in-progress,in-review,done,archived}`.
+- **Utility**: `.touch-target` (44px min), `.visually-hidden`.
+
+Don't create parallel button/form variants — add states (`:hover`, `:focus-visible`, `:active`) to the existing primitives.
+
+### Mobile responsive
+
+Breakpoints: 768px (primary mobile), 1024px (tablet `min-width: 769px and max-width: 1024px`), 640px (compact), 480px (xs). Mobile overrides go in `@media (max-width: 768px)` blocks at the bottom of `styles.css` after base styles.
+
+**Bottom spacing:** `--mobile-nav-height` (44px) + `env(safe-area-inset-bottom, 0px)` + `--standalone-bottom-gap` (0/8px PWA). All bottom-positioned mobile elements compose those.
+
+**Touch targets:** Standing button-freeze directive supersedes per-button touch-target guidance. For non-button elements, primary controls (nav bar, FAB, tab action rows, modal CTAs, list-row tap targets, form controls) must be ≥36px on mobile. Secondary controls inside a card/list-row where the row itself is the tap target stay compact (24–28px or small chips).
+
+**Safe area:** `max(var(--space-md), env(safe-area-inset-left, 0px))` for notch-aware horizontal padding.
+
+### Lazy-loaded heavy views
+
+18 views loaded via `React.lazy()` with `<Suspense fallback={null}>`: AgentsView, NodesView, ChatView, MemoryView, DevServerView, InsightsView, DocumentsView, SkillsView, ResearchView, ReliabilityView, EvalsView, TodoView, GoalsView, StashRecoveryView, SetupWizardModal, PluginManager, PiExtensionsManager, AgentDetailView. `prefetchLazyViews()` warms chunks once on mount via `requestIdleCallback`. **Do not make these eager.**
+
+When adding or removing entries, update `packages/dashboard/app/__tests__/lazy-loaded-views-docs.test.ts` (expected set + count).
+
+### CSS testing
+
+Use `packages/dashboard/app/test/cssFixture.ts`:
 
 ```ts
 import { loadAllAppCss, loadAllAppCssBaseOnly } from "../test/cssFixture";
-
-// Concatenates styles.css + all component .css
-const allCss = await loadAllAppCss();
-
-// Strips @media/@supports blocks for base-rule assertions
-const baseOnly = await loadAllAppCssBaseOnly();
+const allCss = await loadAllAppCss();          // styles.css + all component .css
+const baseOnly = await loadAllAppCssBaseOnly(); // strips @media/@supports
 ```
 
-**Never** directly `readFileSync('../styles.css')` — an ESLint rule (`no-restricted-syntax` in `eslint.config.mjs`) bans this in `packages/dashboard/**/*.test.{ts,tsx}` and points devs at `cssFixture.ts`.
+**Never** directly `readFileSync('../styles.css')` — an ESLint rule (`no-restricted-syntax` in `eslint.config.mjs`) bans this and points at `cssFixture.ts`. `vitest.config.ts` has `test.css: { include: [/.+/] }` so component CSS imports inject into jsdom for `getComputedStyle` assertions.
 
-The test config (`vitest.config.ts`) includes `test.css: { include: [/.+/] }` so component CSS imports actually inject into jsdom (needed for `getComputedStyle` assertions).
+### File browser editor & autosize textarea
 
-### Lazy-Loaded Heavy Views
+- `FileEditor.tsx` is CodeMirror 6-only (no `<textarea>` fallback). Language resolution: `packages/dashboard/app/utils/codemirror-language.ts`.
+- For chat-style composer fields use `packages/dashboard/app/hooks/useAutosizeTextarea.ts`. Pattern: `height = "auto"` then clamp `scrollHeight` to min/max in `useLayoutEffect`. Pair with `resize: none` and `overflow-y: auto`.
 
-These 18 views are lazy-loaded via `React.lazy()` to manage bundle size:
+### File-path links
 
-- `AgentsView`, `NodesView`, `ChatView`, `MemoryView`
-- `DevServerView`, `InsightsView`, `DocumentsView`, `SkillsView`, `ResearchView`, `ReliabilityView`, `EvalsView`, `TodoView`, `GoalsView`, `StashRecoveryView`
-- `SetupWizardModal`, `PluginManager`, `PiExtensionsManager`, `AgentDetailView`
+Reuse `packages/dashboard/app/utils/filePathLinkify.tsx` and `FileBrowserContext`. Wrap plain text with `linkifyFilePaths(...)`, mixed JSX with `linkifyReactChildren(...)`. Mount under `FileBrowserProvider` and route clicks through its `openFile(path, { workspace?, line?, col? })`.
 
-They are loaded in `App.tsx` / `AppModals.tsx` / `SettingsModal.tsx` / `AgentsView.tsx` with `<Suspense fallback={null}>`. 
+### Common pitfalls
 
-A `prefetchLazyViews()` function runs once on mount via `requestIdleCallback` to warm chunks. **Do not make these eager again** — bundle size matters.
-
-### File browser editor
-
-`packages/dashboard/app/components/FileEditor.tsx` is CodeMirror 6-backed as the single edit surface (no fallback `<textarea>` pane). Language resolution lives in `packages/dashboard/app/utils/codemirror-language.ts` via `resolveCodeMirrorLanguage(filePath)`, currently mapping JS/TS, CSS, JSON, and Markdown extensions; unknown extensions intentionally fall back to plain text.
-
-### Chat-style textarea autosize pattern
-
-For chat-like composer fields (mailbox compose, planning interview textareas, onboarding Q&A), use `packages/dashboard/app/hooks/useAutosizeTextarea.ts` as the canonical pattern. It mirrors ChatView/QuickChat behavior: set `height = "auto"`, then clamp `scrollHeight` to min/max bounds, and re-run on value/dependency changes in `useLayoutEffect`. Pair it with component CSS that disables manual resize and uses `overflow-y: auto` plus token-based min/max heights.
-
-### Design Tokens
-
-All new CSS **must** use these token variables instead of hardcoded values. Tokens are defined at `:root` and adapted for light mode via `[data-theme="light"]`.
-
----
-
-### Design Tokens
-
-All new CSS **must** use these token variables instead of hardcoded values. Tokens are defined at `:root` and adapted for light mode via `[data-theme="light"]`.
-
-| Token | Value | Purpose |
-|-------|-------|---------|
-| `--space-xs` | `4px` | Tight inline spacing |
-| `--space-sm` | `8px` | Small gaps |
-| `--space-md` | `12px` | Default gaps |
-| `--space-lg` | `16px` | Section padding |
-| `--space-xl` | `24px` | Large section padding |
-| `--space-2xl` | `32px` | Extra-large spacing |
-| `--radius-sm` | `4px` | Small corners |
-| `--radius-md` | `8px` | Default corners |
-| `--radius-lg` | `12px` | Card/modal corners |
-| `--radius-xl` | `16px` | Large corners |
-| `--radius-pill` | `10px` | Pill/badge corners |
-| `--shadow-sm` | `0 1px 2px rgba(0,0,0,0.1)` | Subtle lift |
-| `--shadow-md` | `0 4px 6px rgba(0,0,0,0.1)` | Standard lift |
-| `--shadow-lg` | `0 4px 24px rgba(0,0,0,0.4)` | Modals, dropdowns |
-| `--shadow-glow` | `0 0 8px rgba(88,166,255,0.3)` | Focus glow |
-| `--glow-success` | `0 0 8px rgba(46,160,67,0.3)` | Success state |
-| `--glow-danger` | `0 0 8px rgba(248,81,73,0.3)` | Danger state |
-| `--glow-warning` | `0 0 8px rgba(227,179,65,0.3)` | Warning state |
-| `--focus-ring` | `0 0 0 2px rgba(88,166,255,0.15)` | Subtle focus ring |
-| `--focus-ring-strong` | `0 0 0 2px rgba(88,166,255,0.3)` | Prominent focus ring |
-| `--transition-instant` | `0.1s ease` | Immediate |
-| `--transition-fast` | `0.15s ease` | Quick |
-| `--transition-normal` | `0.2s ease` | Default |
-| `--transition-slow` | `0.3s ease` | Smooth |
-| `--font-primary` | system font stack | Body font |
-| `--font-mono` | monospace stack | Code, IDs |
-| `--header-height` | `57px` | Fixed header height |
-| `--mobile-nav-height` | `44px` | Mobile nav bar |
-| `--standalone-bottom-gap` | `0px` / `8px` (PWA) | iOS home bar gap |
-| `--overlay-padding-top` | `10vh` | Modal vertical position |
-
-**Never** hardcode pixel values, colors, or durations in component CSS. Always reference a token. The sole exception is inside `:root` or theme blocks where tokens are *defined*.
-
----
-
-### Color Variables
-
-Core palette (dark defaults at `:root`, overridden in `[data-theme="light"]`):
-
-| Variable | Purpose |
-|----------|---------|
-| `--bg` | Page background |
-| `--surface` | Elevated surface |
-| `--card` | Card background |
-| `--card-hover` | Card hover state |
-| `--border` | Borders and dividers |
-| `--text` | Primary text |
-| `--text-muted` | Secondary/muted text |
-| `--text-dim` | Tertiary/disabled text |
-
-Task status colors (semantic — consistent meaning across all 54 color themes):
-
-| Variable | Status |
-|----------|--------|
-| `--triage` | Triage |
-| `--todo` | Todo |
-| `--in-progress` | In Progress |
-| `--in-review` | In Review |
-| `--done` | Done |
-
-Semantic status colors:
-
-| Variable | Purpose |
-|----------|---------|
-| `--color-success` | Success green |
-| `--color-error` | Error red (light) |
-| `--color-error-dark` | Error red (dark) |
-| `--color-warning` | Warning amber |
-| `--color-info` | Info blue |
-| `--color-muted` | Muted gray |
-| `--accent-text` | Foreground text/icon color on `--accent` surfaces |
-
-**Rule:** Never use raw hex or `rgba(...)` for colors in component styles. Use `var(--token)` or `color-mix(in srgb, var(--color) X%, transparent)` for translucent backgrounds. The only place hardcoded colors are acceptable is inside `:root` theme blocks defining tokens.
-
-Status background tokens already use `color-mix` for theme adaptability — reuse them rather than creating parallel variants:
-
-```
---status-triage-bg, --status-todo-bg, --status-in-progress-bg,
---status-in-review-bg, --status-done-bg, --status-archived-bg,
---status-error-bg, --status-error-bg-deep
-```
-
----
-
-### Theme System
-
-The dashboard supports **dark/light modes** (controlled by `data-theme` attribute) plus **54 color themes** (controlled by `data-color-theme` attribute). Theme blocks live in `packages/dashboard/app/public/theme-data.css` and are lazy-loaded when a non-default theme is active.
-
-**Token categories:**
-
-1. **Base tokens** (`--bg`, `--surface`, `--text`, etc.) — redefined in every theme block (dark + light for each of the 54 themes). Components using these tokens adapt automatically.
-2. **Semantic tokens** (tokens with consistent *meaning* across all themes, like `--autopilot-pulse`, `--event-error-text`, `--badge-mission-*`, `--fab-*`) — only need dark/light adaptation via `[data-theme="light"]`. They do NOT need per-color-theme overrides because the semantic meaning is always consistent.
-3. **Status tokens** (`--triage`, `--todo`, `--in-progress`, etc.) — redefined per theme block to match each theme's palette.
-
-**Adding theme-aware CSS custom properties:**
-- For **base** tokens: add to `:root`, `[data-theme="light"]`, and all 54 theme blocks (dark + light variants)
-- For **semantic** tokens: add to `:root` and `[data-theme="light"]` only
-- For **status** tokens: add to `:root` and all theme blocks
-
-The automated test in `status-colors-theme.test.ts` iterates all theme blocks to catch regressions.
-
-**New components must use `var(--token)` references** so themes apply without any per-component dark/light handling.
-
----
-
-### Component Classes
-
-Reuse these existing CSS classes rather than creating parallel styles. They live in `styles.css`.
-
-#### Buttons
-
-| Class | Purpose |
-|-------|---------|
-| `.btn` | Base button |
-| `.btn-primary` | Primary CTA (uses `--cta-bg`) |
-| `.btn-danger` | Destructive action (red) |
-| `.btn-warning` | Warning action (amber) |
-| `.btn-sm` | Compact button (4px 10px padding, 12px font) |
-| `.btn-icon` | Icon-only button (square, icon fills) |
-| `.btn-icon--active` | Active icon button state |
-| `.btn-badge` | Notification badge on button |
-
-All buttons use `--btn-padding`, `--btn-border-width`, `--transition-fast`, and `--radius-md` tokens. All have `:focus-visible` using `--focus-ring-strong` and `:active` using `transform: scale(0.97)`.
-
-#### Modals
-
-| Class | Purpose |
-|-------|---------|
-| `.modal-overlay` | Backdrop; use with `.open` class |
-| `.modal-overlay.open` | Visible overlay (uses `backdrop-filter: blur(4px)`) |
-| `.modal` | Default modal (480px wide, `--radius-lg`, `--shadow-lg`) |
-| `.modal-lg` | Large modal (640px wide) |
-| `.modal-header` | Modal title bar (flex, space-between) |
-| `.modal-close` | Close button (× icon, hover color change) |
-| `.modal-actions` | Action bar at modal bottom |
-| `.modal-actions-left` | Left-aligned actions (use `margin-right: auto`) |
-| `.modal-actions-right` | Right-aligned actions |
-
-The overlay uses `position: fixed; inset: 0; z-index: 100;`. Pad the top with `--overlay-padding-top` (default 10vh) to center vertically.
-
-#### Forms
-
-| Class | Purpose |
-|-------|---------|
-| `.form-group` | Field container with `--space-xl` horizontal padding |
-| `.form-group label` | Uppercase label (12px, 0.5px letter-spacing) |
-| `.input` | Global input (surface bg, `--radius-sm`) |
-| `.select` | Global select (same style as `.input`) |
-| `.checkbox-label` | Checkbox label (flex, gap, no uppercase) |
-| `.form-error` | Error box (uses `color-mix`, `--color-error`) |
-
-Inputs and selects in `.form-group` get focus styles (`border-color: var(--todo)` + `--focus-ring`). Global `.input` and `.select` classes apply independently.
-
-#### Cards
-
-| Class | Purpose |
-|-------|---------|
-| `.card` | Task card base (grab cursor, `--card-padding`) |
-| `.card-header` | Card top row (flex, gap: 6px) |
-| `.card-id` | Monospace task ID (11px, `--text-muted`) |
-| `.card-title` | Card title (13px, break-word) |
-| `.card-meta` | Meta row (flex, gap, `--space-sm`) |
-| `.card-status-badge` | Status badge (pill shape, status-bg/text colors) |
-| `.card-status-badge--triage` | Triage badge variant |
-| `.card-status-badge--todo` | Todo badge variant |
-| `.card-status-badge--in-progress` | In-Progress badge variant |
-| `.card-status-badge--in-review` | In-Review badge variant |
-| `.card-status-badge--done` | Done badge variant |
-| `.card-status-badge--archived` | Archived badge variant |
-
-Cards have `--focus-ring-strong` focus style and `--card-hover` background on hover. Use `.card-status-badge--{status}` classes for column-color badges.
-
-#### Utility
-
-| Class | Purpose |
-|-------|---------|
-| `.touch-target` | 44px minimum touch target (Apple HIG / WCAG 2.5.8) |
-| `.visually-hidden` | Screen-reader-only (clip rect) |
-
----
-
-### Mobile Responsive
-
-**Breakpoints** (use `@media (max-width: N)`):
-
-| Breakpoint | Value | Use |
-|------------|-------|-----|
-| Mobile | `768px` | Primary mobile breakpoint |
-| Tablet | `1024px` | `min-width: 769px and max-width: 1024px` |
-| Small | `640px` | Compact mobile |
-| XSmall | `480px` | Very narrow devices |
-
-**Mobile CSS placement:** All mobile overrides go in `@media (max-width: 768px)` blocks at the **bottom** of `styles.css`, after their base styles.
-
-**Bottom spacing:**
-- `--mobile-nav-height` (`44px`) controls mobile nav bar height
-- `--standalone-bottom-gap` (`0px` default, `8px` in PWA `display-mode: standalone`) adds iOS home indicator breathing room
-- All bottom-positioned elements use `calc(..., var(--mobile-nav-height), env(safe-area-inset-bottom, 0px), var(--standalone-bottom-gap))`
-
-**Touch targets:** All interactive elements must be at least **36px** on mobile. Use `.touch-target` for elements below this threshold (which sets `44px` minimum). Inside mobile media queries, individual component touch targets may be `36px`.
-
-**Touch-target convention — primary vs secondary controls (added 2026-05-13 after FN-3965/FN-4351):**
-
-WCAG 2.5.8 / Apple HIG apply to the **primary interaction target** of a surface, not to every visible interactive element. Blanket-inflating secondary controls to 36px+ breaks density and is an anti-pattern.
-
-- **Primary controls** (mobile nav bar, FAB, tab action rows, modal CTAs, list-row entire-row tap targets, settings/onboarding form controls): MUST be ≥36px on mobile. Use `calc(var(--space-xl) + var(--space-md))` or `.touch-target`.
-- **Secondary controls** on a density-sensitive surface where the surface itself is the primary tap target (e.g., TaskCard's archive/unarchive/send-back/edit/delete buttons — the card body opens detail on tap; list-row hover-revealed action buttons; chip-style provenance/tracking affordances): MUST remain compact (typically 24–28px square or `font-size: 0.625rem`-class chips). Do NOT apply mobile touch-target inflation here.
-
-If you're tempted to add `min-height: calc(var(--space-xl) + var(--space-md))` (or any 36px+ override) to a hover-revealed or chip-style control inside a card or list row, stop and ask: is the parent surface itself the tap target? If yes, the secondary control stays compact. Reference FN-3965 (the wrong application) and FN-4351 (the restoration) for the canonical case.
-
-**Safe area:** Use `max(var(--space-md), env(safe-area-inset-left, 0px))` pattern for content respecting device notches on mobile.
-
----
-
-### File-path links in dashboard text
-
-- Reuse `packages/dashboard/app/utils/filePathLinkify.tsx` plus `packages/dashboard/app/context/FileBrowserContext.tsx` whenever a dashboard surface should open workspace paths in `FileBrowserModal`.
-- Wrap plain text with `linkifyFilePaths(...)`, and wrap mixed JSX/markdown/highlight output with `linkifyReactChildren(...)` so existing formatting survives.
-- Mount surfaces under `FileBrowserProvider` and route clicks through its `openFile(path, { workspace?, line?, col? })` handler instead of adding one-off modal state plumbing.
-
-### Adding New CSS
-
-1. **Always use tokens** — `var(--space-md)`, `var(--text-muted)`, `var(--radius-md)`, `var(--transition-fast)`, etc. Never write `padding: 8px` or `color: #e6edf3` directly.
-2. **Place new rules correctly** — Component CSS goes in `app/components/ComponentName.css`. Only genuinely global rules go in `styles.css`.
-3. **Import stylesheet in component** — Add `import "./ComponentName.css";` at the top of `ComponentName.tsx`.
-4. **Reuse existing classes** — Don't create parallel button or form styles. Add states (`:hover`, `:focus-visible`, `:active`) to the existing `.btn`, `.card`, `.input` chains.
-5. **Theme-aware backgrounds** — Use `color-mix(in srgb, var(--color) X%, transparent)` instead of `rgba(...)`. For example, error backgrounds: `color-mix(in srgb, var(--color-error) 10%, transparent)`.
-6. **Accessibility** — Add `:focus-visible` styles using `var(--focus-ring-strong)` on every interactive component. Never suppress focus entirely.
-7. **Test both themes** — Verify new styles look correct in both dark and light modes before committing.
-8. **Mobile overrides** — Add mobile variants below the base styles, inside a `@media (max-width: 768px)` block.
-
----
-
-### Common Pitfalls
-
-- **`--surface-hover` is undefined** — This token is referenced in several places but never defined in `:root` or theme blocks. Use a fallback: `var(--surface-hover, rgba(0,0,0,0.03))` or define the token explicitly.
-- **Hardcoded `rgba(...)` for error states** — Use `color-mix(in srgb, var(--color-error) 10%, transparent)` instead of `rgba(248, 81, 73, 0.1)`.
-- **`.form-error` style** — Should use `color-mix(in srgb, var(--color-error) 10%, transparent)` for the background, not hardcoded rgba.
-- **Global `.spin` utility lives in `packages/dashboard/app/styles.css`** — Don't duplicate the generic `.spin { animation: spin 1s linear infinite; }` rule in component stylesheets. Keep per-component `.spin` rules only when they intentionally change keyframes/duration/specificity.
-- **`lucide-react` icon changes** — When adding new icons, update test mocks (`vi.mock("lucide-react")`) immediately. Missing mock exports cascade into runtime failures.
-- **Light-theme overrides** — Components using `var(*)` tokens generally inherit correctly from `[data-theme="light"]` root redefinitions. Only add explicit `[data-theme="light"]` overrides where fine-tuning is needed (opacity, subtle shadows).
-- **CSS regex tests in test files** — When changing mobile CSS values (e.g., `min-height`), update both the CSS and the corresponding test assertions. Use non-greedy `[^}]*` patterns for block-scoped regex, not `[\s\S]*` which can bleed across block boundaries.
-- **BEM specificity conflicts** — When a container state class (`.quick-entry-box--expanded`) and an element modifier (`.quick-entry-input--expanded`) both target the same element, the container may win due to higher specificity. Use `:not(.modifier)` to scope container rules: `.quick-entry-box--expanded .quick-entry-input:not(.quick-entry-input--expanded)`.
-- **CSS in `@media` blocks** — Don't search backwards for the nearest `@media` to check if a rule is mobile-scoped. Track brace depth to confirm the line is inside the block. Many components are defined globally even if they only visually appear on mobile.
-- **Mobile board view-switch scroll-snap pitfall (FN-001)** — `scroll-snap-type: x mandatory` on mobile `.board` can cause iOS Safari to compress the viewport into a corner when switching from ListView because stale layout measurements are snapped before flex children resolve. Use `scroll-snap-type: x proximity` combined with `overflow-anchor: none` instead.
+- **`--surface-hover` undefined** — reference with a fallback (`var(--surface-hover, rgba(0,0,0,0.03))`) or define explicitly.
+- **BEM specificity** — when a container state class and an element modifier target the same node, the container can win. Use `:not(.modifier)` to scope.
+- **CSS `@media` detection** — track brace depth to confirm a rule is mobile-scoped; don't scan backwards for the nearest `@media`. Many components are global even if visually mobile-only.
+- **Mobile board scroll-snap (FN-001)** — `scroll-snap-type: x mandatory` on mobile `.board` causes iOS Safari to compress the viewport when switching from ListView. Use `x proximity` + `overflow-anchor: none`.
+- **`lucide-react` icon adds** — update `vi.mock("lucide-react")` test mocks immediately; missing exports cascade.
+- **`.spin` is global** — don't redefine the generic spin keyframes in component CSS.
 
 ## Reliability Mechanism Coverage
 
-Reliability governance freeze is **LIFTED** (user directive, 2026-05-14, #product). Reliability-layer behavior changes are unblocked — a reliability pass is in scope. Standard review/test rigor still applies.
+Reliability-layer changes are in scope. Interaction regression backstops live in `packages/engine/src/__tests__/reliability-interactions/` — any task that adds or changes a reliability layer must add/update interaction tests there covering each plausible pair with existing layers (merge path, workflow/pre-merge, self-healing, scheduler/watchdog/restart recovery, governance gates).
 
-Reliability interaction regression backstops live in `packages/engine/src/__tests__/reliability-interactions/` and are the canonical location for cross-layer reliability coverage. Any task that adds or changes a reliability layer must add/update interaction tests in that directory for each plausible pair with existing layers (merge path, workflow/pre-merge, self-healing, scheduler/watchdog/restart recovery, and governance gates).
-- FN-4754 adds a dashboard-diff display boundary backstop via `packages/engine/src/__tests__/reliability-interactions/dashboard-diff-boundary.test.ts` plus dashboard read-only guards in `packages/dashboard/src/__tests__/routes-diff-display-read-only.test.ts` and `packages/dashboard/src/__tests__/routes-diff-rebase-range.test.ts`.
-- FN-4824 defines cross-node assignment-wake behavior in `docs/design/fn-4824-cross-node-assignment-wake-contract.md` with interaction coverage in `packages/engine/src/__tests__/reliability-interactions/cross-node-assignment-wake.test.ts`.
-
-**Auto-recovery dispatcher (FN-4533 governance exception).** The auto-recovery orchestrator at `packages/engine/src/auto-recovery.ts` composes on top of existing reliability layers (FN-4500 fast-path, FN-4508 deterministic branch-conflict classifications, FN-4499 bootstrap-misbinding re-anchor, FN-4428 contamination classifier, `mergeAuditAutoRecovery` Stages 1–5, self-healing sweeps) to handle residual failures in six classes: file-scope invariant violation at squash, branch misbinding / ghost worktree, verification-fix scope leak, contamination with foreign-attributed commits, `branch-conflict-unrecoverable` residuals, and room-post / message-send failures. Dispatcher invocation is additive at existing call sites — no existing layer's behavior is changed; see the FN-4533 design document for the composition contract and FN-4359 governance scope.
+The auto-recovery dispatcher at `packages/engine/src/auto-recovery.ts` (FN-4533) composes on top of existing layers (FN-4500 fast-path, FN-4508 deterministic branch-conflict, FN-4499 bootstrap-misbinding, FN-4428 contamination, `mergeAuditAutoRecovery` Stages 1–5, self-healing) to handle six residual classes: file-scope violation at squash, branch misbinding / ghost worktree, verification-fix scope leak, contamination, `branch-conflict-unrecoverable` residuals, and room-post/message-send failures. Invocation is additive — no existing layer's behavior changes.
