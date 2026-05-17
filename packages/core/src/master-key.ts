@@ -55,8 +55,8 @@ export class MasterKeyManager {
 
     const generated = randomBytes(32);
     const persisted = await this.persistNewKeyWithRaceHandling(generated);
-    console.info(`master key created (${await this.getBackend()})`);
-    return persisted;
+    console.info(`master key created (${persisted.backend})`);
+    return persisted.key;
   }
 
   async rotateKey(): Promise<Buffer> {
@@ -69,15 +69,18 @@ export class MasterKeyManager {
       return next;
     }
 
-    const wroteKeychain = await this.writeKeychainKey(next);
-    if (wroteKeychain) {
+    if (backend === "keychain") {
+      const wroteKeychain = await this.writeKeychainKey(next);
+      if (!wroteKeychain) {
+        throw new Error("unable to rotate master key in active keychain backend");
+      }
       console.info("master key rotated (keychain)");
       return next;
     }
 
-    await this.writeFileKey(next, { overwrite: true });
-    console.info("master key rotated (file)");
-    return next;
+    const persisted = await this.persistNewKeyWithRaceHandling(next);
+    console.info(`master key rotated (${persisted.backend})`);
+    return persisted.key;
   }
 
   async getBackend(): Promise<"keychain" | "file" | "missing"> {
@@ -94,12 +97,14 @@ export class MasterKeyManager {
     return "missing";
   }
 
-  private async persistNewKeyWithRaceHandling(generated: Buffer): Promise<Buffer> {
+  private async persistNewKeyWithRaceHandling(
+    generated: Buffer,
+  ): Promise<{ key: Buffer; backend: "keychain" | "file" }> {
     const keytar = await this.loadKeytar();
     if (keytar) {
       const raced = await this.readKeychainKey();
       if (raced) {
-        return raced;
+        return { key: raced, backend: "keychain" };
       }
       try {
         await keytar.setPassword(
@@ -107,11 +112,11 @@ export class MasterKeyManager {
           MASTER_KEY_KEYCHAIN_ACCOUNT,
           generated.toString("base64"),
         );
-        return generated;
+        return { key: generated, backend: "keychain" };
       } catch {
         const afterRace = await this.readKeychainKey();
         if (afterRace) {
-          return afterRace;
+          return { key: afterRace, backend: "keychain" };
         }
         console.warn("master key keychain unavailable; using file backend");
       }
@@ -119,19 +124,19 @@ export class MasterKeyManager {
 
     const racedFile = await this.readFileKey();
     if (racedFile) {
-      return racedFile;
+      return { key: racedFile, backend: "file" };
     }
 
     try {
       await this.writeFileKey(generated, { overwrite: false });
-      return generated;
+      return { key: generated, backend: "file" };
     } catch (error) {
       if (error instanceof MasterKeyPermissionError) {
         throw error;
       }
       const afterRace = await this.readFileKey();
       if (afterRace) {
-        return afterRace;
+        return { key: afterRace, backend: "file" };
       }
       throw new Error("failed to persist master key", { cause: error });
     }
