@@ -194,6 +194,49 @@ export type DatabaseMutationType =
 
 // ── Filesystem mutation types ─────────────────────────────────────────────────
 
+export const SECRET_MUTATION_TYPES = [
+  "secret:read",
+  "secret:create",
+  "secret:update",
+  "secret:delete",
+  "secret:approval-requested",
+  "secret:approval-granted",
+  "secret:approval-denied",
+  "secret:sync-push",
+  "secret:sync-pull",
+  "secret:env-write",
+  "secret:env-write-skipped",
+  "secret:env-cleanup",
+  "secret:env-cleanup-skipped",
+] as const;
+
+export const SECRET_AUDIT_PLAINTEXT_FORBIDDEN_KEYS = [
+  "plaintextValue",
+  "value",
+  "secret",
+  "password",
+  "ciphertext",
+  "decrypted",
+  "nonce",
+] as const;
+
+/**
+ * Guards secret audit metadata against obvious plaintext/ciphertext payload leaks.
+ *
+ * This check is intentionally top-level only; nested objects are not inspected.
+ */
+export function assertNoSecretPlaintext(metadata?: Record<string, unknown>): void {
+  if (!metadata) {
+    return;
+  }
+
+  for (const key of SECRET_AUDIT_PLAINTEXT_FORBIDDEN_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(metadata, key)) {
+      throw new Error("secret audit metadata may not include plaintext fields");
+    }
+  }
+}
+
 export type FilesystemMutationType =
   | "file:write"
   | "file:delete"
@@ -208,8 +251,7 @@ export type FilesystemMutationType =
   | "binary:install-success"
   | "binary:install-failed"
   | "binary:install-denied"
-  | "secret:sync-push"
-  | "secret:sync-pull";
+  | (typeof SECRET_MUTATION_TYPES)[number];
 
 export type SandboxMutationType = "sandbox:prepare" | "sandbox:run" | "sandbox:failure" | "sandbox:fallback";
 
