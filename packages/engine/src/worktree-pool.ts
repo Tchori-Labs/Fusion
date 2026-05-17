@@ -91,26 +91,32 @@ export async function isGitRepository(dir: string): Promise<boolean> {
   }
 }
 
-export async function getRegisteredWorktreePaths(rootDir: string): Promise<Set<string>> {
+export async function describeRegisteredWorktrees(rootDir: string): Promise<{ rawOutput: string; canonicalized: string[] }> {
   try {
     const result = await execAsync("git worktree list --porcelain", {
       cwd: rootDir,
       encoding: "utf-8",
+      timeout: 10_000,
+      maxBuffer: 10 * 1024 * 1024,
     });
     const stdout = getExecStdout(result);
 
-    const paths = new Set<string>();
+    const canonicalized: string[] = [];
     for (const line of stdout.split("\n")) {
       if (line.startsWith("worktree ")) {
-        paths.add(canonicalizePath(line.slice("worktree ".length)));
+        canonicalized.push(canonicalizePath(line.slice("worktree ".length)));
       }
     }
-    return paths;
-  } catch (err: unknown) {
-    const errorMessage = err instanceof Error ? err.message : String(err);
-    worktreePoolLog.warn(`Failed to list registered worktrees: ${errorMessage}`);
-    return new Set();
+
+    return { rawOutput: stdout, canonicalized };
+  } catch {
+    return { rawOutput: "", canonicalized: [] };
   }
+}
+
+export async function getRegisteredWorktreePaths(rootDir: string): Promise<Set<string>> {
+  const { canonicalized } = await describeRegisteredWorktrees(rootDir);
+  return new Set(canonicalized);
 }
 
 export async function isRegisteredGitWorktree(rootDir: string, worktreePath: string): Promise<boolean> {
@@ -135,9 +141,11 @@ export async function isInsideGitWorkTree(worktreePath: string): Promise<boolean
   }
 }
 
+export type TaskWorktreeClassification = "missing" | "incomplete" | "unregistered" | "outside-work-tree";
+
 export type TaskWorktreeClassificationResult =
   | { ok: true }
-  | { ok: false; classification: "missing" | "incomplete" | "unregistered"; reason: string };
+  | { ok: false; classification: TaskWorktreeClassification; reason: string };
 
 /**
  * Language-agnostic liveness/classification gate for task worktrees.
@@ -146,11 +154,14 @@ export async function classifyTaskWorktree(rootDir: string, worktreePath: string
   if (!existsSync(worktreePath)) {
     return { ok: false, classification: "missing", reason: "worktree directory does not exist" };
   }
-  if (!hasRequiredWorktreeFiles(worktreePath) || !await isInsideGitWorkTree(worktreePath)) {
-    return { ok: false, classification: "incomplete", reason: "missing or invalid .git metadata" };
+  if (!hasRequiredWorktreeFiles(worktreePath)) {
+    return { ok: false, classification: "incomplete", reason: "missing .git metadata" };
   }
   if (!await isRegisteredGitWorktree(rootDir, worktreePath)) {
     return { ok: false, classification: "unregistered", reason: "not registered in git worktree list" };
+  }
+  if (!await isInsideGitWorkTree(worktreePath)) {
+    return { ok: false, classification: "outside-work-tree", reason: "git rev-parse --is-inside-work-tree returned false" };
   }
   return { ok: true };
 }

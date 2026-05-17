@@ -111,6 +111,7 @@ vi.mock("../worktree-pool.js", async (importOriginal) => {
   return {
     ...actual,
     classifyTaskWorktree: vi.fn().mockResolvedValue({ ok: true }),
+    describeRegisteredWorktrees: vi.fn().mockResolvedValue({ rawOutput: "", canonicalized: [] }),
     isUsableTaskWorktree: vi.fn().mockResolvedValue(true),
   };
 });
@@ -247,7 +248,7 @@ import { withRateLimitRetry } from "../rate-limit-retry.js";
 import { exec, execSync } from "node:child_process";
 import { existsSync, realpathSync } from "node:fs";
 import { hydrateWorktreeDb } from "../worktree-db-hydrate.js";
-import { classifyTaskWorktree, isUsableTaskWorktree } from "../worktree-pool.js";
+import { classifyTaskWorktree, describeRegisteredWorktrees, isUsableTaskWorktree } from "../worktree-pool.js";
 import { classifyStaleLock, tryRemoveStaleLock } from "../worktree-stale-lock.js";
 import { executingTaskLock } from "../active-session-registry.js";
 
@@ -263,6 +264,7 @@ export const mockedExistsSync = vi.mocked(existsSync);
 export const mockedRealpathSync = vi.mocked(realpathSync);
 export const mockedHydrateWorktreeDb = vi.mocked(hydrateWorktreeDb);
 export const mockedClassifyTaskWorktree = vi.mocked(classifyTaskWorktree);
+export const mockedDescribeRegisteredWorktrees = vi.mocked(describeRegisteredWorktrees);
 export const mockedIsUsableTaskWorktree = vi.mocked(isUsableTaskWorktree);
 export const mockedClassifyStaleLock = vi.mocked(classifyStaleLock);
 export const mockedTryRemoveStaleLock = vi.mocked(tryRemoveStaleLock);

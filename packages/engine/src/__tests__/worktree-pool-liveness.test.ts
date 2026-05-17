@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execSync, spawnSync } from "node:child_process";
 import { afterEach, describe, expect, it } from "vitest";
-import { hasRequiredWorktreeFiles, isUsableTaskWorktree } from "../worktree-pool.js";
+import { classifyTaskWorktree, hasRequiredWorktreeFiles, isUsableTaskWorktree } from "../worktree-pool.js";
 
 const hasGit = spawnSync("git", ["--version"], { stdio: "pipe" }).status === 0;
 const describeIfGit = hasGit ? describe : describe.skip;
@@ -79,6 +79,87 @@ describeIfGit("worktree liveness gating (FN-4682)", () => {
     }));
     const worktreePath = track(makeWorktree(rootDir, "empty"));
     await expect(isUsableTaskWorktree(rootDir, worktreePath)).resolves.toBe(true);
+  });
+
+  it.each([
+    {
+      name: "ok",
+      setup: () => {
+        const rootDir = track(makeRepo((dir) => {
+          git(dir, 'git commit --allow-empty -m "init"');
+        }));
+        const worktreePath = track(makeWorktree(rootDir, "ok"));
+        return { rootDir, worktreePath };
+      },
+      expected: { ok: true } as const,
+    },
+    {
+      name: "missing",
+      setup: () => {
+        const rootDir = track(makeRepo((dir) => {
+          git(dir, 'git commit --allow-empty -m "init"');
+        }));
+        const worktreePath = join(tmpdir(), `fn-4682-missing-${Date.now()}`);
+        return { rootDir, worktreePath };
+      },
+      expected: {
+        ok: false,
+        classification: "missing",
+        reason: "worktree directory does not exist",
+      } as const,
+    },
+    {
+      name: "incomplete",
+      setup: () => {
+        const rootDir = track(makeRepo((dir) => {
+          git(dir, 'git commit --allow-empty -m "init"');
+        }));
+        const worktreePath = track(mkdtempSync(join(tmpdir(), "fn-4682-incomplete-")));
+        return { rootDir, worktreePath };
+      },
+      expected: {
+        ok: false,
+        classification: "incomplete",
+        reason: "missing .git metadata",
+      } as const,
+    },
+    {
+      name: "unregistered",
+      setup: () => {
+        const rootDir = track(makeRepo((dir) => {
+          git(dir, 'git commit --allow-empty -m "init"');
+        }));
+        const worktreePath = track(makeRepo((dir) => {
+          git(dir, 'git commit --allow-empty -m "standalone"');
+        }));
+        return { rootDir, worktreePath };
+      },
+      expected: {
+        ok: false,
+        classification: "unregistered",
+        reason: "not registered in git worktree list",
+      } as const,
+    },
+    {
+      name: "outside-work-tree",
+      setup: () => {
+        const rootDir = track(makeRepo((dir) => {
+          git(dir, 'git commit --allow-empty -m "init"');
+        }));
+        const worktreePath = track(makeWorktree(rootDir, "outside-work-tree"));
+        rmSync(join(worktreePath, ".git"), { recursive: true, force: true });
+        writeFileSync(join(worktreePath, ".git"), "gitdir: /tmp/nonexistent\n", "utf-8");
+        return { rootDir, worktreePath };
+      },
+      expected: {
+        ok: false,
+        classification: "outside-work-tree",
+        reason: "git rev-parse --is-inside-work-tree returned false",
+      } as const,
+    },
+  ])("FN-4935: classifyTaskWorktree %s", async ({ setup, expected }) => {
+    const { rootDir, worktreePath } = setup();
+    await expect(classifyTaskWorktree(rootDir, worktreePath)).resolves.toEqual(expected);
   });
 
   it("FN-4682: rejects missing worktree directory", async () => {
