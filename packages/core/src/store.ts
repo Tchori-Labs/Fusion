@@ -23,6 +23,8 @@ import { TodoStore } from "./todo-store.js";
 import { EvalStore } from "./eval-store.js";
 import { BackwardCompat, ProjectRequiredError } from "./migration.js";
 import { CentralCore } from "./central-core.js";
+import { SecretsStore } from "./secrets-store.js";
+import { MasterKeyManager } from "./master-key.js";
 import { getTaskMergeBlocker, resolveTaskMergeTarget } from "./task-merge.js";
 import { getInReviewStallReason } from "./in-review-stall.js";
 import { getStalePausedReviewSignal } from "./stale-paused-review.js";
@@ -803,6 +805,10 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   private todoStore: TodoStore | null = null;
   /** Cached EvalStore instance */
   private evalStore: EvalStore | null = null;
+  /** Cached SecretsStore instance */
+  private secretsStore: SecretsStore | null = null;
+  /** Cached central connection for SecretsStore global scope access */
+  private secretsCentralCore: CentralCore | null = null;
   /** Cached distributed task-id allocator instance. */
   private distributedTaskIdAllocator: DistributedTaskIdAllocator | null = null;
 
@@ -8048,6 +8054,11 @@ ${stepsSection}`;
       this._archiveDb.close();
       this._archiveDb = null;
     }
+    if (this.secretsCentralCore) {
+      void this.secretsCentralCore.close();
+      this.secretsCentralCore = null;
+    }
+    this.secretsStore = null;
   }
 
   /**
@@ -8078,6 +8089,24 @@ ${stepsSection}`;
   /** Expose the shared Database instance for co-located stores (e.g. AiSessionStore). */
   getDatabase(): Database {
     return this.db;
+  }
+
+  async getSecretsStore(): Promise<SecretsStore> {
+    if (this.secretsStore) {
+      return this.secretsStore;
+    }
+
+    const central = new CentralCore(this.getFusionDir());
+    await central.init();
+    this.secretsCentralCore = central;
+    const centralDb = (central as unknown as { db: import("./central-db.js").CentralDatabase | null }).db;
+    if (!centralDb) {
+      throw new Error("Central database unavailable for secrets store");
+    }
+    const masterKeyManager = new MasterKeyManager();
+    const masterKeyProvider = () => masterKeyManager.getOrCreateKey();
+    this.secretsStore = new SecretsStore(this.db, centralDb, masterKeyProvider);
+    return this.secretsStore;
   }
 
   getDatabaseHealth(): {

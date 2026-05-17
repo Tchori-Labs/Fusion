@@ -105,7 +105,7 @@ describe("self-healing completion fan-out", () => {
     );
   });
 
-  it("removes worktree from hint and is idempotent when missing", async () => {
+  it("prefers worktree hint and is idempotent when missing", async () => {
     (existsSyncMock as any).mockImplementation((p: string) => p === "/wt/fn-b");
     const blocker = makeTask("FN-B", { column: "done", branch: "fusion/fn-b" });
     const store = createStore([blocker]);
@@ -116,32 +116,28 @@ describe("self-healing completion fan-out", () => {
     expect(execMock.mock.calls.some((c) => String(c[0]).includes("git worktree remove --force") && String(c[0]).includes("/wt/fn-b"))).toBe(true);
 
     existsSyncMock.mockReturnValue(false);
-    execMock.mockImplementation((cmd: string, _opts: unknown, cb: (err: unknown, stdout: string, stderr: string) => void) => {
-      if (cmd.includes("git worktree list --porcelain")) cb(null, "", "");
-      else cb(null, "", "");
-    });
     const second = await mgr.reconcileCompletedTask("FN-B");
     expect(second.worktreeRemoved).toBe(false);
     const rmCalls = execMock.mock.calls.filter((c) => String(c[0]).includes("git worktree remove --force") && String(c[0]).includes("/wt/fn-b"));
     expect(rmCalls).toHaveLength(1);
   });
 
-  it("derives worktree from worktree list and skips branch delete when unique commits exist", async () => {
-    (existsSyncMock as any).mockImplementation((p: string) => String(p).includes("/wt/fn-c"));
+  it("falls back to task.worktree when hint/branch mapping are unavailable", async () => {
+    (existsSyncMock as any).mockImplementation((p: string) => p === "/wt/fn-c");
     uniqueCommitsMock.mockResolvedValue({ commits: [{ sha: "abc", subject: "x" }] as any, mainRef: "main", degraded: false });
-    execMock.mockImplementation((cmd: string, _opts: unknown, cb: (err: unknown, stdout: string, stderr: string) => void) => {
-      cb(null, "", "");
-    });
 
-    const blocker = makeTask("FN-C", { column: "done", branch: "fusion/fn-c" });
+    const blocker = makeTask("FN-C", { column: "done", branch: null as any, worktree: "/wt/fn-c" });
     const store = createStore([blocker]);
     const mgr = new SelfHealingManager(store, { rootDir: "/repo" });
-    vi.spyOn(mgr as any, "findWorktreePathForBranch").mockResolvedValue("/wt/fn-c");
+    const findSpy = vi.spyOn(mgr as any, "findWorktreePathForBranch");
+
     const out = await mgr.reconcileCompletedTask("FN-C");
+    expect(out.worktreeRemoved).toBe(true);
+    expect(findSpy).not.toHaveBeenCalled();
     expect(execMock.mock.calls.some((c) => String(c[0]).includes("git worktree remove --force") && String(c[0]).includes("/wt/fn-c"))).toBe(true);
+    expect((await store.getTask("FN-C"))?.worktree).toBeNull();
+    expect((await store.getTask("FN-C"))?.branch).toBeNull();
     expect(out.branchRemoved).toBe(false);
-    expect(execMock.mock.calls.some((c) => String(c[0]).includes("git branch -D"))).toBe(false);
-    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("skip deletion"));
   });
 
   it("globalPause short-circuits", async () => {
@@ -176,11 +172,24 @@ describe("self-healing completion fan-out", () => {
     store.emit("task:moved", { task: t, from: "in-review", to: "todo", source: "user" });
     await Promise.resolve();
     expect(spy).toHaveBeenCalledTimes(2);
-    expect(spy).toHaveBeenNthCalledWith(1, "FN-L");
+    expect(spy).toHaveBeenNthCalledWith(1, "FN-L", { worktreeHint: undefined });
 
     mgr.stop();
     store.emit("task:moved", { task: t, from: "in-review", to: "done", source: "user" });
     await Promise.resolve();
     expect(spy).toHaveBeenCalledTimes(2);
+  });
+
+  it("clears task.worktree and matching task.branch after successful removal", async () => {
+    (existsSyncMock as any).mockImplementation((p: string) => p === "/wt/fn-d");
+    uniqueCommitsMock.mockResolvedValue({ commits: [], mainRef: "main", degraded: false });
+    const blocker = makeTask("FN-D", { column: "done", branch: "fusion/fn-d", worktree: "/wt/fn-d" });
+    const store = createStore([blocker]);
+    const mgr = new SelfHealingManager(store, { rootDir: "/repo" });
+
+    const out = await mgr.reconcileCompletedTask("FN-D", { worktreeHint: "/wt/fn-d" });
+    expect(out.worktreeRemoved).toBe(true);
+    expect((await store.getTask("FN-D"))?.worktree).toBeNull();
+    expect((await store.getTask("FN-D"))?.branch).toBeNull();
   });
 });

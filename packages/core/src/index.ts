@@ -1133,3 +1133,11 @@ export type {
   SecretScope,
   SecretRecord,
 } from "./secrets-store.js";
+export {
+  wrapSecretsBundle,
+  unwrapSecretsBundle,
+  SecretsSyncError,
+} from "./secrets-sync.js";
+export type {
+  WrappedSecretsBundle,
+} from "./secrets-sync.js";

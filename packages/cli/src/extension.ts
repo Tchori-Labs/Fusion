@@ -21,6 +21,7 @@ import {
   formatRoleMismatchReason,
   resolveAgentProvisioningPolicy,
   TASK_PRIORITIES,
+  resolveSecretAccessPolicy,
 } from "@fusion/core";
 import {
   getGhErrorMessage,
@@ -95,6 +96,25 @@ async function getStore(cwd: string): Promise<TaskStore> {
 
 function getFusionDir(cwd: string): string {
   return join(resolveProjectRoot(cwd), ".fusion");
+}
+
+function emitSecretAudit(
+  store: TaskStore,
+  ctx: { runId?: string; agentId?: string; taskId?: string },
+  mutationType: string,
+  target: string,
+  metadata?: Record<string, unknown>,
+): void {
+  if (!ctx.runId || !ctx.agentId) return;
+  store.recordRunAuditEvent({
+    runId: ctx.runId,
+    agentId: ctx.agentId,
+    taskId: ctx.taskId,
+    domain: "filesystem",
+    mutationType,
+    target,
+    metadata,
+  });
 }
 
 /**
@@ -1486,6 +1506,82 @@ export default function kbExtension(pi: ExtensionAPI) {
           promptSnippet: params.prompt ? params.prompt.slice(0, 200) : undefined,
           promptGuidelines: "Lightweight fetch only; for JS-rendered pages, use agent-browser skill.",
         },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "fn_secret_get",
+    label: "fn: Secret Get",
+    description: "Read a secret by key using per-secret access policy.",
+    parameters: Type.Object({
+      key: Type.String({ description: "Secret key" }),
+      scope: Type.Optional(Type.Union([Type.Literal("project"), Type.Literal("global")], { description: "Optional scope" })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const store = await getStore(ctx.cwd);
+      const secretsStore = await store.getSecretsStore();
+      const scopes = params.scope ? [params.scope] : ["project", "global"];
+
+      let record: import("@fusion/core").SecretRecord | null = null;
+      let resolvedScope: "project" | "global" | null = null;
+      for (const scope of scopes) {
+        const match = secretsStore.listSecrets(scope).find((candidate) => candidate.key === params.key);
+        if (match) {
+          record = match;
+          resolvedScope = scope;
+          break;
+        }
+      }
+
+      if (!record || !resolvedScope) {
+        return { content: [{ type: "text", text: `Secret '${params.key}' not found.` }], details: { error: "not-found", key: params.key, scope: params.scope ?? null } };
+      }
+
+      const globalSettings = await store.getGlobalSettingsStore().getSettings();
+      const decision = resolveSecretAccessPolicy({
+        secretPolicy: record.accessPolicy,
+        settings: { secretsAccessPolicy: globalSettings.secretsAccessPolicy },
+      });
+
+      if (decision.policy === "deny") {
+        emitSecretAudit(store, ctx as { runId?: string; agentId?: string; taskId?: string }, "secret:approval-denied", `${resolvedScope}:${params.key}`);
+        return { content: [{ type: "text", text: "Secret access denied by policy." }], details: { error: "denied", key: params.key, scope: resolvedScope, policySource: decision.source } };
+      }
+
+      if (decision.policy === "prompt") {
+        const { ApprovalRequestStore } = await import("@fusion/core");
+        const approvalStore = new ApprovalRequestStore(store.getDatabase());
+        const dedupeKey = `secret-read:${resolvedScope}:${params.key}:${ctx.agentId ?? "unknown"}`;
+        const existing = approvalStore.findLatestByDedupeKey({ requesterActorId: ctx.agentId ?? "user", taskId: (ctx as { taskId?: string }).taskId, dedupeKey });
+        const request = existing && existing.status === "pending"
+          ? existing
+          : approvalStore.create({
+            requester: { actorId: ctx.agentId ?? "user", actorType: "agent", actorName: ctx.agentName ?? ctx.agentId ?? "Agent" },
+            targetAction: {
+              category: "secrets_access",
+              action: "read",
+              summary: `Read secret ${params.key}`,
+              resourceType: "secret",
+              resourceId: record.id,
+              context: { approvalDedupeKey: dedupeKey, key: params.key, scope: resolvedScope },
+            },
+            ...(ctx.runId ? { runId: ctx.runId } : {}),
+            ...((ctx as { taskId?: string }).taskId ? { taskId: (ctx as { taskId?: string }).taskId } : {}),
+          });
+
+        emitSecretAudit(store, ctx as { runId?: string; agentId?: string; taskId?: string }, "secret:approval-requested", `${resolvedScope}:${params.key}`);
+        return {
+          content: [{ type: "text", text: `Secret access requires approval. Request ${request.id} is pending. Approve via POST /api/approvals/:id/decision.` }],
+          details: { outcome: "pending_approval", approvalRequestId: request.id, key: params.key, scope: resolvedScope },
+        };
+      }
+
+      const revealed = await secretsStore.revealSecret(record.id, resolvedScope, { agentId: ctx.agentId ?? null });
+      emitSecretAudit(store, ctx as { runId?: string; agentId?: string; taskId?: string }, "secret:read", `${resolvedScope}:${params.key}`, { key: params.key, scope: resolvedScope });
+      return {
+        content: [{ type: "text", text: `Loaded secret '${params.key}' from ${resolvedScope} scope.` }],
+        details: { key: params.key, value: revealed.plaintextValue, scope: resolvedScope },
       };
     },
   });

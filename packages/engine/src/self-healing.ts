@@ -128,6 +128,8 @@ function matchesScope(filePath: string, scopePatterns: string[]): boolean {
 export interface SelfHealingOptions {
   /** Project root directory (parent of .worktrees/) */
   rootDir: string;
+  /** Optional callback to release TaskExecutor in-memory worktree ownership for a task. */
+  releaseExecutorWorktreeOwnership?: (taskId: string) => void;
   /** Optional AgentStore for agent-level self-healing checks. */
   agentStore?: AgentStore;
   /** Canonical stale-lease recovery manager. */
@@ -413,7 +415,7 @@ export class SelfHealingManager {
         (from === "in-review" && to === "done") ||
         (from === "done" && to === "archived");
       if (!shouldReconcile) return;
-      void this.reconcileCompletedTask(task.id).catch((err: unknown) => {
+      void this.reconcileCompletedTask(task.id, { worktreeHint: task.worktree ?? undefined }).catch((err: unknown) => {
         const errorMessage = err instanceof Error ? err.message : String(err);
         log.warn(`[self-healing] task:moved completion fan-out failed for ${task.id}: ${errorMessage}`);
       });
@@ -1935,7 +1937,7 @@ export class SelfHealingManager {
       const settings = await this.store.getSettings();
       if (settings.globalPause || settings.enginePaused) return result;
 
-      const task = await this.store.getTask(taskId);
+      let task = await this.store.getTask(taskId);
       const allTasks = await this.store.listTasks({ slim: true, includeArchived: true });
       const taskById = new Map(allTasks.map((t) => [t.id, t]));
       const todoTasks = await this.store.listTasks({ column: "todo", slim: true });
@@ -1998,7 +2000,11 @@ export class SelfHealingManager {
       }
 
       const branchName = task?.branch || `fusion/${taskId.toLowerCase()}`;
-      let worktreePath = options?.worktreeHint;
+      const hintedWorktreePath = options?.worktreeHint;
+      let worktreePath = hintedWorktreePath;
+      if (!worktreePath || !existsSync(worktreePath)) {
+        worktreePath = task?.worktree;
+      }
       if (!worktreePath || !existsSync(worktreePath)) {
         worktreePath = await this.findWorktreePathForBranch(branchName);
       }
@@ -2013,6 +2019,12 @@ export class SelfHealingManager {
             reason: RemovalReason.SelfHealingStaleActiveBranch,
           });
           result.worktreeRemoved = true;
+          if (task) {
+            const patch: Partial<Task> = { worktree: null };
+            if (task.branch === branchName) patch.branch = null;
+            await this.store.updateTask(task.id, patch);
+            task = { ...task, ...patch } as Task;
+          }
         } catch (err: unknown) {
           const errorMessage = err instanceof Error ? err.message : String(err);
           log.warn(`${prefix} failed to remove worktree ${worktreePath}: ${errorMessage}`);
@@ -2020,6 +2032,8 @@ export class SelfHealingManager {
       } else {
         log.log(`${prefix} no live worktree found for branch ${branchName}`);
       }
+
+      this.options.releaseExecutorWorktreeOwnership?.(taskId);
 
       if (task) {
         result.branchRemoved = await this.clearCompletionBranchIfSubsumed(task, branchName);
@@ -2041,6 +2055,7 @@ export class SelfHealingManager {
             worktreeRemoved: result.worktreeRemoved,
             branchRemoved: result.branchRemoved,
             branch: branchName,
+            worktreePath: result.worktreeRemoved ? worktreePath : undefined,
           },
         });
       } catch (err: unknown) {
