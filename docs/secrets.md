@@ -135,6 +135,13 @@ Fusion can materialize env-exportable secrets into each acquired task worktree w
 
 Settings shape is project-scoped in `ProjectSettings` (`packages/core/src/types.ts:2599-2609`): `secretsEnv` (env materialization config) and `secretsSyncPassphrase` (ciphertext already wrapped under local master key by caller; see `types.ts:2602-2604`).
 
+**Canonical test locations:**
+- `packages/core/src/__tests__/secrets-env.test.ts` — settings-contract tests (type shape, defaults, deprecated alias, store round-trip).
+- `packages/engine/src/__tests__/secrets-env-writer.test.ts` — materialization implementation (write/cleanup/fingerprint/overwrite-policy).
+- `packages/engine/src/__tests__/worktree-acquisition-secrets-env.test.ts` — worktree acquisition lifecycle integration.
+- `packages/engine/src/__tests__/worktree-pool-secrets-env-cleanup.test.ts` — worktree pool teardown cleanup.
+- `packages/engine/src/__tests__/reliability-interactions/secrets-env-materialization.test.ts` — reliability-layer interaction tests.
+
 ## Cross-node Sync
 
 Fusion now exposes four secrets sync endpoints:
