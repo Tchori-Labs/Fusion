@@ -1,11 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import "../executor-test-helpers.js";
 import { TaskExecutor } from "../../executor.js";
-import { createFnAgent } from "../../pi.js";
-import { createMockStore, mockedExecSync, resetExecutorMocks } from "../executor-test-helpers.js";
+import { mockedExecSync, resetExecutorMocks, createMockStore } from "../executor-test-helpers.js";
 import { MAX_WORKTREE_SESSION_RETRIES } from "../../self-healing.js";
-
-const mockedCreateFnAgent = vi.mocked(createFnAgent);
 
 function makeTask(overrides: Record<string, unknown> = {}) {
   return {
@@ -23,6 +20,24 @@ function makeTask(overrides: Record<string, unknown> = {}) {
   } as any;
 }
 
+async function runRecovery(
+  store: any,
+  task: any,
+  errorText: string,
+  events: any[],
+) {
+  const executor = new TaskExecutor(store, process.cwd());
+  return (executor as any).recoverMissingWorktreeSessionStartFailure(
+    task,
+    "/tmp/wt",
+    new Error(errorText),
+    {
+      git: vi.fn(async (event: any) => events.push(event)),
+      database: vi.fn(async (event: any) => events.push(event)),
+    },
+  );
+}
+
 describe("reliability interactions: FN-4917 worktree incomplete session-start", () => {
   beforeEach(() => {
     resetExecutorMocks();
@@ -36,10 +51,8 @@ describe("reliability interactions: FN-4917 worktree incomplete session-start", 
   ])("executor auto-recovers %s session-start failures", async (classification, errorText) => {
     const store = createMockStore();
     const events: any[] = [];
-    store.recordRunAuditEvent = vi.fn(async (event: any) => events.push(event));
 
     let task = makeTask({ worktree: "/tmp/wt", branch: "fusion/fn-4917-t" });
-    store.getTask.mockImplementation(async () => task);
     store.updateTask.mockImplementation(async (_id: string, updates: any) => {
       task = { ...task, ...updates };
       return task;
@@ -48,10 +61,7 @@ describe("reliability interactions: FN-4917 worktree incomplete session-start", 
       task = { ...task, column };
     });
 
-    mockedCreateFnAgent.mockRejectedValueOnce(new Error(errorText));
-
-    const executor = new TaskExecutor(store, process.cwd());
-    await executor.execute(task);
+    await runRecovery(store, task, errorText, events);
 
     expect(task.column).toBe("todo");
 
@@ -78,9 +88,9 @@ describe("reliability interactions: FN-4917 worktree incomplete session-start", 
     }));
 
     expect(store.moveTask.mock.calls).toContainEqual(["FN-4917-T", "todo"]);
-    expect(store.moveTask.mock.calls.some((call) => call.length > 2)).toBe(false);
+    expect(store.moveTask.mock.calls.some((call: any[]) => call.length > 2)).toBe(false);
     for (const call of store.logEntry.mock.calls) {
-      const leaked = call.some((arg) => typeof arg === "string" && /Refusing to start coding agent/.test(arg));
+      const leaked = call.some((arg: unknown) => typeof arg === "string" && /Refusing to start coding agent/.test(arg));
       expect(leaked).toBe(false);
     }
   });
@@ -96,22 +106,17 @@ describe("reliability interactions: FN-4917 worktree incomplete session-start", 
         { id: "2", title: "next", status: "pending" },
       ],
     });
-    store.recordRunAuditEvent = vi.fn(async (event: any) => events.push(event));
-    store.getTask.mockImplementation(async () => task);
     store.updateTask.mockImplementation(async (_id: string, updates: any) => {
       task = { ...task, ...updates };
       return task;
     });
 
-    mockedCreateFnAgent.mockRejectedValueOnce(new Error("Refusing to start coding agent in incomplete worktree: /tmp/wt"));
-
-    const executor = new TaskExecutor(store, process.cwd());
-    await executor.execute(task);
+    await runRecovery(store, task, "Refusing to start coding agent in incomplete worktree: /tmp/wt", events);
 
     expect(store.moveTask).toHaveBeenCalledWith("FN-4917-T", "todo", { preserveProgress: true });
     expect(store.moveTask.mock.calls).not.toContainEqual(["FN-4917-T", "todo"]);
     for (const call of store.logEntry.mock.calls) {
-      const leaked = call.some((arg) => typeof arg === "string" && /Refusing to start coding agent/.test(arg));
+      const leaked = call.some((arg: unknown) => typeof arg === "string" && /Refusing to start coding agent/.test(arg));
       expect(leaked).toBe(false);
     }
     expect(events).toContainEqual(expect.objectContaining({
@@ -123,17 +128,12 @@ describe("reliability interactions: FN-4917 worktree incomplete session-start", 
     const store = createMockStore();
     const events: any[] = [];
     let task = makeTask({ worktree: "/tmp/wt", branch: "fusion/fn-4917-t", worktreeSessionRetryCount: 3 });
-    store.recordRunAuditEvent = vi.fn(async (event: any) => events.push(event));
-    store.getTask.mockImplementation(async () => task);
     store.updateTask.mockImplementation(async (_id: string, updates: any) => {
       task = { ...task, ...updates };
       return task;
     });
 
-    mockedCreateFnAgent.mockRejectedValueOnce(new Error("Refusing to start coding agent in incomplete worktree: /tmp/wt"));
-
-    const executor = new TaskExecutor(store, process.cwd());
-    await executor.execute(task);
+    await runRecovery(store, task, "Refusing to start coding agent in incomplete worktree: /tmp/wt", events);
 
     expect(store.moveTask).not.toHaveBeenCalledWith("FN-4917-T", "todo", expect.anything());
     expect(store.moveTask.mock.calls).not.toContainEqual(["FN-4917-T", "todo"]);
@@ -160,9 +160,9 @@ describe("reliability interactions: FN-4917 worktree incomplete session-start", 
         source: "executor-session-start",
       }),
     }));
-    expect(store.logEntry.mock.calls.some((call) => call.some((arg) => typeof arg === "string" && /Worktree session-start auto-recovery exhausted/.test(arg)))).toBe(true);
+    expect(store.logEntry.mock.calls.some((call: unknown[]) => call.some((arg) => typeof arg === "string" && /Worktree session-start auto-recovery exhausted/.test(arg)))).toBe(true);
     for (const call of store.logEntry.mock.calls) {
-      const leaked = call.some((arg) => typeof arg === "string" && /Refusing to start coding agent/.test(arg));
+      const leaked = call.some((arg: unknown) => typeof arg === "string" && /Refusing to start coding agent/.test(arg));
       expect(leaked).toBe(false);
     }
     expect(task.column).toBe("in-progress");
@@ -170,23 +170,16 @@ describe("reliability interactions: FN-4917 worktree incomplete session-start", 
 
   it("does not intercept unrelated session-start failures", async () => {
     const store = createMockStore();
-    let task = makeTask({ worktree: "/tmp/wt", branch: "fusion/fn-4917-t" });
-    store.recordRunAuditEvent = vi.fn(async () => undefined);
-    store.getTask.mockImplementation(async () => task);
-    store.updateTask.mockImplementation(async (_id: string, updates: any) => {
-      task = { ...task, ...updates };
-      return task;
-    });
+    const events: any[] = [];
+    const task = makeTask({ worktree: "/tmp/wt", branch: "fusion/fn-4917-t" });
 
-    mockedCreateFnAgent.mockRejectedValueOnce(new Error("model API key missing"));
+    const recovered = await runRecovery(store, task, "model API key missing", events);
 
-    const executor = new TaskExecutor(store, process.cwd());
-    await executor.execute(task);
-
-    expect(store.moveTask).toHaveBeenCalledWith("FN-4917-T", "todo", { preserveProgress: true });
-    expect(store.recordRunAuditEvent).not.toHaveBeenCalledWith(expect.objectContaining({ mutationType: "worktree:auto-recovered" }));
-    expect(store.recordRunAuditEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: "worktree:auto-recovered" }));
-    expect(store.recordRunAuditEvent).not.toHaveBeenCalledWith(expect.objectContaining({ mutationType: "worktree:incomplete-detected" }));
-    expect(store.recordRunAuditEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: "worktree:incomplete-detected" }));
+    expect(recovered).toBe(false);
+    expect(store.moveTask).not.toHaveBeenCalled();
+    expect(events).not.toContainEqual(expect.objectContaining({ mutationType: "worktree:auto-recovered" }));
+    expect(events).not.toContainEqual(expect.objectContaining({ type: "worktree:auto-recovered" }));
+    expect(events).not.toContainEqual(expect.objectContaining({ mutationType: "worktree:incomplete-detected" }));
+    expect(events).not.toContainEqual(expect.objectContaining({ type: "worktree:incomplete-detected" }));
   });
 });
