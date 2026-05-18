@@ -35,4 +35,31 @@ describe("activeSessionRegistry", () => {
 
     warnSpy.mockRestore();
   });
+
+  it("reconcileStaleSelfOwned returns no-entry when path is unregistered", () => {
+    expect(activeSessionRegistry.reconcileStaleSelfOwned("/tmp/missing", "FN-1")).toEqual({
+      reconciled: false,
+      reason: "no-entry",
+    });
+  });
+
+  it("reconcileStaleSelfOwned returns foreign-task for mismatched owner", () => {
+    activeSessionRegistry.registerPath("/tmp/w1", { taskId: "FN-2", kind: "executor", ownerKey: "FN-2" });
+
+    expect(activeSessionRegistry.reconcileStaleSelfOwned("/tmp/w1", "FN-1")).toEqual({
+      reconciled: false,
+      reason: "foreign-task",
+    });
+    expect(activeSessionRegistry.lookupByPath("/tmp/w1")?.taskId).toBe("FN-2");
+  });
+
+  it("reconcileStaleSelfOwned unregisters matching self-owned entry", () => {
+    activeSessionRegistry.registerPath("/tmp/w1", { taskId: "FN-1", kind: "executor", ownerKey: "FN-1" });
+
+    expect(activeSessionRegistry.reconcileStaleSelfOwned("/tmp/w1", "FN-1")).toEqual({
+      reconciled: true,
+      reason: "reconciled",
+    });
+    expect(activeSessionRegistry.lookupByPath("/tmp/w1")).toBeNull();
+  });
 });

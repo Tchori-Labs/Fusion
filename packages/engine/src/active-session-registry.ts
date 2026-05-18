@@ -10,6 +10,11 @@ export interface ActiveSessionRecord extends ActiveSessionRegistration {
   registeredAt: number;
 }
 
+export interface ReconcileStaleSelfOwnedResult {
+  reconciled: boolean;
+  reason: "no-entry" | "foreign-task" | "reconciled";
+}
+
 class ActiveSessionRegistry {
   private readonly records = new Map<string, ActiveSessionRecord>();
 
@@ -43,6 +48,19 @@ class ActiveSessionRegistry {
       }
     }
     return paths;
+  }
+
+  reconcileStaleSelfOwned(worktreePath: string, expectedTaskId: string): ReconcileStaleSelfOwnedResult {
+    const record = this.lookupByPath(worktreePath);
+    if (!record) {
+      return { reconciled: false, reason: "no-entry" };
+    }
+    if (record.taskId !== expectedTaskId) {
+      return { reconciled: false, reason: "foreign-task" };
+    }
+
+    this.unregisterPath(worktreePath);
+    return { reconciled: true, reason: "reconciled" };
   }
 
   clear(): void {
