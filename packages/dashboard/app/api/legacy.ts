@@ -5867,16 +5867,7 @@ export interface ExecutorStats {
 export interface ActivityFeedEntry {
   id: string;
   timestamp: string;
-  type:
-    | "task:created"
-    | "task:moved"
-    | "task:updated"
-    | "task:deleted"
-    | "task:merged"
-    | "task:failed"
-    | "task:duplicate-warning-overridden"
-    | "settings:updated"
-    | "project:isolation-transition";
+  type: ActivityEventType;
   projectId: string;
   projectName: string;
   taskId?: string;
