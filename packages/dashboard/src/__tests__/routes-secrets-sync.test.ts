@@ -119,6 +119,21 @@ describe("routes secrets sync", () => {
     expect(/(forbidden-pass|forbidden-value|"salt"\s*:|"nonce"\s*:|"ciphertext"\s*:)/.test(JSON.stringify(res.body))).toBe(false);
   });
 
+  it.each([
+    ["undefined", undefined],
+    ["empty string", ""],
+    ["null", null],
+  ])("POST /api/nodes/:id/secrets/pull rejects missing remote apiKey (%s)", async (_shape, apiKey) => {
+    vi.spyOn(CentralCore.prototype, "getNode").mockResolvedValue({ ...remoteNode, url: "http://remote.test", apiKey: apiKey as string } as any);
+
+    const res = await request(fixture.app, "POST", "/api/nodes/node-remote-001/secrets/pull", JSON.stringify({}), { "content-type": "application/json" });
+
+    expect(res.status).toBe(400);
+    expect((res.body as any).error).toBe(MISSING_REMOTE_NODE_API_KEY_MESSAGE);
+    expect(mockedFetchFromRemoteNode).not.toHaveBeenCalled();
+    expect(/(forbidden-pass|forbidden-value|"salt"\s*:|"nonce"\s*:|"ciphertext"\s*:)/.test(JSON.stringify(res.body))).toBe(false);
+  });
+
   it("POST /api/nodes/:id/secrets/pull happy path and skip reserved", async () => {
     await setSyncPassphrase(secrets, "shared-pass");
     await secrets.createSecret({ scope: "project", key: "EXISTING", plaintextValue: "old" });
