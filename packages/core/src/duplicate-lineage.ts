@@ -1,8 +1,8 @@
 import type { SourceType } from "./types.js";
 import { DUPLICATE_OF_METADATA_KEY } from "./types.js";
 
-const DUPLICATE_REFERENCE_PATTERN = /\b(?:duplicate(?:s|d)?\s+of|dup(?:e|licate)?\s+of|duplicates)\b\s*[:\-]?\s*([A-Z]+-\d+(?:\s*[\/,]\s*[A-Z]+-\d+)*)/gi;
-const PAREN_DUPLICATE_PATTERN = /\([Dd]uplicate\s+of\s+([A-Z]+-\d+(?:[\/,\s]+[A-Z]+-\d+)*)\)/g;
+const DUPLICATE_REFERENCE_PATTERN = /\b(?:duplicate(?:s|d)?\s+of|dup(?:e|licate)?\s+of|duplicates)\b\s*[:-]?\s*([A-Z]+-\d+(?:\s*[/,]\s*[A-Z]+-\d+)*)/gi;
+const PAREN_DUPLICATE_PATTERN = /\([Dd]uplicate\s+of\s+([A-Z]+-\d+(?:[/,\s]+[A-Z]+-\d+)*)\)/g;
 const TASK_ID_PATTERN = /\b[A-Z]+-\d+\b/g;
 
 export function extractDuplicateOfReferences(text: string | null | undefined): string[] {
