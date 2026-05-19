@@ -106,6 +106,7 @@ For a full walkthrough (installation, onboarding, first task, and daily workflow
 | [Multi-Node Coordination Validation Findings (FN-4820)](./findings/fn-4820-multi-node-coordination-validation.md) | Validation findings from multi-node coordination testing and edge-case analysis |
 | [Secrets Sync Auth Parity Review (FN-4886)](./reviews/fn-4886-secrets-sync-auth-parity.md) | Review of node secrets sync API authentication parity and security boundaries |
 | [Test Speed Audit (FN-5048)](./test-speed-audit-FN-5048.md) | Measured baseline test performance, offender list, and optimization priorities |
+| [Soft-Delete Verification Matrix](./soft-delete-verification-matrix.md) | Authoritative checklist for the FN-5105 → FN-5143 soft-delete stream: scenario × layer coverage |
 
 ## External Resources
 

@@ -339,6 +339,8 @@ const { WorktreePool } = await import("@fusion/engine");
 vi.mock("@fusion/engine", async (importOriginal) => {
   const original = await importOriginal<typeof import("@fusion/engine")>();
   const { createCliEngineMock } = await import("../../test/mockCoreEngine");
+  const coreModule = await import("@fusion/core");
+  const taskStoreMock = (coreModule.TaskStore as any);
   const TriageProcessor = vi.fn().mockImplementation(() => ({
     start: vi.fn(),
     stop: vi.fn(),
@@ -652,51 +654,49 @@ vi.mock("@fusion/engine", async (importOriginal) => {
     ProjectEngine,
     ProjectEngineManager: vi.fn().mockImplementation((centralCore: any, options: any) => {
       const engines = new Map<string, any>();
-      const starting = new Map<string, Promise<any>>();
-      const startEngine = async (id: string, pathHint?: string) => {
-        const existing = engines.get(id);
-        if (existing) return existing;
-        const pending = starting.get(id);
-        if (pending) return pending;
+      const startPromises = new Map<string, Promise<void>>();
 
-        const promise = (async () => {
-          const { TaskStore: TSMock } = await import("@fusion/core");
-          const lastStore = (TSMock as any).mock?.results?.at(-1)?.value;
-          const project = pathHint ? { path: pathHint } : await centralCore.getProject(id);
-          const engine = new ProjectEngine(
-            { workingDirectory: project?.path ?? process.cwd() },
+      const materializeEngine = (id: string, path: string = process.cwd()) => {
+        let engine = engines.get(id);
+        if (!engine) {
+          const lastStore = taskStoreMock.mock?.results?.at(-1)?.value;
+          engine = new ProjectEngine(
+            { workingDirectory: path },
             centralCore,
             { ...options, externalTaskStore: lastStore, projectId: id },
           );
-          await engine.start();
           engines.set(id, engine);
-          starting.delete(id);
-          return engine;
-        })();
-
-        starting.set(id, promise);
-        return promise;
+        }
+        if (!startPromises.has(id)) {
+          startPromises.set(id, Promise.resolve(engine.start()).then(() => undefined));
+        }
+        return engine;
       };
 
       return {
         startAll: vi.fn(async () => {
           const projects = await centralCore.listProjects();
           for (const project of projects) {
-            await startEngine(project.id, project.path);
+            materializeEngine(project.id, project.path);
           }
+          await Promise.all([...startPromises.values()]);
         }),
-        getEngine: vi.fn((id: string) => engines.get(id)),
+        getEngine: vi.fn((id: string) => materializeEngine(id)),
         getAllEngines: vi.fn(() => engines),
         getStore: vi.fn((id: string) => engines.get(id)?.getTaskStore()),
-        has: vi.fn((id: string) => engines.has(id) || starting.has(id)),
-        ensureEngine: vi.fn(async (id: string) => startEngine(id)),
+        has: vi.fn((id: string) => engines.has(id)),
+        ensureEngine: vi.fn(async (id: string) => {
+          const project = await centralCore.getProject?.(id).catch(() => null);
+          return materializeEngine(id, project?.path ?? process.cwd());
+        }),
         stopAll: vi.fn(async () => {
+          await Promise.all([...startPromises.values()]);
           for (const engine of engines.values()) await engine.stop();
           engines.clear();
-          starting.clear();
+          startPromises.clear();
         }),
         onProjectAccessed: vi.fn((id: string) => {
-          void startEngine(id);
+          materializeEngine(id);
         }),
         startReconciliation: vi.fn(),
       };
@@ -1542,14 +1542,14 @@ describe("runDashboard — immediate resume on unpause", () => {
   });
 
   it("sweeps merge queue on unpause when autoMerge is enabled", async () => {
-    // Set up settings to return autoMerge: true for the drain queue check
-    mockStore.getSettings.mockResolvedValue({
+    const currentSettings = {
       maxConcurrent: 1,
       maxWorktrees: 2,
-      autoMerge: true,
+      autoMerge: false,
       pollIntervalMs: 60_000,
       globalPause: false,
-    });
+    };
+    mockStore.getSettings.mockImplementation(async () => ({ ...currentSettings }));
     mockStore.listTasks.mockResolvedValue([
       { id: "FN-MQ1", column: "in-review", paused: false },
       { id: "FN-MQ2", column: "in-review", paused: false },
@@ -1568,10 +1568,9 @@ describe("runDashboard — immediate resume on unpause", () => {
 
     await runDashboard(0, { open: false });
 
-    // Clear any calls from startup sweep
     (aiMergeTask as ReturnType<typeof vi.fn>).mockClear();
+    currentSettings.autoMerge = true;
 
-    // Trigger unpause event with autoMerge enabled
     mockStore.emit("settings:updated", {
       settings: { globalPause: false, maxConcurrent: 1, autoMerge: true },
       previous: { globalPause: true },
@@ -1876,14 +1875,15 @@ describe("runDashboard — enginePaused (soft pause)", () => {
   });
 
   it("sweeps merge queue on engine unpause when autoMerge is enabled", async () => {
-    mockStore.getSettings.mockResolvedValue({
+    const currentSettings = {
       maxConcurrent: 1,
       maxWorktrees: 2,
-      autoMerge: true,
+      autoMerge: false,
       pollIntervalMs: 60_000,
       enginePaused: false,
       globalPause: false,
-    });
+    };
+    mockStore.getSettings.mockImplementation(async () => ({ ...currentSettings }));
     mockStore.listTasks.mockResolvedValue([
       { id: "FN-EP2", column: "in-review", paused: false },
     ]);
@@ -1901,6 +1901,7 @@ describe("runDashboard — enginePaused (soft pause)", () => {
     await runDashboard(0, { open: false });
 
     (aiMergeTask as ReturnType<typeof vi.fn>).mockClear();
+    currentSettings.autoMerge = true;
 
     mockStore.emit("settings:updated", {
       settings: { enginePaused: false, maxConcurrent: 1, autoMerge: true },
