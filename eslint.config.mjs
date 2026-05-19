@@ -19,7 +19,7 @@ const detachedSpawnGuard = {
       }
       const startLine = node.loc.start.line;
       const windowStart = Math.max(0, startLine - 3);
-      return sourceCode.lines.slice(windowStart, startLine - 1).some((line) => line.includes(allowlistMarker));
+      return sourceCode.lines.slice(windowStart, startLine).some((line) => line.includes(allowlistMarker));
     }
 
     function isSpawnCall(node) {
