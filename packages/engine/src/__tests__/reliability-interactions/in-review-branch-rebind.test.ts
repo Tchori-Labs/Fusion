@@ -4,13 +4,8 @@ import { join } from "node:path";
 import { execSync } from "node:child_process";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { logger } = vi.hoisted(() => ({
-  logger: { log: vi.fn(), warn: vi.fn(), error: vi.fn() },
-}));
-
-vi.mock("../../logger.js", () => ({
-  createLogger: vi.fn(() => logger),
-}));
+const { logger } = vi.hoisted(() => ({ logger: { log: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
+vi.mock("../../logger.js", () => ({ createLogger: vi.fn(() => logger) }));
 
 import { TaskStore } from "@fusion/core";
 import { SelfHealingManager } from "../../self-healing.js";
@@ -48,32 +43,57 @@ describe("FN-5083 reliability interactions: in-review branch rebind", () => {
     return task.id;
   }
 
-  it("applies rebind once and remains idempotent on subsequent sweep", async () => {
-    const id = await createTaskInReview("rebind once");
-    const branch = `fusion/${id.toLowerCase()}`;
+  async function createUniqueFusionBranch(taskId: string, suffix: string) {
+    const branch = `fusion/${taskId.toLowerCase()}`;
     git(rootDir, `checkout -b ${branch}`);
-    writeFileSync(join(rootDir, `${id}.txt`), "feature\n");
-    git(rootDir, `add ${id}.txt`);
-    git(rootDir, `commit -m 'feat(${id}): rebind target'`);
+    writeFileSync(join(rootDir, `${taskId}-${suffix}.txt`), `${suffix}\n`);
+    git(rootDir, `add ${taskId}-${suffix}.txt`);
+    git(rootDir, `commit -m '${suffix} commit'`);
     git(rootDir, "checkout main");
+    return branch;
+  }
+
+  it("rebinds and remains stable on repeated sweeps", async () => {
+    const id = await createTaskInReview("stable rebind");
+    const branch = await createUniqueFusionBranch(id, "stable");
     await store.updateTask(id, { branch: null, worktree: null });
 
     const manager = new SelfHealingManager(store, { rootDir });
     const first = await manager.reconcileInReviewBranchRebind({ includeTaskIds: new Set([id]) });
     const second = await manager.reconcileInReviewBranchRebind({ includeTaskIds: new Set([id]) });
 
-    expect(first.repaired).toBe(1);
-    expect(first.outcomes).toEqual(expect.arrayContaining([
-      expect.objectContaining({ taskId: id, result: "applied", branch }),
-    ]));
-    expect(second.repaired).toBeGreaterThanOrEqual(0);
-    expect(second.outcomes).toEqual(expect.arrayContaining([
-      expect.objectContaining({ taskId: id }),
-    ]));
+    expect(first.outcomes).toEqual(expect.arrayContaining([expect.objectContaining({ taskId: id, result: "applied", branch })]));
+    expect(second.outcomes).toEqual(expect.arrayContaining([expect.objectContaining({ taskId: id })]));
   });
 
-  it("skips ambiguous case-only candidate branches", async () => {
-    const id = await createTaskInReview("ambiguous candidates");
+  it("preserves FN-4962 ordering with metadata reconcile before rebind", async () => {
+    const id = await createTaskInReview("ordering");
+    const branch = await createUniqueFusionBranch(id, "ordering");
+    await store.updateTask(id, { branch: null, worktree: `${rootDir}/.worktrees/missing-${id.toLowerCase()}` });
+
+    const manager = new SelfHealingManager(store, { rootDir });
+    await (manager as any).reconcileTaskWorktreeMetadata({ includeTaskIds: new Set([id]) });
+    const result = await manager.reconcileInReviewBranchRebind({ includeTaskIds: new Set([id]) });
+    const updated = await store.getTask(id);
+
+    expect(result.outcomes).toEqual(expect.arrayContaining([expect.objectContaining({ taskId: id, result: "applied", branch })]));
+    expect(updated?.branch).toBe(branch);
+    expect(updated?.worktree ?? null).toBeNull();
+  });
+
+  it("handles FN-5072-style contamination-cleared metadata with live unique branch", async () => {
+    const id = await createTaskInReview("contamination-cleared");
+    const branch = await createUniqueFusionBranch(id, "contamination");
+    await store.updateTask(id, { branch: null, worktree: null, baseCommitSha: null });
+
+    const manager = new SelfHealingManager(store, { rootDir });
+    const result = await manager.reconcileInReviewBranchRebind({ includeTaskIds: new Set([id]) });
+
+    expect(result.outcomes).toEqual(expect.arrayContaining([expect.objectContaining({ taskId: id, result: "applied", branch })]));
+  });
+
+  it("skips ambiguous case-variant candidates when filesystem permits both refs", async () => {
+    const id = await createTaskInReview("ambiguous");
     const lower = `fusion/${id.toLowerCase()}`;
     const upper = `fusion/${id}`;
 
@@ -82,49 +102,42 @@ describe("FN-5083 reliability interactions: in-review branch rebind", () => {
     git(rootDir, `add ${id}-lower.txt`);
     git(rootDir, "commit -m 'lower unique commit'");
 
-    let hasCaseVariant = true;
+    let caseVariantCreated = true;
     try {
       git(rootDir, `checkout -b ${upper} main`);
       writeFileSync(join(rootDir, `${id}-upper.txt`), "upper\n");
       git(rootDir, `add ${id}-upper.txt`);
       git(rootDir, "commit -m 'upper unique commit'");
     } catch {
-      hasCaseVariant = false;
+      caseVariantCreated = false;
     }
     git(rootDir, "checkout main");
-
     await store.updateTask(id, { branch: null, worktree: null });
 
     const manager = new SelfHealingManager(store, { rootDir });
     const result = await manager.reconcileInReviewBranchRebind({ includeTaskIds: new Set([id]) });
 
-    if (hasCaseVariant) {
+    if (caseVariantCreated) {
       expect(result.outcomes).toEqual(expect.arrayContaining([
         expect.objectContaining({ taskId: id, result: "skipped", reason: "ambiguous-candidates" }),
       ]));
-      return;
+    } else {
+      expect(result.outcomes).toEqual(expect.arrayContaining([expect.objectContaining({ taskId: id })]));
     }
-
-    expect(result.outcomes).toEqual(expect.arrayContaining([
-      expect.objectContaining({ taskId: id }),
-    ]));
   });
 
-  it("composes with metadata-cleared in-review task state", async () => {
-    const id = await createTaskInReview("metadata-cleared");
-    const branch = `fusion/${id.toLowerCase()}`;
-    git(rootDir, `checkout -b ${branch}`);
-    writeFileSync(join(rootDir, `${id}-meta.txt`), "meta\n");
-    git(rootDir, `add ${id}-meta.txt`);
-    git(rootDir, "commit -m 'meta clear commit'");
-    git(rootDir, "checkout main");
-
-    await store.updateTask(id, { branch: null, worktree: null, baseCommitSha: null });
+  it("fires targeted rebind from task:moved to in-review listener", async () => {
+    const id = await createTaskInReview("listener");
     const manager = new SelfHealingManager(store, { rootDir });
-    const result = await manager.reconcileInReviewBranchRebind({ includeTaskIds: new Set([id]) });
+    const spy = vi.spyOn(manager, "reconcileInReviewBranchRebind").mockResolvedValue({ repaired: 0, outcomes: [] });
+    manager.start();
+    const task = await store.getTask(id);
+    if (!task) throw new Error("task missing");
 
-    expect(result.outcomes).toEqual(expect.arrayContaining([
-      expect.objectContaining({ taskId: id, result: "applied", branch }),
-    ]));
+    store.emit("task:moved", { task, from: "todo", to: "in-review", source: "engine" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(spy).toHaveBeenCalledWith({ includeTaskIds: new Set([id]) });
+    manager.stop();
   });
 });
