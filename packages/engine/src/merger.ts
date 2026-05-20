@@ -6431,14 +6431,14 @@ export async function aiMergeTask(
       audit,
       runContext: engineRunContext,
       runInitCommand: false,
-      createWorktree: async (branchName, worktreePath) => {
-        await execAsync(`git worktree add -f ${quoteArg(worktreePath)} ${quoteArg(branchName)}`, {
+      createWorktree: async (branch, path, taskId, startPoint, allowSiblingBranchRename) => {
+        await execAsync(`git worktree add -f ${quoteArg(path)} ${quoteArg(branch)}`, {
           cwd: projectRootDir,
           encoding: "utf-8",
           timeout: 120_000,
           maxBuffer: 10 * 1024 * 1024,
         });
-        return { path: worktreePath, branch: branchName };
+        return { path, branch };
       },
     });
     task.worktree = acquisition.worktreePath;
@@ -6542,57 +6542,24 @@ export async function aiMergeTask(
         integrationRoot.rootDir,
       );
       const reusableWorktreePath = task.worktree?.trim();
-      // Check if the worktree is usable synchronously.
-      // If usable, the refusal is a genuine liveness conflict — re-throw.
-      // If unusable, try fresh acquisition.
-      const isWorktreeUnusable = !reusableWorktreePath
-        || !existsSync(reusableWorktreePath)
-        || !existsSync(join(reusableWorktreePath, ".git"));
-      if (isWorktreeUnusable) {
-        await emitReuseHandoffAuditEvent(
-          "merge:reuse-worktree-fresh-acquire",
-          { taskId, gate: error.gate, reason: error.reason, priorWorktreePath: task.worktree ?? null },
-          integrationRoot.rootDir,
-        );
-        const worktreeName = generateWorktreeName(projectRootDir, settings);
-        const newWorktreePath = resolveTaskWorktreePath(projectRootDir, settings, worktreeName);
-        const branchName = canonicalFusionBranchName(task.id);
-        try {
-          await execAsync(
-            `git worktree add -b "${branchName}" ${JSON.stringify(newWorktreePath)} ${JSON.stringify(task.baseCommitSha ?? "HEAD")}`,
-            { cwd: projectRootDir, encoding: "utf-8", timeout: 60_000, maxBuffer: 10 * 1024 * 1024 },
-          );
-          await installTaskWorktreeIdentityGuard({
-            worktreePath: newWorktreePath,
-            taskId: task.id,
-            commitMsgHookEnabled: settings.commitMsgHookEnabled,
-            taskPrefix: settings.taskPrefix,
-            taskAttributionTrailerName: settings.taskAttributionTrailerNames?.[0],
-          });
-          await store.updateTask(taskId, { worktree: newWorktreePath, branch: branchName });
-          await emitReuseHandoffAuditEvent(
-            "merge:reuse-worktree-fresh-acquired",
-            { taskId, newWorktreePath, branch: branchName },
-            newWorktreePath,
-          );
-          integrationRoot = { ...integrationRoot, mode: "reuse-task-worktree", rootDir: newWorktreePath };
-          reuseTaskWorktreeMerge = true;
-          rootDir = newWorktreePath;
-        } catch (freshAcquireErr: unknown) {
-          const msg = freshAcquireErr instanceof Error ? freshAcquireErr.message : String(freshAcquireErr);
-          mergerLog.warn(`${taskId}: fresh worktree acquisition after refusal failed (${msg}) — falling back to cwd-main`);
-          await emitReuseHandoffAuditEvent(
-            "merge:reuse-fallback-cwd-main",
-            { taskId, reason: "fresh-worktree-acquisition-failed", priorWorktreePath: task.worktree ?? null, acquisitionError: msg, diagnostics: { gate: error.gate, reason: error.reason } },
-            projectRootDir,
-          );
-          integrationRoot = { ...integrationRoot, mode: "cwd-main", rootDir: projectRootDir };
-          reuseTaskWorktreeMerge = false;
-          rootDir = projectRootDir;
-        }
+      if (!reusableWorktreePath) {
+        await reacquireReuseIntegrationWorktree("missing-task-worktree-after-refusal", {
+          requestedMode: requestedIntegrationMode,
+          gate: error.gate,
+          reason: error.reason,
+        });
       } else {
-        // Worktree path exists and is usable — genuine liveness/lease conflict. Re-throw.
-        throw error;
+        const classification = await classifyTaskWorktree(projectRootDir, reusableWorktreePath);
+        if (!classification.ok) {
+          await reacquireReuseIntegrationWorktree("unusable-task-worktree-after-refusal", {
+            requestedMode: requestedIntegrationMode,
+            gate: error.gate,
+            reason: error.reason,
+            classification,
+          });
+        } else {
+          throw error;
+        }
       }
     }
   }

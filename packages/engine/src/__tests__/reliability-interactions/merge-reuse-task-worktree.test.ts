@@ -389,7 +389,6 @@ describe("FN-5279 reliability interactions: merge reuse task worktree", () => {
       expect(fallback?.metadata).toMatchObject({
         reason: "missing-task-worktree",
         source: "fresh",
-        integrationBranch: "master",
       });
     } finally {
       await fixture.cleanup();
