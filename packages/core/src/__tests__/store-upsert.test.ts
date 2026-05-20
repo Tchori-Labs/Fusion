@@ -602,7 +602,7 @@ describe("TaskStore", () => {
       await expect(store.deleteTask(targetTask.id)).resolves.toMatchObject({ id: targetTask.id });
     });
 
-    it("deleting a task preserves agent log entries for soft-deleted rows", async () => {
+    it("deleting a task clears persisted agent log entries for soft-deleted rows", async () => {
       const task = await createTestTask();
       await store.appendAgentLog(task.id, "cascade me", "text");
       (store as any).flushAgentLogBuffer();
@@ -617,7 +617,7 @@ describe("TaskStore", () => {
       const after = (store as any).db.prepare(
         "SELECT COUNT(*) as count FROM agentLogEntries WHERE taskId = ?",
       ).get(task.id) as { count: number };
-      expect(after.count).toBe(1);
+      expect(after.count).toBe(0);
     });
 
     it("deleteTask clears linked agent task assignments", async () => {
@@ -744,7 +744,7 @@ describe("TaskStore", () => {
         expect(count).toBe(1);
       });
 
-      it("auto-flushes before deleteTask", async () => {
+      it("auto-flushes before deleteTask and soft-delete clears resulting rows", async () => {
         const task = await createTestTask();
 
         await store.appendAgentLog(task.id, "to be cascaded", "text");
@@ -757,7 +757,7 @@ describe("TaskStore", () => {
         const after = (store as any).db.prepare(
           "SELECT COUNT(*) as count FROM agentLogEntries WHERE taskId = ?",
         ).get(task.id) as { count: number };
-        expect(after.count).toBe(1);
+        expect(after.count).toBe(0);
       });
 
       it("flushes remaining entries on close without throwing", async () => {

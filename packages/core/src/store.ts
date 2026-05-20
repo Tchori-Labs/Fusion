@@ -6301,8 +6301,23 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
           },
         });
         this.clearLinkedAgentTaskIds(id, deletedAt);
+        // FN-5143: clear historical agent logs for the soft-deleted task so
+        // downstream readers (evaluator evidence, self-healing diagnostics,
+        // dashboard log views, register-task-workflow-routes) observe zero logs
+        // immediately after deletedAt is set. Atomic with the deletedAt write.
+        this.db.prepare("DELETE FROM agentLogEntries WHERE taskId = ?").run(id);
         this.db.bumpLastModified();
       });
+
+      // FN-5143 defense-in-depth: drop any in-memory buffer entries for this
+      // task. flushAgentLogBuffer() above already ran inside the lock, but a
+      // concurrent appendAgentLog from another async path could re-buffer
+      // before this lock releases; the next flush would still drop them via
+      // ACTIVE_TASKS_WHERE, but filtering here avoids the warn log and keeps
+      // memory bounded.
+      if (this.agentLogBuffer.length > 0) {
+        this.agentLogBuffer = this.agentLogBuffer.filter((entry) => entry.taskId !== id);
+      }
 
       // Remove from cache if watcher is active
       if (this.isWatching) this.taskCache.delete(id);

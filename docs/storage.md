@@ -15,6 +15,11 @@
 - Archived-task flows (`archiveTask`, archived cleanup/migration) still hard-delete from the active `tasks` table after copying to cold storage (`archive.db`).
 - ID reservation is unchanged: soft-deleted IDs remain reserved. `distributed-task-id` and `task-id-integrity` intentionally scan all task rows (including soft-deleted rows), and must not filter on `deletedAt`.
 
+### Agent log clearing (FN-5143)
+
+- `TaskStore.deleteTask` now clears `agentLogEntries` rows for the soft-deleted task in the same transaction that writes `deletedAt`, so downstream `getAgentLogs*` / `getAgentLogCount` calls observe zero logs immediately.
+- This is soft-delete-specific cleanup; archived-task agent log snapshot behavior (`taskToArchiveEntry` / `archiveTask`) is unchanged.
+
 ### Dashboard delete-event handling (FN-5135)
 
 - Dashboard clients treat any SSE payload with `deletedAt != null` (`task:created`, `task:updated`, `task:moved`, `task:merged`) as a delete-equivalent and remove/suppress that task locally.
