@@ -16,6 +16,22 @@ Exception: explicit named user request in chat that overrides this directive.
 - Dangling task-local file references are a blocking spec REVISE.
 - Save planning scratch and interim notes via `fn_task_document_write` instead of inventing on-disk task-local files.
 
+### External-integration evidence
+
+Any task integrating a third-party tool (CLI, daemon, downloadable binary,
+installer-managed dependency) must cite, in PROMPT.md:
+
+1. Canonical upstream repo URL (e.g. `https://github.com/max-sixty/worktrunk`).
+2. Docs / homepage URL.
+3. Release or download URL.
+4. Binary / CLI name in backticks (e.g. `` `wt` ``).
+5. Checksum or an explicit `upstream-pending-verification` marker.
+
+Missing evidence is a blocking REVISE during triage (deterministic gate in
+`packages/engine/src/spec-validation/external-integration-evidence.ts`).
+Never invent a release URL, binary name, or sha256 from model knowledge —
+FN-5320 is the cautionary tale.
+
 ## Finalizing Changes
 
 When a change affects the published `@runfusion/fusion` package, add a changeset:

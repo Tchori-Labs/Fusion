@@ -36,6 +36,10 @@ import {
 } from "./agent-session-helpers.js";
 import { reviewStep, type ReviewVerdict } from "./reviewer.js";
 import { detectDanglingTaskDocReferences, formatDanglingDiagnostic } from "./spec-validation/task-document-references.js";
+import {
+  detectExternalIntegrationEvidenceGaps,
+  formatExternalIntegrationEvidenceDiagnostic,
+} from "./spec-validation/external-integration-evidence.js";
 import { buildSessionSkillContext } from "./session-skill-context.js";
 import { PRIORITY_SPECIFY, type AgentSemaphore } from "./concurrency.js";
 import { AgentLogger } from "./agent-logger.js";
@@ -2095,6 +2099,20 @@ export class TriageProcessor {
             specReviewVerdictRef.current = "REVISE";
             planLog.warn(`${taskId}: ${diagnostic}`);
             await store.logEntry(taskId, "Spec review: REVISE (dangling task-document references)");
+            return {
+              content: [{ type: "text" as const, text: diagnostic }],
+              details: {},
+            };
+          }
+
+          const evidenceGaps = detectExternalIntegrationEvidenceGaps({
+            promptContent,
+          });
+          if (evidenceGaps.length > 0) {
+            const diagnostic = formatExternalIntegrationEvidenceDiagnostic(evidenceGaps);
+            specReviewVerdictRef.current = "REVISE";
+            planLog.warn(`${taskId}: ${diagnostic}`);
+            await store.logEntry(taskId, "Spec review: REVISE (external-integration evidence gaps)");
             return {
               content: [{ type: "text" as const, text: diagnostic }],
               details: {},

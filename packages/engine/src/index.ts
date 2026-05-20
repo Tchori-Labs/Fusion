@@ -137,6 +137,14 @@ export {
 } from "./branch-conflicts.js";
 export { generateReservedWorktreeName, generateWorktreeName, planTaskWorktreePath, slugify } from "./worktree-names.js";
 export { createLogger, type Logger } from "./logger.js";
+export {
+  validateExternalIntegrationManifest,
+  KNOWN_EXTERNAL_INTEGRATIONS,
+  type ExternalIntegrationReleaseAsset,
+  type ExternalIntegrationReleaseManifest,
+  type ExternalIntegrationManifestValidationError,
+  type ExternalIntegrationManifestValidationResult,
+} from "./external-integrations/index.js";
 export { fetchWebContent, assertSafeUrl, WebFetchError, type WebFetchOptions, type WebFetchResult, type WebFetchErrorCode } from "./web-fetch.js";
 export { classifyTaskError, type ErrorClass, type TaskErrorClassification } from "./error-classifier.js";
 export {

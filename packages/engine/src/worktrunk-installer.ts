@@ -3,6 +3,8 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import type { ApprovalRequest, ApprovalRequestActorSnapshot, ApprovalRequestStore, WorktrunkSettings } from "@fusion/core";
+import type { ExternalIntegrationReleaseManifest } from "./external-integrations/manifest.js";
+import { validateExternalIntegrationManifest } from "./external-integrations/manifest.js";
 import { createLogger } from "./logger.js";
 import type { EngineRunContext, RunAuditor } from "./run-audit.js";
 import type { AgentActionGateContext } from "./agent-action-gate.js";
@@ -35,6 +37,19 @@ export const WORKTRUNK_PINNED_RELEASE: WorktrunkReleaseManifest = {
   version: null,
   verifiedAt: null,
   assets: {},
+};
+
+export const WORKTRUNK_INTEGRATION_MANIFEST: ExternalIntegrationReleaseManifest = {
+  id: "worktrunk",
+  binaryName: WORKTRUNK_BINARY_NAME,
+  upstreamRepo: "max-sixty/worktrunk",
+  docsUrl: "https://worktrunk.dev/",
+  source: WORKTRUNK_PINNED_RELEASE.source,
+  version: WORKTRUNK_PINNED_RELEASE.version,
+  verifiedAt: WORKTRUNK_PINNED_RELEASE.verifiedAt,
+  assets: Object.fromEntries(
+    Object.entries(WORKTRUNK_PINNED_RELEASE.assets).map(([name, asset]) => [name, { url: asset.url, sha256: asset.sha256 }]),
+  ),
 };
 
 export interface WorktrunkManifestValidationError {
@@ -92,42 +107,55 @@ function worktrunkVersionLabel(): string {
 }
 
 export function validateWorktrunkManifest(input: unknown): WorktrunkManifestValidationResult {
-  const missingFields: WorktrunkManifestValidationError["missingFields"] = [];
-  if (!input || typeof input !== "object") {
-    return {
-      ok: false,
-      missingFields: ["source", "version", "verifiedAt", "assets"],
-      reason: "Worktrunk release manifest must be an object with source, version, verifiedAt, and assets fields.",
-    };
-  }
+  const record = input && typeof input === "object" && !Array.isArray(input) ? (input as Record<string, unknown>) : {};
+  const validation = validateExternalIntegrationManifest({
+    id: "worktrunk",
+    binaryName: WORKTRUNK_BINARY_NAME,
+    upstreamRepo: "max-sixty/worktrunk",
+    docsUrl: "https://worktrunk.dev/",
+    source: record.source,
+    version: record.version,
+    verifiedAt: record.verifiedAt,
+    assets: record.assets,
+  });
 
-  const record = input as Record<string, unknown>;
-  if (typeof record.source !== "string") missingFields.push("source");
-  if (!(typeof record.version === "string" || record.version === null)) missingFields.push("version");
-  if (!(typeof record.verifiedAt === "string" || record.verifiedAt === null)) missingFields.push("verifiedAt");
-  if (!record.assets || typeof record.assets !== "object" || Array.isArray(record.assets)) {
-    missingFields.push("assets");
-  } else {
-    for (const [assetName, assetValue] of Object.entries(record.assets as Record<string, unknown>)) {
-      const assetRecord = assetValue as Record<string, unknown>;
-      if (!assetValue || typeof assetValue !== "object" || Array.isArray(assetValue) || typeof assetRecord.url !== "string") {
-        missingFields.push(`assets.${assetName}.url`);
-      }
-      if (!assetValue || typeof assetValue !== "object" || Array.isArray(assetValue) || typeof assetRecord.sha256 !== "string") {
-        missingFields.push(`assets.${assetName}.sha256`);
-      }
+  if (validation.ok) return { ok: true };
+
+  const narrowMissingFields: WorktrunkManifestValidationError["missingFields"] = [];
+  const outOfShapeFields: string[] = [];
+  const addNarrow = (field: WorktrunkManifestValidationError["missingFields"][number]): void => {
+    if (!narrowMissingFields.includes(field)) narrowMissingFields.push(field);
+  };
+
+  for (const field of validation.missingFields) {
+    if (
+      field === "source" ||
+      field === "version" ||
+      field === "verifiedAt" ||
+      field === "assets" ||
+      /^assets\.[^.]+\.(url|sha256)$/.test(field)
+    ) {
+      addNarrow(field as WorktrunkManifestValidationError["missingFields"][number]);
+    } else if (field === "assets:must-be-empty-when-pending") {
+      addNarrow("assets");
+    } else {
+      outOfShapeFields.push(field);
     }
   }
 
-  if (missingFields.length > 0) {
-    return {
-      ok: false,
-      missingFields,
-      reason: `Worktrunk release manifest is missing required fields: ${missingFields.join(", ")}`,
-    };
+  if (narrowMissingFields.length === 0) {
+    addNarrow("assets");
   }
 
-  return { ok: true };
+  const reasonSuffix = outOfShapeFields.length > 0
+    ? ` (non-worktrunk fields: ${outOfShapeFields.join(", ")})`
+    : "";
+
+  return {
+    ok: false,
+    missingFields: narrowMissingFields,
+    reason: `${validation.reason}${reasonSuffix}`,
+  };
 }
 
 function homeKey(settings: WorktrunkSettings): string {

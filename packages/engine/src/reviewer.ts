@@ -839,6 +839,7 @@ function buildReviewRequest(
       "Assess against the spec quality criteria: mission clarity, step specificity/verifiability,",
       "file scope accuracy, dependency correctness, testing requirements, documentation completeness,",
       "dangling task-document references, and appropriate sizing/review level.",
+      "For tasks integrating third-party tools, also verify canonical upstream repo URL, docs URL, release/download URL, binary/CLI name, and checksum or explicit upstream-pending-verification marker are present.",
       "",
       "Read relevant source files to verify the spec references real files, functions, and patterns.",
       "Check that steps have concrete, verifiable outcomes — not vague instructions.",
