@@ -4,6 +4,7 @@ import {
   sortTasksByPriorityFanoutThenAgeAndId,
   buildUnblockWeightMap,
   computeBlockerFanoutMap,
+  compareTasksByPriorityThenAgeAndId,
   HIGH_FANOUT_BLOCKER_TODO_THRESHOLD,
   type TaskStore,
   type Task,
@@ -102,6 +103,35 @@ export function filterPathsByIgnoreList(paths: string[], ignorePaths?: string[])
   }
 
   return paths.filter((path) => !normalizedIgnorePaths.some((ignore) => isIgnoredOverlapPath(path, ignore)));
+}
+
+export interface QueuedOverlapCandidate {
+  id: string;
+  priority?: Task["priority"] | null;
+  createdAt: string;
+  scope: string[];
+}
+
+export function findHigherPriorityQueuedOverlap(
+  candidate: QueuedOverlapCandidate,
+  queuedScopes: QueuedOverlapCandidate[],
+  overlap: (a: string[], b: string[]) => boolean,
+): QueuedOverlapCandidate | null {
+  let higher: QueuedOverlapCandidate | null = null;
+
+  for (const queued of queuedScopes) {
+    if (queued.id === candidate.id) continue;
+    if (!queued.scope.length || !candidate.scope.length) continue;
+    if (!overlap(candidate.scope, queued.scope)) continue;
+
+    if (compareTasksByPriorityThenAgeAndId(queued, candidate) < 0) {
+      if (!higher || compareTasksByPriorityThenAgeAndId(queued, higher) < 0) {
+        higher = queued;
+      }
+    }
+  }
+
+  return higher;
 }
 
 type ConcurrencyGateName = "maxConcurrent" | "maxWorktrees" | "semaphore";
@@ -991,6 +1021,8 @@ export class Scheduler {
        * subsequent todo tasks in the same pass also see them.
        */
       const activeScopes = new Map<string, string[]>();
+      const inversionEmitted = new Set<string>();
+      const queuedHigherPriorityScopes: QueuedOverlapCandidate[] = [];
       if (settings.groupOverlappingFiles) {
         const overlapIgnorePaths = settings.overlapIgnorePaths ?? [];
         // In-progress tasks
@@ -999,6 +1031,19 @@ export class Scheduler {
           const filteredScope = filterPathsByIgnoreList(scope, overlapIgnorePaths);
           if (filteredScope.length > 0) activeScopes.set(t.id, filteredScope);
         }
+        for (const t of todo) {
+          if (t.status !== "queued" || t.paused || t.userPaused) continue;
+          const scope = await this.store.parseFileScopeFromPrompt(t.id);
+          const filteredScope = filterPathsByIgnoreList(scope, overlapIgnorePaths);
+          if (filteredScope.length === 0) continue;
+          queuedHigherPriorityScopes.push({
+            id: t.id,
+            priority: t.priority,
+            createdAt: t.createdAt,
+            scope: filteredScope,
+          });
+        }
+
         // Only live in-review tasks with a worktree belong in activeScopes.
         // Paused in-review tasks (e.g., failed-merge tasks awaiting human triage) cannot
         // make progress, so they must not contribute to overlap blockers; including them
@@ -1115,25 +1160,86 @@ export class Scheduler {
               ? overlapBlockerId
               : activeScopeEntries.find(([, ipScope]) => this.pathsOverlap(taskScope, ipScope))?.[0] ?? null;
 
-            if (overlappingTaskId) {
-              const unresolvedDeps = task.dependencies.filter((depId) => {
-                const dep = tasks.find((t) => t.id === depId);
-                return dep && dep.column !== "done" && dep.column !== "in-review" && dep.column !== "archived";
-              });
-              const targetBlockedBy = task.dependencies.length > 0
-                ? (unresolvedDeps[0] ?? null)
-                : overlappingTaskId;
+            const higherPriorityQueuedOverlap = findHigherPriorityQueuedOverlap(
+              {
+                id: task.id,
+                priority: task.priority,
+                createdAt: task.createdAt,
+                scope: taskScope,
+              },
+              queuedHigherPriorityScopes,
+              this.pathsOverlap.bind(this),
+            );
+
+            if (higherPriorityQueuedOverlap) {
+              const dependencyBlocker = unmetDeps[0] ?? null;
               if (
                 task.status !== "queued"
-                || task.blockedBy !== targetBlockedBy
+                || task.blockedBy !== dependencyBlocker
+                || task.overlapBlockedBy !== higherPriorityQueuedOverlap.id
+              ) {
+                await this.store.updateTask(task.id, {
+                  status: "queued",
+                  blockedBy: dependencyBlocker,
+                  overlapBlockedBy: higherPriorityQueuedOverlap.id,
+                });
+              }
+              await this.rollbackRunningAgentsForQueuedTodoTask(task.id);
+              await this.logDispatchQueuedReason(
+                task.id,
+                `queued — deferred for higher-priority queued task ${higherPriorityQueuedOverlap.id} (overlap)`,
+              );
+              continue;
+            }
+
+            if (overlappingTaskId) {
+              const dependencyBlocker = unmetDeps[0] ?? null;
+              if (
+                task.status !== "queued"
+                || task.blockedBy !== dependencyBlocker
                 || task.overlapBlockedBy !== overlappingTaskId
               ) {
                 await this.store.updateTask(task.id, {
                   status: "queued",
-                  blockedBy: targetBlockedBy,
+                  blockedBy: dependencyBlocker,
                   overlapBlockedBy: overlappingTaskId,
                 });
               }
+
+              const overlapBlockerTask = tasks.find((candidate) => candidate.id === overlappingTaskId);
+              const inversionKey = `${task.id}|${overlappingTaskId}`;
+              if (
+                overlapBlockerTask
+                && !inversionEmitted.has(inversionKey)
+                && compareTasksByPriorityThenAgeAndId(task, overlapBlockerTask) < 0
+              ) {
+                inversionEmitted.add(inversionKey);
+                try {
+                  await this.store.recordRunAuditEvent?.({
+                    taskId: task.id,
+                    agentId: "scheduler",
+                    runId: generateSyntheticRunId("scheduler", task.id),
+                    domain: "database",
+                    mutationType: "scheduler:overlap-priority-inversion",
+                    target: task.id,
+                    metadata: {
+                      candidateId: task.id,
+                      candidatePriority: task.priority ?? null,
+                      candidateCreatedAt: task.createdAt ?? null,
+                      blockerId: overlapBlockerTask.id,
+                      blockerPriority: overlapBlockerTask.priority ?? null,
+                      blockerCreatedAt: overlapBlockerTask.createdAt ?? null,
+                      blockerColumn: overlapBlockerTask.column,
+                      source: "scheduler.overlap-priority-inversion",
+                    },
+                  });
+                } catch (error) {
+                  schedulerLog.warn(
+                    `Task ${task.id} failed to emit overlap priority inversion audit: ${error instanceof Error ? error.message : String(error)}`,
+                  );
+                }
+              }
+
               await this.rollbackRunningAgentsForQueuedTodoTask(task.id);
               await this.logDispatchQueuedReason(task.id, `queued — file scope overlap with ${overlappingTaskId}`);
               continue;

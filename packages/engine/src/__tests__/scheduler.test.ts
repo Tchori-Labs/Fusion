@@ -1,6 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { PrMonitor } from "../pr-monitor.js";
-import { Scheduler, pathsOverlap, filterPathsByIgnoreList, formatConcurrencyLimitMemoKey } from "../scheduler.js";
+import {
+  Scheduler,
+  pathsOverlap,
+  filterPathsByIgnoreList,
+  formatConcurrencyLimitMemoKey,
+  findHigherPriorityQueuedOverlap,
+} from "../scheduler.js";
 import { AgentSemaphore } from "../concurrency.js";
 import type { TaskStore, Task, TaskDetail } from "@fusion/core";
 import { existsSync } from "node:fs";
@@ -163,6 +169,64 @@ describe("filterPathsByIgnoreList", () => {
   it("filters ignored glob-style directories", () => {
     expect(filterPathsByIgnoreList(["generated/*", "generated/client.ts", "src/index.ts"], ["generated/*"]))
       .toEqual(["src/index.ts"]);
+  });
+});
+
+describe("findHigherPriorityQueuedOverlap", () => {
+  const overlap = (a: string[], b: string[]) => pathsOverlap(a, b);
+
+  it("returns higher-priority queued overlap", () => {
+    const result = findHigherPriorityQueuedOverlap(
+      { id: "FN-2", priority: "normal", createdAt: "2026-01-02T00:00:00Z", scope: ["src/a.ts"] },
+      [{ id: "FN-1", priority: "urgent", createdAt: "2026-01-03T00:00:00Z", scope: ["src/a.ts"] }],
+      overlap,
+    );
+    expect(result?.id).toBe("FN-1");
+  });
+
+  it("uses age tiebreaker at equal priority", () => {
+    const result = findHigherPriorityQueuedOverlap(
+      { id: "FN-2", priority: "normal", createdAt: "2026-01-02T00:00:00Z", scope: ["src/a.ts"] },
+      [{ id: "FN-1", priority: "normal", createdAt: "2026-01-01T00:00:00Z", scope: ["src/a.ts"] }],
+      overlap,
+    );
+    expect(result?.id).toBe("FN-1");
+  });
+
+  it("uses task id tiebreaker when priority and age match", () => {
+    const result = findHigherPriorityQueuedOverlap(
+      { id: "FN-10", priority: "normal", createdAt: "2026-01-01T00:00:00Z", scope: ["src/a.ts"] },
+      [{ id: "FN-2", priority: "normal", createdAt: "2026-01-01T00:00:00Z", scope: ["src/a.ts"] }],
+      overlap,
+    );
+    expect(result?.id).toBe("FN-2");
+  });
+
+  it("returns null when scopes do not overlap", () => {
+    const result = findHigherPriorityQueuedOverlap(
+      { id: "FN-2", priority: "normal", createdAt: "2026-01-02T00:00:00Z", scope: ["src/a.ts"] },
+      [{ id: "FN-1", priority: "urgent", createdAt: "2026-01-01T00:00:00Z", scope: ["src/b.ts"] }],
+      overlap,
+    );
+    expect(result).toBeNull();
+  });
+
+  it("returns null when candidate or queued scopes are empty", () => {
+    expect(
+      findHigherPriorityQueuedOverlap(
+        { id: "FN-2", priority: "normal", createdAt: "2026-01-02T00:00:00Z", scope: [] },
+        [{ id: "FN-1", priority: "urgent", createdAt: "2026-01-01T00:00:00Z", scope: ["src/a.ts"] }],
+        overlap,
+      ),
+    ).toBeNull();
+
+    expect(
+      findHigherPriorityQueuedOverlap(
+        { id: "FN-2", priority: "normal", createdAt: "2026-01-02T00:00:00Z", scope: ["src/a.ts"] },
+        [{ id: "FN-1", priority: "urgent", createdAt: "2026-01-01T00:00:00Z", scope: [] }],
+        overlap,
+      ),
+    ).toBeNull();
   });
 });
 
@@ -1406,7 +1470,7 @@ describe("Scheduler", () => {
       // Dependency-blocked urgent task should be queued, not started.
       expect(updateTask).toHaveBeenCalledWith("FN-100", { status: "queued", blockedBy: "FN-900" });
       // Overlap-blocked urgent task should be queued with blocker id.
-      expect(updateTask).toHaveBeenCalledWith("FN-103", { status: "queued", blockedBy: "FN-001", overlapBlockedBy: "FN-001" });
+      expect(updateTask).toHaveBeenCalledWith("FN-103", { status: "queued", blockedBy: null, overlapBlockedBy: "FN-001" });
       // Paused and recovery-gated urgent tasks never enter scheduling.
       expect(moveTask).not.toHaveBeenCalledWith("FN-101", "in-progress");
       expect(moveTask).not.toHaveBeenCalledWith("FN-102", "in-progress");
@@ -1748,7 +1812,7 @@ describe("Scheduler", () => {
       (scheduler as any).running = true;
       await scheduler.schedule();
 
-      expect(updateTask).toHaveBeenCalledWith("FN-002", { status: "queued", blockedBy: "FN-001", overlapBlockedBy: "FN-001" });
+      expect(updateTask).toHaveBeenCalledWith("FN-002", { status: "queued", blockedBy: null, overlapBlockedBy: "FN-001" });
       expect(moveTask).not.toHaveBeenCalledWith("FN-002", "in-progress");
     });
 
@@ -1786,7 +1850,7 @@ describe("Scheduler", () => {
       (scheduler as any).running = true;
       await scheduler.schedule();
 
-      expect(updateTask).toHaveBeenCalledWith("FN-002", { status: "queued", blockedBy: "FN-001", overlapBlockedBy: "FN-001" });
+      expect(updateTask).toHaveBeenCalledWith("FN-002", { status: "queued", blockedBy: null, overlapBlockedBy: "FN-001" });
       expect(moveTask).not.toHaveBeenCalledWith("FN-002", "in-progress");
     });
   });
@@ -1923,7 +1987,7 @@ describe("Scheduler", () => {
       (scheduler as any).running = true;
       await scheduler.schedule();
 
-      expect(updateTask).toHaveBeenCalledWith("FN-T", { status: "queued", blockedBy: "FN-B", overlapBlockedBy: "FN-B" });
+      expect(updateTask).toHaveBeenCalledWith("FN-T", { status: "queued", blockedBy: null, overlapBlockedBy: "FN-B" });
     });
 
     it("does not stamp blockedBy for todos without overlap, including empty scopes", async () => {
