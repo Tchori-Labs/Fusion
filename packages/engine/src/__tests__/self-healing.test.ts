@@ -6157,6 +6157,29 @@ describe("clearStaleBlockedBy", () => {
     manager.stop();
   });
 
+  it("FN-5433: skips stale blockedBy refresh when next unresolved dependency is unchanged", async () => {
+    const store = createRunningStore();
+    const queuedTask = createTask("FN-3170", {
+      status: "queued",
+      blockedBy: "FN-DEP",
+      dependencies: ["FN-DEP", "FN-OTHER"],
+    });
+    const depA = createTask("FN-DEP", { column: "todo" });
+    const depB = createTask("FN-OTHER", { column: "in-progress" });
+    (store.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue([queuedTask, depA, depB]);
+
+    const manager = new SelfHealingManager(store, { rootDir: "/tmp/test-project" });
+    const recovered = await manager.clearStaleBlockedBy();
+
+    expect(recovered).toBe(0);
+    expect(store.updateTask).not.toHaveBeenCalledWith("FN-3170", expect.any(Object));
+    const refreshedLogs = (store.logEntry as ReturnType<typeof vi.fn>).mock.calls.filter(
+      ([taskId, message]) => taskId === "FN-3170" && String(message).includes("refreshed stale blockedBy"),
+    );
+    expect(refreshedLogs).toHaveLength(0);
+    manager.stop();
+  });
+
   it("FN-3908: refreshes blockedBy to first unresolved dependency when stale blocker changed", async () => {
     const store = createRunningStore();
     const queuedTask = createTask("FN-3170", {
@@ -6169,8 +6192,9 @@ describe("clearStaleBlockedBy", () => {
     (store.listTasks as ReturnType<typeof vi.fn>).mockResolvedValue([queuedTask, depA, depB]);
 
     const manager = new SelfHealingManager(store, { rootDir: "/tmp/test-project" });
-    await manager.clearStaleBlockedBy();
+    const recovered = await manager.clearStaleBlockedBy();
 
+    expect(recovered).toBe(1);
     expect(store.updateTask).toHaveBeenCalledWith("FN-3170", { blockedBy: "FN-3169", status: "queued" });
     expect(store.logEntry).toHaveBeenCalledWith("FN-3170", expect.stringContaining("refreshed stale blockedBy"));
     manager.stop();

@@ -3384,6 +3384,9 @@ export class SelfHealingManager {
               if (todoTaskIds.has(task.id)) {
                 if (unresolvedDeps.length > 0) {
                   const nextBlocker = unresolvedDeps[0]!;
+                  if (nextBlocker === blockerId) {
+                    continue;
+                  }
                   await this.store.updateTask(task.id, { blockedBy: nextBlocker, status: "queued" });
                   await this.store.logEntry(task.id, `Auto-recovered: refreshed stale blockedBy — ${reason}; now blocked by ${nextBlocker}`);
                 } else if (hasActiveOverlapBlocker) {
