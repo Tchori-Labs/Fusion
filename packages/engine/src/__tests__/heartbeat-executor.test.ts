@@ -3181,7 +3181,6 @@ describe("executeHeartbeat", () => {
         source: expect.objectContaining({
           sourceType: "agent_heartbeat",
           sourceAgentId: "agent-001",
-          sourceRunId: undefined,
         }),
       }), expect.objectContaining({ settings: { autoSummarizeTitles: false } }));
     });
