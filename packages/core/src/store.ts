@@ -3714,20 +3714,28 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
 
   private async _maybeAutoArchiveSameAgentDuplicate(task: Task, input: TaskCreateInput): Promise<void> {
     const sourceAgentId = task.sourceAgentId ?? null;
-    if (!sourceAgentId) return;
+    const sourceParentTaskId = task.sourceParentTaskId ?? null;
+    // Need at least one provenance handle to scope the dedup check.
+    if (!sourceAgentId && !sourceParentTaskId) return;
 
     try {
       const nowMs = Date.now();
       const recent = (await this.listTasks({ slim: true, includeArchived: false })).filter((candidate) => {
         if (candidate.id === task.id) return false;
-        if (candidate.sourceAgentId !== sourceAgentId) return false;
         const createdMs = Date.parse(candidate.createdAt);
         if (Number.isNaN(createdMs)) return false;
-        return createdMs >= nowMs - 24 * 60 * 60 * 1000;
+        if (createdMs < nowMs - 24 * 60 * 60 * 1000) return false;
+        const agentMatch = sourceAgentId != null && candidate.sourceAgentId === sourceAgentId;
+        const parentMatch = sourceParentTaskId != null && candidate.sourceParentTaskId === sourceParentTaskId;
+        return agentMatch || parentMatch;
       });
 
       const matches = findSameAgentDuplicates(
-        { title: input.title ?? task.title, description: input.description },
+        {
+          title: input.title ?? task.title,
+          description: input.description,
+          sourceParentTaskId,
+        },
         recent.map((candidate) => ({
           id: candidate.id,
           title: candidate.title ?? "",
@@ -3735,8 +3743,9 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
           column: candidate.column,
           createdAt: Date.parse(candidate.createdAt),
           sourceAgentId: candidate.sourceAgentId ?? null,
+          sourceParentTaskId: candidate.sourceParentTaskId ?? null,
         })),
-        { nowMs },
+        { nowMs, sourceAgentId },
       );
 
       if (matches.length === 0) return;

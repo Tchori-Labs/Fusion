@@ -5,6 +5,12 @@ import type { TaskStore } from "./store.js";
 export interface SameAgentDuplicateInput {
   title?: string | null;
   description: string;
+  /**
+   * Parent task that spawned this task (e.g., the executing task whose heartbeat
+   * agent called fn_task_create). When set, candidates sharing the same parent
+   * are considered siblings even if they have different sourceAgentId values.
+   */
+  sourceParentTaskId?: string | null;
 }
 
 export interface SameAgentDuplicateCandidate {
@@ -14,6 +20,7 @@ export interface SameAgentDuplicateCandidate {
   column: Column;
   createdAt: number;
   sourceAgentId: string | null;
+  sourceParentTaskId?: string | null;
 }
 
 export interface SameAgentDuplicateMatch {
@@ -21,17 +28,34 @@ export interface SameAgentDuplicateMatch {
   score: number;
 }
 
+/**
+ * Find candidate tasks that look like duplicates spawned by the same caller.
+ *
+ * "Same caller" means the candidate shares the input's `sourceAgentId` (legacy
+ * FN-5233 behavior) OR shares the input's `sourceParentTaskId` when set
+ * (provenance dedup — same parent task spawned similar siblings).
+ *
+ * Filters out candidates older than `windowMs` (default 24h) and candidates
+ * with neither a matching sourceAgentId nor a matching sourceParentTaskId.
+ */
 export function findSameAgentDuplicates(
   input: SameAgentDuplicateInput,
   candidates: SameAgentDuplicateCandidate[],
-  opts?: { threshold?: number; nowMs?: number; windowMs?: number },
+  opts?: { threshold?: number; nowMs?: number; windowMs?: number; sourceAgentId?: string | null },
 ): SameAgentDuplicateMatch[] {
   const threshold = opts?.threshold ?? 0.75;
   const nowMs = opts?.nowMs ?? Date.now();
   const windowMs = opts?.windowMs ?? 24 * 60 * 60 * 1000;
   const cutoff = nowMs - windowMs;
+  const inputAgentId = opts?.sourceAgentId ?? null;
+  const inputParentId = input.sourceParentTaskId ?? null;
 
-  const recent = candidates.filter((candidate) => candidate.createdAt >= cutoff && candidate.sourceAgentId != null);
+  const recent = candidates.filter((candidate) => {
+    if (candidate.createdAt < cutoff) return false;
+    const agentMatch = inputAgentId != null && candidate.sourceAgentId === inputAgentId;
+    const parentMatch = inputParentId != null && candidate.sourceParentTaskId === inputParentId;
+    return agentMatch || parentMatch;
+  });
 
   const matches = findDuplicateMatches(
     { title: input.title ?? undefined, description: input.description },
