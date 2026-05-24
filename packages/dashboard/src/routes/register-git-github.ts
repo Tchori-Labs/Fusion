@@ -1300,6 +1300,37 @@ export async function pullGitBranch(cwd?: string, options?: PullGitBranchOptions
 
     const pullStart = performance.now();
     await tryFastForwardFromOrigin(rootDir, taskId, integration.integrationBranch, integration.integrationRemote ?? "origin");
+
+    // Sync working tree + index to the local integration tip. The merger
+    // advances `refs/heads/<integrationBranch>` via `git update-ref` without
+    // touching any worktree. When HEAD here is symbolic to that branch
+    // (the normal case in the user's project-root checkout), HEAD already
+    // resolves to the new sha — but the working files and index don't
+    // follow until something forces it. `tryFastForwardFromOrigin` only
+    // updates the worktree when origin is ahead of local; when the local
+    // tip is ahead of origin (the post-merge, pre-push state), it returns
+    // a no-op and the user sees "Pull completed" with no visible change.
+    // Reset against the branch ref explicitly so the worktree advances to
+    // the local tip regardless of whether the origin FF ran. The autostash
+    // above protects user edits, so --hard is safe here.
+    const localIntegrationTip = (await runGitCommand(
+      ["rev-parse", "--verify", `refs/heads/${integration.integrationBranch}`],
+      rootDir,
+      5_000,
+    )).trim();
+    if (localIntegrationTip) {
+      await runGitCommand(["reset", "--hard", localIntegrationTip], rootDir, 10_000)
+        .catch((err) => {
+          // Log-and-continue: a failed worktree sync still leaves the ref
+          // advanced, so downstream stash-pop and audit emission proceed.
+          // The user's worktree just stays at its prior sha, matching today's
+          // behavior. Logged loudly so the failure is visible.
+          console.warn(
+            `[integration-pull] taskId=${taskId} worktree sync to ${localIntegrationTip.slice(0, 8)} failed (continuing): ${err instanceof Error ? err.message : String(err)}`,
+          );
+        });
+    }
+
     const durationMs = Math.round(performance.now() - pullStart);
     const toSha = (await runGitCommand(["rev-parse", "HEAD"], rootDir, 5_000)).trim();
 
