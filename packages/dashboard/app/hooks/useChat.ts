@@ -473,10 +473,13 @@ export function useChat(
       try {
         if (isPaginationRequest) {
           // Prepend older messages (forward pagination, used when hasMoreMessages)
+          const requestSessionId = sessionId;
           const data = await fetchChatMessages(sessionId, { limit: 50, ...opts }, projectId);
-          const mappedMessages = data.messages.map(mapChatMessageToInfo);
-          setMessages((prev) => [...mappedMessages, ...prev]);
-          setHasMoreMessages(data.messages.length >= 50);
+          if (activeSessionRef.current?.id === requestSessionId) {
+            const mappedMessages = data.messages.map(mapChatMessageToInfo);
+            setMessages((prev) => [...mappedMessages, ...prev]);
+            setHasMoreMessages(data.messages.length >= 50);
+          }
         } else {
           // Initial full load — fetch all messages, never truncate at 50
           const allMessages = await fetchAllMessagesInChat(sessionId, projectId);
