@@ -350,7 +350,9 @@ Desktop packaging is configured in `electron-builder.yml`.
 - Output directory: `packages/desktop/dist-electron`
 - Targets: macOS (`dmg`, `zip`), Windows (`nsis`, `portable`), Linux (`AppImage`, `deb`, `tar.gz`)
 - Windows artifacts: `Fusion-<version>-win-<arch>.exe` (NSIS installer) and portable `.exe` in `packages/desktop/dist-electron/`
-- Canonical Windows build path: `.github/workflows/desktop-windows.yml` (`workflow_dispatch` on `windows-latest`)
+- Binary GitHub Release workflow (`.github/workflows/release.yml`) now attaches Windows desktop artifacts: `Fusion-<version>-win-x64.exe` outputs (NSIS + portable), matching `.exe.sha256` sidecars, and `.blockmap` files.
+- Tag-less release rehearsal workflow (`.github/workflows/test-release.yml`) mirrors that artifact collection path without publishing a real GitHub Release.
+- Isolated manual Windows build path: `.github/workflows/desktop-windows.yml` (`workflow_dispatch` on `windows-latest`).
 - Windows `.exe` packaging requires a Windows host/runner for this task (no Wine-based cross-compilation path)
 - Deep link protocol: `fusion://`
 - Publish provider: GitHub (`gsxdsm/fusion`)
@@ -366,6 +368,7 @@ The Windows desktop workflow (`.github/workflows/desktop-windows.yml`) supports 
   - `WINDOWS_CERTIFICATE_PASSWORD`
 - Signing is handled directly by electron-builder using `CSC_LINK` and `CSC_KEY_PASSWORD`; no separate `signtool` wrapper script is invoked in this workflow.
 - If signing secrets are not available (for example, forked PR contexts), the workflow still succeeds and uploads unsigned artifacts; the `Verify signed artifacts` step is skipped.
+- Release-attached Windows `.exe` artifacts are currently unsigned in the binary publishing pipeline; code-signing automation for release workflows is tracked by FN-5592.
 - Signing policy is pinned in `electron-builder.yml` (`sha256` digest + `http://timestamp.digicert.com`) to match `scripts/sign-windows.ps1` used by CLI binaries.
 - Local signing is opt-in: developers who need signed local Windows builds must set `CSC_LINK`/`CSC_KEY_PASSWORD` in their own environment before invoking electron-builder.
 
