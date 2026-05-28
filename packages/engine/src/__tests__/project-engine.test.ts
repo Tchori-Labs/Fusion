@@ -1499,14 +1499,13 @@ describe("ProjectEngine paused in-review auto-merge behavior", () => {
     await engine.stop();
   });
 
-  it("FN-5627: refuses fast-path and parks task when mergeConfirmed commitSha is not ancestor of integration branch", async () => {
+  it("FN-5627: auto-recovers fast-path refusal by clearing poisoned mergeDetails + re-enqueueing (mergeRetries < budget)", async () => {
     // Repro for the FN-5625/FN-5623 false-positive done class: the merger
     // has a TOCTOU between writing `mergeConfirmed: true` and `git update-ref`
     // succeeding. When the ref-advance fails after the optimistic write, the
-    // task row is poisoned. Without this gate, the auto-merge fast-path
-    // would silently promote the poisoned row to `done`. With the gate, the
-    // fast-path verifies reachability and refuses, parking the task in
-    // in-review with status=failed for manual review.
+    // task row is poisoned. The gate detects this, clears the lies, and
+    // re-enqueues for a fresh aiMergeTask attempt — no human intervention
+    // required as long as the retry budget isn't exhausted.
     const mockStore = createMockStore({ ...baseSettings, autoMerge: true });
     mockStore.store.getTask.mockResolvedValueOnce({
       id: "FN-poisoned",
@@ -1521,6 +1520,10 @@ describe("ProjectEngine paused in-review auto-merge behavior", () => {
         commitSha: "abc123abc123abc123abc123abc123abc1234567",
         mergeTargetBranch: "main",
         mergedAt: "2026-05-28T19:34:17.022Z",
+        landedFiles: ["packages/foo/bar.ts"],
+        filesChanged: 1,
+        insertions: 10,
+        deletions: 2,
       },
     });
     mocks.currentStore = mockStore.store;
@@ -1557,28 +1560,116 @@ describe("ProjectEngine paused in-review auto-merge behavior", () => {
     await engine.start();
     engine.enqueueMerge("FN-poisoned");
 
-    // Gate refuses the fast-path: the task row is updated with status=failed,
-    // mergeConfirmed is cleared, and the task is parked in in-review.
+    // Auto-recovery path: the task row is updated with cleared poisoned
+    // fields, mergeRetries incremented, status null (NOT failed).
     await vi.waitFor(() => {
       const calls = (mockStore.store.updateTask as ReturnType<typeof vi.fn>).mock.calls as unknown as Array<[string, Record<string, unknown>]>;
-      const refusalCall = calls.find((call) =>
+      const recoveryCall = calls.find((call) =>
         call[0] === "FN-poisoned"
-        && call[1]?.status === "failed"
-        && typeof call[1]?.error === "string"
-        && /not reachable/.test(call[1].error as string),
+        && call[1]?.mergeRetries === 1
+        && call[1]?.status === null,
       );
-      expect(refusalCall).toBeDefined();
-      const updates = refusalCall![1] as { mergeDetails?: { mergeConfirmed?: boolean } };
+      expect(recoveryCall).toBeDefined();
+      const updates = recoveryCall![1] as {
+        mergeDetails?: {
+          mergeConfirmed?: boolean;
+          commitSha?: string;
+          mergedAt?: string;
+          landedFiles?: string[];
+          filesChanged?: number;
+        };
+      };
+      // Poisoned fields cleared.
       expect(updates.mergeDetails?.mergeConfirmed).toBe(false);
+      expect(updates.mergeDetails?.commitSha).toBeUndefined();
+      expect(updates.mergeDetails?.mergedAt).toBeUndefined();
+      expect(updates.mergeDetails?.landedFiles).toBeUndefined();
+      expect(updates.mergeDetails?.filesChanged).toBeUndefined();
     });
 
-    // moveTask("done") was NOT called.
+    // Critical invariant: status is NOT failed (this is auto-recoverable).
+    const failedCall = (mockStore.store.updateTask as ReturnType<typeof vi.fn>).mock.calls
+      .find((call: unknown[]) => call[0] === "FN-poisoned" && (call[1] as { status?: string })?.status === "failed");
+    expect(failedCall).toBeUndefined();
+
+    // moveTask("done") was NOT called (no false-positive completion).
     expect(mockStore.store.moveTask).not.toHaveBeenCalledWith("FN-poisoned", "done");
     // task:merged was NOT emitted for the poisoned task.
     const emitCalls = (mockStore.store.emit as ReturnType<typeof vi.fn>).mock.calls as unknown as Array<[string, { task?: { id: string } }]>;
     const mergedCalls = emitCalls.filter((call) => call[0] === "task:merged");
     const poisonedEmit = mergedCalls.find((call) => call[1]?.task?.id === "FN-poisoned");
     expect(poisonedEmit).toBeUndefined();
+
+    await engine.stop();
+  });
+
+  it("FN-5627: fast-path refusal parks task as failed when mergeRetries budget is exhausted", async () => {
+    // When auto-recovery has already cycled through 3 attempts without
+    // landing, the next refusal is terminal. The task is parked with
+    // status=failed for manual review, with no further re-enqueue. The
+    // downstream FN-5488 fast-path on `clearStaleBlockedBy` recognizes this
+    // as a permanent blocker so dependents aren't held forever.
+    const mockStore = createMockStore({ ...baseSettings, autoMerge: true });
+    mockStore.store.getTask.mockResolvedValueOnce({
+      id: "FN-exhausted",
+      column: "in-review",
+      paused: false,
+      mergeRetries: 3, // already at budget
+      status: null,
+      branch: "fusion/fn-exhausted",
+      baseBranch: "main",
+      mergeDetails: {
+        mergeConfirmed: true,
+        commitSha: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+        mergeTargetBranch: "main",
+        mergedAt: "2026-05-28T19:34:17.022Z",
+      },
+    });
+    mocks.currentStore = mockStore.store;
+
+    mocks.execFile.mockImplementation((
+      _file: string,
+      args: string[],
+      _options: unknown,
+      callback?: (error: (Error & { code?: number }) | null, result: { stdout: string; stderr: string }) => void,
+    ) => {
+      const cb = (typeof _options === "function" ? _options : callback) as (
+        error: (Error & { code?: number }) | null,
+        result: { stdout: string; stderr: string },
+      ) => void;
+      if (args[0] === "cat-file") {
+        cb(null, { stdout: "", stderr: "" });
+        return {} as never;
+      }
+      if (args[0] === "merge-base" && args[1] === "--is-ancestor") {
+        const err = new Error("Command failed: git merge-base --is-ancestor") as Error & { code?: number };
+        err.code = 1;
+        cb(err, { stdout: "", stderr: "" });
+        return {} as never;
+      }
+      cb(null, { stdout: "/usr/bin/mock\n", stderr: "" });
+      return {} as never;
+    });
+
+    const engine = createEngine();
+    await engine.start();
+    engine.enqueueMerge("FN-exhausted");
+
+    await vi.waitFor(() => {
+      const calls = (mockStore.store.updateTask as ReturnType<typeof vi.fn>).mock.calls as unknown as Array<[string, Record<string, unknown>]>;
+      const terminalCall = calls.find((call) =>
+        call[0] === "FN-exhausted"
+        && call[1]?.status === "failed"
+        && typeof call[1]?.error === "string"
+        && /retry budget exhausted|after 3 attempts/.test(call[1].error as string),
+      );
+      expect(terminalCall).toBeDefined();
+      const updates = terminalCall![1] as { mergeDetails?: { mergeConfirmed?: boolean; commitSha?: string } };
+      expect(updates.mergeDetails?.mergeConfirmed).toBe(false);
+      expect(updates.mergeDetails?.commitSha).toBeUndefined();
+    });
+
+    expect(mockStore.store.moveTask).not.toHaveBeenCalledWith("FN-exhausted", "done");
 
     await engine.stop();
   });

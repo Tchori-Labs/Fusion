@@ -1460,34 +1460,109 @@ export class ProjectEngine {
               if (!reachability.reachable) {
                 const sha = task.mergeDetails.commitSha || "";
                 const shortSha = sha ? sha.slice(0, 8) : "<no-sha>";
-                const errorMsg =
-                  `Merge confirmed flag set but commit ${shortSha} is not reachable from ` +
-                  `${integrationBranchForGate} (${reachability.reason}). ` +
-                  `Task parked in in-review pending manual review.`;
+                const currentRetries = task.mergeRetries ?? 0;
+                const budgetExhausted =
+                  currentRetries >= ProjectEngine.MAX_AUTO_MERGE_RETRIES;
+
+                // Clear poisoned mergeDetails fields. These persisted before
+                // the integration ref-advance actually succeeded (pre-FN-5627
+                // optimistic-write TOCTOU). Drop the lies but keep diagnostic
+                // context (mergeTargetBranch, attemptsMade, etc.).
+                const cleanedMergeDetails = {
+                  ...task.mergeDetails,
+                  mergeConfirmed: false,
+                  commitSha: undefined,
+                  mergedAt: undefined,
+                  landedFiles: undefined,
+                  filesChanged: undefined,
+                  insertions: undefined,
+                  deletions: undefined,
+                  noOpVerifiedShortCircuit: undefined,
+                  landedFilesAttributionRestricted: undefined,
+                };
+
+                if (budgetExhausted) {
+                  // Retry budget exhausted — terminal park for manual review.
+                  // FN-4538-class invariant: failed `in-review` blockers at the
+                  // retry ceiling are recognized by downstream `clearStaleBlockedBy`
+                  // fast paths (FN-5488), so dependents won't deadlock.
+                  const errorMsg =
+                    `Auto-merge fast-path refused after ${currentRetries} attempts: commit ${shortSha} is not reachable from ` +
+                    `${integrationBranchForGate} (${reachability.reason}). Manual review required.`;
+                  runtimeLog.warn(
+                    `Auto-merge: ${taskId} fast-path REFUSED + budget exhausted — ${reachability.reason}: ${reachability.diagnostic}`,
+                  );
+                  await store.logEntry(
+                    taskId,
+                    `[FN-5627] Auto-merge fast-path refused (retry budget exhausted) — ${errorMsg}`,
+                  );
+                  await store.updateTask(taskId, {
+                    mergeDetails: cleanedMergeDetails,
+                    status: "failed",
+                    error: errorMsg,
+                  });
+                  try {
+                    const auditor = createRunAuditor(store, {
+                      runId: generateSyntheticRunId("merger-fast-path-refused", taskId),
+                      agentId: "merger",
+                      taskId,
+                      phase: "auto-merge-fast-path-gate",
+                    });
+                    await auditor.database({
+                      type: "merger:fast-path-blocked-foreign-commit",
+                      target: taskId,
+                      metadata: {
+                        taskId,
+                        commitSha: sha,
+                        integrationBranch: integrationBranchForGate,
+                        reason: reachability.reason,
+                        diagnostic: reachability.diagnostic,
+                        mergeRetries: currentRetries,
+                        budgetExhausted: true,
+                      },
+                    });
+                  } catch (auditErr) {
+                    runtimeLog.warn(
+                      `Auto-merge: ${taskId} fast-path audit emit failed: ${
+                        auditErr instanceof Error ? auditErr.message : String(auditErr)
+                      }`,
+                    );
+                  }
+                  continue;
+                }
+
+                // FN-5627 auto-recovery: clear the poisoned mergeDetails,
+                // increment the merge retry counter, and re-enqueue. The next
+                // dequeue runs a fresh `aiMergeTask` against the task branch —
+                // because the merger's TOCTOU is now fixed, the redo either
+                // lands cleanly or fails with a real merger error that surfaces
+                // through normal lifecycle. We don't need an executor to be
+                // re-engaged for this kind of recovery; the branch already
+                // has the work, it just needs to be re-applied to the
+                // integration tip.
+                const nextRetries = currentRetries + 1;
                 runtimeLog.warn(
-                  `Auto-merge: ${taskId} fast-path REFUSED — ${reachability.reason}: ${reachability.diagnostic}`,
+                  `Auto-merge: ${taskId} fast-path REFUSED — auto-recovering (attempt ${nextRetries}/${ProjectEngine.MAX_AUTO_MERGE_RETRIES}): ${reachability.reason}: ${reachability.diagnostic}`,
                 );
                 await store.logEntry(
                   taskId,
-                  `[FN-5627] Auto-merge fast-path refused — ${errorMsg}`,
+                  `[FN-5627] Auto-merge fast-path refused — cleared poisoned mergeDetails (commit ${shortSha} not reachable from ${integrationBranchForGate}, ${reachability.reason}). Re-enqueueing for fresh merge attempt ${nextRetries}/${ProjectEngine.MAX_AUTO_MERGE_RETRIES}.`,
                 );
                 await store.updateTask(taskId, {
-                  mergeDetails: {
-                    ...task.mergeDetails,
-                    mergeConfirmed: false,
-                  },
-                  status: "failed",
-                  error: errorMsg,
+                  mergeDetails: cleanedMergeDetails,
+                  mergeRetries: nextRetries,
+                  status: null,
+                  error: null,
                 });
                 try {
                   const auditor = createRunAuditor(store, {
-                    runId: generateSyntheticRunId("merger-fast-path-refused", taskId),
+                    runId: generateSyntheticRunId("merger-fast-path-auto-recovered", taskId),
                     agentId: "merger",
                     taskId,
                     phase: "auto-merge-fast-path-gate",
                   });
                   await auditor.database({
-                    type: "merger:fast-path-blocked-foreign-commit",
+                    type: "merger:fast-path-auto-recovered",
                     target: taskId,
                     metadata: {
                       taskId,
@@ -1495,6 +1570,8 @@ export class ProjectEngine {
                       integrationBranch: integrationBranchForGate,
                       reason: reachability.reason,
                       diagnostic: reachability.diagnostic,
+                      mergeRetries: nextRetries,
+                      maxRetries: ProjectEngine.MAX_AUTO_MERGE_RETRIES,
                     },
                   });
                 } catch (auditErr) {
@@ -1504,6 +1581,11 @@ export class ProjectEngine {
                     }`,
                   );
                 }
+                // Re-enqueue this task for the next cycle. We continue past
+                // the current iteration because `task` is a stale snapshot;
+                // the re-enqueued tick reads fresh state with mergeConfirmed=false
+                // and falls through to the normal `aiMergeTask` path.
+                this.internalEnqueueMerge(taskId);
                 continue;
               }
               const blockerReason = getTaskHardMergeBlocker(task as Task);

@@ -550,10 +550,22 @@ export type DatabaseMutationType =
    * `task.mergeDetails.commitSha` is not reachable from the integration branch
    * tip, indicating the merger persisted `mergeConfirmed: true` before the
    * ref-advance actually landed (TOCTOU window in merger.ts ~9762 vs ~9845).
-   * Task is parked in in-review with `status: "failed"` for manual review.
-   * Metadata: { taskId, commitSha, integrationBranch, reason, diagnostic }
+   * Emitted on TERMINAL refusal only — when `mergeRetries` has reached
+   * `MAX_AUTO_MERGE_RETRIES` and the task is parked in in-review with
+   * `status: "failed"` for manual review.
+   * Metadata: { taskId, commitSha, integrationBranch, reason, diagnostic, mergeRetries, budgetExhausted }
    */
-  | "merger:fast-path-blocked-foreign-commit";
+  | "merger:fast-path-blocked-foreign-commit"
+  /**
+   * FN-5627: Auto-recoverable variant of the fast-path refusal. The gate cleared
+   * the poisoned mergeDetails fields (commitSha/mergedAt/landedFiles/etc.) and
+   * re-enqueued the task for a fresh `aiMergeTask` attempt. Emitted on each
+   * recoverable refusal until `mergeRetries` reaches
+   * `MAX_AUTO_MERGE_RETRIES`, at which point the next refusal switches to
+   * `merger:fast-path-blocked-foreign-commit` and parks as failed.
+   * Metadata: { taskId, commitSha, integrationBranch, reason, diagnostic, mergeRetries, maxRetries }
+   */
+  | "merger:fast-path-auto-recovered";
 
 // ── Filesystem mutation types ─────────────────────────────────────────────────
 
