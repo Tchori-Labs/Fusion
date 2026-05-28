@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type JSX } from "react";
 import { AlertTriangle, X } from "lucide-react";
 import { fetchAuthStatus } from "../api";
 import "./OAuthReloginBanner.css";
