@@ -149,7 +149,7 @@ export function probeFts5(db: DatabaseSync): boolean {
 
 // ── Schema Definition ────────────────────────────────────────────────
 
-const SCHEMA_VERSION = 91;
+const SCHEMA_VERSION = 92;
 
 function normalizeTaskComments(
   steeringComments: SteeringComment[] | undefined,
@@ -760,6 +760,17 @@ CREATE TABLE IF NOT EXISTS missions (
   createdAt TEXT NOT NULL,
   updatedAt TEXT NOT NULL
 );
+
+-- Goals table (strategic intent across mission timelines)
+CREATE TABLE IF NOT EXISTS goals (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  description TEXT,
+  status TEXT NOT NULL,
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idxGoalsStatus ON goals(status);
 
 -- Milestones table (phases within a mission)
 CREATE TABLE IF NOT EXISTS milestones (
@@ -3569,6 +3580,25 @@ export class Database {
     if (version < 91) {
       this.applyMigration(91, () => {
         this.addColumnIfMissing("missions", "baseBranch", "TEXT");
+      });
+    }
+
+    if (version < 92) {
+      this.applyMigration(92, () => {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS goals (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            description TEXT,
+            status TEXT NOT NULL,
+            createdAt TEXT NOT NULL,
+            updatedAt TEXT NOT NULL
+          )
+        `);
+        this.db.exec(`
+          CREATE INDEX IF NOT EXISTS idxGoalsStatus
+            ON goals(status)
+        `);
       });
     }
 

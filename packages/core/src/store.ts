@@ -20,6 +20,7 @@ import { InsightStore } from "./insight-store.js";
 import { ResearchStore } from "./research-store.js";
 import { ExperimentSessionStore } from "./experiment-session-store.js";
 import { TodoStore } from "./todo-store.js";
+import { GoalStore } from "./goal-store.js";
 import { EvalStore } from "./eval-store.js";
 import { BackwardCompat, ProjectRequiredError } from "./migration.js";
 import { CentralCore } from "./central-core.js";
@@ -1117,6 +1118,8 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   private experimentSessionStore: ExperimentSessionStore | null = null;
   /** Cached TodoStore instance */
   private todoStore: TodoStore | null = null;
+  /** Cached GoalStore instance */
+  private goalStore: GoalStore | null = null;
   /** Cached EvalStore instance */
   private evalStore: EvalStore | null = null;
   /** Cached SecretsStore instance */
@@ -10342,6 +10345,17 @@ ${notificationsSection}`;
       this.todoStore = new TodoStore(this.db);
     }
     return this.todoStore;
+  }
+
+  /**
+   * Get the GoalStore instance for project-scoped goals operations.
+   * Lazily initializes the GoalStore on first access.
+   */
+  getGoalStore(): GoalStore {
+    if (!this.goalStore) {
+      this.goalStore = new GoalStore(this.fusionDir, this.db);
+    }
+    return this.goalStore;
   }
 
   /**

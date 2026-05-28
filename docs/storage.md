@@ -146,7 +146,7 @@ Important execution nuance:
 - **Backend settings keys defined in `@fusion/core`:** **78** total
   - **Global settings:** 17 (`GlobalSettings`)
   - **Project settings:** 61 (`ProjectSettings`)
-- **SQLite tables in project DB schema (`packages/core/src/db.ts`):** **46** (including migration-created tables)
+- **SQLite tables in project DB schema (`packages/core/src/db.ts`):** **47** (including migration-created tables)
 - **Issues identified:** **9**
   - High: 2
   - Medium: 5
@@ -340,6 +340,7 @@ The `tasks.githubTracking` JSON column stores per-task GitHub tracking state (`e
 | `task_documents` | Task-scoped document metadata/content keyed by `(taskId, key)` with current revision pointer. |
 | `task_document_revisions` | Immutable revision history for task documents (content snapshots by revision). |
 | `__meta` | Schema version + monotonic `lastModified` change detector, plus one-time bootstrap metadata such as `bootstrappedAt` and `projectIdentity`. |
+| `goals` | Strategic intent records (`title`, optional `description`, `status`, timestamps) that can outlive mission timelines. |
 | `missions` | Mission-level planning hierarchy root. |
 | `milestones` | Milestones under missions, including dependency lists and validation state. |
 | `slices` | Slices under milestones with plan-state/activation metadata. |
