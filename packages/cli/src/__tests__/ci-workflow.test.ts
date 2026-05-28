@@ -320,12 +320,13 @@ describe("Binary release workflow (.github/workflows/release.yml)", () => {
     expect(typeof workflow).toBe("object");
   });
 
-  it("uses workflow_dispatch trigger (auto binary release disabled)", () => {
+  it("supports workflow_dispatch and version tag triggers", () => {
     expect(workflow.on).toHaveProperty("workflow_dispatch");
+    expect(workflow.on).toHaveProperty("push");
   });
 
-  it("does not auto-trigger on version tags", () => {
-    expect(workflow.on.push).toBeUndefined();
+  it("auto-triggers on v* version tags", () => {
+    expect(workflow.on.push.tags).toContain("v*");
   });
 
   it("has build-binaries job with 5-target matrix", () => {

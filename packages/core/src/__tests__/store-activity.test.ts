@@ -812,37 +812,28 @@ describe("TaskStore", () => {
       const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
       const storeAny = store as any;
       const originalTasksDir = storeAny.tasksDir;
-      storeAny.tasksDir = join(rootDir, ".fusion", "missing-tasks-dir");
+      // Force fs.watch to throw synchronously on every platform. A non-
+      // existent directory only fails reliably on macOS — Linux Node with
+      // `recursive: true` silently returns a no-op watcher (no sync throw,
+      // no async error event), so the catch arm we want to exercise never
+      // fires. Embedding a NUL byte makes Node reject the path argument
+      // up front with ERR_INVALID_ARG_VALUE, which is platform-agnostic.
+      const invalidTasksDir = join(rootDir, ".fusion", "missing-tasks-dir") + " bad";
+      storeAny.tasksDir = invalidTasksDir;
 
       try {
         await store.watch();
 
-        // fs.watch on a missing path is platform-sensitive: macOS Node throws
-        // ENOENT synchronously (routed to the `watch:fs-watch-setup` warning),
-        // whereas Linux Node returns a watcher that emits an async `error`
-        // event (routed to the `watch:fs-watch-error` warning). Either path
-        // is correct — the contract this test guards is "log the failure and
-        // keep polling alive," not which catch arm caught it. Use vi.waitFor
-        // so we observe the async path on Linux without racing the spy.
-        const findWarning = () =>
-          warnSpy.mock.calls.find((call) => {
-            if (typeof call[0] !== "string") return false;
-            return (
-              call[0].includes("[task-store] fs.watch unavailable; falling back to polling-only updates")
-              || call[0].includes("[task-store] fs.watch emitted an error; polling will continue")
-            );
-          });
+        const warningCall = warnSpy.mock.calls.find(
+          (call) => typeof call[0] === "string" && call[0].includes("[task-store] fs.watch unavailable; falling back to polling-only updates"),
+        );
+        expect(warningCall).toBeDefined();
 
-        await vi.waitFor(() => {
-          expect(findWarning()).toBeDefined();
-        });
-
-        const warningCall = findWarning()!;
         const [, context] = warningCall as [string, Record<string, unknown>];
         expect(context).toMatchObject({
-          tasksDir: join(rootDir, ".fusion", "missing-tasks-dir"),
+          phase: "watch:fs-watch-setup",
+          tasksDir: invalidTasksDir,
         });
-        expect(context.phase).toMatch(/^watch:fs-watch-(setup|error)$/);
         expect(typeof context.error).toBe("string");
         expect(storeAny.pollInterval).not.toBeNull();
         await expect(storeAny.checkForChanges()).resolves.toBeUndefined();
