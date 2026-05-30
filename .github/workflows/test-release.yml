@@ -26,9 +26,8 @@ jobs:
           - os: macos-latest
             target: bun-darwin-arm64
             binary: fn-darwin-arm64
-          - os: macos-13
-            target: bun-darwin-x64
-            binary: fn-darwin-x64
+          # bun-darwin-x64 (Intel) dropped: macos-13 runner scarcity — CLI is
+          # Apple-Silicon-only for macOS. Keep in sync with release.yml.
           - os: windows-latest
             target: bun-windows-x64
             binary: fn-windows-x64.exe

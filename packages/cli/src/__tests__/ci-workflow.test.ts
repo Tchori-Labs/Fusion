@@ -329,15 +329,16 @@ describe("Binary release workflow (.github/workflows/release.yml)", () => {
     expect(workflow.on.push.tags).toContain("v*");
   });
 
-  it("has build-binaries job with 5-target matrix", () => {
+  it("has build-binaries job with 4-target matrix", () => {
     const matrix = workflow.jobs["build-binaries"].strategy.matrix.include;
-    expect(matrix).toHaveLength(5);
+    expect(matrix).toHaveLength(4);
     const targets = matrix.map((m: any) => m.target);
     expect(targets).toContain("bun-linux-x64");
     expect(targets).toContain("bun-linux-arm64");
     expect(targets).toContain("bun-darwin-arm64");
-    expect(targets).toContain("bun-darwin-x64");
     expect(targets).toContain("bun-windows-x64");
+    // bun-darwin-x64 dropped: macos-13 runner scarcity; CLI is Apple-Silicon-only.
+    expect(targets).not.toContain("bun-darwin-x64");
   });
 
   it("has correct OS runners for each target", () => {
@@ -347,7 +348,6 @@ describe("Binary release workflow (.github/workflows/release.yml)", () => {
     expect(osMap["bun-linux-x64"]).toBe("ubuntu-latest");
     expect(osMap["bun-linux-arm64"]).toBe("ubuntu-24.04-arm");
     expect(osMap["bun-darwin-arm64"]).toBe("macos-latest");
-    expect(osMap["bun-darwin-x64"]).toBe("macos-13");
     expect(osMap["bun-windows-x64"]).toBe("windows-latest");
   });
 
@@ -427,15 +427,16 @@ describe("Test-release workflow (.github/workflows/test-release.yml)", () => {
     expect(workflow.on).toHaveProperty("workflow_dispatch");
   });
 
-  it("has 5-target build matrix", () => {
+  it("has 4-target build matrix", () => {
     const matrix = workflow.jobs["build-binaries"].strategy.matrix.include;
-    expect(matrix).toHaveLength(5);
+    expect(matrix).toHaveLength(4);
     const targets = matrix.map((m: any) => m.target);
     expect(targets).toContain("bun-linux-x64");
     expect(targets).toContain("bun-linux-arm64");
     expect(targets).toContain("bun-darwin-arm64");
-    expect(targets).toContain("bun-darwin-x64");
     expect(targets).toContain("bun-windows-x64");
+    // bun-darwin-x64 dropped: macos-13 runner scarcity; CLI is Apple-Silicon-only.
+    expect(targets).not.toContain("bun-darwin-x64");
   });
 
   it("maps bun-linux-arm64 to fn-linux-arm64 binary name", () => {

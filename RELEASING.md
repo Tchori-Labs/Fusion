@@ -56,8 +56,9 @@ When you merge the Version Packages PR:
 |----------|------------|--------|
 | Linux x64 | `fusion-linux-x64` | — |
 | macOS arm64 | `fusion-darwin-arm64` | ✓ (codesign + notarization) |
-| macOS x64 | `fusion-darwin-x64` | ✓ (codesign + notarization) |
 | Windows x64 | `fusion-windows-x64.exe` | ✓ (Authenticode) |
+
+> macOS Intel (`darwin-x64`) is intentionally not shipped: the CLI is Apple-Silicon-only because `macos-13` GitHub runners are too scarce to build reliably. The desktop macOS DMG/ZIP remains universal.
 
 ## Testing binary builds
 

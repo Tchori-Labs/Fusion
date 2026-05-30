@@ -15,3 +15,4 @@ Fix the Binary Release workflow so platform binaries publish to GitHub Releases 
 - The `build-exe-cross` tests that cross-compile platform binaries are now opt-in (`FUSION_TEST_BUILD_EXE=1`) instead of auto-running on every CI run; native per-platform binary builds remain covered by `test-release.yml`.
 - A workflow_dispatch run now builds and uploads binaries as artifacts for validation without creating a release (release creation is gated to tag pushes).
 - The dependency-graph plugin build uses a cross-platform copy step that no longer breaks the Windows desktop build.
+- The macOS Intel (`bun-darwin-x64`) CLI binary is no longer built/shipped — `macos-13` runners are too scarce to build reliably and were blocking releases. The macOS CLI is now Apple-Silicon-only; the desktop macOS DMG/ZIP remains universal.

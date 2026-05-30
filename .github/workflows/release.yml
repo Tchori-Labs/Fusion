@@ -43,9 +43,9 @@ jobs:
           - os: macos-latest
             target: bun-darwin-arm64
             binary: fn-darwin-arm64
-          - os: macos-13
-            target: bun-darwin-x64
-            binary: fn-darwin-x64
+          # bun-darwin-x64 (Intel) dropped: macos-13 runners are scarce and
+          # blocked releases by sitting queued for hours. The CLI ships
+          # Apple-Silicon-only for macOS; desktop macOS DMG/ZIP is universal.
           - os: windows-latest
             target: bun-windows-x64
             binary: fn-windows-x64.exe
