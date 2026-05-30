@@ -447,14 +447,23 @@ export async function assertCleanBranchAtBase(
 
   if (candidateForeign.length === 0) return;
 
-  // FN-5475: a commit attributed to another task that's already reachable
-  // from local `main` was promoted through integration. Treat it as
-  // ancestral, not contamination. This closes the race where a sibling
-  // task's commit briefly sat at local-main's tip while a downstream
-  // worktree was created (cross-task tip absorption).
+  // FN-5475/FN-219: a commit attributed to another task that's already
+  // reachable from the integration target was promoted through integration.
+  // Treat it as ancestral, not contamination. Check both local `main` and
+  // `origin/main`: long-running dashboards can have stale local main while
+  // the remote-tracking branch already contains the promoted dependency, and
+  // using only local main produces false branch-cross-contamination loops.
+  const integratedRefs = ["main", "origin/main"];
   const foreignCommits: BranchCrossContaminationCommit[] = [];
   for (const commit of candidateForeign) {
-    if (await isAncestorOf(repoDir, commit.sha, "main")) continue;
+    let alreadyIntegrated = false;
+    for (const ref of integratedRefs) {
+      if (await isAncestorOf(repoDir, commit.sha, ref)) {
+        alreadyIntegrated = true;
+        break;
+      }
+    }
+    if (alreadyIntegrated) continue;
     foreignCommits.push(commit);
   }
 
