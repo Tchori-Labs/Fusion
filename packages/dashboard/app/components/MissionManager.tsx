@@ -3486,7 +3486,17 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
                           {/* Assertions Panel */}
                           <div className="mission-assertions">
                             <div className="mission-assertions__header">
-                              <span className="mission-assertions__title">Assertions</span>
+                              <span className="mission-assertions__title">Contract assertions (autopilot gate)</span>
+                              <span className="mission-assertions__mode-tag" data-testid="milestone-assertions-enforced-indicator">
+                                <span className="status-dot status-dot--running" />
+                                Enforced by autopilot
+                              </span>
+                              {milestoneRollup?.hasProseButNoAssertions && (
+                                <span className="mission-assertions__mode-tag mission-assertions__mode-tag--warning" data-testid="milestone-missing-structured-assertions-badge">
+                                  <span className="status-dot status-dot--pending" />
+                                  Prose criteria found; add contract assertions
+                                </span>
+                              )}
                               {milestoneRollup && (
                                 <span
                                   className="mission-status-badge mission-status-badge--sm"
@@ -3741,7 +3751,13 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
                                     // even when milestone.acceptanceCriteria is also populated (FN-4613/FN-4652).
                                     // If FN-4578/4579/4580 (or successors) change the model, update this.
                                     <div className="mission-assertions__list" data-testid="milestone-feature-acceptance-rollup">
-                                      <span className="mission-assertions__title">Completion criteria (from features)</span>
+                                      <div className="mission-assertions__rollup-header">
+                                        <span className="mission-assertions__title">Feature acceptance criteria (informational)</span>
+                                        <span className="mission-assertions__mode-tag mission-assertions__mode-tag--informational" data-testid="milestone-feature-acceptance-informational-indicator">
+                                          <span className="status-dot status-dot--pending" />
+                                          Not enforced by autopilot
+                                        </span>
+                                      </div>
                                       {featuresWithAcceptanceCriteria.map((feature) => (
                                         <div key={feature.id} className="mission-assertion">
                                           <span className="mission-assertion__title">{feature.title}</span>
@@ -3755,7 +3771,7 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
                                   ) : (
                                     !milestone.acceptanceCriteria?.trim() ? (
                                       <div className="mission-manager__empty mission-assertions__empty">
-                                        <span>No assertions defined. Add one to define completion criteria.</span>
+                                        <span>No contract assertions defined yet. Feature acceptance criteria are informational until assertions are added.</span>
                                       </div>
                                     ) : null
                                   )

@@ -143,6 +143,20 @@ export interface MissionAssertionBackfillReport {
   skippedErrors: MissionAssertionBackfillErrorRow[];
 }
 
+export interface MissionAssertionSeedInput {
+  featureId: string;
+  milestoneId: string;
+  title: string;
+  assertion: string;
+}
+
+export interface MissionAssertionSeedReport {
+  scanned: number;
+  created: number;
+  linked: number;
+  skippedExisting: number;
+}
+
 // ── Event Types ─────────────────────────────────────────────────────
 
 export interface MissionStoreEvents {
@@ -367,6 +381,7 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
   }
 
   private _eventSeq = 0;
+  private _milestonesMissingStructuredAssertions = new Set<string>();
 
   // ── Row-to-Object Converters ───────────────────────────────────────
 
@@ -1968,6 +1983,48 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
   }
 
   /**
+   * Idempotently seed authored contract assertions for specific features.
+   *
+   * Re-running this method is safe: existing equivalent feature-linked assertions are skipped.
+   */
+  seedContractAssertionsForFeatures(inputs: MissionAssertionSeedInput[]): MissionAssertionSeedReport {
+    let created = 0;
+    let linked = 0;
+    let skippedExisting = 0;
+
+    for (const input of inputs) {
+      const existingLinked = this.listAssertionsForFeature(input.featureId).find((assertion) =>
+        assertion.milestoneId === input.milestoneId
+        && assertion.title.trim() === input.title.trim()
+        && assertion.assertion.trim() === input.assertion.trim(),
+      );
+
+      if (existingLinked) {
+        skippedExisting += 1;
+        continue;
+      }
+
+      const createdAssertion = this.addContractAssertion(input.milestoneId, {
+        title: input.title,
+        assertion: input.assertion,
+        status: "pending",
+        sourceFeatureId: input.featureId,
+      });
+      created += 1;
+
+      this.linkFeatureToAssertion(input.featureId, createdAssertion.id);
+      linked += 1;
+    }
+
+    return {
+      scanned: inputs.length,
+      created,
+      linked,
+      skippedExisting,
+    };
+  }
+
+  /**
    * Backfill assertion links for legacy features that predate the FN-5695 creation-path fix.
    * Reuses deriveFeatureAssertion()/ensureFeatureAssertion text-source rules so create/update
    * and repair flows stay aligned on canonical assertion content.
@@ -3102,6 +3159,11 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
 
     const assertions = this.listContractAssertions(milestoneId);
     const totalAssertions = assertions.length;
+    const proseOnMilestone = (milestone.acceptanceCriteria ?? "").trim().length > 0;
+    const proseOnFeatures = this.listSlices(milestoneId)
+      .flatMap((slice) => this.listFeatures(slice.id))
+      .some((feature) => (feature.acceptanceCriteria ?? "").trim().length > 0);
+    const hasProseButNoAssertions = totalAssertions === 0 && (proseOnMilestone || proseOnFeatures);
 
     // Count by status
     let passedAssertions = 0;
@@ -3156,6 +3218,8 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
       state = "ready";
     }
 
+    this.reconcileMissingStructuredAssertionsSignal(milestone, hasProseButNoAssertions);
+
     return {
       milestoneId,
       totalAssertions,
@@ -3164,8 +3228,33 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
       blockedAssertions,
       pendingAssertions,
       unlinkedAssertions,
+      hasProseButNoAssertions,
       state,
     };
+  }
+
+  milestoneHasProseButNoAssertions(milestoneId: string): boolean {
+    return this.getMilestoneValidationRollup(milestoneId).hasProseButNoAssertions;
+  }
+
+  private reconcileMissingStructuredAssertionsSignal(milestone: Milestone, hasProseButNoAssertions: boolean): void {
+    if (hasProseButNoAssertions) {
+      // Debounce per process: emit on first transition into this condition so
+      // operators can detect regressions without flooding every recompute cycle.
+      if (!this._milestonesMissingStructuredAssertions.has(milestone.id)) {
+        const mission = this.getMission(milestone.missionId);
+        if (mission) {
+          this.logMissionEvent(mission.id, "warning", `Milestone ${milestone.id} has prose acceptance criteria but no structured assertions.`, {
+            code: "milestone_missing_structured_assertions",
+            milestoneId: milestone.id,
+          });
+        }
+      }
+      this._milestonesMissingStructuredAssertions.add(milestone.id);
+      return;
+    }
+
+    this._milestonesMissingStructuredAssertions.delete(milestone.id);
   }
 
   /**

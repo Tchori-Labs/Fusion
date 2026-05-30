@@ -173,6 +173,7 @@ const mockMilestoneValidationRollup = {
   blockedAssertions: 0,
   pendingAssertions: 0,
   unlinkedAssertions: 0,
+  hasProseButNoAssertions: false,
   state: "not_started" as const,
 };
 
@@ -236,6 +237,7 @@ const mockMilestoneValidationTelemetryWithRounds = {
     blockedAssertions: 0,
     pendingAssertions: 0,
     unlinkedAssertions: 0,
+    hasProseButNoAssertions: false,
     state: "failed" as const,
   },
 };
@@ -276,6 +278,7 @@ const mockBlockedMilestoneTelemetry = {
     blockedAssertions: 1,
     pendingAssertions: 0,
     unlinkedAssertions: 0,
+    hasProseButNoAssertions: false,
     state: "blocked" as const,
   },
 };
@@ -4635,7 +4638,7 @@ describe("MissionManager", () => {
   });
 
   describe("milestone assertions empty-state", () => {
-    const emptyAssertionsCopy = "No assertions defined. Add one to define completion criteria.";
+    const emptyAssertionsCopy = "No contract assertions defined yet. Feature acceptance criteria are informational until assertions are added.";
 
     it("keeps empty-state nudge when assertions and feature acceptance criteria are both missing", async () => {
       const missionDetail = JSON.parse(JSON.stringify(mockMissionDetail)) as typeof mockMissionDetail;
@@ -4698,7 +4701,15 @@ describe("MissionManager", () => {
         },
       ];
 
-      globalThis.fetch = createDetailFetchMockForMissionDetail(missionDetail);
+      const telemetryOverride = {
+        ...mockMilestoneValidationTelemetry,
+        rollup: {
+          ...mockMilestoneValidationRollup,
+          hasProseButNoAssertions: true,
+        },
+      };
+
+      globalThis.fetch = createDetailFetchMockForMissionDetail(missionDetail, telemetryOverride);
       render(<MissionManager isOpen={true} onClose={vi.fn()} addToast={vi.fn()} />);
 
       fireEvent.click(await screen.findByText("Build Auth System"));
@@ -4706,11 +4717,13 @@ describe("MissionManager", () => {
 
       expect(screen.queryByText(emptyAssertionsCopy)).not.toBeInTheDocument();
       const rollup = screen.getByTestId("milestone-feature-acceptance-rollup");
-      expect(within(rollup).getByText("Completion criteria (from features)")).toBeInTheDocument();
+      expect(within(rollup).getByText("Feature acceptance criteria (informational)")).toBeInTheDocument();
+      expect(within(rollup).getByTestId("milestone-feature-acceptance-informational-indicator")).toHaveTextContent("Not enforced by autopilot");
       expect(within(rollup).getByText("Session handling")).toBeInTheDocument();
       expect(within(rollup).getByText("Session refresh succeeds without logout", { exact: false })).toBeInTheDocument();
       expect(within(rollup).getByText("Token storage")).toBeInTheDocument();
       expect(within(rollup).getByText("Tokens remain encrypted at rest", { exact: false })).toBeInTheDocument();
+      expect(screen.getByTestId("milestone-missing-structured-assertions-badge")).toHaveTextContent("Prose criteria found; add contract assertions");
     });
 
     it("keeps structured assertions precedence and hides rollup when assertions exist", async () => {
@@ -4725,6 +4738,7 @@ describe("MissionManager", () => {
       await waitForDetailLoaded();
 
       expect(screen.getByText("Auth works")).toBeInTheDocument();
+      expect(screen.getByTestId("milestone-assertions-enforced-indicator")).toHaveTextContent("Enforced by autopilot");
       expect(screen.queryByTestId("milestone-feature-acceptance-rollup")).not.toBeInTheDocument();
     });
   });

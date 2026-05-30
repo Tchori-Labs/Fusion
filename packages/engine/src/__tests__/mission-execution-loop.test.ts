@@ -174,6 +174,13 @@ function createMockMissionStore() {
       features.set(id, updated);
       return updated;
     }),
+    updateFeature: vi.fn((id: string, updates: Partial<MissionFeature>) => {
+      const feature = features.get(id);
+      if (!feature) throw new Error(`Feature ${id} not found`);
+      const updated = { ...feature, ...updates, updatedAt: new Date().toISOString() };
+      features.set(id, updated);
+      return updated;
+    }),
     transitionLoopState: vi.fn((id: string, newState: MissionFeature["loopState"]) => {
       const feature = features.get(id);
       if (!feature) throw new Error(`Feature ${id} not found`);
@@ -507,6 +514,21 @@ describe("MissionExecutionLoop", () => {
         "validation:passed",
         expect.objectContaining({ featureId: "F-001" }),
       );
+      expect(missionStore.updateFeature).toHaveBeenCalledWith(
+        "F-001",
+        expect.objectContaining({ loopState: "passed", lastValidatorStatus: "passed" }),
+      );
+      expect(missionStore.logMissionEvent).toHaveBeenCalledWith(
+        expect.any(String),
+        "warning",
+        expect.stringContaining("auto-passed"),
+        expect.objectContaining({
+          code: "feature_auto_passed_no_assertions",
+          featureId: "F-001",
+          reason: "no_assertions_linked",
+          taskId: "FN-001",
+        }),
+      );
       expectNoValidationBoardTaskMutation(taskStore);
     });
 
@@ -818,6 +840,7 @@ describe("MissionExecutionLoop", () => {
         "passed",
         expect.any(String),
       );
+      expect(missionStore.updateFeature).not.toHaveBeenCalled();
       expectNoValidationBoardTaskMutation(taskStore);
     });
 

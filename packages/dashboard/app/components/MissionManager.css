@@ -1708,14 +1708,44 @@
   align-items: center;
   gap: var(--space-sm);
   margin-bottom: var(--space-sm);
+  flex-wrap: wrap;
 }
 
 .mission-assertions__title {
-  font-size: 13px;
+  font-size: calc(var(--space-sm) + var(--space-xs) * 0.75);
   font-weight: 600;
   color: var(--text-muted);
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: calc(var(--btn-border-width) * 2);
+}
+
+.mission-assertions__mode-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  font-size: calc(var(--space-sm) + var(--space-xs) * 0.5);
+  color: var(--text-dim);
+  background: color-mix(in srgb, var(--surface) 85%, var(--bg));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: calc(var(--space-xs) * 0.5) var(--space-sm);
+}
+
+.mission-assertions__mode-tag--warning {
+  color: var(--color-warning);
+  border-color: color-mix(in srgb, var(--color-warning) 40%, var(--border));
+}
+
+.mission-assertions__mode-tag--informational {
+  color: var(--text-muted);
+}
+
+.mission-assertions__rollup-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
 }
 
 .mission-assertions__list {
@@ -2742,8 +2772,12 @@
 
   /* Assertions coverage bar responsive */
   .mission-assertions__coverage-bar {
-    min-width: 30px;
-    max-width: 60px;
+    min-width: calc(var(--space-lg) * 2);
+    max-width: calc(var(--space-lg) * 4);
+  }
+
+  .mission-assertions__rollup-header {
+    align-items: flex-start;
   }
 
   /* Feature lineage and retry budget wrap on narrow screens */

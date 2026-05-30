@@ -214,7 +214,6 @@ export class MissionExecutionLoop extends EventEmitter {
                 feature.loopState === "implementing"
                 && feature.taskId
                 && feature.lastValidatorStatus !== "passed"
-                && this.missionStore.listAssertionsForFeature(feature.id).length > 0
               ) {
                 try {
                   const linkedTask = await this.taskStore.getTask(feature.taskId).catch(() => null);
@@ -801,6 +800,26 @@ ${taskContext ? `\n\nImplementation context:\n${taskContext}` : ""}`;
       const feature = this.missionStore.getFeature(featureId);
       if (feature && feature.status !== "done") {
         this.missionStore.updateFeatureStatus(featureId, "done");
+      }
+
+      if (!runId && feature) {
+        // Auto-pass path has no validator run, so we must advance the loop state directly.
+        if (feature.loopState !== "passed" || feature.lastValidatorStatus !== "passed") {
+          this.missionStore.updateFeature(featureId, {
+            loopState: "passed",
+            lastValidatorStatus: "passed",
+          });
+        }
+        this.logFeatureMissionEvent(
+          featureId,
+          "warning",
+          "feature_auto_passed_no_assertions",
+          `Feature ${featureId} auto-passed because no assertions were linked.`,
+          {
+            taskId: feature.taskId,
+            reason: "no_assertions_linked",
+          },
+        );
       }
 
       loopLog.log(`Feature ${featureId} passed validation`);

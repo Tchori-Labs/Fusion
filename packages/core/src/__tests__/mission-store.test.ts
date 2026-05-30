@@ -3032,6 +3032,49 @@ describe("MissionStore", () => {
       expect(events[events.length - 1].state).toBe("ready"); // linked but not passed
       expect(events[events.length - 1].rollup.unlinkedAssertions).toBe(0);
     });
+
+    it("flags rollup when milestone prose exists but no assertions are linked", () => {
+      const updatedMission = store.updateMission(mission.id, { status: "active" });
+      expect(updatedMission.status).toBe("active");
+      store.updateMilestone(milestone.id, { acceptanceCriteria: "Milestone prose" });
+
+      const warningEvents: Array<{ id: string; code: unknown }> = [];
+      store.on("mission:event", (event) => {
+        if (event.eventType === "warning") {
+          warningEvents.push({ id: event.id, code: event.metadata?.code });
+        }
+      });
+
+      const rollup = store.getMilestoneValidationRollup(milestone.id);
+      expect(rollup.hasProseButNoAssertions).toBe(true);
+      expect(store.milestoneHasProseButNoAssertions(milestone.id)).toBe(true);
+
+      const assertion = store.addContractAssertion(milestone.id, { title: "A1", assertion: "Temp" });
+      store.deleteContractAssertion(assertion.id);
+
+      expect(warningEvents.some((event) => event.code === "milestone_missing_structured_assertions")).toBe(true);
+    });
+
+    it("does not flag rollup when assertions exist", () => {
+      store.updateMilestone(milestone.id, { acceptanceCriteria: "Milestone prose" });
+      const assertion = store.addContractAssertion(milestone.id, { title: "A1", assertion: "Test" });
+      const slice = store.addSlice(milestone.id, { title: "Slice" });
+      const feature = store.addFeature(slice.id, { title: "Feature" });
+      store.linkFeatureToAssertion(feature.id, assertion.id);
+
+      const rollup = store.getMilestoneValidationRollup(milestone.id);
+      expect(rollup.hasProseButNoAssertions).toBe(false);
+      expect(store.milestoneHasProseButNoAssertions(milestone.id)).toBe(false);
+    });
+
+    it("does not flag rollup when neither milestone nor features have prose", () => {
+      const slice = store.addSlice(milestone.id, { title: "Slice" });
+      store.addFeature(slice.id, { title: "Feature" });
+
+      const rollup = store.getMilestoneValidationRollup(milestone.id);
+      expect(rollup.hasProseButNoAssertions).toBe(false);
+      expect(store.milestoneHasProseButNoAssertions(milestone.id)).toBe(false);
+    });
   });
 
   // ── buildEnrichedDescription with Assertions Tests ────────────────────
@@ -3146,6 +3189,44 @@ describe("MissionStore", () => {
       const assertionId = store.listAssertionsForFeature(feature.id)[0].id;
       store.deleteFeature(feature.id);
       expect(store.getContractAssertion(assertionId)).toBeUndefined();
+    });
+  });
+
+  describe("seedContractAssertionsForFeatures", () => {
+    it("seeds and links authored assertions idempotently", () => {
+      const mission = store.createMission({ title: "Seed mission" });
+      const milestone = store.addMilestone(mission.id, { title: "M1" });
+      const slice = store.addSlice(milestone.id, { title: "S1" });
+      const feature = store.addFeature(slice.id, { title: "F1", acceptanceCriteria: "AC" });
+
+      const beforeManaged = store.listAssertionsForFeature(feature.id).length;
+
+      const first = store.seedContractAssertionsForFeatures([
+        {
+          featureId: feature.id,
+          milestoneId: milestone.id,
+          title: "Authored assertion",
+          assertion: "Feature output is deterministic",
+        },
+      ]);
+
+      expect(first.created).toBe(1);
+      expect(first.linked).toBe(1);
+      expect(first.skippedExisting).toBe(0);
+
+      const second = store.seedContractAssertionsForFeatures([
+        {
+          featureId: feature.id,
+          milestoneId: milestone.id,
+          title: "Authored assertion",
+          assertion: "Feature output is deterministic",
+        },
+      ]);
+
+      expect(second.created).toBe(0);
+      expect(second.linked).toBe(0);
+      expect(second.skippedExisting).toBe(1);
+      expect(store.listAssertionsForFeature(feature.id).length).toBe(beforeManaged + 1);
     });
   });
 

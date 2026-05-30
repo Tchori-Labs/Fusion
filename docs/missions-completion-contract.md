@@ -6,6 +6,7 @@
 - **Task:** FN-5718
 - **Depends on enforcement behavior from:** FN-5715 (reference implementation of the trigger/recovery path)
 - **Scope:** Product contract and implementation requirements only (no code changes in this task)
+- **Implementation status:** Realized by FN-5733 (loop auto-pass advancement, mission/store guard telemetry, MissionManager label reconciliation)
 
 ## Problem
 
@@ -92,6 +93,11 @@ This keeps completion logic deterministic and consistent with FN-5715 trigger/re
 
 ## UI Reconciliation Requirements (for follow-on engineering task)
 
+✅ Implemented in FN-5733 with MissionManager labels:
+- `Contract assertions (autopilot gate)` + enforced indicator
+- `Feature acceptance criteria (informational)` + not-enforced indicator
+- warning badge when `hasProseButNoAssertions === true`
+
 Target surface: `packages/dashboard/app/components/MissionManager.tsx`
 
 1. **Disambiguate labels**
@@ -119,6 +125,11 @@ Target surface: `packages/dashboard/app/components/MissionManager.tsx`
    - No button touch-target/mobile-reflow requirements (standing directive).
 
 ## Engineering Acceptance Criteria (follow-on implementation)
+
+✅ Implemented in FN-5733:
+- Auto-pass path now advances `loopState` to `passed` and emits mission event code `feature_auto_passed_no_assertions` while preserving the `validation:passed` emit contract (`"No assertions linked"` summary).
+- Milestone rollup/store guard now exposes `hasProseButNoAssertions` and emits warning mission event code `milestone_missing_structured_assertions` (debounced on transition into condition).
+- MissionManager UI now distinguishes enforced assertion gate vs informational feature acceptance criteria.
 
 1. **Data/model contract**
    - Preserve the canonical relationship: feature-authored criteria -> store-managed assertion -> linked assertion enforcement.

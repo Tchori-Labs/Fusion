@@ -133,6 +133,7 @@ export interface MilestoneValidationRollup {
   blockedAssertions: number;
   pendingAssertions: number;
   unlinkedAssertions: number;
+  hasProseButNoAssertions: boolean;
   state: MilestoneValidationState;
 }
 

@@ -615,6 +615,8 @@ export interface MilestoneValidationRollup {
   pendingAssertions: number;
   /** Number of assertions not linked to any feature */
   unlinkedAssertions: number;
+  /** True when milestone/feature prose criteria exist but no structured assertions are linked */
+  hasProseButNoAssertions: boolean;
   /** The computed validation state */
   state: MilestoneValidationState;
 }

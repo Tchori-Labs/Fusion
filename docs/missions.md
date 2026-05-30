@@ -396,6 +396,8 @@ A feature transitions to `blocked` when:
 
 On engine restart, `recoverActiveMissions()` re-enqueues features in `validating` or `needs_fix` states from the `activeValidations` set, ensuring no validation work is lost. It also re-triggers `implementing` features whose linked task is already `done`/`archived` and whose assertion validation has not passed yet.
 
+For features with zero linked assertions, the completion path is explicit: the loop marks the feature `done`, advances `loopState` to `passed`, emits `validation:passed` with summary `"No assertions linked"`, and records mission event code `feature_auto_passed_no_assertions`.
+
 ### Autopilot / Scheduler Interplay
 
 The scheduler and autopilot collaborate through a carefully ordered call sequence:
@@ -425,6 +427,8 @@ These are independent tracking mechanisms — autopilot monitors mission progres
 **MissionEvent audit types:**
 - `slice_activated`, `feature_planned`, `feature_completed`
 - `validation:started`, `validation:passed`, `validation:failed`, `validation:blocked`
+- `feature_auto_passed_no_assertions` (reason: `no_assertions_linked`)
+- `milestone_missing_structured_assertions` (warning when prose criteria exist with zero structured assertions)
 - `fix_feature:created`, `feature:blocked`
 
 **Validator run telemetry:**

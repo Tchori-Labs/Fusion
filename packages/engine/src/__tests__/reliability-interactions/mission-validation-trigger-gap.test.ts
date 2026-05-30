@@ -148,4 +148,45 @@ describe("FN-5715 reliability: mission validation trigger gap", () => {
     expect(processSpy).not.toHaveBeenCalled();
     loop.stop();
   });
+
+  it("recovery replays implementing done tasks with zero assertions and advances loop state", async () => {
+    const feature = makeFeature({ status: "done", lastValidatorStatus: undefined, loopState: "implementing" });
+    const missionStore = {
+      listMissions: vi.fn(() => [{ id: "M-001", status: "active" }]),
+      getMissionWithHierarchy: vi.fn(() => ({
+        id: "M-001",
+        status: "active",
+        milestones: [{ status: "active", slices: [{ status: "active", features: [feature] }] }],
+      })),
+      getFeatureByTaskId: vi.fn(() => feature),
+      getFeature: vi.fn(() => feature),
+      updateFeatureStatus: vi.fn(),
+      updateFeature: vi.fn(),
+      listAssertionsForFeature: vi.fn(() => []),
+      getSlice: vi.fn(() => ({ id: "SL-001", milestoneId: "MS-001", status: "active" })),
+      getMilestone: vi.fn(() => ({ id: "MS-001", missionId: "M-001" })),
+      logMissionEvent: vi.fn(),
+      transitionLoopState: vi.fn(),
+    };
+    const taskStore = {
+      getTask: vi.fn(async () => ({ id: "FN-001", column: "done", status: "done" })),
+      on: vi.fn(),
+      off: vi.fn(),
+    };
+
+    const loop = new MissionExecutionLoop({
+      missionStore: missionStore as any,
+      taskStore: taskStore as any,
+      rootDir: process.cwd(),
+    });
+    loop.start();
+
+    await loop.recoverActiveMissions();
+
+    expect(missionStore.updateFeature).toHaveBeenCalledWith(
+      "F-001",
+      expect.objectContaining({ loopState: "passed", lastValidatorStatus: "passed" }),
+    );
+    loop.stop();
+  });
 });
