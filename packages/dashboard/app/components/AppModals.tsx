@@ -24,6 +24,7 @@ import { WorkflowStepManager } from "./WorkflowStepManager";
 import { AgentListModal } from "./AgentListModal";
 import { ModelOnboardingModal } from "./ModelOnboardingModal";
 import { ToastContainer } from "./ToastContainer";
+import { useNavigationHistoryContext } from "../hooks/useNavigationHistory";
 
 const SetupWizardModal = lazy(() => import("./SetupWizardModal").then((m) => ({ default: m.SetupWizardModal })));
 const SettingsModal = lazy(() => import("./SettingsModal").then((m) => ({ default: m.SettingsModal })));
@@ -104,6 +105,7 @@ export function AppModals({
   onReopenOnboarding,
   onOpenApprovals,
 }: AppModalsProps) {
+  const { pushNav } = useNavigationHistoryContext();
   const [firstCreatedTask, setFirstCreatedTask] = useState<Task | null>(null);
   const detailTask = modalManager.detailTask
     ? (() => {
@@ -136,11 +138,22 @@ export function AppModals({
     modalManager.openGitHubImport();
   }, [modalManager]);
 
+  const openDetailTaskWithNav = useCallback(
+    (
+      task: Parameters<typeof modalManager.openDetailTask>[0],
+      tab?: Parameters<typeof modalManager.openDetailTask>[1],
+    ) => {
+      modalManager.openDetailTask(task, tab);
+      pushNav({ type: "modal", close: modalManager.closeDetailTask });
+    },
+    [modalManager, pushNav],
+  );
+
   const handleOnboardingViewTask = useCallback((task: Task) => {
     setFirstCreatedTask(null);
     modalManager.closeModelOnboarding();
-    modalManager.openDetailTask(task);
-  }, [modalManager]);
+    openDetailTaskWithNav(task);
+  }, [modalManager, openDetailTaskWithNav]);
 
   const handleModalCreateWithOnboardingTracking = useCallback(
     async (input: TaskCreateInput): Promise<Task> => {
@@ -172,7 +185,7 @@ export function AppModals({
             projectId={projectId}
             tasks={tasks}
             onClose={deepLink.handleDetailClose}
-            onOpenDetail={modalManager.openDetailTask}
+            onOpenDetail={openDetailTaskWithNav}
             mobileHeaderMode={modalManager.detailTaskOrigin === "list-mobile" ? "back" : "close"}
             onMoveTask={taskOperations.moveTask}
             onDeleteTask={taskOperations.deleteTask}
@@ -320,7 +333,7 @@ export function AppModals({
         onOpenTaskDetail={(taskId) => {
           const task = tasks.find((candidate) => candidate.id === taskId);
           if (task) {
-            modalManager.openDetailTask(task);
+            openDetailTaskWithNav(task);
           }
         }}
       />

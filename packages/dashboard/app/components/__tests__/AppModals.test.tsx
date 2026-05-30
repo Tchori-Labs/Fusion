@@ -1,6 +1,8 @@
+import type { ReactElement, ReactNode } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render as rtlRender, screen, waitFor, type RenderOptions } from "@testing-library/react";
 import { AppModals } from "../AppModals";
+import { NavigationHistoryProvider, useNavigationHistory } from "../../hooks/useNavigationHistory";
 import type { ModalManager } from "../../hooks/useModalManager";
 import type { Toast } from "../../hooks/useToast";
 
@@ -9,7 +11,11 @@ const mockTaskDetailModalProps = vi.fn();
 vi.mock("../TaskDetailModal", () => ({
   TaskDetailModal: (props: any) => {
     mockTaskDetailModalProps(props);
-    return null;
+    return (
+      <button data-testid="task-detail-open-detail" onClick={() => props.onOpenDetail?.({ id: "FN-2", title: "Nested" })}>
+        open detail
+      </button>
+    );
   },
 }));
 
@@ -78,8 +84,16 @@ vi.mock("../SystemStatsModal", () => ({
   },
 }));
 
+const mockActivityLogModalProps = vi.fn();
 vi.mock("../ActivityLogModal", () => ({
-  ActivityLogModal: () => null,
+  ActivityLogModal: (props: any) => {
+    mockActivityLogModalProps(props);
+    return (
+      <button data-testid="activity-log-open-task" onClick={() => props.onOpenTaskDetail?.("FN-1")}>
+        open task detail
+      </button>
+    );
+  },
 }));
 
 vi.mock("../GitManagerModal", () => ({
@@ -102,7 +116,11 @@ const mockModelOnboardingModalProps = vi.fn();
 vi.mock("../ModelOnboardingModal", () => ({
   ModelOnboardingModal: (props: any) => {
     mockModelOnboardingModalProps(props);
-    return null;
+    return (
+      <button data-testid="onboarding-view-task" onClick={() => props.onViewTask?.({ id: "FN-1", title: "Created task" })}>
+        view task
+      </button>
+    );
   },
 }));
 
@@ -134,6 +152,15 @@ vi.mock("@fusion/core", () => ({}));
 vi.mock("../ErrorBoundary", () => ({
   ModalErrorBoundary: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
+
+function NavigationWrapper({ children }: { children: ReactNode }) {
+  const history = useNavigationHistory({ enabled: true });
+  return <NavigationHistoryProvider value={history}>{children}</NavigationHistoryProvider>;
+}
+
+function render(ui: ReactElement, options?: Omit<RenderOptions, "wrapper">) {
+  return rtlRender(ui, { wrapper: NavigationWrapper, ...options });
+}
 
 describe("AppModals", () => {
   const mockModalManager: ModalManager = {
@@ -234,6 +261,7 @@ describe("AppModals", () => {
     mockTaskDetailModalProps.mockClear();
     mockScheduledTasksModalProps.mockClear();
     mockModelOnboardingModalProps.mockClear();
+    mockActivityLogModalProps.mockClear();
     mockSettingsModalProps.mockClear();
     mockSystemStatsModalProps.mockClear();
     mockTodoModalProps.mockClear();
@@ -541,6 +569,71 @@ describe("AppModals", () => {
           projectId: "proj-system",
         }),
       );
+    });
+  });
+
+  describe("task detail history wiring", () => {
+    const commonProps = {
+      projectId: "proj-1",
+      tasks: [{ id: "FN-1", title: "Task one" }],
+      projects: [],
+      currentProject: null,
+      addToast: vi.fn(),
+      toasts: mockToasts,
+      removeToast: vi.fn(),
+      projectActions: { handleAddProject: vi.fn(), handleSetupComplete: vi.fn(), handleModelOnboardingComplete: vi.fn() },
+      taskHandlers: { handleModalCreate: vi.fn(), handlePlanningTaskCreated: vi.fn(), handlePlanningTasksCreated: vi.fn(), handleSubtaskTasksCreated: vi.fn(), handleGitHubImport: vi.fn() },
+      taskOperations: { moveTask: vi.fn(), deleteTask: vi.fn(), mergeTask: vi.fn(), retryTask: vi.fn(), duplicateTask: vi.fn() },
+      deepLink: { handleDetailClose: vi.fn() },
+      settings: mockSettings,
+    };
+
+    it("pushes history for activity-log open and closes on popstate", async () => {
+      const pushStateSpy = vi.spyOn(window.history, "pushState");
+      const closeDetailTask = vi.fn();
+      render(
+        <AppModals
+          {...commonProps}
+          modalManager={{ ...mockModalManager, activityLogOpen: true, closeDetailTask }}
+        />,
+      );
+
+      fireEvent.click(screen.getByTestId("activity-log-open-task"));
+      expect(pushStateSpy).toHaveBeenCalled();
+
+      window.dispatchEvent(new PopStateEvent("popstate", { state: { navIndex: 0 } }));
+      await waitFor(() => expect(closeDetailTask).toHaveBeenCalledTimes(1));
+    });
+
+    it("pushes history for onboarding view-task open and closes on popstate", async () => {
+      const pushStateSpy = vi.spyOn(window.history, "pushState");
+      const closeDetailTask = vi.fn();
+      render(
+        <AppModals
+          {...commonProps}
+          modalManager={{ ...mockModalManager, modelOnboardingOpen: true, closeDetailTask }}
+        />,
+      );
+
+      fireEvent.click(screen.getByTestId("onboarding-view-task"));
+      expect(pushStateSpy).toHaveBeenCalled();
+
+      window.dispatchEvent(new PopStateEvent("popstate", { state: { navIndex: 0 } }));
+      await waitFor(() => expect(closeDetailTask).toHaveBeenCalledTimes(1));
+    });
+
+    it("pushes an additional history entry for task-to-task detail navigation", () => {
+      const pushStateSpy = vi.spyOn(window.history, "pushState");
+      render(
+        <AppModals
+          {...commonProps}
+          modalManager={{ ...mockModalManager, detailTask: { id: "FN-1", title: "Task one" } }}
+        />,
+      );
+
+      fireEvent.click(screen.getByTestId("task-detail-open-detail"));
+      expect(pushStateSpy).toHaveBeenCalledTimes(1);
+      expect(mockModalManager.openDetailTask).toHaveBeenCalledWith({ id: "FN-2", title: "Nested" }, undefined);
     });
   });
 });

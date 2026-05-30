@@ -9,6 +9,7 @@ The Fusion dashboard is the main control plane for tasks, agents, missions, sett
 The dashboard now handles browser back navigation consistently on desktop and mobile.
 Using Back will first dismiss open modals and then step back through in-app view changes (for example, task detail → board) before leaving the app.
 This behavior used to be mobile-only, and now applies across all viewports.
+Task Detail modal opens from onboarding, activity log, and task-to-task navigation now all register navigation history entries, so Android back swipe/button dismisses them consistently.
 
 ## Deep Links
 
