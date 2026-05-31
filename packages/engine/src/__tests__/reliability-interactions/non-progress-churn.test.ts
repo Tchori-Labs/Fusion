@@ -189,7 +189,7 @@ describe("reliability interactions: non-progress churn", () => {
     manager.stop();
   });
 
-  it("parks incomplete STUCK_LOOP_EXHAUSTED tasks in todo when the churn signal does not fire", async () => {
+  it("re-queues incomplete STUCK_LOOP_EXHAUSTED tasks in todo when the churn signal does not fire", async () => {
     const task = baseTask({ id: "FN-5168-LOOP", stuckKillCount: 6 });
     const store = createStore(task);
     const manager = new SelfHealingManager(store, { rootDir: "/tmp/repo" });
@@ -210,11 +210,11 @@ describe("reliability interactions: non-progress churn", () => {
     await detector.killAndRetry(task.id, 60_000);
 
     expect(task.error).toBeNull();
-    expect(task.status).toBeNull();
+    expect(task.status).toBe("queued");
     expect(task.column).toBe("todo");
-    expect(task.paused).toBe(true);
-    expect(task.userPaused).toBe(true);
-    expect(task.pausedReason).toBe("stuck-loop-exhausted-incomplete-steps");
+    expect(task.paused).toBe(false);
+    expect(task.userPaused).toBe(false);
+    expect(task.pausedReason).toBeNull();
     expect(task.stuckKillCount).toBe(7);
     expect(task.steps).toEqual([{ name: "Implement", status: "in-progress" }]);
     expect(task.log?.some((entry) => entry.action.includes("incomplete task exhausted stuck kill budget"))).toBe(true);

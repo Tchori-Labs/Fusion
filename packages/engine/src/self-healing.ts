@@ -1072,33 +1072,35 @@ export class SelfHealingManager {
         const hasIncompleteSteps = !!task.steps?.some((step) => NON_TERMINAL_STEP_STATUSES.has(step.status));
 
         if (hasIncompleteSteps) {
-          log.warn(`${taskId} exceeded stuck kill budget (${newCount}/${maxKills}, reason=${reason}) with incomplete steps — parking in todo`);
+          log.warn(`${taskId} exceeded stuck kill budget (${newCount}/${maxKills}, reason=${reason}) with incomplete steps — re-queueing in todo with progress preserved`);
           await this.store.updateTask(taskId, {
             stuckKillCount: newCount,
-            paused: true,
-            userPaused: true,
-            pausedReason: "stuck-loop-exhausted-incomplete-steps",
-          } as Partial<Task> & { userPaused: boolean });
+            paused: false,
+            userPaused: false,
+            pausedReason: null,
+            status: "queued",
+          } as unknown as Partial<Task> & { userPaused: boolean });
           let parkedInTodo = true;
           let moveErrMessage = "";
           try {
             await this.store.moveTask(taskId, "todo", { preserveProgress: true });
             await this.store.updateTask(taskId, {
               stuckKillCount: newCount,
-              paused: true,
-              userPaused: true,
-              pausedReason: "stuck-loop-exhausted-incomplete-steps",
-            } as Partial<Task> & { userPaused: boolean });
+              paused: false,
+              userPaused: false,
+              pausedReason: null,
+              status: "queued",
+            } as unknown as Partial<Task> & { userPaused: boolean });
           } catch (moveErr: unknown) {
             parkedInTodo = false;
             moveErrMessage = moveErr instanceof Error ? moveErr.message : String(moveErr);
-            log.warn(`${taskId} moveTask(todo) failed (${moveErrMessage}) after incomplete STUCK_LOOP_EXHAUSTED terminalization — task remains paused for manual intervention`);
+            log.warn(`${taskId} moveTask(todo) failed (${moveErrMessage}) after incomplete STUCK_LOOP_EXHAUSTED terminalization — task remains queued for scheduler retry`);
           }
           await this.store.logEntry(
             taskId,
             parkedInTodo
-              ? `STUCK_LOOP_EXHAUSTED: incomplete task exhausted stuck kill budget (${newCount}/${maxKills}), last reason=${reason}. Parked in todo with progress preserved; manual review/resume required before retry.`
-              : `STUCK_LOOP_EXHAUSTED: incomplete task exhausted stuck kill budget (${newCount}/${maxKills}), last reason=${reason}. Failed to move task to todo (${moveErrMessage}); task remains paused for manual intervention.`,
+              ? `STUCK_LOOP_EXHAUSTED: incomplete task exhausted stuck kill budget (${newCount}/${maxKills}), last reason=${reason}. Re-queued in todo with progress preserved; scheduler may retry without manual unpause.`
+              : `STUCK_LOOP_EXHAUSTED: incomplete task exhausted stuck kill budget (${newCount}/${maxKills}), last reason=${reason}. Failed to move task to todo (${moveErrMessage}); task remains unpaused for scheduler retry.`,
           );
           return false;
         }
