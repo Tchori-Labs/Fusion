@@ -5,6 +5,7 @@ import {
   getBranchSelectionMode,
   resolveBranchAssignmentContext,
   resolveBranchSelection,
+  resolveEntryPointBranchAssignment,
 } from "../routes/branch-selection.js";
 
 describe("branch-selection", () => {
@@ -45,5 +46,16 @@ describe("branch-selection", () => {
   it("reads requested branch mode", () => {
     expect(getBranchSelectionMode(undefined)).toBeUndefined();
     expect(getBranchSelectionMode({ mode: "auto-new" })).toBe("auto-new");
+  });
+
+  it("re-exports entry-point branch assignment helper", () => {
+    expect(resolveEntryPointBranchAssignment({
+      assignmentMode: "shared",
+      resolvedBranch: "feature/planning",
+      taskSegment: "FN-123 add parser",
+    })).toEqual({
+      workingBranch: "feature/planning/fn-123-add-parser",
+      mergeTargetBranch: "feature/planning",
+    });
   });
 });

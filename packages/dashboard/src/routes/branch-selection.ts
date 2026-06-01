@@ -1,4 +1,24 @@
+import {
+  deriveAutoTaskBranchName,
+  derivePerTaskBranchName,
+  resolveEntryPointBranchAssignment,
+  sanitizeBranchSegment,
+} from "@fusion/core";
+import type {
+  EntryPointAssignmentMode,
+  EntryPointBranchAssignment,
+  EntryPointBranchAssignmentInput,
+} from "@fusion/core";
 import { badRequest } from "../api-error.js";
+
+export {
+  resolveEntryPointBranchAssignment,
+};
+export type {
+  EntryPointAssignmentMode,
+  EntryPointBranchAssignment,
+  EntryPointBranchAssignmentInput,
+};
 
 export type BranchSelectionMode =
   | "project-default"
@@ -113,26 +133,15 @@ export function resolveBranchAssignmentContext(input: unknown): ResolvedBranchAs
   };
 }
 
-function sanitizeSegment(input: string): string {
-  return input
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9._/-]+/g, "-")
-    .replace(/-{2,}/g, "-")
-    .replace(/^[-/.]+|[-/.]+$/g, "")
-    .slice(0, 48);
+export function sanitizeSegment(input: string): string {
+  return sanitizeBranchSegment(input);
 }
 
 export function deriveAutoTaskBranch(taskId: string, shortName: string): string {
-  const base = `fusion/${taskId.toLowerCase()}`;
-  const segment = sanitizeSegment(shortName ?? "");
-  return segment ? `${base}-${segment}` : base;
+  return deriveAutoTaskBranchName(taskId, shortName);
 }
 
 export function derivePerTaskBranch(sharedBranch: string | undefined, taskSegment: string): string | undefined {
   const base = normalizeOptionalBranch(sharedBranch, "sharedBranch");
-  if (!base) return undefined;
-  const segment = sanitizeSegment(taskSegment);
-  if (!segment) return base;
-  return `${base}/${segment}`;
+  return derivePerTaskBranchName(base, taskSegment);
 }
