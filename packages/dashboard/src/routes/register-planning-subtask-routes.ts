@@ -10,7 +10,7 @@ import { ApiError, badRequest, conflict, notFound, rateLimited } from "../api-er
 import { writeSSEEvent, type SessionBufferedEvent } from "../sse-buffer.js";
 import type { AiSessionStore } from "../ai-session-store.js";
 import type { ApiRoutesContext } from "./types.js";
-import { derivePerTaskBranch, resolveBranchAssignmentContext, resolveBranchSelection } from "./branch-selection.js";
+import { resolveBranchAssignmentContext, resolveBranchSelection, resolveEntryPointBranchAssignment } from "./branch-selection.js";
 
 interface PlanningSubtaskRouteDeps {
   store: TaskStore;
@@ -239,9 +239,11 @@ export function registerPlanningSubtaskRoutes(ctx: ApiRoutesContext, deps: Plann
           throw badRequest("Each subtask must include tempId and title");
         }
 
-        const taskBranch = branchMode === "per-task-derived"
-          ? derivePerTaskBranch(resolvedBranch, item.title || item.tempId)
-          : resolvedBranch;
+        const { workingBranch: taskBranch } = resolveEntryPointBranchAssignment({
+          assignmentMode: branchMode,
+          resolvedBranch,
+          taskSegment: item.title || item.tempId,
+        });
 
         const task = await scopedStore.createTask({
           title: item.title.trim(),
@@ -1294,9 +1296,11 @@ export function registerPlanningSubtaskRoutes(ctx: ApiRoutesContext, deps: Plann
       const tempIdToTaskId = new Map<string, string>();
 
       for (const item of mergedSubtasks) {
-        const taskBranch = branchMode === "per-task-derived"
-          ? derivePerTaskBranch(resolvedBranch, item.title || item.id)
-          : resolvedBranch;
+        const { workingBranch: taskBranch } = resolveEntryPointBranchAssignment({
+          assignmentMode: branchMode,
+          resolvedBranch,
+          taskSegment: item.title || item.id,
+        });
 
         const task = await scopedStore.createTask({
           title: item.title.trim(),

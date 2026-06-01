@@ -2204,7 +2204,7 @@ describe("POST /subtasks/*", () => {
 
     expect(createRes.status).toBe(201);
     expect(store.createTask).toHaveBeenCalledWith(expect.objectContaining({
-      branch: "feature/planning",
+      branch: "feature/planning/first",
       baseBranch: "main",
       branchContext: {
         groupId: `planning:${start.body.sessionId}`,

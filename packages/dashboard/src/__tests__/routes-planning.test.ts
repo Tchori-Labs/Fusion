@@ -2257,14 +2257,32 @@ describe("Planning Mode Routes", () => {
           expect.objectContaining({ branchName: "feature/auth-slice", autoMerge: false }),
         );
         expect(store.getBranchGroupBySource).toHaveBeenCalledWith("planning", planningSessionId);
-        expect(store.createTask).toHaveBeenNthCalledWith(
-          1,
-          expect.objectContaining({ branch: "feature/auth-slice", baseBranch: "main" }),
-        );
-        expect(store.createTask).toHaveBeenNthCalledWith(
-          2,
-          expect.objectContaining({ branch: "feature/auth-slice", baseBranch: "main" }),
-        );
+        const firstCreateCall = (store.createTask as ReturnType<typeof vi.fn>).mock.calls[0]?.[0];
+        const secondCreateCall = (store.createTask as ReturnType<typeof vi.fn>).mock.calls[1]?.[0];
+
+        expect(firstCreateCall).toMatchObject({
+          branch: "feature/auth-slice/auth-backend",
+          baseBranch: "main",
+          branchContext: {
+            groupId: `planning:${planningSessionId}`,
+            source: "planning",
+            assignmentMode: "shared",
+            inheritedBaseBranch: "main",
+          },
+        });
+        expect(secondCreateCall).toMatchObject({
+          branch: "feature/auth-slice/auth-ui",
+          baseBranch: "main",
+          branchContext: {
+            groupId: `planning:${planningSessionId}`,
+            source: "planning",
+            assignmentMode: "shared",
+            inheritedBaseBranch: "main",
+          },
+        });
+        expect(firstCreateCall?.branch).not.toBe("feature/auth-slice");
+        expect(secondCreateCall?.branch).not.toBe("feature/auth-slice");
+        expect(firstCreateCall?.branch).not.toBe(secondCreateCall?.branch);
       });
 
       it("ensures shared branch groups when creating subtask breakdown tasks", async () => {
@@ -2319,6 +2337,23 @@ describe("Planning Mode Routes", () => {
           expect.objectContaining({ branchName: "feature/auth-breakdown", autoMerge: false }),
         );
         expect(store.getBranchGroupBySource).toHaveBeenCalledWith("planning", sessionId);
+        const firstCreateCall = (store.createTask as ReturnType<typeof vi.fn>).mock.calls[0]?.[0];
+        const secondCreateCall = (store.createTask as ReturnType<typeof vi.fn>).mock.calls[1]?.[0];
+        expect(firstCreateCall?.branch).toBe("feature/auth-breakdown/auth-backend");
+        expect(secondCreateCall?.branch).toBe("feature/auth-breakdown/auth-ui");
+        expect(firstCreateCall?.branch).not.toBe("feature/auth-breakdown");
+        expect(secondCreateCall?.branch).not.toBe("feature/auth-breakdown");
+        expect(firstCreateCall?.branch).not.toBe(secondCreateCall?.branch);
+        expect(firstCreateCall?.branchContext).toMatchObject({
+          groupId: `planning:${sessionId}`,
+          source: "planning",
+          assignmentMode: "shared",
+        });
+        expect(secondCreateCall?.branchContext).toMatchObject({
+          groupId: `planning:${sessionId}`,
+          source: "planning",
+          assignmentMode: "shared",
+        });
       });
 
       it("prefers session autoMerge override when creating shared planning subtasks", async () => {

@@ -731,8 +731,8 @@ export function SubtaskBreakdownModal({ isOpen, onClose, initialDescription, onT
                     <div className="form-group">
                       <label>Planning branch mode</label>
                       <select value={branchAssignmentMode} onChange={(event) => setBranchAssignmentMode(event.target.value as typeof branchAssignmentMode)} disabled={view.type === "creating"}>
-                        <option value="shared">Shared branch for all subtasks</option>
-                        <option value="per-task-derived">Per-task branch derived from planning branch</option>
+                        <option value="shared">Shared merge target — subtasks run on their own branches</option>
+                        <option value="per-task-derived">Per-task branches derived from planning branch</option>
                       </select>
                     </div>
                   </div>
