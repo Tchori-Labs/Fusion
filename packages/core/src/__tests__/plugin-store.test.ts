@@ -663,6 +663,40 @@ describe("PluginStore", () => {
       ).rejects.toThrow("Invalid state transition");
     });
 
+    it("treats same-state transitions as no-op", async () => {
+      const manifest = makeManifest();
+      await store.registerPlugin({ manifest, path: "/path/to/plugin" });
+      await store.updatePluginState("test-plugin", "started");
+
+      await expect(store.updatePluginState("test-plugin", "started")).resolves.toMatchObject({
+        id: "test-plugin",
+        state: "started",
+      });
+    });
+
+    it("does not emit plugin:stateChanged for same-state transitions", async () => {
+      const stateChanged = vi.fn();
+      store.on("plugin:stateChanged", stateChanged);
+
+      const manifest = makeManifest();
+      await store.registerPlugin({ manifest, path: "/path/to/plugin" });
+      await store.updatePluginState("test-plugin", "started");
+      expect(stateChanged).toHaveBeenCalledTimes(1);
+
+      await store.updatePluginState("test-plugin", "started");
+      expect(stateChanged).toHaveBeenCalledTimes(1);
+    });
+
+    it("updates error on same-state transition when error payload is provided", async () => {
+      const manifest = makeManifest();
+      await store.registerPlugin({ manifest, path: "/path/to/plugin" });
+      await store.updatePluginState("test-plugin", "started");
+
+      const plugin = await store.updatePluginState("test-plugin", "started", "Recovered warning");
+      expect(plugin.state).toBe("started");
+      expect(plugin.error).toBe("Recovered warning");
+    });
+
     it("allows restarting from stopped", async () => {
       const manifest = makeManifest();
       await store.registerPlugin({ manifest, path: "/path/to/plugin" });

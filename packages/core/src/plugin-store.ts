@@ -487,6 +487,21 @@ export class PluginStore extends EventEmitter<PluginStoreEvents> {
       throw new Error(`Invalid state: ${state}`);
     }
 
+    if (state === oldState) {
+      // Same-state transitions are idempotent by design. Only emit plugin:updated
+      // when a provided error payload actually changes persisted plugin fields.
+      if (error === undefined || plugin.error === error) {
+        return plugin;
+      }
+
+      this.upsertProjectState(id, { state, error });
+      this.centralDb.bumpLastModified();
+
+      const updated = await this.getPlugin(id);
+      this.emit("plugin:updated", updated);
+      return updated;
+    }
+
     if (state !== "error") {
       const validTransitions: Record<PluginState, PluginState[]> = {
         installed: ["started", "stopped", "error"],
