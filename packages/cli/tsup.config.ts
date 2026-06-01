@@ -126,12 +126,14 @@ async function bundlePluginEntry({ pluginId, srcDir, destDir, withMcpAsset = fal
   console.log(`Bundled plugin ${pluginId} to dist/plugins/${pluginId}/bundled.js`);
 }
 
-export default defineConfig({
+const pluginSdkEntry = join(__dirname, "..", "plugin-sdk", "src", "index.ts");
+
+const cliBuildConfig = {
   entry: ["src/bin.ts", "src/extension.ts"],
   format: ["esm"],
   platform: "node",
   target: "node22",
-  esbuildOptions(options) {
+  esbuildOptions(options: { conditions?: string[] }) {
     options.conditions = [...(options.conditions || []), "source"];
   },
   noExternal: [/^@fusion\//, /^@fusion-plugin-examples\//],
@@ -146,7 +148,9 @@ export default defineConfig({
     "cpu-features",
   ],
   splitting: false,
-  clean: true,
+  // Keep clean disabled so the dedicated plugin-sdk tsup config can emit into
+  // dist/plugin-sdk without being wiped between config executions.
+  clean: false,
   removeNodeProtocol: false,
   banner: {
     js: 'import { createRequire as __createRequire } from "node:module"; const require = __createRequire(import.meta.url);',
@@ -293,4 +297,23 @@ export default defineConfig({
       `WARNING: Dashboard client assets not found at ${dashboardClientSrc}. Generated minimal stub at ${join(dashboardClientDest, "index.html")}.`,
     );
   },
-});
+};
+
+const pluginSdkBuildConfig = {
+  entry: { "plugin-sdk/index": pluginSdkEntry },
+  format: ["esm"],
+  platform: "node",
+  target: "node22",
+  tsconfig: join(__dirname, "..", "plugin-sdk", "tsconfig.json"),
+  dts: {
+    resolve: true,
+    compilerOptions: {
+      rootDir: join(__dirname, ".."),
+    },
+  },
+  noExternal: [/^@fusion\//],
+  clean: false,
+  outDir: "dist",
+};
+
+export default defineConfig([cliBuildConfig, pluginSdkBuildConfig]);

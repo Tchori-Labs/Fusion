@@ -1494,6 +1494,8 @@ The pi extension ships as part of `@runfusion/fusion` and provides tools + a `/f
 
 The extension has no skills — tool descriptions give the LLM everything it needs.
 
+Published SDK surface: `@runfusion/fusion/plugin-sdk` now ships as a public subpath export from the CLI package, exposing `definePlugin`, `validatePluginManifest`, and the plugin type surface for external plugin authors without depending on private `@fusion/*` workspace packages.
+
 ### `fn_web_fetch`
 
 Lightweight URL read from agent/chat sessions. HTTP GET, follows redirects, extracts readable text (HTML→text and JSON pretty-print), bounded.
