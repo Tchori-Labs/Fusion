@@ -111,6 +111,13 @@ export function MessageComposer({
     setToType("agent");
   }, []);
 
+  const scrollTextareaIntoView = useCallback(() => {
+    if (typeof textareaRef.current?.scrollIntoView !== "function") {
+      return;
+    }
+    textareaRef.current.scrollIntoView({ block: "center", behavior: "auto" });
+  }, []);
+
   useEffect(() => {
     if (!replyContext) {
       return;
@@ -120,19 +127,15 @@ export function MessageComposer({
   }, [replyContext]);
 
   useEffect(() => {
-    if (!replyContext || typeof window === "undefined" || window.visualViewport == null) {
+    if (typeof window === "undefined" || window.visualViewport == null) {
       return;
     }
 
-    const handleVisualViewportResize = () => {
-      textareaRef.current?.scrollIntoView({ block: "center", behavior: "auto" });
-    };
-
-    window.visualViewport.addEventListener("resize", handleVisualViewportResize);
+    window.visualViewport.addEventListener("resize", scrollTextareaIntoView);
     return () => {
-      window.visualViewport?.removeEventListener("resize", handleVisualViewportResize);
+      window.visualViewport?.removeEventListener("resize", scrollTextareaIntoView);
     };
-  }, [replyContext]);
+  }, [scrollTextareaIntoView]);
 
   return (
     <div className="message-composer" data-testid="message-composer">
@@ -207,6 +210,7 @@ export function MessageComposer({
             placeholder="Type your message…"
             value={content}
             onChange={(e) => setContent(e.target.value)}
+            onFocus={scrollTextareaIntoView}
             maxLength={MAX_CONTENT_LENGTH}
             data-testid="message-composer-content"
           />

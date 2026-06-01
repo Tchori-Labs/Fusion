@@ -193,6 +193,44 @@ describe("MessageComposer", () => {
     expect(document.activeElement).toBe(screen.getByTestId("message-composer-content"));
   });
 
+  it("scrolls textarea into view on visualViewport resize for a new compose", () => {
+    const addEventListener = vi.fn();
+    const removeEventListener = vi.fn();
+    let resizeHandler: (() => void) | undefined;
+
+    addEventListener.mockImplementation((event: string, handler: () => void) => {
+      if (event === "resize") {
+        resizeHandler = handler;
+      }
+    });
+
+    Object.defineProperty(window, "visualViewport", {
+      configurable: true,
+      value: {
+        addEventListener,
+        removeEventListener,
+      },
+      writable: true,
+    });
+
+    if (!("scrollIntoView" in HTMLElement.prototype)) {
+      Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+        configurable: true,
+        value: () => undefined,
+        writable: true,
+      });
+    }
+    const scrollIntoViewSpy = vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(() => undefined);
+
+    render(<MessageComposer {...defaultProps} agents={mockAgents} />);
+
+    expect(addEventListener).toHaveBeenCalledWith("resize", expect.any(Function));
+    resizeHandler?.();
+    expect(scrollIntoViewSpy).toHaveBeenCalledWith({ block: "center", behavior: "auto" });
+
+    scrollIntoViewSpy.mockRestore();
+  });
+
   it("scrolls textarea into view on visualViewport resize when replying", () => {
     const addEventListener = vi.fn();
     const removeEventListener = vi.fn();
@@ -232,6 +270,24 @@ describe("MessageComposer", () => {
 
     expect(addEventListener).toHaveBeenCalledWith("resize", expect.any(Function));
     resizeHandler?.();
+    expect(scrollIntoViewSpy).toHaveBeenCalledWith({ block: "center", behavior: "auto" });
+
+    scrollIntoViewSpy.mockRestore();
+  });
+
+  it("scrolls textarea into view on focus", () => {
+    if (!("scrollIntoView" in HTMLElement.prototype)) {
+      Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+        configurable: true,
+        value: () => undefined,
+        writable: true,
+      });
+    }
+    const scrollIntoViewSpy = vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(() => undefined);
+
+    render(<MessageComposer {...defaultProps} agents={mockAgents} />);
+
+    fireEvent.focus(screen.getByTestId("message-composer-content"));
     expect(scrollIntoViewSpy).toHaveBeenCalledWith({ block: "center", behavior: "auto" });
 
     scrollIntoViewSpy.mockRestore();
