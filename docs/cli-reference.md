@@ -67,6 +67,12 @@ fn onboard --force
 The command is safe to re-run and only updates the settings you confirm during
 prompts.
 
+Backward compatibility guarantee: onboarding auto-launch never interrupts
+existing setups and never blocks headless usage. It is skipped when both the
+central DB and local project DB already exist, and it never prompts in non-TTY,
+`serve`, `daemon`, `--skip-onboarding`, `FUSION_SKIP_ONBOARDING`, piped, or
+agent-run invocations.
+
 ---
 
 ## `fn update`
