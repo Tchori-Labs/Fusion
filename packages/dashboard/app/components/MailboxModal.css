@@ -651,6 +651,7 @@
 
 .mailbox-view .mailbox-content {
   flex: 1;
+  min-height: 0;
   overflow: hidden;
   padding: var(--space-xl);
   max-height: none;
@@ -868,8 +869,11 @@
   }
 
   .mailbox-view .mailbox-content {
+    min-height: 0;
     max-height: none;
     overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
     padding: var(--space-md);
     /* Account for mobile nav bar at bottom */
     padding-bottom: calc(var(--mobile-nav-height) + env(safe-area-inset-bottom, 0) + var(--standalone-bottom-gap) + var(--space-lg));

@@ -1805,6 +1805,17 @@ describe("MailboxView", () => {
       expect(viewBlock).toContain("overflow: hidden;");
     });
 
+    it("defines .mailbox-view .mailbox-content as a bounded flex child", async () => {
+      const css = loadAllAppCss();
+
+      const contentBlockMatch = css.match(/\.mailbox-view\s+\.mailbox-content\s*\{([^}]*)\}/);
+      expect(contentBlockMatch).toBeTruthy();
+      const contentBlock = contentBlockMatch![1];
+      expect(contentBlock).toContain("flex: 1;");
+      expect(contentBlock).toContain("min-height: 0;");
+      expect(contentBlock).toContain("max-height: none;");
+    });
+
     it("defines desktop/tablet split-pane selectors under .mailbox-view scope", async () => {
       const css = loadAllAppCss();
 
@@ -1871,6 +1882,10 @@ describe("MailboxView", () => {
       const contentRuleMatch = mailboxMobileSection.match(/\.mailbox-view\s+\.mailbox-content\s*\{[^}]*\}/);
       expect(contentRuleMatch).toBeTruthy();
       expect(contentRuleMatch![0]).toContain("max-height: none");
+      expect(contentRuleMatch![0]).toContain("overflow-y: auto");
+      expect(contentRuleMatch![0]).toContain("min-height: 0");
+      expect(contentRuleMatch![0]).toContain("overscroll-behavior: contain");
+      expect(contentRuleMatch![0]).toContain("-webkit-overflow-scrolling: touch");
 
       // Content should have padding-bottom accounting for mobile nav
       expect(contentRuleMatch![0]).toContain("padding-bottom");
