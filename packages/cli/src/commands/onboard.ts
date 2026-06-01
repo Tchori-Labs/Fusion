@@ -135,6 +135,21 @@ function validateMaxConcurrent(input: string): number {
   return value;
 }
 
+async function runSkippableStep(
+  prompts: PromptSession,
+  label: string,
+  body: () => Promise<void>,
+): Promise<boolean> {
+  console.log(`\n${label}:`);
+  const shouldRun = await prompts.promptYesNo(`Run ${label.toLowerCase()} now?`, true);
+  if (!shouldRun) {
+    console.log(`⤳ Skipped ${label}`);
+    return false;
+  }
+  await body();
+  return true;
+}
+
 export async function runOnboard(options: OnboardOptions = {}): Promise<void> {
   const globalSettingsStore = new GlobalSettingsStore();
   await globalSettingsStore.init();
@@ -152,11 +167,16 @@ export async function runOnboard(options: OnboardOptions = {}): Promise<void> {
     if (existsSync(centralDbPath)) {
       console.log(`✓ Central DB already exists: ${centralDbPath}`);
     } else {
-      console.log(`Creating central DB: ${centralDbPath}`);
-      const central = new CentralCore();
-      await central.init();
-      await central.close();
-      console.log("✓ Central DB initialized");
+      const ranCentralDb = await runSkippableStep(prompts, "Central DB", async () => {
+        console.log(`Creating central DB: ${centralDbPath}`);
+        const central = new CentralCore();
+        await central.init();
+        await central.close();
+        console.log("✓ Central DB initialized");
+      });
+      if (!ranCentralDb) {
+        console.log("Central DB setup skipped; database was not created or initialized.");
+      }
     }
 
     const authStorage = AuthStorage.create(getFusionAuthPath());
@@ -165,9 +185,10 @@ export async function runOnboard(options: OnboardOptions = {}): Promise<void> {
     const modelRegistry = ModelRegistry.create(mergedAuthStorage, getModelRegistryModelsPath());
     const providerAuth = wrapAuthStorageWithApiKeyProviders(mergedAuthStorage, modelRegistry);
 
-    const apiProviders = providerAuth.getApiKeyProviders();
-    if (apiProviders.length > 0) {
-      console.log("\nAI provider setup:");
+    await runSkippableStep(prompts, "AI provider setup", async () => {
+      const apiProviders = providerAuth.getApiKeyProviders();
+      if (apiProviders.length === 0) return;
+
       const oauthProviders = new Set(providerAuth.getOAuthProviders().map((provider) => provider.id));
       const providerChoices = apiProviders.map((provider) => {
         const configured = providerAuth.hasApiKey(provider.id) || providerAuth.hasAuth(provider.id);
@@ -183,50 +204,50 @@ export async function runOnboard(options: OnboardOptions = {}): Promise<void> {
         allowSkip: true,
       });
 
-      if (selectedProvider) {
-        if (oauthProviders.has(selectedProvider)) {
-          console.log(`Provider ${selectedProvider} uses OAuth. Authenticate with: fn dashboard`);
-        } else {
-          const apiKey = await prompts.prompt("Enter API key");
-          providerAuth.setApiKey(selectedProvider, apiKey);
-          console.log(`✓ Stored API key for ${selectedProvider}`);
-        }
+      if (!selectedProvider) return;
+      if (oauthProviders.has(selectedProvider)) {
+        console.log(`Provider ${selectedProvider} uses OAuth. Authenticate with: fn dashboard`);
+        return;
       }
-    }
 
-    console.log("\nProject setup:");
-    const shouldInit = await prompts.promptYesNo("Run fn init for this directory now?", true);
-    if (shouldInit) {
+      const apiKey = await prompts.prompt("Enter API key");
+      providerAuth.setApiKey(selectedProvider, apiKey);
+      console.log(`✓ Stored API key for ${selectedProvider}`);
+    });
+
+    await runSkippableStep(prompts, "Project setup", async () => {
       await runInit({});
-    }
+    });
 
-    console.log("\nCore settings:");
-    const testMode = await prompts.promptYesNo("Enable test mode globally?", false);
-    // Project testMode overrides global testMode when set.
-    await globalSettingsStore.updateSettings({ testMode });
+    await runSkippableStep(prompts, "Core settings", async () => {
+      const testMode = await prompts.promptYesNo("Enable test mode globally?", false);
+      // Project testMode overrides global testMode when set.
+      await globalSettingsStore.updateSettings({ testMode });
 
-    let projectContext: Awaited<ReturnType<typeof resolveProject>> | undefined;
-    try {
-      projectContext = await resolveProject(undefined);
-    } catch {
-      projectContext = undefined;
-    }
+      let projectContext: Awaited<ReturnType<typeof resolveProject>> | undefined;
+      try {
+        projectContext = await resolveProject(undefined);
+      } catch {
+        projectContext = undefined;
+      }
 
-    if (projectContext) {
-      const rawMaxConcurrent = await prompts.prompt(
-        "Set maxConcurrent for this project",
-        String((await projectContext.store.getSettings()).maxConcurrent ?? 2),
-      );
-      const maxConcurrent = validateMaxConcurrent(rawMaxConcurrent);
-      await projectContext.store.updateSettings({ maxConcurrent });
-      console.log(`✓ Project maxConcurrent set to ${maxConcurrent}`);
-    } else {
-      console.log("Skipping maxConcurrent (no active project found).");
-    }
+      if (projectContext) {
+        const rawMaxConcurrent = await prompts.prompt(
+          "Set maxConcurrent for this project",
+          String((await projectContext.store.getSettings()).maxConcurrent ?? 2),
+        );
+        const maxConcurrent = validateMaxConcurrent(rawMaxConcurrent);
+        await projectContext.store.updateSettings({ maxConcurrent });
+        console.log(`✓ Project maxConcurrent set to ${maxConcurrent}`);
+      } else {
+        console.log("Skipping maxConcurrent (no active project found).");
+      }
+    });
 
-    console.log("\nNext steps:");
-    console.log("  fn dashboard      # launch dashboard");
-    console.log("  fn task create    # create your first task");
+    await runSkippableStep(prompts, "Next steps", async () => {
+      console.log("  fn dashboard      # launch dashboard");
+      console.log("  fn task create    # create your first task");
+    });
 
     await globalSettingsStore.updateSettings({
       cliOnboardingCompletedAt: new Date().toISOString(),
@@ -245,5 +266,6 @@ export async function runOnboard(options: OnboardOptions = {}): Promise<void> {
 export const __testUtils = {
   createPromptSession,
   validateMaxConcurrent,
+  runSkippableStep,
   PROMPT_CANCELLED_ERROR,
 };

@@ -52,7 +52,8 @@ During fresh initialization, Fusion also installs the bundled `fusion` skill int
 
 Run the interactive CLI onboarding wizard. It walks through central DB setup,
 API-key provider setup, optional first-project init, core settings defaults, and
-a short next-steps tour.
+a short next-steps tour. Each step can be individually skipped while staying in
+the onboarding flow.
 
 ```bash
 fn onboard

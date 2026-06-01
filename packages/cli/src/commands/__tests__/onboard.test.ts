@@ -129,9 +129,10 @@ describe("onboard", () => {
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
     await runOnboard({
-      input: inputFrom(["3", "", "n", "n"]),
+      input: inputFrom(["y", "y", "3", "y", "y", "n", "y"]),
     });
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("Creating central DB"));
+    expect(centralInitMock).toHaveBeenCalled();
   });
 
   it("runOnboard reports central db already exists", async () => {
@@ -142,20 +143,23 @@ describe("onboard", () => {
     writeFileSync(existingPath, "db");
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
-    await runOnboard({ input: inputFrom(["3", "", "n", "n"]) });
+    await runOnboard({ input: inputFrom(["y", "3", "y", "y", "n", "y"]) });
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("Central DB already exists"));
   });
 
   it("stores API key, runs init, persists global testMode and completion marker", async () => {
     const providerAuth = makeProviderAuth();
     mockProviderAuthFactory.mockReturnValue(providerAuth);
-    await runOnboard({ input: inputFrom(["1", "test-key", "y", "y"]) });
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
 
+    await runOnboard({ input: inputFrom(["y", "y", "1", "test-key", "y", "y", "y", "y"]) });
 
     expect(providerAuth.setApiKey).toHaveBeenCalledWith("openrouter", "test-key");
     expect(mockRunInit).toHaveBeenCalledTimes(1);
     expect(globalSettingsState.testMode).toBe(true);
     expect(typeof globalSettingsState.cliOnboardingCompletedAt).toBe("string");
+    expect(logSpy).toHaveBeenCalledWith("  fn dashboard      # launch dashboard");
+    expect(logSpy).toHaveBeenCalledWith("  fn task create    # create your first task");
     expect(globalSettingsState.setupComplete).toBeUndefined();
   });
 
@@ -164,10 +168,10 @@ describe("onboard", () => {
     mockProviderAuthFactory.mockReturnValue(providerAuth);
     globalSettingsState.cliOnboardingCompletedAt = "2026-06-01T00:00:00.000Z";
 
-    await runOnboard({ input: inputFrom(["3", "", "n", "n"]) });
+    await runOnboard({ input: inputFrom(["y", "3", "y", "y", "n", "y"]) });
     expect(providerAuth.setApiKey).not.toHaveBeenCalled();
 
-    await runOnboard({ force: true, input: inputFrom(["3", "", "n", "n"]) });
+    await runOnboard({ force: true, input: inputFrom(["y", "n", "n", "n", "n"]) });
     expect(globalSettingsState.cliOnboardingCompletedAt).not.toBe("2026-06-01T00:00:00.000Z");
   });
 
@@ -189,5 +193,63 @@ describe("onboard", () => {
     await expect(pending).rejects.toThrow(__testUtils.PROMPT_CANCELLED_ERROR);
     session.close();
     expect(process.listenerCount("SIGINT")).toBeLessThanOrEqual(before);
+  });
+
+  it("runSkippableStep declines without running body and accepts once", async () => {
+    const declineSession = __testUtils.createPromptSession(inputFrom(["n"]));
+    const declineBody = vi.fn(async () => {});
+    await expect(__testUtils.runSkippableStep(declineSession, "Sample", declineBody)).resolves.toBe(false);
+    expect(declineBody).not.toHaveBeenCalled();
+    declineSession.close();
+
+    const acceptSession = __testUtils.createPromptSession(inputFrom(["y"]));
+    const acceptBody = vi.fn(async () => {});
+    await expect(__testUtils.runSkippableStep(acceptSession, "Sample", acceptBody)).resolves.toBe(true);
+    expect(acceptBody).toHaveBeenCalledTimes(1);
+    acceptSession.close();
+  });
+
+  it("allows fully skipping onboarding steps while still persisting completion marker", async () => {
+    const providerAuth = makeProviderAuth();
+    mockProviderAuthFactory.mockReturnValue(providerAuth);
+
+    await runOnboard({ input: inputFrom(["n", "n", "n", "n", "n"]) });
+
+    expect(centralInitMock).not.toHaveBeenCalled();
+    expect(mockRunInit).not.toHaveBeenCalled();
+    expect(globalSettingsState.testMode).toBeUndefined();
+    expect(typeof globalSettingsState.cliOnboardingCompletedAt).toBe("string");
+    expect(providerAuth.setApiKey).not.toHaveBeenCalled();
+  });
+
+  it("supports selective skip for provider while running init and settings", async () => {
+    const providerAuth = makeProviderAuth();
+    mockProviderAuthFactory.mockReturnValue(providerAuth);
+
+    await runOnboard({ input: inputFrom(["y", "n", "y", "y", "n", "y"]) });
+    expect(providerAuth.setApiKey).not.toHaveBeenCalled();
+    expect(mockRunInit).toHaveBeenCalledTimes(1);
+    expect(globalSettingsState.testMode).toBe(false);
+    expect(typeof globalSettingsState.cliOnboardingCompletedAt).toBe("string");
+  });
+
+  it("supports selective skip for project setup while other steps run", async () => {
+    const providerAuth = makeProviderAuth();
+    mockProviderAuthFactory.mockReturnValue(providerAuth);
+
+    await runOnboard({ input: inputFrom(["y", "y", "3", "n", "y", "n", "y"]) });
+    expect(mockRunInit).not.toHaveBeenCalled();
+    expect(globalSettingsState.testMode).toBe(false);
+    expect(typeof globalSettingsState.cliOnboardingCompletedAt).toBe("string");
+  });
+
+  it("treats cancellation distinctly from skip and does not persist completion", async () => {
+    const providerAuth = makeProviderAuth();
+    mockProviderAuthFactory.mockReturnValue(providerAuth);
+    const cancelledInput = new PassThrough();
+    cancelledInput.end();
+
+    await expect(runOnboard({ input: cancelledInput })).rejects.toThrow("Onboarding cancelled.");
+    expect(globalSettingsState.cliOnboardingCompletedAt).toBeUndefined();
   });
 });
