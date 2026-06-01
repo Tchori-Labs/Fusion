@@ -1116,6 +1116,11 @@ function AppInner() {
     pushNav({ type: "modal", close: modalManager.closeSubtask });
   }, [modalManager, pushNav]);
 
+  const openGroupModalWithNav = useCallback((groupId: string) => {
+    modalManager.openGroupModal(groupId);
+    pushNav({ type: "modal", close: modalManager.closeGroupModal });
+  }, [modalManager, pushNav]);
+
   const openGitHubImportWithNav = useCallback(() => {
     modalManager.openGitHubImport();
     pushNav({ type: "modal", close: modalManager.closeGitHubImport });
@@ -1630,6 +1635,7 @@ function AppInner() {
             onMoveTask={moveTask}
             onPauseTask={pauseTask}
             onOpenDetail={openDetailTask}
+            onOpenGroupModal={openGroupModalWithNav}
             addToast={addToast}
             onQuickCreate={handleBoardQuickCreate}
             onNewTask={openNewTaskWithNav}

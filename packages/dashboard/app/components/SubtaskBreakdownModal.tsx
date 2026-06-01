@@ -35,6 +35,7 @@ interface SubtaskBreakdownModalProps {
   parentTaskId?: string;
   projectId?: string;
   resumeSessionId?: string;
+  onOpenGroupModal?: (groupId: string) => void;
 }
 
 type ViewState =
@@ -74,7 +75,7 @@ function hasDependencyCycle(subtasks: SubtaskItem[]): boolean {
   return subtasks.some((item) => visit(item.id));
 }
 
-export function SubtaskBreakdownModal({ isOpen, onClose, initialDescription, onTasksCreated, parentTaskId, projectId, resumeSessionId }: SubtaskBreakdownModalProps) {
+export function SubtaskBreakdownModal({ isOpen, onClose, initialDescription, onTasksCreated, parentTaskId, projectId, resumeSessionId, onOpenGroupModal }: SubtaskBreakdownModalProps) {
   const viewportMode = useViewportMode();
   useMobileScrollLock(isOpen);
   const { keyboardOverlap, viewportHeight, viewportOffsetTop, keyboardOpen } = useMobileKeyboard({
@@ -735,7 +736,18 @@ export function SubtaskBreakdownModal({ isOpen, onClose, initialDescription, onT
                         <option value="per-task-derived">Per-task branches derived from planning branch</option>
                       </select>
                       {branchAssignmentMode === "shared" && branchName.trim() && (
-                        <p className="text-muted">Grouped on shared branch <strong>{branchName.trim()}</strong></p>
+                        <p className="text-muted">
+                          Grouped on shared branch <strong>{branchName.trim()}</strong>
+                          {onOpenGroupModal && (
+                            <button
+                              type="button"
+                              className="btn btn-sm"
+                              onClick={() => onOpenGroupModal(`BG-${branchName.trim()}`)}
+                            >
+                              Open group modal
+                            </button>
+                          )}
+                        </p>
                       )}
                     </div>
                   </div>

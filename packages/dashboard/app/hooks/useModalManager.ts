@@ -36,6 +36,7 @@ export interface ModalManager {
   detailTask: (Task | TaskDetail) | null;
   detailTaskInitialTab: DetailTaskTab;
   detailTaskOrigin: DetailTaskOrigin | null;
+  groupModalGroupId: string | null;
   settingsOpen: boolean;
   settingsInitialSection: SectionId | undefined;
   schedulesOpen: boolean;
@@ -80,6 +81,9 @@ export interface ModalManager {
   openDetailWithChangesTab: (task: Task | TaskDetail) => void;
   updateDetailTask: (updated: Partial<TaskDetail>) => void;
   closeDetailTask: () => void;
+
+  openGroupModal: (groupId: string) => void;
+  closeGroupModal: () => void;
 
   openSettings: (section?: SectionId) => void;
   closeSettings: () => void;
@@ -152,6 +156,7 @@ export function useModalManager(options: UseModalManagerOptions): ModalManager {
   const [detailTask, setDetailTask] = useState<(Task | TaskDetail) | null>(null);
   const [detailTaskInitialTab, setDetailTaskInitialTab] = useState<DetailTaskTab>("definition");
   const [detailTaskOrigin, setDetailTaskOrigin] = useState<DetailTaskOrigin | null>(null);
+  const [groupModalGroupId, setGroupModalGroupId] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsInitialSection, setSettingsInitialSection] = useState<SectionId | undefined>(undefined);
   const [schedulesOpen, setSchedulesOpen] = useState(false);
@@ -175,6 +180,7 @@ export function useModalManager(options: UseModalManagerOptions): ModalManager {
 
   const anyModalOpen = Boolean(
     detailTask ||
+      groupModalGroupId ||
       settingsOpen ||
       newTaskModalOpen ||
       isPlanningOpen ||
@@ -259,6 +265,13 @@ export function useModalManager(options: UseModalManagerOptions): ModalManager {
   const closeDetailTask = useCallback(() => {
     setDetailTask(null);
     setDetailTaskOrigin(null);
+  }, []);
+
+  const openGroupModal = useCallback((groupId: string) => {
+    setGroupModalGroupId(groupId);
+  }, []);
+  const closeGroupModal = useCallback(() => {
+    setGroupModalGroupId(null);
   }, []);
 
   const openSettings = useCallback((section?: SectionId) => {
@@ -376,6 +389,7 @@ export function useModalManager(options: UseModalManagerOptions): ModalManager {
     detailTask,
     detailTaskInitialTab,
     detailTaskOrigin,
+    groupModalGroupId,
     settingsOpen,
     settingsInitialSection,
     schedulesOpen,
@@ -411,6 +425,8 @@ export function useModalManager(options: UseModalManagerOptions): ModalManager {
     openDetailWithChangesTab,
     updateDetailTask,
     closeDetailTask,
+    openGroupModal,
+    closeGroupModal,
     openSettings,
     closeSettings,
     openSchedules,

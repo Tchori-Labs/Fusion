@@ -1,0 +1,105 @@
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { GroupTaskModal } from "../GroupTaskModal";
+import { apiGetBranchGroup, apiPromoteBranchGroup } from "../../api";
+
+vi.mock("../../api", async () => {
+  const actual = await vi.importActual<typeof import("../../api")>("../../api");
+  return {
+    ...actual,
+    apiGetBranchGroup: vi.fn(),
+    apiPromoteBranchGroup: vi.fn(),
+  };
+});
+
+vi.mock("../../hooks/useNavigationHistory", () => ({
+  useNavigationHistory: () => ({ canGoBack: false, goBack: vi.fn() }),
+  useNavigationHistoryContext: () => ({ pushNav: vi.fn(), replaceCurrent: vi.fn() }),
+}));
+
+const mockedGet = vi.mocked(apiGetBranchGroup);
+const mockedPromote = vi.mocked(apiPromoteBranchGroup);
+
+function makeGroup(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "BG-1",
+    branchName: "feature/shared",
+    status: "open",
+    autoMerge: false,
+    prState: "none",
+    prUrl: null,
+    prNumber: null,
+    completion: { landed: 1, total: 2, complete: false },
+    members: [
+      { taskId: "FN-1", title: "First", column: "done", landed: true },
+      { taskId: "FN-2", title: "Second", column: "todo", landed: false },
+    ],
+    ...overrides,
+  };
+}
+
+describe("GroupTaskModal", () => {
+  beforeEach(() => {
+    mockedPromote.mockReset();
+    mockedGet.mockReset();
+  });
+
+  it("renders group summary and member open action", async () => {
+    mockedGet.mockResolvedValue({ group: makeGroup() } as Awaited<ReturnType<typeof apiGetBranchGroup>>);
+    const onOpenMemberTask = vi.fn();
+
+    render(<GroupTaskModal isOpen onClose={vi.fn()} groupId="BG-1" onOpenMemberTask={onOpenMemberTask} />);
+
+    expect(await screen.findByText("feature/shared")).toBeDefined();
+    expect(screen.getByText("1 of 2 members finished")).toBeDefined();
+    await userEvent.click(screen.getAllByRole("button", { name: "Open task" })[0]);
+    expect(onOpenMemberTask).toHaveBeenCalledWith("FN-1");
+  });
+
+  it("hides promote controls until complete", async () => {
+    mockedGet.mockResolvedValue({ group: makeGroup() } as Awaited<ReturnType<typeof apiGetBranchGroup>>);
+
+    render(<GroupTaskModal isOpen onClose={vi.fn()} groupId="BG-1" onOpenMemberTask={vi.fn()} />);
+
+    await screen.findByText("1 of 2 members finished");
+    expect(screen.queryByRole("button", { name: /open pr|merge group into main/i })).toBeNull();
+  });
+
+  it("promotes when complete and auto-merge is off", async () => {
+    mockedGet
+      .mockResolvedValueOnce({
+        group: makeGroup({ completion: { landed: 2, total: 2, complete: true }, members: [
+          { taskId: "FN-1", title: "First", column: "done", landed: true },
+          { taskId: "FN-2", title: "Second", column: "done", landed: true },
+        ] }),
+      } as Awaited<ReturnType<typeof apiGetBranchGroup>>)
+      .mockResolvedValueOnce({
+        group: makeGroup({ completion: { landed: 2, total: 2, complete: true } }),
+      } as Awaited<ReturnType<typeof apiGetBranchGroup>>);
+
+    mockedPromote.mockResolvedValue({ ok: true } as Awaited<ReturnType<typeof apiPromoteBranchGroup>>);
+
+    render(<GroupTaskModal isOpen onClose={vi.fn()} groupId="BG-1" onOpenMemberTask={vi.fn()} />);
+
+    const action = await screen.findByRole("button", { name: /open pr/i });
+    await userEvent.click(action);
+    await waitFor(() => expect(mockedPromote).toHaveBeenCalledWith("BG-1", undefined));
+  });
+
+  it("renders tracked pr info when present", async () => {
+    mockedGet.mockResolvedValue({
+      group: makeGroup({
+        completion: { landed: 2, total: 2, complete: true },
+        prState: "open",
+        prUrl: "https://github.com/org/repo/pull/1",
+        prNumber: 1,
+      }),
+    } as Awaited<ReturnType<typeof apiGetBranchGroup>>);
+
+    render(<GroupTaskModal isOpen onClose={vi.fn()} groupId="BG-1" onOpenMemberTask={vi.fn()} />);
+
+    const link = await screen.findByRole("link", { name: /PR #1/i });
+    expect(link.getAttribute("href")).toContain("/pull/1");
+    expect(link.textContent).toContain("open");
+  });
+});

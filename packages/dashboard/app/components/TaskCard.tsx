@@ -270,6 +270,7 @@ interface TaskCardProps {
   projectId?: string;
   queued?: boolean;
   onOpenDetail: (task: Task | TaskDetail) => void;
+  onOpenGroupModal?: (groupId: string) => void;
   addToast: (message: string, type?: ToastType) => void;
   globalPaused?: boolean;
   onUpdateTask?: (
@@ -437,6 +438,7 @@ function areTaskCardPropsEqual(previous: TaskCardProps, next: TaskCardProps): bo
     previous.prAuthAvailable === next.prAuthAvailable &&
     previous.autoMergeEnabled === next.autoMergeEnabled &&
     previous.onOpenDetail === next.onOpenDetail &&
+    previous.onOpenGroupModal === next.onOpenGroupModal &&
     previous.addToast === next.addToast &&
     previous.onUpdateTask === next.onUpdateTask &&
     previous.onArchiveTask === next.onArchiveTask &&
@@ -528,6 +530,7 @@ function TaskCardComponent({
   projectId,
   queued,
   onOpenDetail,
+  onOpenGroupModal,
   addToast,
   globalPaused,
   onUpdateTask,
@@ -1899,6 +1902,11 @@ function TaskCardComponent({
                   ? `${task.branchContext.groupId} · ${branchMetadata.branch}`
                   : task.branchContext.groupId
               }
+              onClick={(event) => {
+                if (!onOpenGroupModal) return;
+                event.stopPropagation();
+                onOpenGroupModal(task.branchContext.groupId);
+              }}
             >
               <span className="card-branch-label">
                 {task.branchContext.assignmentMode === "shared" ? "Shared" : "Group"}

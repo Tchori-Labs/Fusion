@@ -1409,6 +1409,24 @@ describe("TaskCard", () => {
     expect(screen.getAllByText("feature/shared-branch").length).toBeGreaterThan(0);
   });
 
+  it("opens group modal from shared branch chip", () => {
+    const onOpenGroupModal = vi.fn();
+    render(
+      <TaskCard
+        task={makeTask({
+          branch: "feature/shared-branch",
+          branchContext: { groupId: "BG-22", source: "planning", assignmentMode: "shared" },
+        })}
+        onOpenDetail={noop}
+        onOpenGroupModal={onOpenGroupModal}
+        addToast={noop}
+      />,
+    );
+
+    fireEvent.click(screen.getByText("Shared"));
+    expect(onOpenGroupModal).toHaveBeenCalledWith("BG-22");
+  });
+
   it("keeps long non-default branch names readable via text and title semantics", () => {
     const longBranch = "feature/fn-3423-display-very-long-working-branch-name-for-card-metadata";
     const { container } = render(

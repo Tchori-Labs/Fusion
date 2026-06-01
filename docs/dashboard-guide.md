@@ -1126,9 +1126,12 @@ UI surfaces:
 
 - Subtask planning interview shows a grouped indicator when `assignmentMode=shared`.
 - Task cards show grouped/shared branch metadata for grouped tasks.
+- Clicking either grouped badge opens the dedicated **Group Task Modal** for that branch group.
 - Task detail renders a branch-group card with member landed progress.
 
-The branch-group card is completion-gated: while members are still pending, it shows progress only. PR / merge controls are only revealed after all members are landed into the shared branch. When auto-merge is off, promote/open-PR is explicit user action (no automatic push-to-origin behavior).
+The Group Task Modal shows shared branch name/status, member list (`taskId`, title, column, landed state), quick links to open each member task detail, completion progress (`X of Y members finished`), and tracked PR state when present. It live-refreshes from the same dashboard task-update stream and ignores stale cross-project events.
+
+Both the modal and branch-group card are completion-gated: while members are still pending, they show progress only. PR / merge controls are only revealed after all members are landed into the shared branch. When auto-merge is off, promote/open-PR is explicit user action (no automatic push-to-origin behavior).
 
 ### CLI-onboarding backfill runbook
 

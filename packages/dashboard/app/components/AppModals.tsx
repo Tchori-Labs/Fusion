@@ -24,6 +24,7 @@ import { WorkflowStepManager } from "./WorkflowStepManager";
 import { AgentListModal } from "./AgentListModal";
 import { ModelOnboardingModal } from "./ModelOnboardingModal";
 import { ToastContainer } from "./ToastContainer";
+import { GroupTaskModal } from "./GroupTaskModal";
 import { useNavigationHistoryContext } from "../hooks/useNavigationHistory";
 
 const SetupWizardModal = lazy(() => import("./SetupWizardModal").then((m) => ({ default: m.SetupWizardModal })));
@@ -149,6 +150,11 @@ export function AppModals({
     [modalManager, pushNav],
   );
 
+  const openGroupModalWithNav = useCallback((groupId: string) => {
+    modalManager.openGroupModal(groupId);
+    pushNav({ type: "modal", close: modalManager.closeGroupModal });
+  }, [modalManager, pushNav]);
+
   const handleOnboardingViewTask = useCallback((task: Task) => {
     setFirstCreatedTask(null);
     modalManager.closeModelOnboarding();
@@ -198,6 +204,23 @@ export function AppModals({
             addToast={addToast}
             prAuthAvailable={settings.prAuthAvailable}
             initialTab={modalManager.detailTaskInitialTab}
+          />
+        </ModalErrorBoundary>
+      )}
+
+      {modalManager.groupModalGroupId && (
+        <ModalErrorBoundary>
+          <GroupTaskModal
+            isOpen={Boolean(modalManager.groupModalGroupId)}
+            onClose={modalManager.closeGroupModal}
+            groupId={modalManager.groupModalGroupId}
+            projectId={projectId}
+            onOpenMemberTask={(taskId) => {
+              const memberTask = tasks.find((task) => task.id === taskId);
+              if (memberTask) {
+                openDetailTaskWithNav(memberTask);
+              }
+            }}
           />
         </ModalErrorBoundary>
       )}
@@ -252,6 +275,7 @@ export function AppModals({
           onTasksCreated={taskHandlers.handleSubtaskTasksCreated}
           projectId={projectId}
           resumeSessionId={modalManager.subtaskResumeSessionId}
+          onOpenGroupModal={openGroupModalWithNav}
         />
       </ModalErrorBoundary>
 
