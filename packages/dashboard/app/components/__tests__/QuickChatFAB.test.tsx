@@ -300,7 +300,37 @@ describe("QuickChatFAB session-first UX", () => {
     expect(screen.getByTestId("quick-chat-new-model-select")).toBeInTheDocument();
   });
 
-  it("restores the most recently touched active session by id", async () => {
+  it("restores the persisted last opened active session before latest activity", async () => {
+    localStorage.setItem("fusion:quick-chat-last-session:proj-1", "older-updated");
+    mockFetchChatSessions.mockResolvedValueOnce({
+      sessions: [
+        {
+          ...modelSession,
+          id: "older-updated",
+          updatedAt: "2026-05-13T10:00:00.000Z",
+          lastMessageAt: "2026-05-13T10:00:00.000Z",
+        },
+        {
+          ...agentTwoSession,
+          id: "newer-last-message",
+          updatedAt: "2026-05-13T09:00:00.000Z",
+          lastMessageAt: "2026-05-13T11:00:00.000Z",
+        },
+      ],
+    });
+
+    render(<QuickChatFAB addToast={vi.fn()} projectId="proj-1" />);
+    fireEvent.click(screen.getByTestId("quick-chat-fab"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("quick-chat-input")).toHaveAttribute("placeholder", "Message GPT-4o");
+      expect(screen.getByTestId("quick-chat-session-dropdown")).toHaveValue("older-updated");
+    });
+    expect(mockFetchResumeChatSession).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the latest touched session when the persisted id is stale", async () => {
+    localStorage.setItem("fusion:quick-chat-last-session:proj-1", "missing-session");
     mockFetchChatSessions.mockResolvedValueOnce({
       sessions: [
         {
@@ -325,7 +355,6 @@ describe("QuickChatFAB session-first UX", () => {
       expect(screen.getByTestId("quick-chat-input")).toHaveAttribute("placeholder", "Message Agent Two");
       expect(screen.getByTestId("quick-chat-session-dropdown")).toHaveValue("newer-last-message");
     });
-    expect(mockFetchResumeChatSession).not.toHaveBeenCalled();
   });
 
   it("skips archived newest sessions and restores the newest active session", async () => {
@@ -358,7 +387,7 @@ describe("QuickChatFAB session-first UX", () => {
     expect(screen.getByTestId("quick-chat-session-option-archived-newest")).toBeInTheDocument();
   });
 
-  it("reopen restores the newest active session by max(lastMessageAt, updatedAt)", async () => {
+  it("reopen keeps the last session the user opened", async () => {
     mockFetchChatSessions.mockResolvedValueOnce({
       sessions: [
         {
@@ -394,11 +423,11 @@ describe("QuickChatFAB session-first UX", () => {
     fireEvent.click(fab);
 
     await waitFor(() => {
-      expect(screen.getByTestId("quick-chat-session-dropdown")).toHaveValue("newer-last-message");
+      expect(screen.getByTestId("quick-chat-session-dropdown")).toHaveValue("older-updated");
     });
   });
 
-  it("reopen still skips archived newest sessions", async () => {
+  it("reopen keeps the last active session even when archived newer sessions exist", async () => {
     mockFetchChatSessions.mockResolvedValueOnce({
       sessions: [
         {
@@ -441,7 +470,78 @@ describe("QuickChatFAB session-first UX", () => {
     fireEvent.click(fab);
 
     await waitFor(() => {
-      expect(screen.getByTestId("quick-chat-session-dropdown")).toHaveValue("active-latest");
+      expect(screen.getByTestId("quick-chat-session-dropdown")).toHaveValue("active-older");
+    });
+  });
+
+  it("does not reload messages or show a loading placeholder when reopening", async () => {
+    mockFetchChatMessages.mockResolvedValue({
+      messages: [
+        {
+          id: "msg-1",
+          sessionId: "session-model",
+          role: "assistant",
+          content: "Warm conversation",
+          createdAt: "2026-05-16T00:00:03.000Z",
+          metadata: null,
+          thinkingOutput: null,
+        },
+      ],
+    });
+
+    render(<QuickChatFAB addToast={vi.fn()} projectId="proj-1" />);
+    const fab = screen.getByTestId("quick-chat-fab");
+    fireEvent.click(fab);
+
+    await waitFor(() => {
+      expect(screen.getByText("Warm conversation")).toBeInTheDocument();
+    });
+    const messageFetchCountAfterInitialOpen = mockFetchChatMessages.mock.calls.length;
+
+    fireEvent.click(screen.getByTestId("quick-chat-close"));
+    fireEvent.click(fab);
+
+    await waitFor(() => {
+      expect(screen.getByText("Warm conversation")).toBeInTheDocument();
+      expect(screen.getByTestId("quick-chat-session-dropdown")).toHaveValue("session-model");
+    });
+    expect(mockFetchChatMessages).toHaveBeenCalledTimes(messageFetchCountAfterInitialOpen);
+    expect(screen.queryByText("Loading conversation…")).not.toBeInTheDocument();
+  });
+
+  it("re-restores for a new project without leaking the previous project session", async () => {
+    mockFetchChatSessions.mockImplementation(async (projectId?: string) => ({
+      sessions: projectId === "proj-2"
+        ? [
+          {
+            ...agentTwoSession,
+            id: "proj-2-session",
+            updatedAt: "2026-05-17T10:00:00.000Z",
+            lastMessageAt: "2026-05-17T10:00:00.000Z",
+          },
+        ]
+        : [
+          {
+            ...modelSession,
+            id: "proj-1-session",
+            updatedAt: "2026-05-16T10:00:00.000Z",
+            lastMessageAt: "2026-05-16T10:00:00.000Z",
+          },
+        ],
+    }));
+
+    const { rerender } = render(<QuickChatFAB addToast={vi.fn()} projectId="proj-1" />);
+    fireEvent.click(screen.getByTestId("quick-chat-fab"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("quick-chat-session-dropdown")).toHaveValue("proj-1-session");
+    });
+
+    rerender(<QuickChatFAB addToast={vi.fn()} projectId="proj-2" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("quick-chat-session-dropdown")).toHaveValue("proj-2-session");
+      expect(screen.getByTestId("quick-chat-input")).toHaveAttribute("placeholder", "Message Agent Two");
     });
   });
 

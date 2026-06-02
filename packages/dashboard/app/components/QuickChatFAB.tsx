@@ -32,6 +32,7 @@ import { useViewportMode } from "../hooks/useViewportMode";
 import { useAppSettings } from "../hooks/useAppSettings";
 import { useChatRooms } from "../hooks/useChatRooms";
 import { useChatUnread } from "../hooks/useChatUnread";
+import { getPersistedLastQuickChatSessionId } from "../hooks/quickChatLastSessionStorage";
 import { linkifyFilePaths, linkifyReactChildren } from "../utils/filePathLinkify";
 
 interface PendingAttachment {
@@ -1269,6 +1270,10 @@ export function QuickChatFAB({
     }
 
     const activeSessions = sessions.filter((session) => session.status !== "archived");
+    const persistedSessionId = getPersistedLastQuickChatSessionId(projectId);
+    const persistedSession = persistedSessionId
+      ? activeSessions.find((session) => session.id === persistedSessionId) ?? null
+      : null;
     const timestamp = (value?: string | null): number => {
       if (!value) return 0;
       const parsed = Date.parse(value);
@@ -1279,24 +1284,25 @@ export function QuickChatFAB({
       const bLastTouched = Math.max(timestamp(b.lastMessageAt), timestamp(b.updatedAt));
       return bLastTouched - aLastTouched;
     })[0];
+    const sessionToRestore = persistedSession ?? latestSession;
 
-    if (latestSession) {
-      if (latestSession.modelProvider && latestSession.modelId) {
+    if (sessionToRestore) {
+      if (sessionToRestore.modelProvider && sessionToRestore.modelId) {
         setChatMode("model");
-        setSelectedModel(`${latestSession.modelProvider}/${latestSession.modelId}`);
+        setSelectedModel(`${sessionToRestore.modelProvider}/${sessionToRestore.modelId}`);
       } else {
         setChatMode("agent");
-        setSelectedAgentId(latestSession.agentId);
+        setSelectedAgentId(sessionToRestore.agentId);
       }
 
       restoredFromExistingSessionRef.current = true;
-      void selectSession(latestSession);
+      void selectSession(sessionToRestore);
     } else {
       restoredFromExistingSessionRef.current = false;
     }
 
     hasAppliedInitialSessionRef.current = true;
-  }, [isOpen, selectSession, sessions, sessionsLoading]);
+  }, [isOpen, projectId, selectSession, sessions, sessionsLoading]);
 
   // Initialize/switch quick chat session whenever the selected target changes.
   // NOTE: activeSession and sessionsLoading are in the dependency array to
@@ -1305,7 +1311,6 @@ export function QuickChatFAB({
   // new identity on every activeSession change.
   useEffect(() => {
     if (!isOpen) {
-      prevSessionTargetRef.current = "";
       return;
     }
 
@@ -1373,8 +1378,6 @@ export function QuickChatFAB({
       return;
     }
 
-    hasAppliedInitialSessionRef.current = false;
-    restoredFromExistingSessionRef.current = false;
     setMentionPopupVisible(false);
     setMentionFilter("");
     setMentionStartPos(-1);
@@ -1388,6 +1391,14 @@ export function QuickChatFAB({
     });
     setPendingAttachments([]);
   }, [isOpen]);
+
+  useEffect(() => {
+    hasAppliedInitialSessionRef.current = false;
+    restoredFromExistingSessionRef.current = false;
+    modelsRequestedRef.current = false;
+    modelsInitSettledRef.current = false;
+    prevSessionTargetRef.current = "";
+  }, [projectId]);
 
   useEffect(() => {
     pendingAttachmentsRef.current = pendingAttachments;

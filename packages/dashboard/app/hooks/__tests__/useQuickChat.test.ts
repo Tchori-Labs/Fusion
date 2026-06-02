@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatSession } from "@fusion/core";
 import * as apiModule from "../../api";
 import { getChatPendingMessageKey } from "../chatPendingMessageStorage";
+import { getPersistedLastQuickChatSessionId } from "../quickChatLastSessionStorage";
 import { FN_AGENT_ID, useQuickChat } from "../useQuickChat";
 
 vi.mock("../../api", () => ({
@@ -352,6 +353,34 @@ describe("useQuickChat", () => {
     });
   });
 
+  it("persists the last opened session id when a session becomes active", async () => {
+    const firstSession = makeSession({ id: "session-agent-1", agentId: "agent-001" });
+    const secondSession = makeSession({ id: "session-agent-2", agentId: "agent-002" });
+    mockFetchResumeChatSession
+      .mockResolvedValueOnce({ session: firstSession })
+      .mockResolvedValueOnce({ session: secondSession });
+
+    const { result } = renderHook(() => useQuickChat("proj-123"));
+
+    await act(async () => {
+      await result.current.switchSession("agent-001");
+    });
+
+    await waitFor(() => {
+      expect(result.current.activeSession?.id).toBe("session-agent-1");
+      expect(getPersistedLastQuickChatSessionId("proj-123")).toBe("session-agent-1");
+    });
+
+    await act(async () => {
+      await result.current.switchSession("agent-002");
+    });
+
+    await waitFor(() => {
+      expect(result.current.activeSession?.id).toBe("session-agent-2");
+      expect(getPersistedLastQuickChatSessionId("proj-123")).toBe("session-agent-2");
+    });
+  });
+
   it("switchSession with different model selections creates distinct sessions", async () => {
     const modelASession = makeSession({
       id: "session-model-a",
@@ -405,6 +434,47 @@ describe("useQuickChat", () => {
         },
         "proj-123",
       );
+    });
+  });
+
+  it("clears active session and messages when the project changes", async () => {
+    const session = makeSession({ id: "session-existing", agentId: "agent-001" });
+    mockFetchResumeChatSession.mockResolvedValueOnce({ session });
+    mockFetchChatMessages.mockResolvedValue({
+      messages: [
+        {
+          id: "msg-1",
+          sessionId: "session-existing",
+          role: "assistant",
+          content: "Existing project reply",
+          createdAt: "2026-05-16T00:00:00.000Z",
+          metadata: null,
+          thinkingOutput: null,
+        } as any,
+      ],
+    });
+
+    const { result, rerender } = renderHook(({ projectId }) => useQuickChat(projectId), {
+      initialProps: { projectId: "proj-123" },
+    });
+
+    await act(async () => {
+      await result.current.switchSession("agent-001");
+    });
+
+    await waitFor(() => {
+      expect(result.current.activeSession?.id).toBe("session-existing");
+      expect(result.current.messages).toEqual([
+        expect.objectContaining({ id: "msg-1", content: "Existing project reply" }),
+      ]);
+    });
+
+    rerender({ projectId: "proj-456" });
+
+    await waitFor(() => {
+      expect(result.current.activeSession).toBeNull();
+      expect(result.current.messages).toEqual([]);
+      expect(result.current.sessions).toEqual([]);
     });
   });
 

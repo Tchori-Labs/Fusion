@@ -189,7 +189,8 @@ Quick Chat is an optional floating panel for fast, project-scoped assistant conv
 - Entering `/new` or `/clear` (exact match after trimming) in the Quick Chat composer clears the active thread target: direct/model targets use `startFreshSession(...)`, while room targets call `rooms.clearRoom(activeRoom.id)`.
 - The `+` action opens an inline new-session chooser (inside the panel, not a modal) with `Model` selected by default and optional switch to `Agent`
 - Submitting the inline chooser uses explicit fresh-session creation and immediately persists/selects the new thread, then refreshes the session dropdown list
-- On every open, Quick Chat restores the most recently used non-archived session by latest activity (`max(lastMessageAt, updatedAt)`); only when no prior session exists does it fall back to the first agent / configured default model.
+- On first open for a project, Quick Chat restores the last opened non-archived session from per-project local storage; if that saved session is missing, it falls back to the most recently touched non-archived session by latest activity (`max(lastMessageAt, updatedAt)`), and only falls back to the first agent / configured default model when no prior session exists.
+- Closing and reopening Quick Chat keeps the active conversation warm in memory, so messages stay visible without a conversation reload or "Loading conversation…" flash.
 - Queued follow-up messages entered while a Quick Chat response is still streaming now persist per session, so closing/reopening the panel restores the queued text and flushes it once the active response completes.
 - Resume lookups still use targeted session queries instead of loading the full active-session list first
 - Tool-call summaries in the floating quick-chat panel are intentionally condensed into a single-line header row (especially on small screens) so tool name + status stay scannable without multi-line wrapping

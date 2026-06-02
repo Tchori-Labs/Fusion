@@ -26,6 +26,7 @@ import {
   removePersistedPendingChatMessage,
   setPersistedPendingChatMessage,
 } from "./chatPendingMessageStorage";
+import { setPersistedLastQuickChatSessionId } from "./quickChatLastSessionStorage";
 import { isLikelyTabSuspensionError, useTabVisibilitySuspension } from "./visibilitySuspension";
 
 interface ModelSelection {
@@ -250,6 +251,14 @@ export function useQuickChat(
   useEffect(() => {
     lastAttachedGenerationRef.current = null;
   }, [projectId]);
+
+  useEffect(() => {
+    if (!activeSession?.id) {
+      return;
+    }
+
+    setPersistedLastQuickChatSessionId(projectId, activeSession.id);
+  }, [activeSession?.id, projectId]);
 
   const refreshSessions = useCallback(async () => {
     setSessionsLoading(true);
@@ -531,6 +540,22 @@ export function useQuickChat(
     setStreamingToolCalls([]);
     setIsStreaming(false);
   }, []);
+
+  useEffect(() => {
+    if (streamRef.current) {
+      streamRef.current.close();
+      streamRef.current = null;
+    }
+
+    lastAttachedGenerationRef.current = null;
+    currentSessionKeyRef.current = "";
+    currentSessionTargetRef.current = null;
+    activeSessionRef.current = null;
+    setActiveSession(null);
+    setMessages([]);
+    setSessions([]);
+    resetTransientComposerState();
+  }, [projectId, resetTransientComposerState]);
 
   // Switch to a different chat target session
   const switchSession = useCallback(
