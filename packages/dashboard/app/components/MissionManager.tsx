@@ -191,6 +191,7 @@ const missionInterviewListStatuses: ReadonlySet<AiSessionSummary["status"]> = ne
   "generating",
   "awaiting_input",
   "error",
+  "complete",
 ]);
 
 function getInterviewStatusLabel(status: AiSessionSummary["status"]): string {
@@ -201,6 +202,8 @@ function getInterviewStatusLabel(status: AiSessionSummary["status"]): string {
       return "Awaiting input";
     case "error":
       return "Needs retry";
+    case "complete":
+      return "Plan ready";
     default:
       return status;
   }
@@ -212,6 +215,8 @@ function getInterviewActionLabel(status: AiSessionSummary["status"]): string {
       return "Retry interview";
     case "generating":
       return "Generating plan";
+    case "complete":
+      return "Review plan";
     default:
       return "Resume interview";
   }
@@ -4021,7 +4026,16 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
   const renderInterviewSessionItems = () => missionInterviewDrafts.map((session) => {
     const isErrored = session.status === "error";
     const isGenerating = session.status === "generating";
+    const isComplete = session.status === "complete";
     const resumeActionLabel = getInterviewActionLabel(session.status);
+    const description = isGenerating
+      ? "Generating mission hierarchy from interview context."
+      : isErrored
+        ? "Interview hit an error. Retry from this list item."
+        : isComplete
+          ? "Plan ready — review and approve to create the mission."
+          : "Interview is waiting for your next response.";
+    const actionText = isGenerating ? "Generating…" : isErrored ? "Retry" : isComplete ? "Review" : "Resume";
 
     return (
       <div
@@ -4053,13 +4067,7 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
               {getInterviewStatusLabel(session.status)}
             </span>
           </div>
-          <p className="mission-list__item-description">
-            {isGenerating
-              ? "Generating mission hierarchy from interview context."
-              : isErrored
-                ? "Interview hit an error. Retry from this list item."
-                : "Interview is waiting for your next response."}
-          </p>
+          <p className="mission-list__item-description">{description}</p>
         </div>
         <div className="mission-list__item-actions mission-list__resume-actions" onClick={(event) => event.stopPropagation()}>
           <button
@@ -4070,7 +4078,7 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
             disabled={isGenerating}
           >
             {isGenerating ? <Loader2 size={14} className="spinner" /> : isErrored ? <RefreshCw size={14} /> : <Sparkles size={14} />}
-            <span>{isGenerating ? "Generating…" : isErrored ? "Retry" : "Resume"}</span>
+            <span>{actionText}</span>
           </button>
           <button
             className="mission-btn mission-btn--danger mission-btn--sm"

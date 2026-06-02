@@ -20,6 +20,7 @@ import {
   getMissionInterviewSession,
   getMissionInterviewSummary,
   getRateLimitResetTime,
+  listMissionInterviewDrafts,
   InvalidSessionStateError,
   missionInterviewStreamManager,
   parseMissionAgentResponse,
@@ -136,6 +137,13 @@ class MockAiSessionStore extends EventEmitter {
     );
   }
 
+  listAll(projectId?: string): AiSessionRow[] {
+    return [...this.rows.values()]
+      .filter((row) => row.archived !== 1)
+      .filter((row) => (projectId ? row.projectId === projectId : row.projectId == null))
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  }
+
   on(event: "ai_session:deleted", listener: (sessionId: string) => void): this {
     return super.on(event, listener);
   }
@@ -235,6 +243,80 @@ describe("mission-interview module", () => {
         expect(checkRateLimit(ip)).toBe(true);
       }
       expect(checkRateLimit(ip)).toBe(false);
+    });
+  });
+
+  describe("draft listing", () => {
+    it("includes complete mission interview drafts and filters by type/project", () => {
+      const store = new MockAiSessionStore();
+      store.rows.set(
+        "draft-complete",
+        buildMissionRow({
+          id: "draft-complete",
+          status: "complete",
+          title: "Plan ready",
+          result: JSON.stringify({ missionTitle: "Plan ready", missionDescription: "desc", milestones: [] }),
+          currentQuestion: null,
+          projectId: "project-a",
+          createdAt: "2026-05-12T00:00:00.000Z",
+          updatedAt: "2026-05-12T00:05:00.000Z",
+        }),
+      );
+      store.rows.set(
+        "draft-other-type",
+        buildMissionRow({
+          id: "draft-other-type",
+          type: "planning",
+          status: "complete",
+          title: "Not a mission interview",
+          projectId: "project-a",
+        }),
+      );
+      store.rows.set(
+        "draft-other-project",
+        buildMissionRow({
+          id: "draft-other-project",
+          status: "complete",
+          title: "Other project",
+          projectId: "project-b",
+        }),
+      );
+      setAiSessionStore(store as any);
+
+      expect(listMissionInterviewDrafts("project-a")).toEqual([
+        expect.objectContaining({
+          id: "draft-complete",
+          title: "Plan ready",
+          status: "complete",
+          projectId: "project-a",
+          createdAt: "2026-05-12T00:00:00.000Z",
+          updatedAt: "2026-05-12T00:05:00.000Z",
+          hasConversation: true,
+        }),
+      ]);
+    });
+
+    it("removes converted interviews from the draft list after cleanup", () => {
+      const store = new MockAiSessionStore();
+      store.rows.set(
+        "draft-complete",
+        buildMissionRow({
+          id: "draft-complete",
+          status: "complete",
+          title: "Ready to create",
+          result: JSON.stringify({ missionTitle: "Ready to create", missionDescription: "desc", milestones: [] }),
+          currentQuestion: null,
+        }),
+      );
+      setAiSessionStore(store as any);
+
+      expect(listMissionInterviewDrafts()).toEqual([
+        expect.objectContaining({ id: "draft-complete", status: "complete" }),
+      ]);
+
+      cleanupMissionInterviewSession("draft-complete");
+
+      expect(listMissionInterviewDrafts()).toEqual([]);
     });
   });
 

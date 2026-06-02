@@ -19,7 +19,7 @@ import type { PlanningQuestion, PromptOverrideMap, TaskStore } from "@fusion/cor
 import { resolvePrompt } from "@fusion/core";
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
-import type { AiSessionStore, AiSessionRow, AiSessionStatus } from "./ai-session-store.js";
+import type { AiSessionStore, AiSessionRow, AiSessionStatus, AiSessionSummary } from "./ai-session-store.js";
 import { SessionEventBuffer, type SessionBufferedEvent } from "./sse-buffer.js";
 import {
   createSessionDiagnostics,
@@ -98,7 +98,7 @@ export const GENERATION_TIMEOUT_MS = 180_000;
 
 const generationGuard = new GenerationGuard();
 
-const MISSION_INTERVIEW_DRAFT_STATUSES = ["generating", "awaiting_input", "error"] as const;
+const MISSION_INTERVIEW_DRAFT_STATUSES = ["generating", "awaiting_input", "error", "complete"] as const;
 
 function isMissionInterviewDraftStatus(
   status: AiSessionStatus,
@@ -1314,26 +1314,30 @@ export function listMissionInterviewDrafts(projectId?: string): MissionInterview
   }
 
   return _aiSessionStore
-    .listActive(projectId)
-    .filter((session) => {
-      if (session.type !== "mission_interview") {
-        return false;
-      }
-      if (!isMissionInterviewDraftStatus(session.status)) {
-        return false;
-      }
-      if (projectId) {
-        return session.projectId === projectId;
-      }
-      return session.projectId == null;
-    })
+    .listAll(projectId)
+    .filter(
+      (
+        session,
+      ): session is AiSessionSummary & { type: "mission_interview"; status: MissionInterviewDraftSummary["status"] } => {
+        if (session.type !== "mission_interview") {
+          return false;
+        }
+        if (!isMissionInterviewDraftStatus(session.status)) {
+          return false;
+        }
+        if (projectId) {
+          return session.projectId === projectId;
+        }
+        return session.projectId == null;
+      },
+    )
     .map((session) => {
       const row = _aiSessionStore?.get(session.id);
       const conversation = row ? safeParseJson<unknown[]>(row.conversationHistory, []) : [];
       return {
         id: session.id,
         title: session.title,
-        status: session.status as MissionInterviewDraftSummary["status"],
+        status: session.status,
         projectId: session.projectId,
         createdAt: row?.createdAt ?? session.updatedAt,
         updatedAt: session.updatedAt,

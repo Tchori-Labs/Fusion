@@ -39,7 +39,7 @@ export interface AutopilotStatus {
 export interface MissionInterviewDraftSummary {
   id: string;
   title: string;
-  status: "generating" | "awaiting_input" | "error";
+  status: "generating" | "awaiting_input" | "error" | "complete";
   projectId: string | null;
   createdAt: string;
   updatedAt: string;

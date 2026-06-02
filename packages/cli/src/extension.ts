@@ -2325,11 +2325,11 @@ export default function kbExtension(pi: ExtensionAPI) {
             `SELECT id, title, status, updatedAt
              FROM ai_sessions
              WHERE type = 'mission_interview'
-               AND status IN ('generating', 'awaiting_input', 'error')
+               AND status IN ('generating', 'awaiting_input', 'error', 'complete')
                AND COALESCE(archived, 0) = 0
              ORDER BY updatedAt DESC`,
           )
-          .all() as Array<{ id: string; title: string; status: "generating" | "awaiting_input" | "error"; updatedAt: string }>)
+          .all() as Array<{ id: string; title: string; status: "generating" | "awaiting_input" | "error" | "complete"; updatedAt: string }>)
         : [];
 
       if (missions.length === 0 && drafts.length === 0) {
@@ -2357,7 +2357,8 @@ export default function kbExtension(pi: ExtensionAPI) {
       if (drafts.length > 0) {
         lines.push(`Drafts (${drafts.length})`);
         for (const draft of drafts) {
-          lines.push(`  ◌ ${draft.id}: ${draft.title} (draft · interview ${draft.status})`);
+          const draftStatus = draft.status === "complete" ? "plan ready" : draft.status;
+          lines.push(`  ◌ ${draft.id}: ${draft.title} (draft · interview ${draftStatus})`);
         }
         lines.push("");
       }

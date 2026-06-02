@@ -1088,13 +1088,24 @@ describe.skipIf(!SHOULD_RUN_LEGACY_EXTENSION_INTEGRATION)("fn pi extension (lega
         `INSERT INTO ai_sessions (id, type, status, title, inputPayload, conversationHistory, currentQuestion, result, thinkingOutput, error, projectId, createdAt, updatedAt, lockedByTab, lockedAt)
          VALUES (?, 'mission_interview', 'awaiting_input', ?, '{}', '[]', NULL, NULL, '', NULL, NULL, ?, ?, NULL, NULL)`,
       ).run("draft-1", "Draft Mission", "2026-05-12T00:00:00.000Z", "2026-05-12T00:00:00.000Z");
+      store.getDatabase().prepare(
+        `INSERT INTO ai_sessions (id, type, status, title, inputPayload, conversationHistory, currentQuestion, result, thinkingOutput, error, projectId, createdAt, updatedAt, lockedByTab, lockedAt)
+         VALUES (?, 'mission_interview', 'complete', ?, '{}', '[]', NULL, '{}', '', NULL, NULL, ?, ?, NULL, NULL)`,
+      ).run("draft-2", "Ready Mission", "2026-05-12T00:01:00.000Z", "2026-05-12T00:01:00.000Z");
 
       const listTool = api.tools.get("fn_mission_list")!;
       const result = await listTool.execute("call-1", {}, undefined, undefined, makeCtx(tmpDir));
 
-      expect(result.content[0].text).toContain("Drafts (1)");
+      expect(result.content[0].text).toContain("Drafts (2)");
       expect(result.content[0].text).toContain("draft-1: Draft Mission (draft · interview awaiting_input)");
+      expect(result.content[0].text).toContain("draft-2: Ready Mission (draft · interview plan ready)");
       expect(result.details.drafts).toEqual([
+        {
+          id: "draft-2",
+          title: "Ready Mission",
+          status: "complete",
+          updatedAt: "2026-05-12T00:01:00.000Z",
+        },
         {
           id: "draft-1",
           title: "Draft Mission",

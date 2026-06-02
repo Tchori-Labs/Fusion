@@ -158,7 +158,7 @@ The dashboard supports mission planning workflows where you can:
 - Associate features to executable tasks
 - Track progress at each layer
 - Persisted missions with `interviewState: "in_progress"` remain visible as interview-styled mission cards in the main mission list so planning work does not disappear after reloads
-- Resume in-progress mission interview sessions directly from separate transient session rows in the main missions list (`mission_interview` sessions in `generating`, `awaiting_input`, or `error`) before a mission record is created
+- Resume in-progress mission interview sessions directly from separate transient session rows in the main missions list (`mission_interview` sessions in `generating`, `awaiting_input`, `error`, or `complete`) before a mission record is created; `complete` means the plan summary is ready for review/approval but has not been converted into a mission yet
 - Banner-driven mission interview resumes are one-shot: if you close or send the interview to background, Missions re-fetches project-scoped `mission_interview` sessions and re-surfaces the transient row (including on the mobile stacked Missions view) so resume/retry remains discoverable without losing persisted `interviewState: "in_progress"` mission cards
 - Mission interview, milestone interview, and slice interview agents have read-only board visibility via `fn_task_list` and `fn_task_get`, so they can reference active backlog context and avoid duplicating in-flight tasks while asking planning questions
 
@@ -166,9 +166,9 @@ The dashboard supports mission planning workflows where you can:
 
 Mission interview sessions are persisted in `ai_sessions` before a mission row exists, so unfinished drafts stay recoverable across reloads and restarts.
 
-- **Dashboard:** the Missions view shows a **Drafts** section for in-flight `mission_interview` sessions with **Resume** and **Discard** actions.
-- **CLI:** `fn mission list` shows drafts by default before normal mission status sections. Pass `--no-drafts` to hide them.
-- **pi extension:** `fn_mission_list` includes drafts by default and accepts `includeDrafts: false` to suppress them.
+- **Dashboard:** the Missions view shows a **Drafts** section for in-flight `mission_interview` sessions with **Resume**/**Review** and **Discard** actions. A `complete` draft is a generated-but-unapproved plan parked at the summary step.
+- **CLI:** `fn mission list` shows drafts by default before normal mission status sections, including `complete` plan-ready drafts. Pass `--no-drafts` to hide them.
+- **pi extension:** `fn_mission_list` includes drafts by default and accepts `includeDrafts: false` to suppress them; `complete` mission interview drafts are returned here too.
 - **Discarding drafts:** discarding removes the `ai_sessions` row even for cold drafts after a server restart.
 
 Mission interview draft endpoints:

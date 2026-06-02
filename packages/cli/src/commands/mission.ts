@@ -103,6 +103,17 @@ interface RunMissionListOptions {
   includeDrafts?: boolean;
 }
 
+function formatMissionInterviewDraftStatus(
+  status: "generating" | "awaiting_input" | "error" | "complete",
+): string {
+  switch (status) {
+    case "complete":
+      return "plan ready";
+    default:
+      return status;
+  }
+}
+
 /**
  * List all missions with status summary.
  */
@@ -118,11 +129,11 @@ export async function runMissionList(projectName?: string, options: RunMissionLi
         `SELECT id, title, status, updatedAt
          FROM ai_sessions
          WHERE type = 'mission_interview'
-           AND status IN ('generating', 'awaiting_input', 'error')
+           AND status IN ('generating', 'awaiting_input', 'error', 'complete')
            AND COALESCE(archived, 0) = 0
          ORDER BY updatedAt DESC`,
       )
-      .all() as Array<{ id: string; title: string; status: "generating" | "awaiting_input" | "error"; updatedAt: string }>)
+      .all() as Array<{ id: string; title: string; status: "generating" | "awaiting_input" | "error" | "complete"; updatedAt: string }>)
     : [];
 
   if (missions.length === 0 && drafts.length === 0) {
@@ -135,7 +146,7 @@ export async function runMissionList(projectName?: string, options: RunMissionLi
   if (drafts.length > 0) {
     console.log(`  ◌ Drafts (${drafts.length})`);
     for (const draft of drafts) {
-      console.log(`    ◌  ${draft.id}  ${draft.title} — (draft · interview ${draft.status})`);
+      console.log(`    ◌  ${draft.id}  ${draft.title} — (draft · interview ${formatMissionInterviewDraftStatus(draft.status)})`);
     }
     console.log();
   }

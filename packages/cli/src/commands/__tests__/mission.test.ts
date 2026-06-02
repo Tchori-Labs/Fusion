@@ -377,6 +377,12 @@ describe("mission commands", () => {
             status: "awaiting_input",
             updatedAt: "2026-05-12T00:00:00.000Z",
           },
+          {
+            id: "draft-2",
+            title: "Ready draft",
+            status: "complete",
+            updatedAt: "2026-05-12T00:01:00.000Z",
+          },
         ]),
       });
 
@@ -394,9 +400,10 @@ describe("mission commands", () => {
         }
 
         const joined = consoleCapture.logs.join("\n");
-        expect(joined).toContain("◌ Drafts (1)");
+        expect(joined).toContain("◌ Drafts (2)");
         expect(joined).toContain("draft-1  Draft mission — (draft · interview awaiting_input)");
-        expect(joined.indexOf("◌ Drafts (1)")).toBeLessThan(joined.indexOf("● Active (1)"));
+        expect(joined).toContain("draft-2  Ready draft — (draft · interview plan ready)");
+        expect(joined.indexOf("◌ Drafts (2)")).toBeLessThan(joined.indexOf("● Active (1)"));
 
         mockExit.mockRestore();
       } finally {

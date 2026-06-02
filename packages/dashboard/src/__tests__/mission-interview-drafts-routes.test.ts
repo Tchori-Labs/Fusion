@@ -112,16 +112,28 @@ describe("mission interview draft routes", () => {
     });
   });
 
-  it("GET /interview/drafts excludes complete and archived mission interview rows", async () => {
+  it("GET /interview/drafts includes complete mission interview rows but excludes archived rows", async () => {
     aiSessionStore.upsert(makeRow({ id: "draft-live", title: "Live draft", status: "awaiting_input" }));
-    aiSessionStore.upsert(makeRow({ id: "draft-complete", title: "Complete draft", status: "complete" }));
+    aiSessionStore.upsert(
+      makeRow({
+        id: "draft-complete",
+        title: "Complete draft",
+        status: "complete",
+        result: JSON.stringify({ missionTitle: "Complete draft", missionDescription: "desc", milestones: [] }),
+        currentQuestion: null,
+      }),
+    );
     aiSessionStore.upsert(makeRow({ id: "draft-archived", title: "Archived draft", status: "error" }));
+    aiSessionStore.upsert(makeRow({ id: "draft-other-type", title: "Planning row", type: "planning", status: "complete" }));
     db.prepare("UPDATE ai_sessions SET archived = 1 WHERE id = ?").run("draft-archived");
 
     const res = await request(app, "GET", "/api/missions/interview/drafts");
 
     expect(res.status).toBe(200);
-    expect((res.body as { drafts: Array<{ id: string }> }).drafts.map((draft) => draft.id)).toEqual(["draft-live"]);
+    expect((res.body as { drafts: Array<{ id: string; status: string }> }).drafts).toEqual([
+      expect.objectContaining({ id: "draft-complete", status: "complete" }),
+      expect.objectContaining({ id: "draft-live", status: "awaiting_input" }),
+    ]);
   });
 
   it("POST /interview/drafts/:sessionId/discard removes a hot in-memory session", async () => {

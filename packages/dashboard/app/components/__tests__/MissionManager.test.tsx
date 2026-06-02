@@ -65,6 +65,7 @@ vi.mock("lucide-react", () => ({
   Package: () => <span data-testid="package-icon">Package</span>,
   Box: () => <span data-testid="box-icon">Box</span>,
   Check: () => <span data-testid="check-icon">Check</span>,
+  CheckCircle: () => <span data-testid="check-circle-icon">CheckCircle</span>,
   Loader2: ({ className }: any) => <span data-testid="loader-icon" className={className}>Loader</span>,
   Link: () => <span data-testid="link-icon">Link</span>,
   Unlink: () => <span data-testid="unlink-icon">Unlink</span>,
@@ -2334,6 +2335,15 @@ describe("MissionManager", () => {
         updatedAt: "2026-05-12T00:15:00.000Z",
         hasConversation: true,
       },
+      {
+        id: "draft-complete",
+        title: "Draft ready to review",
+        status: "complete",
+        projectId: null,
+        createdAt: "2026-05-12T00:16:00.000Z",
+        updatedAt: "2026-05-12T00:20:00.000Z",
+        hasConversation: true,
+      },
     ]);
     globalThis.fetch = createFetchMock();
 
@@ -2343,11 +2353,15 @@ describe("MissionManager", () => {
     expect(screen.getByText("Draft awaiting input")).toBeInTheDocument();
     expect(screen.getByText("Draft generating")).toBeInTheDocument();
     expect(screen.getByText("Draft with error")).toBeInTheDocument();
+    expect(screen.getByText("Draft ready to review")).toBeInTheDocument();
+    expect(screen.getByText("Plan ready")).toBeInTheDocument();
+    expect(screen.getByText("Plan ready — review and approve to create the mission.")).toBeInTheDocument();
 
     const statusCases = [
       ["Draft awaiting input", "Resume interview", "Resume", false],
       ["Draft generating", "Generating plan", "Generating…", true],
       ["Draft with error", "Retry interview", "Retry", false],
+      ["Draft ready to review", "Review plan", "Review", false],
     ] as const;
 
     for (const [title, actionLabel, buttonText, disabled] of statusCases) {
@@ -2375,6 +2389,7 @@ describe("MissionManager", () => {
     ["awaiting_input", "Resume interview", "Resume", false],
     ["generating", "Generating plan", "Generating…", true],
     ["error", "Retry interview", "Retry", false],
+    ["complete", "Review plan", "Review", false],
   ] as const)(
     "renders draft action copy for %s status",
     async (status, actionLabel, visibleLabel, disabled) => {
@@ -2469,6 +2484,61 @@ describe("MissionManager", () => {
 
     await waitFor(() => {
       expect(screen.getByText("Plan Mission with AI")).toBeInTheDocument();
+    });
+  });
+
+  it("reopens a complete mission interview draft at the summary review step", async () => {
+    mockFetchAiSession.mockResolvedValue({
+      id: "draft-complete",
+      type: "mission_interview",
+      status: "complete",
+      title: "Draft ready to review",
+      inputPayload: JSON.stringify({ missionTitle: "Draft ready to review" }),
+      conversationHistory: "[]",
+      currentQuestion: null,
+      result: JSON.stringify({
+        missionTitle: "Draft ready to review",
+        missionDescription: "Recovered summary",
+        milestones: [
+          {
+            title: "Milestone 1",
+            description: "Ship it",
+            verification: "Review the plan",
+            slices: [],
+          },
+        ],
+      }),
+      thinkingOutput: "",
+      error: null,
+      projectId: null,
+      createdAt: "2026-05-12T00:16:00.000Z",
+      updatedAt: "2026-05-12T00:20:00.000Z",
+    });
+    mockFetchMissionInterviewDrafts.mockResolvedValueOnce([
+      {
+        id: "draft-complete",
+        title: "Draft ready to review",
+        status: "complete",
+        projectId: null,
+        createdAt: "2026-05-12T00:16:00.000Z",
+        updatedAt: "2026-05-12T00:20:00.000Z",
+        hasConversation: true,
+      },
+    ]);
+    globalThis.fetch = createFetchMock();
+
+    render(<MissionManager isOpen={true} onClose={vi.fn()} addToast={vi.fn()} />);
+
+    const draftRow = await screen.findByText("Draft ready to review");
+    const item = draftRow.closest(".mission-list__item");
+    expect(item).not.toBeNull();
+
+    fireEvent.click(within(item!).getByRole("button", { name: "Review plan" }));
+
+    await waitFor(() => {
+      expect(mockFetchAiSession).toHaveBeenCalledWith("draft-complete");
+      expect(screen.getByText("Plan Mission with AI")).toBeInTheDocument();
+      expect(screen.getByText("Approve Plan")).toBeInTheDocument();
     });
   });
 
