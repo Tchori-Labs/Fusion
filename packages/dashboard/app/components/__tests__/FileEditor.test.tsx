@@ -1,5 +1,6 @@
+import { useState } from "react";
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { EditorView } from "@codemirror/view";
 import { loadAllAppCss } from "../../test/cssFixture";
 import { FileEditor } from "../FileEditor";
@@ -54,6 +55,50 @@ describe("FileEditor", () => {
     const view = getEditorView();
     view.dispatch({ changes: { from: 0, insert: "new content" } });
     expect(onChange).toHaveBeenCalledWith("new content");
+  });
+
+  it("preserves the editor instance across content prop updates", async () => {
+    document.documentElement.dataset.theme = "dark";
+    const { rerender } = render(<FileEditor content="alpha" onChange={vi.fn()} filePath="a.ts" />);
+
+    const initialContentNode = document.querySelector(".cm-content");
+    const initialEditorNode = document.querySelector(".cm-editor");
+    expect(initialContentNode).toBeInTheDocument();
+    expect(initialEditorNode).toBeInTheDocument();
+
+    rerender(<FileEditor content="alpha beta" onChange={vi.fn()} filePath="a.ts" />);
+
+    await waitFor(() => {
+      expect(document.querySelector(".cm-content")).toBe(initialContentNode);
+      expect(document.querySelector(".cm-editor")).toBe(initialEditorNode);
+      expect(getEditorView().state.doc.toString()).toBe("alpha beta");
+    });
+  });
+
+  it("keeps the caret position through the controlled edit loop", async () => {
+    document.documentElement.dataset.theme = "dark";
+
+    function ControlledEditor() {
+      const [value, setValue] = useState("hello");
+      return <FileEditor content={value} onChange={setValue} filePath="memory.md" />;
+    }
+
+    render(<ControlledEditor />);
+
+    const initialContentNode = document.querySelector(".cm-content");
+
+    act(() => {
+      const view = getEditorView();
+      view.dispatch({ changes: { from: 5, insert: "!" }, selection: { anchor: 6 } });
+    });
+
+    await waitFor(() => {
+      const liveView = getEditorView();
+      expect(document.querySelector(".cm-content")).toBe(initialContentNode);
+      expect(liveView.state.doc.toString()).toBe("hello!");
+      expect(liveView.state.selection.main.head).toBe(6);
+      expect(liveView.state.selection.main.anchor).toBe(6);
+    });
   });
 
   it("respects readOnly prop", () => {

@@ -116,7 +116,7 @@ export function FileEditor({
       editorViewRef.current = null;
       view.destroy();
     };
-  }, [content, effectiveShowPreview, languageExtension, readOnly, shouldRenderLineNumbers, wordWrap]);
+  }, [effectiveShowPreview]);
 
   useEffect(() => {
     const observer = new MutationObserver(() => {
@@ -130,6 +130,38 @@ export function FileEditor({
 
     return () => observer.disconnect();
   }, []);
+
+  useEffect(() => {
+    const view = editorViewRef.current;
+    if (!view) return;
+    view.dispatch({
+      effects: lineNumbersCompartmentRef.current.reconfigure(shouldRenderLineNumbers ? lineNumbers() : []),
+    });
+  }, [shouldRenderLineNumbers]);
+
+  useEffect(() => {
+    const view = editorViewRef.current;
+    if (!view) return;
+    view.dispatch({
+      effects: wordWrapCompartmentRef.current.reconfigure(wordWrap ? EditorView.lineWrapping : []),
+    });
+  }, [wordWrap]);
+
+  useEffect(() => {
+    const view = editorViewRef.current;
+    if (!view) return;
+    view.dispatch({
+      effects: readOnlyCompartmentRef.current.reconfigure(readOnly ? [EditorState.readOnly.of(true), EditorView.editable.of(false)] : []),
+    });
+  }, [readOnly]);
+
+  useEffect(() => {
+    const view = editorViewRef.current;
+    if (!view) return;
+    view.dispatch({
+      effects: languageCompartmentRef.current.reconfigure(languageExtension ?? []),
+    });
+  }, [languageExtension]);
 
   useEffect(() => {
     const view = editorViewRef.current;
