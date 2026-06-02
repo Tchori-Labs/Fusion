@@ -648,9 +648,10 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
       if (e.key === "Enter") {
-        if (e.shiftKey && isExpanded) {
-          // Allow Shift+Enter to insert newline when expanded or in fullscreen mode
+        if (e.shiftKey) {
+          // Allow Shift+Enter to insert a newline in any quick-entry state
           // Don't prevent default - let the newline be inserted
+          setIsExpanded(true);
           return;
         }
         // Enter without Shift submits

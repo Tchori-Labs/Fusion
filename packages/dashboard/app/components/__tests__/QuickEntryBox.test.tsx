@@ -446,18 +446,21 @@ describe("QuickEntryBox", () => {
     });
   });
 
-  it("allows Shift+Enter to insert newline when expanded", () => {
-    renderQuickEntryBox({});
-    expandQuickEntry();
+  it("allows Shift+Enter to insert newline when collapsed without submitting", async () => {
+    const { props } = renderQuickEntryBox({});
     const textarea = screen.getByTestId("quick-entry-input");
 
+    expect(textarea.classList.contains("quick-entry-input--expanded")).toBe(false);
     fireEvent.change(textarea, { target: { value: "Line 1" } });
 
-    // Shift+Enter should not prevent default (allow newline)
+    // Shift+Enter should not prevent default or submit while collapsed
     const event = fireEvent.keyDown(textarea, { key: "Enter", shiftKey: true });
 
-    // Event should not be prevented (returns true if preventDefault was NOT called)
     expect(event).toBe(true);
+    expect(props.onCreate).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(textarea).toHaveClass("quick-entry-input--expanded");
+    });
   });
 
   it("submits on Enter even when expanded (without Shift)", async () => {
