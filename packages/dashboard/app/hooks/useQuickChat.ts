@@ -21,6 +21,11 @@ export const FN_AGENT_ID = "__fn_agent__";
 export type { ChatMessageInfo, FallbackInfo, ToolCallInfo } from "./chatTypes";
 import type { ChatMessageInfo, FallbackInfo, ToolCallInfo } from "./chatTypes";
 import { createChatStreamHandlers } from "./createChatStreamHandlers";
+import {
+  getPersistedPendingChatMessage,
+  removePersistedPendingChatMessage,
+  setPersistedPendingChatMessage,
+} from "./chatPendingMessageStorage";
 import { isLikelyTabSuspensionError, useTabVisibilitySuspension } from "./visibilitySuspension";
 
 interface ModelSelection {
@@ -276,6 +281,7 @@ export function useQuickChat(
   );
 
   const clearPendingMessage = useCallback(() => {
+    removePersistedPendingChatMessage(activeSessionRef.current?.id);
     pendingMessageRef.current = "";
     setPendingMessage("");
   }, []);
@@ -286,6 +292,7 @@ export function useQuickChat(
       return;
     }
 
+    removePersistedPendingChatMessage(activeSessionRef.current?.id);
     pendingMessageRef.current = "";
     setPendingMessage("");
     const queuedCompletion = queuedPreSessionCompletionRef.current;
@@ -514,6 +521,7 @@ export function useQuickChat(
   const resetTransientComposerState = useCallback(() => {
     cancelStreamingFlushesRef.current?.();
     cancelStreamingFlushesRef.current = null;
+    removePersistedPendingChatMessage(activeSessionRef.current?.id);
     pendingMessageRef.current = "";
     setPendingMessage("");
     queuedPreSessionCompletionRef.current?.resolve();
@@ -607,6 +615,32 @@ export function useQuickChat(
       attachIfGenerating(session.id, session.inFlightGeneration);
     }
   }, [attachIfGenerating, projectId, resetTransientComposerState]);
+
+  useEffect(() => {
+    const sessionId = activeSession?.id;
+    if (!sessionId) {
+      return;
+    }
+
+    const restoredPendingMessage = getPersistedPendingChatMessage(sessionId);
+    if (!restoredPendingMessage) {
+      return;
+    }
+
+    pendingMessageRef.current = restoredPendingMessage;
+    setPendingMessage(restoredPendingMessage);
+
+    queueMicrotask(() => {
+      if (
+        activeSessionRef.current?.id === sessionId &&
+        pendingMessageRef.current.trim().length > 0 &&
+        !isStreamingRef.current &&
+        !streamRef.current
+      ) {
+        void flushPendingMessage();
+      }
+    });
+  }, [activeSession?.id, flushPendingMessage]);
 
   const startModelChat = useCallback(
     async (modelProvider: string, modelId: string) => {
@@ -765,6 +799,7 @@ export function useQuickChat(
 
         pendingMessageRef.current = content;
         setPendingMessage(content);
+        setPersistedPendingChatMessage(activeSession.id, content);
         return Promise.resolve();
       }
 

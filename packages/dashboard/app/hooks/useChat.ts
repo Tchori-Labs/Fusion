@@ -39,6 +39,11 @@ export interface ChatSessionInfo {
 export type { ChatMessageInfo, FailureInfo, FallbackInfo, ToolCallInfo } from "./chatTypes";
 import type { ChatMessageInfo, FailureInfo, FallbackInfo, ToolCallInfo } from "./chatTypes";
 import { createChatStreamHandlers } from "./createChatStreamHandlers";
+import {
+  getPersistedPendingChatMessage,
+  removePersistedPendingChatMessage,
+  setPersistedPendingChatMessage,
+} from "./chatPendingMessageStorage";
 import { isLikelyTabSuspensionError, useTabVisibilitySuspension } from "./visibilitySuspension";
 import { clearCache, readCache, SWR_CACHE_KEYS, SWR_TASKS_MAX_AGE_MS, writeCache } from "../utils/swrCache";
 import { useAgentsMapCache } from "./useAgentsMapCache";
@@ -482,6 +487,7 @@ export function useChat(
   const resetTransientComposerState = useCallback(() => {
     cancelStreamingFlushesRef.current?.();
     cancelStreamingFlushesRef.current = null;
+    removePersistedPendingChatMessage(activeSessionRef.current?.id);
     pendingMessageRef.current = "";
     setPendingMessage("");
     setStreamingText("");
@@ -491,6 +497,7 @@ export function useChat(
   }, []);
 
   const clearPendingMessage = useCallback(() => {
+    removePersistedPendingChatMessage(activeSessionRef.current?.id);
     pendingMessageRef.current = "";
     setPendingMessage("");
   }, []);
@@ -501,6 +508,7 @@ export function useChat(
       return;
     }
 
+    removePersistedPendingChatMessage(activeSessionRef.current?.id);
     pendingMessageRef.current = "";
     setPendingMessage("");
     sendMessageRef.current(queuedMessage);
@@ -596,6 +604,9 @@ export function useChat(
       if (id && currentActiveSessionId === id && !sessionOverride) {
         return;
       }
+      if (currentActiveSessionId && currentActiveSessionId !== id) {
+        removePersistedPendingChatMessage(currentActiveSessionId);
+      }
 
       // Close any existing stream
       if (streamRef.current) {
@@ -662,6 +673,32 @@ export function useChat(
   // Update the ref to point to the actual selectSession function
   // This is needed to avoid circular dependencies in useEffect
   selectSessionRef.current = selectSession;
+
+  useEffect(() => {
+    const sessionId = activeSession?.id;
+    if (!sessionId) {
+      return;
+    }
+
+    const restoredPendingMessage = getPersistedPendingChatMessage(sessionId);
+    if (!restoredPendingMessage) {
+      return;
+    }
+
+    pendingMessageRef.current = restoredPendingMessage;
+    setPendingMessage(restoredPendingMessage);
+
+    queueMicrotask(() => {
+      if (
+        activeSessionRef.current?.id === sessionId &&
+        pendingMessageRef.current.trim().length > 0 &&
+        !isStreamingRef.current &&
+        !streamRef.current
+      ) {
+        flushPendingMessage();
+      }
+    });
+  }, [activeSession?.id, flushPendingMessage]);
 
   // Create a new session
   const createSession = useCallback(
@@ -829,6 +866,7 @@ export function useChat(
       if (isStreamingRef.current) {
         pendingMessageRef.current = content;
         setPendingMessage(content);
+        setPersistedPendingChatMessage(activeSession.id, content);
         return;
       }
 
