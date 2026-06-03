@@ -806,6 +806,15 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
             ),
         );
 
+        if (session.status === "error") {
+          setView({
+            type: "error",
+            session: { sessionId, currentQuestion: null, summary: null },
+            errorMessage: session.error || "Session failed",
+          });
+          return;
+        }
+
         if (session.status === "draft") {
           // Draft hasn't been started yet — restore the user's saved text +
           // model selection into the editor, reattach the draft id so a
@@ -869,16 +878,16 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
           setView({ type: "loading" });
           if (session.thinkingOutput) setStreamingOutput(session.thinkingOutput);
           connectToPlanningStream(sessionId);
-        } else if (session.status === "error") {
-          setView({
-            type: "error",
-            session: { sessionId, currentQuestion: null, summary: null },
-            errorMessage: session.error || "Session failed",
-          });
         }
-      } catch {
-        setError("Failed to load session");
-        setView({ type: "initial" });
+      } catch (err) {
+        currentSessionIdRef.current = sessionId;
+        setLockSessionId(sessionId);
+        setError(null);
+        setView({
+          type: "error",
+          session: { sessionId, currentQuestion: null, summary: null },
+          errorMessage: getErrorMessage(err) || "Failed to load session",
+        });
       }
     },
     [connectToPlanningStream, projectId],
