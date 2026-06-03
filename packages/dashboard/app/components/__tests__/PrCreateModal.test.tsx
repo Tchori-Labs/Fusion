@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   fetchPrPreflight: vi.fn(),
   fetchPrOptions: vi.fn(),
   createPr: vi.fn(),
+  resolvePrConflicts: vi.fn(),
 }));
 
 vi.mock("../../api", () => ({
@@ -16,6 +17,7 @@ vi.mock("../../api", () => ({
   fetchPrPreflight: mocks.fetchPrPreflight,
   fetchPrOptions: mocks.fetchPrOptions,
   createPr: mocks.createPr,
+  resolvePrConflicts: mocks.resolvePrConflicts,
 }));
 
 const metadata = { title: "AI title", body: "## Summary\n\n## Changes\n\n## Testing\n\n## Linked Task\n", templateUsed: true };
@@ -67,6 +69,7 @@ describe("PrCreateModal", () => {
     mocks.fetchPrPreflight.mockResolvedValue(preflight);
     mocks.fetchPrOptions.mockResolvedValue(options);
     mocks.createPr.mockResolvedValue({ number: 12, title: "AI title", url: "url", status: "open", headBranch: "h", baseBranch: "main", commentCount: 0 } as PrInfo);
+    mocks.resolvePrConflicts.mockResolvedValue({ result: { resolved: true, pushed: true, conflictedFiles: ["a.ts"], message: "resolved" }, preflight });
   });
 
   it("renders nothing when closed", () => {
@@ -207,11 +210,39 @@ describe("PrCreateModal", () => {
     fireEvent.click(screen.getByRole("button", { name: /remove reviewer 1/i }));
   });
 
+  it("renders AI conflict resolution affordance and enables submit after success", async () => {
+    mocks.fetchPrPreflight.mockResolvedValue({ ...preflight, conflictsWithBase: true, branchOnRemote: false });
+    mocks.resolvePrConflicts.mockResolvedValueOnce({ result: { resolved: true, pushed: true, conflictedFiles: ["a.ts"], message: "resolved" }, preflight });
+    const { addToast } = await renderModalLoaded();
+
+    const submitButton = screen.getByRole("button", { name: "Create PR" });
+    expect(submitButton).toBeDisabled();
+    const resolveButton = await screen.findByRole("button", { name: "Resolve conflicts with AI" });
+
+    fireEvent.click(resolveButton);
+
+    await waitFor(() => expect(mocks.resolvePrConflicts).toHaveBeenCalledWith("FN-4756", "main", undefined));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Create PR" })).toBeEnabled());
+    expect(addToast).toHaveBeenCalledWith("Resolved PR conflicts and pushed branch", "success");
+  });
+
+  it("surfaces conflict resolution failures", async () => {
+    mocks.fetchPrPreflight.mockResolvedValue({ ...preflight, conflictsWithBase: true });
+    mocks.resolvePrConflicts.mockRejectedValueOnce(new Error("unable to resolve"));
+    await renderModalLoaded();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Resolve conflicts with AI" }));
+
+    expect(await screen.findByText("unable to resolve")).toBeInTheDocument();
+  });
+
   it("shows submit error and retries with same payload", async () => {
     mocks.createPr.mockRejectedValueOnce(new Error("bad")).mockResolvedValueOnce({ number: 22, title: "ok", url: "u", status: "open", headBranch: "h", baseBranch: "main", commentCount: 0 } as PrInfo);
     await renderModalLoaded();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Create PR" })).toBeEnabled());
 
     fireEvent.click(screen.getByRole("button", { name: "Create PR" }));
+    await waitFor(() => expect(mocks.createPr).toHaveBeenCalledTimes(1));
     expect(await screen.findByText("bad")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     await waitFor(() => expect(mocks.createPr).toHaveBeenCalledTimes(2));
@@ -232,7 +263,9 @@ describe("PrCreateModal", () => {
     });
     mocks.createPr.mockRejectedValueOnce(err);
     await renderModalLoaded();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Create PR" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "Create PR" }));
+    await waitFor(() => expect(mocks.createPr).toHaveBeenCalledTimes(1));
     expect((await screen.findAllByText(/gh auth login/i)).length).toBeGreaterThan(0);
   });
 

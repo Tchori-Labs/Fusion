@@ -7,6 +7,7 @@ import {
   fetchPrOptions,
   fetchPrPreflight,
   generatePrMetadata,
+  resolvePrConflicts,
   type PrOptionsLabel,
   type PrOptionsResponse,
   type PrOptionsUser,
@@ -135,6 +136,7 @@ export function PrCreateModal({
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [resolveConflictError, setResolveConflictError] = useState<string | null>(null);
   const [lastGhError, setLastGhError] = useState<ModalGhError | null>(null);
   const [aiTitle, setAiTitle] = useState("");
   const [aiBody, setAiBody] = useState("");
@@ -147,6 +149,7 @@ export function PrCreateModal({
   const [preflight, setPreflight] = useState<PrPreflightResponse | null>(null);
   const [baseBranch, setBaseBranch] = useState("");
   const [draft, setDraft] = useState(false);
+  const [resolvingConflicts, setResolvingConflicts] = useState(false);
   const [reviewers, setReviewers] = useState<PrOptionsUser[]>([]);
   const [assignees, setAssignees] = useState<PrOptionsUser[]>([]);
   const [labels, setLabels] = useState<PrOptionsLabel[]>([]);
@@ -157,6 +160,7 @@ export function PrCreateModal({
     const requestId = ++requestSeqRef.current;
     setLoading(true);
     setError(null);
+    setResolveConflictError(null);
     try {
       const [metadata, preflightData, optionsData] = await Promise.all([
         generatePrMetadata(taskId, projectId),
@@ -282,6 +286,7 @@ export function PrCreateModal({
 
   const handleBaseChange = useCallback(async (nextBase: string) => {
     setBaseBranch(nextBase);
+    setResolveConflictError(null);
     try {
       const nextPreflight = await fetchPrPreflight(taskId, projectId, nextBase);
       setPreflight(nextPreflight);
@@ -289,6 +294,21 @@ export function PrCreateModal({
       setError(getErrorMessage(loadError));
     }
   }, [projectId, taskId]);
+
+  const handleResolveConflicts = useCallback(async () => {
+    if (!baseBranch || resolvingConflicts) return;
+    setResolvingConflicts(true);
+    setResolveConflictError(null);
+    try {
+      const response = await resolvePrConflicts(taskId, baseBranch, projectId);
+      setPreflight(response.preflight);
+      addToast("Resolved PR conflicts and pushed branch", "success");
+    } catch (resolveError) {
+      setResolveConflictError(getErrorMessage(resolveError));
+    } finally {
+      setResolvingConflicts(false);
+    }
+  }, [addToast, baseBranch, projectId, resolvingConflicts, taskId]);
 
   const payload = useMemo(() => ({
     title: title.trim(),
@@ -360,6 +380,23 @@ export function PrCreateModal({
               <button type="button" className="btn btn-sm" onClick={() => void handleBaseChange(baseBranch)}>
                 Re-run preflight
               </button>
+              {preflight?.conflictsWithBase ? (
+                <div className="card pr-create-modal__conflict-resolution">
+                  <div className="pr-create-modal__conflict-copy">
+                    <p className="pr-create-modal__conflict-title">Resolve conflicts with AI</p>
+                    <p className="pr-create-modal__conflict-message">Fusion will use AI to resolve conflicts on this branch and push it.</p>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    onClick={() => void handleResolveConflicts()}
+                    disabled={resolvingConflicts || loading}
+                  >
+                    {resolvingConflicts ? <RefreshCw size={14} className="spin" /> : null}
+                    Resolve conflicts with AI
+                  </button>
+                </div>
+              ) : null}
             </section>
 
             <section className="pr-create-modal__section">
@@ -445,6 +482,15 @@ export function PrCreateModal({
                 ))}
               </div>
             </details>
+
+              {resolveConflictError ? (
+                <div className="form-error pr-error" role="alert">
+                  <p>{resolveConflictError}</p>
+                  <div className="pr-error__actions">
+                    <button type="button" className="btn btn-sm pr-error__dismiss" onClick={() => setResolveConflictError(null)} aria-label="Dismiss conflict resolution error">×</button>
+                  </div>
+                </div>
+              ) : null}
 
               {error && (
                 <div className="form-error pr-error" role="alert">
