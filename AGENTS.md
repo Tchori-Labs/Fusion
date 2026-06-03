@@ -93,10 +93,6 @@ pnpm verify:workspace
 - Motivating incidents: streamed-response spacing was fixed three times before the invariant was fully covered (FN-5787, FN-5789, FN-5803), the usage "Show hidden" button regressed three times before broader coverage stuck (FN-5797, FN-5875, FN-5919), and the auto-merge blank-dashboard fix re-opened after desktop-only coverage missed mobile Android (FN-5751).
 - If a regression test only proves the exact reported case, it is incomplete; extend it until the invariant holds across all known surfaces.
 
-### STANDING DIRECTIVE: Buttons Are Frozen
-
-- Buttons Are Frozen (2026-05-13): when touching dashboard button styling or behavior, preserve the existing sizing/layout contract unless the task explicitly changes it and the affected docs/tests are updated together.
-
 ### Port 4040 is Reserved
 
 Never kill processes on port 4040 and never start test servers on 4040. Use `--port 0` or another free port.
