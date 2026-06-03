@@ -1239,9 +1239,18 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
     return byName;
   }, [mentionAgents]);
 
+  // Key the reset on skill ids, not array identity: useDiscoveredSkillsCache
+  // (SWR) re-delivers content-identical lists with fresh identities (cache
+  // reads re-parse; revalidation notifies a new array). Resetting on identity
+  // alone wipes the user's keyboard highlight mid-navigation when a
+  // revalidation lands — only a *semantic* list change should reset it.
+  const filteredSkillsKey = useMemo(
+    () => filteredSkills.map((skill) => skill.id).join(" "),
+    [filteredSkills],
+  );
   useEffect(() => {
     setHighlightedSkillIndex(0);
-  }, [filteredSkills]);
+  }, [filteredSkillsKey]);
 
   useEffect(() => {
     setMentionHighlightIndex(0);
