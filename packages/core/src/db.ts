@@ -149,7 +149,7 @@ export function probeFts5(db: DatabaseSync): boolean {
 
 // ── Schema Definition ────────────────────────────────────────────────
 
-const SCHEMA_VERSION = 103;
+const SCHEMA_VERSION = 104;
 
 export { SCHEMA_VERSION };
 
@@ -397,6 +397,15 @@ CREATE TABLE IF NOT EXISTS workflows (
   ir TEXT NOT NULL,
   layout TEXT NOT NULL DEFAULT '{}',
   createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL
+);
+
+-- Per-task selected workflow. stepIds holds the WorkflowStep ids materialized
+-- by compiling the workflow, so re-selection can clean them up (no orphans).
+CREATE TABLE IF NOT EXISTS task_workflow_selection (
+  taskId TEXT PRIMARY KEY,
+  workflowId TEXT NOT NULL,
+  stepIds TEXT NOT NULL DEFAULT '[]',
   updatedAt TEXT NOT NULL
 );
 
@@ -4061,6 +4070,20 @@ export class Database {
             ir TEXT NOT NULL,
             layout TEXT NOT NULL DEFAULT '{}',
             createdAt TEXT NOT NULL,
+            updatedAt TEXT NOT NULL
+          )
+        `);
+      });
+    }
+
+    // Migration 104: Per-task selected workflow (resolves to enabledWorkflowSteps).
+    if (version < 104) {
+      this.applyMigration(104, () => {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS task_workflow_selection (
+            taskId TEXT PRIMARY KEY,
+            workflowId TEXT NOT NULL,
+            stepIds TEXT NOT NULL DEFAULT '[]',
             updatedAt TEXT NOT NULL
           )
         `);
