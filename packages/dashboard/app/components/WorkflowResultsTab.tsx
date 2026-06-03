@@ -42,6 +42,17 @@ interface WorkflowResultsTabProps {
   projectId?: string;
   isTaskInProgress?: boolean;
   onWorkflowStepsChange?: (steps: string[]) => void;
+  taskStatus?: string;
+  taskPausedReason?: string;
+}
+
+/** Extract the user-facing question from a workflow-input paused reason.
+ *  Strips the leading "workflow-input:<nodeId>: " prefix if present. */
+function parseWorkflowInputQuestion(pausedReason?: string): string {
+  if (!pausedReason) return "Reply in the comments and unpause the task to continue.";
+  const match = /^workflow-input:[^:]+:\s*(.*)$/s.exec(pausedReason);
+  if (match) return match[1].trim() || "Reply in the comments and unpause the task to continue.";
+  return pausedReason;
 }
 
 interface WorkflowStepOption {
@@ -201,6 +212,8 @@ export function WorkflowResultsTab({
   projectId,
   isTaskInProgress,
   onWorkflowStepsChange,
+  taskStatus,
+  taskPausedReason,
 }: WorkflowResultsTabProps) {
   const [expandedOutputs, setExpandedOutputs] = useState<Record<string, boolean>>({});
   const [renderModes, setRenderModes] = useState<Record<string, "markdown" | "plain">>({});
@@ -659,8 +672,16 @@ export function WorkflowResultsTab({
   const showConfiguredStepsState = !loading && !hasResults && hasConfiguredSteps;
   const showEditHeaderForResults = canEdit && hasResults;
 
+  const isAwaitingInput = taskStatus === "awaiting-user-input";
+
   return (
     <div className="workflow-results-tab" data-task-id={taskId}>
+      {isAwaitingInput && (
+        <div className="workflow-input-banner" role="alert">
+          <strong>Waiting for your input</strong>
+          <span>{parseWorkflowInputQuestion(taskPausedReason)}</span>
+        </div>
+      )}
       {canEdit && onWorkflowStepsChange && (
         <div className="workflow-selector-row">
           <WorkflowSelector

@@ -1,4 +1,17 @@
 /* ── Workflow Results ── */
+
+.workflow-input-banner {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  padding: var(--space-sm) var(--space-md);
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--ws-warning);
+  color: var(--ws-warning);
+  font-size: 0.85rem;
+  margin-bottom: var(--space-sm);
+}
+
 .workflow-results-loading {
   display: flex;
   align-items: center;

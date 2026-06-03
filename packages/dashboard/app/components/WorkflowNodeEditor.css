@@ -239,6 +239,27 @@
   color: var(--text-tertiary);
 }
 
+.wf-inspector-note--info {
+  color: var(--ws-warning);
+}
+
+.wf-field--checkbox {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--space-sm);
+  cursor: pointer;
+}
+
+.wf-field--checkbox input[type="checkbox"] {
+  width: auto;
+  padding: 0;
+  margin: 0;
+  background: none;
+  border: none;
+  accent-color: var(--todo);
+  cursor: pointer;
+}
+
 /* Canvas nodes */
 .wf-node {
   display: inline-flex;

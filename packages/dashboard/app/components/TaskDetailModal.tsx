@@ -2744,6 +2744,8 @@ export function TaskDetailContent({
                 projectId={projectId}
                 isTaskInProgress={task.column === "in-progress" && task.status !== "paused"}
                 onWorkflowStepsChange={handleWorkflowStepsChange}
+                taskStatus={task.status}
+                taskPausedReason={task.pausedReason}
               />
             </div>
           ) : activeTab === "model" ? (

@@ -14,7 +14,7 @@ import {
   type Node as FlowNode,
   type Edge as FlowEdge,
 } from "@xyflow/react";
-import { X, Plus, Trash2, Save, MessageSquare, Terminal, Shield, GitMerge, Loader2 } from "lucide-react";
+import { X, Plus, Trash2, Save, MessageSquare, Terminal, Shield, GitMerge, Loader2, HelpCircle } from "lucide-react";
 import type { WorkflowDefinition } from "@fusion/core";
 import { getErrorMessage } from "@fusion/core";
 import {
@@ -23,12 +23,32 @@ import {
   updateWorkflow,
   deleteWorkflow,
   compileWorkflow,
+  fetchModels,
+  fetchAgents,
+  fetchDiscoveredSkills,
+  type ModelInfo,
 } from "../api";
+import type { Agent } from "../api";
+import type { DiscoveredSkill } from "../api";
 import type { ToastType } from "../hooks/useToast";
 import { useOverlayDismiss } from "../hooks/useOverlayDismiss";
 import { useModalResizePersist } from "../hooks/useModalResizePersist";
 import { workflowNodeTypes, type WorkflowFlowNodeData, type WorkflowEditorNodeKind } from "./nodes/WorkflowNodeTypes";
 import { irToFlow, flowToIr, emptyWorkflowIr, emptyWorkflowLayout } from "./workflow-flow-mapping";
+import { CustomModelDropdown } from "./CustomModelDropdown";
+
+type ExecutorKind = "model" | "agent" | "skill" | "cli";
+
+function getModelDropdownValue(provider: string, modelId: string): string {
+  return provider && modelId ? `${provider}/${modelId}` : "";
+}
+
+function parseModelDropdownValue(value: string): { provider: string; modelId: string } {
+  if (!value) return { provider: "", modelId: "" };
+  const slashIndex = value.indexOf("/");
+  if (slashIndex === -1) return { provider: "", modelId: "" };
+  return { provider: value.slice(0, slashIndex), modelId: value.slice(slashIndex + 1) };
+}
 
 interface WorkflowNodeEditorProps {
   isOpen: boolean;
@@ -43,8 +63,9 @@ function newNodeId(): string {
   return `n-${Date.now().toString(36)}-${nodeSeq}`;
 }
 
-const PALETTE: Array<{ kind: WorkflowEditorNodeKind; label: string; icon: typeof MessageSquare }> = [
+const PALETTE: Array<{ kind: WorkflowEditorNodeKind; label: string; icon: typeof MessageSquare; presetConfig?: Record<string, unknown> }> = [
   { kind: "prompt", label: "Prompt", icon: MessageSquare },
+  { kind: "prompt", label: "User input", icon: HelpCircle, presetConfig: { awaitInput: true } },
   { kind: "script", label: "Script", icon: Terminal },
   { kind: "gate", label: "Gate", icon: Shield },
   { kind: "merge", label: "Merge boundary", icon: GitMerge },
@@ -108,16 +129,18 @@ function InnerEditor({
   );
 
   const addNode = useCallback(
-    (kind: WorkflowEditorNodeKind) => {
+    (kind: WorkflowEditorNodeKind, nodeLabel?: string, presetConfig?: Record<string, unknown>) => {
       const id = newNodeId();
-      const label = kind === "merge" ? "Merge boundary" : kind.charAt(0).toUpperCase() + kind.slice(1);
+      const label = nodeLabel ?? (kind === "merge" ? "Merge boundary" : kind.charAt(0).toUpperCase() + kind.slice(1));
+      const baseConfig = kind === "gate" ? { gateMode: "gate" } : {};
+      const config = presetConfig ? { ...baseConfig, ...presetConfig } : baseConfig;
       setNodes((ns) => [
         ...ns,
         {
           id,
           type: kind,
           position: { x: 200 + ns.length * 40, y: 240 + (ns.length % 3) * 70 },
-          data: { kind, label, config: kind === "gate" ? { gateMode: "gate" } : {} },
+          data: { kind, label, config },
           deletable: true,
         },
       ]);
@@ -200,6 +223,32 @@ function InnerEditor({
   }, [activeWorkflow, nodes, edges, projectId, addToast]);
 
   const selectedNode = nodes.find((n) => n.id === selectedNodeId) ?? null;
+
+  // Lazy-loaded executor resources
+  const [models, setModels] = useState<ModelInfo[]>([]);
+  const [agents, setAgents] = useState<Agent[]>([]);
+  const [skills, setSkills] = useState<DiscoveredSkill[]>([]);
+
+  const currentExecutor = (selectedNode?.data.config?.executor as ExecutorKind | undefined) ?? "model";
+
+  useEffect(() => {
+    if (!selectedNode || (selectedNode.data.kind !== "prompt" && selectedNode.data.kind !== "gate")) return;
+    if (currentExecutor === "model" && models.length === 0) {
+      fetchModels().then((res) => setModels(res.models)).catch((err) => {
+        addToast(getErrorMessage(err) || "Failed to load models", "error");
+      });
+    } else if (currentExecutor === "agent" && agents.length === 0) {
+      fetchAgents().then(setAgents).catch((err) => {
+        addToast(getErrorMessage(err) || "Failed to load agents", "error");
+      });
+    } else if (currentExecutor === "skill" && skills.length === 0) {
+      fetchDiscoveredSkills(projectId).then(setSkills).catch((err) => {
+        addToast(getErrorMessage(err) || "Failed to load skills", "error");
+      });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentExecutor, selectedNode?.id]);
+
   const overlayProps = useOverlayDismiss(onClose);
 
   return (
@@ -244,8 +293,8 @@ function InnerEditor({
               <>
                 <div className="wf-editor-toolbar">
                   <div className="wf-editor-palette">
-                    {PALETTE.map(({ kind, label, icon: Icon }) => (
-                      <button key={kind} className="wf-palette-btn" onClick={() => addNode(kind)}>
+                    {PALETTE.map(({ kind, label, icon: Icon, presetConfig }) => (
+                      <button key={label} className="wf-palette-btn" onClick={() => addNode(kind, label, presetConfig)}>
                         <Icon size={13} /> {label}
                       </button>
                     ))}
@@ -311,6 +360,127 @@ function InnerEditor({
                     onChange={(e) => updateSelectedData({ config: { prompt: e.target.value } })}
                   />
                 </label>
+              ) : null}
+
+              {selectedNode.data.kind === "prompt" ? (
+                <>
+                  <label className="wf-field">
+                    <span>Executor</span>
+                    <select
+                      value={currentExecutor}
+                      onChange={(e) => updateSelectedData({ config: { executor: e.target.value } })}
+                    >
+                      <option value="model">Model</option>
+                      <option value="agent">Agent</option>
+                      <option value="skill">Skill</option>
+                      <option value="cli">CLI / script</option>
+                    </select>
+                  </label>
+
+                  {currentExecutor === "model" && (
+                    <label className="wf-field">
+                      <span>Model</span>
+                      <CustomModelDropdown
+                        label="Model"
+                        models={models}
+                        value={getModelDropdownValue(
+                          String(selectedNode.data.config?.modelProvider ?? ""),
+                          String(selectedNode.data.config?.modelId ?? ""),
+                        )}
+                        onChange={(value) => {
+                          const { provider, modelId } = parseModelDropdownValue(value);
+                          updateSelectedData({ config: { modelProvider: provider || undefined, modelId: modelId || undefined } });
+                        }}
+                      />
+                    </label>
+                  )}
+
+                  {currentExecutor === "agent" && (
+                    <label className="wf-field">
+                      <span>Agent</span>
+                      <select
+                        value={String(selectedNode.data.config?.agentId ?? "")}
+                        onChange={(e) => updateSelectedData({ config: { agentId: e.target.value || undefined } })}
+                      >
+                        <option value="">— select agent —</option>
+                        {agents.map((a) => (
+                          <option key={a.id} value={a.id}>{a.name}</option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
+
+                  {currentExecutor === "skill" && (
+                    <label className="wf-field">
+                      <span>Skill</span>
+                      <select
+                        value={String(selectedNode.data.config?.skillName ?? "")}
+                        onChange={(e) => updateSelectedData({ config: { skillName: e.target.value || undefined } })}
+                      >
+                        <option value="">— select skill —</option>
+                        {skills.map((s) => (
+                          <option key={s.id} value={s.name}>{s.name}</option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
+
+                  {currentExecutor === "cli" && (
+                    <label className="wf-field">
+                      <span>Script name</span>
+                      <input
+                        value={String(selectedNode.data.config?.scriptName ?? "")}
+                        onChange={(e) => updateSelectedData({ config: { scriptName: e.target.value } })}
+                      />
+                      <span className="wf-inspector-note">Named script from project settings. The node prompt is passed via FUSION_NODE_PROMPT.</span>
+                    </label>
+                  )}
+
+                  <label className="wf-field wf-field--checkbox">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(selectedNode.data.config?.autoApprove)}
+                      onChange={(e) => updateSelectedData({ config: { autoApprove: e.target.checked } })}
+                    />
+                    <span>Auto-approve requests</span>
+                  </label>
+
+                  <label className="wf-field">
+                    <span>Max retries</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={10}
+                      placeholder="default"
+                      value={selectedNode.data.config?.maxRetries != null ? String(selectedNode.data.config.maxRetries) : ""}
+                      onChange={(e) => {
+                        const val = e.target.value.trim();
+                        if (val === "") {
+                          const patch: Record<string, unknown> = { ...selectedNode.data.config };
+                          delete patch.maxRetries;
+                          updateSelectedData({ config: patch });
+                        } else {
+                          const num = parseInt(val, 10);
+                          if (!isNaN(num)) updateSelectedData({ config: { maxRetries: num } });
+                        }
+                      }}
+                    />
+                  </label>
+
+                  <label className="wf-field wf-field--checkbox">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(selectedNode.data.config?.awaitInput)}
+                      onChange={(e) => updateSelectedData({ config: { awaitInput: e.target.checked } })}
+                    />
+                    <span>Wait for user input</span>
+                  </label>
+                  {Boolean(selectedNode.data.config?.awaitInput) && (
+                    <p className="wf-inspector-note wf-inspector-note--info">
+                      This node pauses the task until you reply in the task's comments and unpause. The Prompt field above is shown to the user as the question.
+                    </p>
+                  )}
+                </>
               ) : null}
 
               {selectedNode.data.kind === "script" ? (
