@@ -205,6 +205,8 @@ Scoped exception (FN-5819): shared-branch-group members (`branchContext.assignme
 - `./docs/soft-delete-verification-matrix.md` — mandatory soft-delete verification matrix.
 - `./docs/cli-reference.md` — CLI and terminal UI reference.
 - `./docs/contributing.md` — contributing conventions and release-adjacent context.
+- `./docs/solutions/` — documented solutions to past problems (bugs, best practices, workflow patterns), organized by category with YAML frontmatter (`module`, `tags`, `problem_type`). Relevant when implementing or debugging in documented areas.
+- `./CONCEPTS.md` — shared domain vocabulary (entities, named processes, status concepts) with project-specific meaning. Relevant when orienting to the codebase or discussing domain concepts.
 
 ### Lazy-Loaded Heavy Views
 
