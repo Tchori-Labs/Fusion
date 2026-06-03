@@ -202,8 +202,8 @@ function parseTaskBranchContextFromSourceMetadata(sourceMetadata: Record<string,
   // groupId is optional: only shared-mode members carry one. A non-shared
   // member persists source/assignmentMode without a groupId, so a missing or
   // empty groupId must NOT discard the whole context.
-  const groupId = typeof candidate.groupId === "string" && candidate.groupId.trim()
-    ? candidate.groupId
+  const groupId = typeof candidate.groupId === "string"
+    ? candidate.groupId.trim() || undefined
     : undefined;
   if (candidate.source !== "planning" && candidate.source !== "mission" && candidate.source !== "new-task") return undefined;
   if (candidate.assignmentMode !== "shared" && candidate.assignmentMode !== "per-task-derived") return undefined;
@@ -226,7 +226,9 @@ function withTaskBranchContextInSourceMetadata(
   return {
     ...(sourceMetadata ?? {}),
     [TASK_BRANCH_CONTEXT_METADATA_KEY]: {
-      ...(branchContext.groupId ? { groupId: branchContext.groupId } : {}),
+      ...(branchContext.groupId?.trim()
+        ? { groupId: branchContext.groupId.trim() }
+        : {}),
       source: branchContext.source,
       assignmentMode: branchContext.assignmentMode,
       ...(branchContext.inheritedBaseBranch ? { inheritedBaseBranch: branchContext.inheritedBaseBranch } : {}),

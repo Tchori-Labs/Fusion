@@ -39,7 +39,7 @@ interface GitHubOperations {
   }>;
   mergePr(params: { number: number; method?: "merge" | "squash" | "rebase" }): Promise<PrInfo>;
   getPrStatus(owner: string, repo: string, number: number): Promise<PrInfo>;
-  updatePr(params: { number: number; title?: string; body?: string }): Promise<PrInfo>;
+  updatePr(params: { owner?: string; repo?: string; number: number; title?: string; body?: string }): Promise<PrInfo>;
   closePr(params: { number: number }): Promise<PrInfo>;
 }
 
@@ -287,6 +287,8 @@ export function syncGroupPrCallback(
       return { prNumber: current.number, prUrl: current.url, prState: currentState };
     }
     const updated = await github.updatePr({
+      owner: repo.owner,
+      repo: repo.repo,
       number: group.prNumber,
       title: buildGroupPullRequestTitle(group, members),
       body: buildGroupPrSyncBody(group, members),

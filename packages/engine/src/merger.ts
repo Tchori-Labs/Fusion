@@ -7553,11 +7553,25 @@ export async function aiMergeTask(
           group: latestGroup,
           members,
         });
+        // Guard against stale snapshots: a newer landing/promotion may have
+        // stored a different (e.g. newer open) PR for this group while we were
+        // awaiting the sync. Re-read the current group and only persist the
+        // reconciled state if it still points at the exact PR snapshot we
+        // synced (same prNumber AND prState); otherwise skip to avoid clobbering
+        // the newer PR.
+        const currentGroup = store.getBranchGroup(groupId);
+        if (
+          !currentGroup ||
+          currentGroup.prNumber !== latestGroup.prNumber ||
+          currentGroup.prState !== latestGroup.prState
+        ) {
+          return;
+        }
         // Out-of-band reconciliation: if GitHub reports the PR is no longer
         // open (closed/merged), persist the corrected prState rather than
         // leaving a stale "open".
-        if (reconciled.prState !== latestGroup.prState) {
-          store.updateBranchGroup(latestGroup.id, {
+        if (reconciled.prState !== currentGroup.prState) {
+          store.updateBranchGroup(currentGroup.id, {
             prState: reconciled.prState,
             prNumber: reconciled.prNumber,
             prUrl: reconciled.prUrl,

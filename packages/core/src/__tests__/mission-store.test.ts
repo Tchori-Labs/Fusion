@@ -2469,6 +2469,10 @@ describe("MissionStore", () => {
 
       expect(triaged[0].id).toBe(f1.id);
       expect(task?.branchContext?.assignmentMode).toBe("per-task-derived");
+      // Non-shared invariant: a per-task-derived member must NOT carry a groupId
+      // and must NOT create a synthetic mission:<id> branch group.
+      expect(task?.branchContext?.groupId).toBeUndefined();
+      expect(ts.getBranchGroupBySource("mission", mission.id)).toBeNull();
     });
 
     it("triageSlice respects explicit branch options over mission strategy defaults", async () => {

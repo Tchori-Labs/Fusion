@@ -1366,6 +1366,11 @@ describe("syncGroupPrCallback (U6)", () => {
     const result = await sync({ cwd: "/tmp/project", group: group as never, members });
     expect(result).toEqual({ prNumber: 42, prUrl: "https://github.com/owner/repo/pull/42", prState: "open" });
     expect(github.updatePr).toHaveBeenCalledTimes(1);
+    // T4: owner/repo must be forwarded so multi-project daemons target the
+    // resolved per-project repo, not process.cwd().
+    expect(github.updatePr).toHaveBeenCalledWith(
+      expect.objectContaining({ owner: "owner", repo: "repo", number: 42 }),
+    );
     const body = (github.updatePr.mock.calls[0][0] as { body: string }).body;
     expect(body).toContain("Completion: 0/2 landed");
     expect(body).toContain("FN-A: Alpha");
