@@ -112,7 +112,8 @@ describe("FN-4811 follow-up: integrity warning dedup persists across restarts", 
       setupForeignOnlyRepo(dir, taskId);
       const task = makeUnprovenDoneTask(taskId);
 
-      const store = makeStore(task);
+      const events: unknown[] = [];
+      const store = makeStore(task, events);
       const manager = new SelfHealingManager(store, { rootDir: dir });
 
       await manager.reconcileDoneTaskIntegrity();
@@ -127,6 +128,7 @@ describe("FN-4811 follow-up: integrity warning dedup persists across restarts", 
       expect(task.mergeDetails?.integrityWarning).toBeDefined();
       expect(task.mergeDetails?.integrityWarning?.reason).toBe("no-owned-commit-foreign-deltas");
       expect(typeof task.mergeDetails?.integrityWarning?.warnedAt).toBe("string");
+      expect(events.filter((event: any) => event?.mutationType === "task:integrity-warning")).toHaveLength(1);
 
       manager.stop();
     } finally {
@@ -141,7 +143,8 @@ describe("FN-4811 follow-up: integrity warning dedup persists across restarts", 
       setupForeignOnlyRepo(dir, taskId);
       const task = makeUnprovenDoneTask(taskId);
 
-      const store = makeStore(task);
+      const events: unknown[] = [];
+      const store = makeStore(task, events);
       const manager = new SelfHealingManager(store, { rootDir: dir });
 
       await manager.reconcileDoneTaskIntegrity();
@@ -153,6 +156,7 @@ describe("FN-4811 follow-up: integrity warning dedup persists across restarts", 
         /Integrity warning: done-task finalize evidence is unproven/.test(String(c[1] ?? "")),
       );
       expect(reWarned).toBe(false);
+      expect(events.filter((event: any) => event?.mutationType === "task:integrity-warning")).toHaveLength(1);
 
       manager.stop();
     } finally {
@@ -206,7 +210,8 @@ describe("FN-4811 follow-up: integrity warning dedup persists across restarts", 
         },
       };
 
-      const store = makeStore(task);
+      const events: unknown[] = [];
+      const store = makeStore(task, events);
       const manager = new SelfHealingManager(store, { rootDir: dir });
 
       await manager.reconcileDoneTaskIntegrity();
@@ -218,6 +223,7 @@ describe("FN-4811 follow-up: integrity warning dedup persists across restarts", 
       expect(warned).toBe(true);
       // Persisted record updated to the new reason.
       expect(task.mergeDetails?.integrityWarning?.reason).toBe("no-owned-commit-foreign-deltas");
+      expect(events.filter((event: any) => event?.mutationType === "task:integrity-warning")).toHaveLength(1);
 
       manager.stop();
     } finally {

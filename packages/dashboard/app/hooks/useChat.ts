@@ -204,15 +204,16 @@ function extractFailureInfo(metadata: Record<string, unknown> | null | undefined
   };
 }
 
-function normalizeFailureInfo(data: string | ChatFailureInfo): FailureInfo {
+function normalizeFailureInfo(data: string | ChatFailureInfo, t?: (key: string, defaultValue: string) => string): FailureInfo {
+  const defaultErrorMsg = t ? t("chat.failedToGetResponse", "Failed to get response") : "Failed to get response";
   if (typeof data === "string") {
-    const summary = data.trim() || "Failed to get response";
+    const summary = data.trim() || defaultErrorMsg;
     return { summary };
   }
 
   const summary = typeof data.summary === "string" && data.summary.trim()
     ? data.summary.trim()
-    : "Failed to get response";
+    : defaultErrorMsg;
 
   return {
     summary,
@@ -248,6 +249,8 @@ export function useChat(
   projectId?: string,
   addToast?: (msg: string, type?: "success" | "error" | "warning") => void,
 ): UseChatReturn {
+  // Note: We use i18n lazy - the t function is only used for fallback messages
+  // and can be undefined since normalizeFailureInfo has a safe default
   const getChatSessionsCacheKey = useCallback(
     (targetProjectId?: string) => (targetProjectId ? `${SWR_CACHE_KEYS.CHAT_SESSIONS_PREFIX}${targetProjectId}` : null),
     [],
@@ -683,17 +686,44 @@ export function useChat(
     pendingMessageRef.current = restoredPendingMessage;
     setPendingMessage(restoredPendingMessage);
 
-    queueMicrotask(() => {
-      if (
-        activeSessionRef.current?.id === sessionId &&
-        pendingMessageRef.current.trim().length > 0 &&
-        !isStreamingRef.current &&
-        !streamRef.current
-      ) {
-        flushPendingMessage();
-      }
-    });
-  }, [activeSession?.id, flushPendingMessage]);
+    // Flush only once the server confirms no generation is in flight. The
+    // local sessions list can hold a stale falsy `isGenerating` (it is a
+    // route-level enrichment that the chat:session:updated SSE payload
+    // lacks), so flushing from local state alone fires a send that aborts a
+    // live generation server-side and can lose the queued message (FN-5852).
+    let cancelled = false;
+    void fetchChatSession(sessionId, projectId)
+      .then(({ session: refreshedSession }) => {
+        if (
+          cancelled ||
+          activeSessionRef.current?.id !== sessionId ||
+          pendingMessageRef.current.trim().length === 0
+        ) {
+          return;
+        }
+
+        if (refreshedSession.isGenerating) {
+          // Still generating: attach (if not already) and let the stream's
+          // onDone/onError flush the queued message.
+          if (!streamRef.current) {
+            attachIfGenerating(sessionId, refreshedSession.inFlightGeneration);
+          }
+          return;
+        }
+
+        if (!isStreamingRef.current && !streamRef.current) {
+          flushPendingMessage();
+        }
+      })
+      .catch(() => {
+        // Keep the restored bubble; another flush trigger (stream
+        // completion, visibility resume, manual send) will deliver it.
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSession?.id, attachIfGenerating, flushPendingMessage, projectId]);
 
   // Create a new session
   const createSession = useCallback(

@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act } from "react";
 import type { ComponentProps } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { PrCreateModal } from "../PrCreateModal";
@@ -9,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   fetchPrPreflight: vi.fn(),
   fetchPrOptions: vi.fn(),
   createPr: vi.fn(),
+  pushPrBranch: vi.fn(),
   resolvePrConflicts: vi.fn(),
 }));
 
@@ -17,6 +19,7 @@ vi.mock("../../api", () => ({
   fetchPrPreflight: mocks.fetchPrPreflight,
   fetchPrOptions: mocks.fetchPrOptions,
   createPr: mocks.createPr,
+  pushPrBranch: mocks.pushPrBranch,
   resolvePrConflicts: mocks.resolvePrConflicts,
 }));
 
@@ -37,6 +40,16 @@ const options = {
   assignees: [{ login: "assign1", name: "Assignee 1" }],
   labels: [{ name: "bug", color: "ff0000" }],
 };
+
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
 
 function renderModal(overrides?: Partial<ComponentProps<typeof PrCreateModal>>) {
   const onClose = vi.fn();
@@ -69,6 +82,7 @@ describe("PrCreateModal", () => {
     mocks.fetchPrPreflight.mockResolvedValue(preflight);
     mocks.fetchPrOptions.mockResolvedValue(options);
     mocks.createPr.mockResolvedValue({ number: 12, title: "AI title", url: "url", status: "open", headBranch: "h", baseBranch: "main", commentCount: 0 } as PrInfo);
+    mocks.pushPrBranch.mockResolvedValue({ result: { pushed: true, head: "fusion/fn-4756", message: "Pushed fusion/fn-4756 to origin." }, preflight });
     mocks.resolvePrConflicts.mockResolvedValue({ result: { resolved: true, pushed: true, conflictedFiles: ["a.ts"], message: "resolved" }, preflight });
   });
 
@@ -155,13 +169,90 @@ describe("PrCreateModal", () => {
     expect(screen.getByText(/using/i)).toBeInTheDocument();
   });
 
-  it("regenerates and reverts AI content", async () => {
-    mocks.generatePrMetadata.mockResolvedValueOnce(metadata).mockResolvedValueOnce({ title: "New title", body: "New body", templateUsed: false });
+  it("renders preflight and options before metadata resolves", async () => {
+    const metadataDeferred = createDeferred<typeof metadata>();
+    mocks.generatePrMetadata.mockReturnValueOnce(metadataDeferred.promise);
+
+    renderModal();
+
+    expect(await screen.findByText("Branch pushed to remote")).toBeInTheDocument();
+    expect(screen.getByLabelText(/base branch/i)).toBeEnabled();
+    expect(screen.getByText("Reviewers")).toBeInTheDocument();
+    expect(screen.getByText(/generating ai title/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create PR" })).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText(/title/i), { target: { value: "Manual PR title" } });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Create PR" })).toBeEnabled());
+
+    fireEvent.change(screen.getByPlaceholderText("Filter reviewers"), { target: { value: "rev" } });
+    fireEvent.click(screen.getByRole("button", { name: /reviewer 1/i }));
+    expect(screen.getByRole("button", { name: /remove reviewer 1/i })).toBeInTheDocument();
+
+    metadataDeferred.resolve(metadata);
+    expect(await screen.findByDisplayValue("Manual PR title")).toBeInTheDocument();
+  });
+
+  it("keeps submit disabled while preflight is pending or failed", async () => {
+    const preflightDeferred = createDeferred<typeof preflight>();
+    mocks.fetchPrPreflight.mockReturnValueOnce(preflightDeferred.promise);
+
+    renderModal();
+
+    expect(await screen.findByDisplayValue("AI title")).toBeInTheDocument();
+    expect(screen.getByText(/loading pre-flight checks/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create PR" })).toBeDisabled();
+
+    preflightDeferred.reject(new Error("preflight blew up"));
+    expect(await screen.findByText("preflight blew up")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create PR" })).toBeDisabled();
+  });
+
+  it("keeps metadata failure scoped so the modal remains usable", async () => {
+    mocks.generatePrMetadata.mockRejectedValueOnce(new Error("metadata blew up"));
+    renderModal();
+
+    expect(await screen.findByText("metadata blew up")).toBeInTheDocument();
+    expect(screen.getByText("Branch pushed to remote")).toBeInTheDocument();
+    expect(screen.getByLabelText(/base branch/i)).toBeEnabled();
+
+    fireEvent.change(screen.getByLabelText(/title/i), { target: { value: "Manual fallback title" } });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Create PR" })).toBeEnabled());
+  });
+
+  it("keeps options failure scoped so metadata and preflight still render", async () => {
+    mocks.fetchPrOptions.mockRejectedValueOnce(new Error("options blew up"));
+    renderModal();
+
+    expect(await screen.findByDisplayValue("AI title")).toBeInTheDocument();
+    expect(screen.getByText("Branch pushed to remote")).toBeInTheDocument();
+    expect(await screen.findByText("options blew up")).toBeInTheDocument();
+    expect(screen.getByLabelText(/base branch/i)).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Create PR" })).toBeEnabled();
+  });
+
+  it("renders empty option and preview states without throwing", async () => {
+    mocks.fetchPrPreflight.mockResolvedValueOnce({ ...preflight, commits: [], changedFiles: [] });
+    mocks.fetchPrOptions.mockResolvedValueOnce({ ...options, baseBranches: [], reviewers: [], assignees: [], labels: [] });
+
+    await renderModalLoaded();
+
+    expect(screen.getByText("No commits found.")).toBeInTheDocument();
+    expect(screen.getByText("No changed files detected.")).toBeInTheDocument();
+    expect(screen.getByLabelText(/base branch/i)).toBeDisabled();
+  });
+
+  it("regenerates AI content without re-blocking preflight and options", async () => {
+    const regenerateDeferred = createDeferred<typeof metadata>();
+    mocks.generatePrMetadata.mockResolvedValueOnce(metadata).mockReturnValueOnce(regenerateDeferred.promise);
     await renderModalLoaded();
     const titleInput = screen.getByDisplayValue("AI title");
     fireEvent.change(titleInput, { target: { value: "custom" } });
     expect(screen.getByRole("button", { name: /revert to ai version/i })).toBeInTheDocument();
     fireEvent.click(screen.getAllByRole("button", { name: /^regenerate$/i })[0]);
+    expect(screen.getByText("Branch pushed to remote")).toBeInTheDocument();
+    expect(screen.getByLabelText(/base branch/i)).toBeEnabled();
+    expect(screen.getByText(/generating ai title/i)).toBeInTheDocument();
+    regenerateDeferred.resolve({ title: "New title", body: "New body", templateUsed: false });
     await screen.findByDisplayValue("New title");
     fireEvent.change(screen.getByDisplayValue("New title"), { target: { value: "edited" } });
     fireEvent.click(screen.getByRole("button", { name: /revert to ai version/i }));
@@ -175,6 +266,24 @@ describe("PrCreateModal", () => {
     expect(submitButton).toBeDisabled();
     fireEvent.click(screen.getByLabelText(/create as draft/i));
     expect(screen.getByRole("button", { name: "Create draft PR" })).toBeInTheDocument();
+  });
+
+  it("refreshes preflight independently when the base branch changes", async () => {
+    const baseChangeDeferred = createDeferred<typeof preflight>();
+    mocks.fetchPrPreflight
+      .mockResolvedValueOnce(preflight)
+      .mockReturnValueOnce(baseChangeDeferred.promise);
+
+    await renderModalLoaded();
+
+    fireEvent.change(screen.getByLabelText(/base branch/i), { target: { value: "develop" } });
+    expect(mocks.fetchPrPreflight).toHaveBeenLastCalledWith("FN-4756", undefined, "develop");
+    expect(screen.getByText(/loading pre-flight checks/i)).toBeInTheDocument();
+    expect(screen.getByDisplayValue("AI title")).toBeInTheDocument();
+
+    baseChangeDeferred.resolve({ ...preflight, defaultBaseBranch: "develop" });
+    await waitFor(() => expect(screen.queryByText(/loading pre-flight checks/i)).not.toBeInTheDocument());
+    expect(screen.getByLabelText(/base branch/i)).toHaveValue("develop");
   });
 
   it("adds and removes chips and submits payload", async () => {
@@ -191,6 +300,7 @@ describe("PrCreateModal", () => {
 
     const submitButton = screen.getByRole("button", { name: "Create draft PR" });
     expect(submitButton).toHaveClass("btn-primary");
+    await waitFor(() => expect(submitButton).toBeEnabled());
     fireEvent.click(submitButton);
 
     await waitFor(() => expect(mocks.createPr).toHaveBeenCalledTimes(1));
@@ -208,6 +318,46 @@ describe("PrCreateModal", () => {
     expect(onClose).toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: /remove reviewer 1/i }));
+  });
+
+  it("renders push-branch affordance and enables submit after success", async () => {
+    mocks.fetchPrPreflight.mockResolvedValue({ ...preflight, branchOnRemote: false });
+    mocks.pushPrBranch.mockResolvedValueOnce({ result: { pushed: true, head: "fusion/fn-4756", message: "Pushed fusion/fn-4756 to origin." }, preflight });
+    const { addToast } = await renderModalLoaded();
+
+    expect(screen.getByRole("button", { name: "Create PR" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Push branch to remote" }));
+
+    await waitFor(() => expect(mocks.pushPrBranch).toHaveBeenCalledWith("FN-4756", "main", undefined));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Create PR" })).toBeEnabled());
+    expect(addToast).toHaveBeenCalledWith("Pushed fusion/fn-4756 to origin.", "success");
+  });
+
+  it("surfaces push-branch failures", async () => {
+    mocks.fetchPrPreflight.mockResolvedValue({ ...preflight, branchOnRemote: false });
+    mocks.pushPrBranch.mockRejectedValueOnce(new Error("unable to push branch"));
+    await renderModalLoaded();
+
+    fireEvent.click(screen.getByRole("button", { name: "Push branch to remote" }));
+
+    expect(await screen.findByText("unable to push branch")).toBeInTheDocument();
+  });
+
+  it("keeps the push-branch remediation usable on narrow mobile widths", async () => {
+    mocks.fetchPrPreflight.mockResolvedValue({ ...preflight, branchOnRemote: false });
+    const originalInnerWidth = window.innerWidth;
+
+    await act(async () => {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: 375 });
+      window.dispatchEvent(new Event("resize"));
+    });
+
+    await renderModalLoaded();
+
+    expect(screen.getByRole("button", { name: "Push branch to remote" })).toBeVisible();
+
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: originalInnerWidth });
+    window.dispatchEvent(new Event("resize"));
   });
 
   it("renders AI conflict resolution affordance and enables submit after success", async () => {

@@ -149,7 +149,7 @@ export function probeFts5(db: DatabaseSync): boolean {
 
 // ── Schema Definition ────────────────────────────────────────────────
 
-const SCHEMA_VERSION = 102;
+const SCHEMA_VERSION = 105;
 
 export { SCHEMA_VERSION };
 
@@ -384,6 +384,29 @@ CREATE TABLE IF NOT EXISTS workflow_steps (
   modelProvider TEXT,
   modelId TEXT,
   createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL
+);
+
+-- Named workflow definitions authored as WorkflowIr graphs (+ editor layout).
+-- The ir and layout columns are JSON-encoded TEXT; ir is validated via
+-- parseWorkflowIr before persistence at the store layer.
+CREATE TABLE IF NOT EXISTS workflows (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  ir TEXT NOT NULL,
+  layout TEXT NOT NULL DEFAULT '{}',
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idxWorkflowsCreatedAt ON workflows(createdAt);
+
+-- Per-task selected workflow. stepIds holds the WorkflowStep ids materialized
+-- by compiling the workflow, so re-selection can clean them up (no orphans).
+CREATE TABLE IF NOT EXISTS task_workflow_selection (
+  taskId TEXT PRIMARY KEY,
+  workflowId TEXT NOT NULL,
+  stepIds TEXT NOT NULL DEFAULT '[]',
   updatedAt TEXT NOT NULL
 );
 
@@ -1833,18 +1856,61 @@ export class Database {
 
     const cutoffIso = new Date(Date.now() - retentionMs).toISOString();
     let deletedTotal = 0;
+    const recordChanges = (table: string, result: { changes: number | bigint }) => {
+      const changes = typeof result.changes === "bigint" ? Number(result.changes) : result.changes;
+      deletedByTable[table] = changes;
+      deletedTotal += changes;
+    };
 
     for (const table of Database.OPERATIONAL_LOG_TABLES) {
       if (!this.tableExists(table)) continue;
       try {
-        const result = this.db
-          .prepare(`DELETE FROM "${table}" WHERE timestamp < ?`)
-          .run(cutoffIso);
-        const changes = typeof result.changes === "bigint" ? Number(result.changes) : result.changes;
-        deletedByTable[table] = changes;
-        deletedTotal += changes;
+        recordChanges(
+          table,
+          this.db.prepare(`DELETE FROM "${table}" WHERE timestamp < ?`).run(cutoffIso),
+        );
       } catch (error) {
         console.warn(`[fusion:db] Failed to prune operational log table ${table}`, error);
+      }
+    }
+
+    if (this.tableExists("agentRuns")) {
+      try {
+        recordChanges(
+          "agentRuns",
+          this.db
+            .prepare("DELETE FROM agentRuns WHERE endedAt IS NOT NULL AND endedAt < ?")
+            .run(cutoffIso),
+        );
+      } catch (error) {
+        console.warn("[fusion:db] Failed to prune operational log table agentRuns", error);
+      }
+    }
+
+    if (this.tableExists("agentConfigRevisions")) {
+      try {
+        recordChanges(
+          "agentConfigRevisions",
+          this.db
+            .prepare(
+              `DELETE FROM agentConfigRevisions
+               WHERE createdAt < ?
+                 AND id NOT IN (
+                   SELECT id FROM (
+                     SELECT id,
+                            ROW_NUMBER() OVER (
+                              PARTITION BY agentId
+                              ORDER BY createdAt DESC, rowid DESC
+                            ) AS rn
+                     FROM agentConfigRevisions
+                   ) ranked
+                   WHERE rn = 1
+                 )`,
+            )
+            .run(cutoffIso),
+        );
+      } catch (error) {
+        console.warn("[fusion:db] Failed to prune operational log table agentConfigRevisions", error);
       }
     }
 
@@ -2003,6 +2069,28 @@ export class Database {
       this.addColumnIfMissing("tasks", "userPaused", "INTEGER DEFAULT 0");
       this.addColumnIfMissing("tasks", "pausedReason", "TEXT");
       this.addColumnIfMissing("tasks", "scopeAutoWiden", "TEXT DEFAULT '[]'");
+    }
+
+    // Deferred agentLogEntries drop (companion to migration 102): when the
+    // legacy table still had rows on the first init pass, the destructive drop
+    // was deferred until TaskStore copies the rows to JSONL and writes the
+    // __meta guard, then re-runs init(). Migrations 103+ bump the schema
+    // version past 102 on that first pass, so the re-run can no longer reach
+    // the version-gated 102 block — finish the drop here, version-independent
+    // (and before the early return below, which fires once the version is
+    // current).
+    if (this.hasTable("agentLogEntries")) {
+      const agentLogMigrationComplete = this.getMetaValue("agentLogEntriesToFileMigrationVersion") === "1";
+      const legacyAgentLogTableIsEmpty =
+        (this.db.prepare("SELECT COUNT(*) as count FROM agentLogEntries").get() as { count: number }).count === 0;
+      const hasLegacyAgentLogCitations = this.hasTable("goal_citations")
+        ? (this.db.prepare(
+            "SELECT 1 FROM goal_citations WHERE surface = 'agent_log' AND sourceRef GLOB 'agentLog:[0-9]*' LIMIT 1",
+          ).get() ?? undefined) !== undefined
+        : false;
+      if (agentLogMigrationComplete || (legacyAgentLogTableIsEmpty && !hasLegacyAgentLogCitations)) {
+        this.db.exec(`DROP TABLE IF EXISTS agentLogEntries`);
+      }
     }
 
     if (version >= SCHEMA_VERSION) return;
@@ -4035,6 +4123,62 @@ export class Database {
           this.db.exec(`DROP TABLE IF EXISTS agentLogEntries`);
         });
       }
+    }
+
+    // Migration 103: Named workflow definitions (WorkflowIr graphs + layout).
+    if (version < 103) {
+      this.applyMigration(103, () => {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS workflows (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            ir TEXT NOT NULL,
+            layout TEXT NOT NULL DEFAULT '{}',
+            createdAt TEXT NOT NULL,
+            updatedAt TEXT NOT NULL
+          );
+          CREATE INDEX IF NOT EXISTS idxWorkflowsCreatedAt ON workflows(createdAt);
+        `);
+      });
+    }
+
+    // Migration 104: Per-task selected workflow (resolves to enabledWorkflowSteps).
+    if (version < 104) {
+      this.applyMigration(104, () => {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS task_workflow_selection (
+            taskId TEXT PRIMARY KEY,
+            workflowId TEXT NOT NULL,
+            stepIds TEXT NOT NULL DEFAULT '[]',
+            updatedAt TEXT NOT NULL
+          )
+        `);
+      });
+    }
+
+    // Migration 105: task_workflow_selection has no FK to tasks(id) (SQLite can't
+    // add one to an existing table without a rebuild), so physical task deletes
+    // before this version could leave orphaned selection rows and unreclaimable
+    // compiled workflow_steps. Drop any already-orphaned rows and their steps.
+    if (version < 105) {
+      this.applyMigration(105, () => {
+        // Delete the compiled steps referenced by orphaned selections first, then
+        // the orphaned selection rows themselves. json_each expands the stepIds
+        // JSON array; the WHERE guards against malformed (non-array) stepIds.
+        this.db.exec(`
+          DELETE FROM workflow_steps WHERE id IN (
+            SELECT je.value
+            FROM task_workflow_selection sel
+            JOIN json_each(sel.stepIds) je
+            WHERE json_valid(sel.stepIds)
+              AND json_type(sel.stepIds) = 'array'
+              AND sel.taskId NOT IN (SELECT id FROM tasks)
+          );
+          DELETE FROM task_workflow_selection
+          WHERE taskId NOT IN (SELECT id FROM tasks);
+        `);
+      });
     }
 
   }

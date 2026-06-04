@@ -19,6 +19,7 @@ export const DEFAULT_GLOBAL_SETTINGS = {
   themeMode: "dark",
   colorTheme: "default",
   dashboardFontScalePct: 100,
+  language: undefined,
   defaultProvider: undefined,
   defaultModelId: undefined,
   testMode: undefined,
@@ -185,6 +186,8 @@ export const DEFAULT_GLOBAL_SETTINGS = {
 export const DEFAULT_PROJECT_SETTINGS = {
   globalPause: false,
   globalPauseReason: undefined,
+  defaultWorkflowId: undefined,
+  approvedWorkflowCliCommands: undefined,
   enginePaused: false,
   maxConcurrent: 2,
   maxTriageConcurrent: 2,

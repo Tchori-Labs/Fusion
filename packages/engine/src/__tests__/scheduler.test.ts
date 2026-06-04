@@ -1599,7 +1599,7 @@ describe("Scheduler", () => {
       expect(auditCalls[0]?.[0]?.metadata?.semaphore).toEqual({ used: 1, limit: 2, slack: 1 });
     });
 
-    it("re-logs and re-audits when binding holder identity changes", async () => {
+    it("suppresses re-log and re-audit when only binding holder identity changes", async () => {
       vi.mocked(existsSync).mockReturnValue(true);
       vi.mocked(readFile).mockResolvedValue("# Task\nDo something");
 
@@ -1629,16 +1629,14 @@ describe("Scheduler", () => {
       const concurrencyReasonCalls = (store.logEntry as ReturnType<typeof vi.fn>).mock.calls.filter(
         (call: unknown[]) => call[0] === "FN-D" && String(call[1]).includes("queued — concurrency limit reached"),
       );
-      expect(concurrencyReasonCalls).toHaveLength(2);
+      expect(concurrencyReasonCalls).toHaveLength(1);
 
       const auditCalls = (store.recordRunAuditEvent as ReturnType<typeof vi.fn>).mock.calls.filter(
         (call: unknown[]) => (call[0] as { mutationType?: string } | undefined)?.mutationType === "scheduler:dispatch-queued-concurrency",
       );
-      expect(auditCalls).toHaveLength(2);
+      expect(auditCalls).toHaveLength(1);
       expect(auditCalls[0]?.[0]?.metadata?.bindingGates).toEqual(["maxWorktrees"]);
-      expect(auditCalls[1]?.[0]?.metadata?.bindingGates).toEqual(["maxWorktrees"]);
       expect(auditCalls[0]?.[0]?.metadata?.holders?.maxWorktrees).toEqual(["FN-A"]);
-      expect(auditCalls[1]?.[0]?.metadata?.holders?.maxWorktrees).toEqual(["FN-B"]);
     });
 
     it("re-logs and re-audits when binding gate changes", async () => {
@@ -1686,7 +1684,7 @@ describe("Scheduler", () => {
       expect(auditCalls[1]?.[0]?.metadata?.bindingGates).toEqual(["maxWorktrees"]);
     });
 
-    it("formats queued-concurrency memo keys from binding gates and holder identity only", () => {
+    it("formats queued-concurrency memo keys from binding gates only", () => {
       const key = formatConcurrencyLimitMemoKey({
         available: 0,
         bindingGates: ["maxConcurrent", "maxWorktrees"],
@@ -1700,8 +1698,9 @@ describe("Scheduler", () => {
         },
       });
 
-      expect(key).toBe("queued-concurrency:maxConcurrent,maxWorktrees:holders=FN-A,FN-B");
+      expect(key).toBe("queued-concurrency:maxConcurrent,maxWorktrees");
       expect(key).not.toMatch(/used=|limit=|available=|\d+\/\d+/);
+      expect(key).not.toContain("FN-A");
       expect(key).not.toContain("FN-Z");
     });
   });

@@ -357,11 +357,7 @@ function formatConcurrencyLimitReason(diagnostic: ConcurrencyGateDiagnostic): st
 
 export function formatConcurrencyLimitMemoKey(diagnostic: ConcurrencyGateDiagnostic): string {
   const gates = diagnostic.bindingGates.join(",");
-  const bindingHolders = [...new Set(
-    diagnostic.bindingGates.flatMap((gate) => diagnostic.holders[gate] ?? []),
-  )].sort();
-  const holderKey = bindingHolders.length > 0 ? bindingHolders.join(",") : "none";
-  return `queued-concurrency:${gates}:holders=${holderKey}`;
+  return `queued-concurrency:${gates || "none"}`;
 }
 
 export interface SchedulerOptions {
@@ -456,6 +452,10 @@ export class Scheduler {
   private wasPermanentAgentUnavailable = new Set<string>();
   /** Tracks dispatch-queued reason signatures to avoid per-tick log spam. */
   private wasDispatchQueuedReasonLogged = new Set<string>();
+  /** Tracks the last overlap blocker that emitted a priority inversion audit for a task. */
+  private overlapPriorityInversionMemo = new Map<string, string>();
+  /** Tracks the last stable concurrency-block signature emitted for a task. */
+  private dispatchQueuedConcurrencyAuditMemo = new Map<string, string>();
   /** Tracks per-task candidacy fingerprints for task:updated auto-claim invalidation gating. */
   private lastAutoClaimFingerprint = new Map<string, string>();
   private readonly staleTaskReporter: StaleTaskReporter;
@@ -706,6 +706,8 @@ export class Scheduler {
       this.wasNodeBlocked.delete(task.id);
       this.wasPermanentAgentUnavailable.delete(task.id);
       this.clearDispatchQueuedReasonMemo(task.id);
+      this.clearOverlapPriorityInversionMemo(task.id);
+      this.clearDispatchQueuedConcurrencyAuditMemo(task.id);
 
       void (async () => {
         try {
@@ -850,6 +852,8 @@ export class Scheduler {
     this.wasNodeDispatchValidationBlocked.clear();
     this.wasPermanentAgentUnavailable.clear();
     this.wasDispatchQueuedReasonLogged.clear();
+    this.overlapPriorityInversionMemo.clear();
+    this.dispatchQueuedConcurrencyAuditMemo.clear();
     schedulerLog.log("Stopped");
   }
 
@@ -868,9 +872,38 @@ export class Scheduler {
     }
 
     this.clearDispatchQueuedReasonMemo(taskId);
+    if (!key.includes(":queued-concurrency:")) {
+      this.clearDispatchQueuedConcurrencyAuditMemo(taskId);
+    }
     this.wasDispatchQueuedReasonLogged.add(key);
     await this.store.logEntry(taskId, reason);
     return true;
+  }
+
+  private shouldEmitOverlapPriorityInversion(taskId: string, blockerId: string): boolean {
+    const lastBlockerId = this.overlapPriorityInversionMemo.get(taskId);
+    if (lastBlockerId === blockerId) {
+      return false;
+    }
+    this.overlapPriorityInversionMemo.set(taskId, blockerId);
+    return true;
+  }
+
+  private clearOverlapPriorityInversionMemo(taskId: string): void {
+    this.overlapPriorityInversionMemo.delete(taskId);
+  }
+
+  private shouldEmitDispatchQueuedConcurrencyAudit(taskId: string, signature: string): boolean {
+    const lastSignature = this.dispatchQueuedConcurrencyAuditMemo.get(taskId);
+    if (lastSignature === signature) {
+      return false;
+    }
+    this.dispatchQueuedConcurrencyAuditMemo.set(taskId, signature);
+    return true;
+  }
+
+  private clearDispatchQueuedConcurrencyAuditMemo(taskId: string): void {
+    this.dispatchQueuedConcurrencyAuditMemo.delete(taskId);
   }
 
   private emitDependencyParityDiff(diff: SchedulingDependencyParityDiff): void {
@@ -1260,7 +1293,6 @@ export class Scheduler {
         activeScopes.set(taskId, scope);
         activeScopeColumns.set(taskId, column);
       };
-      const inversionEmitted = new Set<string>();
       const queuedHigherPriorityScopes: QueuedOverlapCandidate[] = [];
       const queuedHigherPriorityTaskById = new Map<string, Task>();
       const overlapIgnorePaths = settings.overlapIgnorePaths ?? [];
@@ -1504,13 +1536,11 @@ export class Scheduler {
               }
 
               const overlapBlockerTask = tasks.find((candidate) => candidate.id === overlappingTaskId);
-              const inversionKey = `${task.id}|${overlappingTaskId}`;
               if (
                 overlapBlockerTask
-                && !inversionEmitted.has(inversionKey)
+                && this.shouldEmitOverlapPriorityInversion(task.id, overlappingTaskId)
                 && compareTasksByPriorityThenAgeAndId(task, overlapBlockerTask) < 0
               ) {
-                inversionEmitted.add(inversionKey);
                 try {
                   await this.store.recordRunAuditEvent?.({
                     taskId: task.id,
@@ -1549,8 +1579,10 @@ export class Scheduler {
             if (task.overlapBlockedBy) {
               await this.store.updateTask(task.id, { overlapBlockedBy: null });
             }
+            this.clearOverlapPriorityInversionMemo(task.id);
           } else if (coordinationOnlyTask && task.overlapBlockedBy) {
             await this.store.updateTask(task.id, { overlapBlockedBy: null });
+            this.clearOverlapPriorityInversionMemo(task.id);
             await this.store.logEntry(
               task.id,
               "coordination/no-commit task bypassed non-implementation overlap lease",
@@ -1561,12 +1593,13 @@ export class Scheduler {
         // Dependencies met — check concurrency
         if (started >= available) {
           const reason = formatConcurrencyLimitReason(concurrencyGateDiagnostic);
-          const didLog = await this.logDispatchQueuedReason(
+          const concurrencySignature = formatConcurrencyLimitMemoKey(concurrencyGateDiagnostic);
+          await this.logDispatchQueuedReason(
             task.id,
             reason,
-            formatConcurrencyLimitMemoKey(concurrencyGateDiagnostic),
+            concurrencySignature,
           );
-          if (didLog) {
+          if (this.shouldEmitDispatchQueuedConcurrencyAudit(task.id, concurrencySignature)) {
             await this.emitDispatchQueuedConcurrencyAudit(task, concurrencyGateDiagnostic);
           }
           continue;
@@ -1816,6 +1849,8 @@ export class Scheduler {
         this.wasNodeDispatchValidationBlocked.delete(task.id);
         this.wasPermanentAgentUnavailable.delete(task.id);
         this.clearDispatchQueuedReasonMemo(task.id);
+        this.clearOverlapPriorityInversionMemo(task.id);
+        this.clearDispatchQueuedConcurrencyAuditMemo(task.id);
         await this.store.logEntry(task.id, `Node routing resolved: ${effectiveNode.nodeId ?? "local"} (source: ${effectiveNode.source})`);
         this.options.onSchedule?.(task);
         started++;

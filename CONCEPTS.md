@@ -2,6 +2,20 @@
 
 Shared domain vocabulary for this project — entities, named processes, and status concepts with project-specific meaning. Seeded with core domain vocabulary, then accretes as ce-compound and ce-compound-refresh process learnings; direct edits are fine. Glossary only, not a spec or catch-all.
 
+## Settings & Localization
+
+### Surface
+One of Fusion's user-facing frontends — the browser dashboard and the terminal TUI. Surfaces have independent runtimes and rendering stacks but are expected to share user-level state: a setting changed on one surface (theme, language) carries to the other.
+
+### Global Settings
+User-level settings persisted server-side that apply across all Surfaces and all projects, as opposed to per-project settings. Values are validated at the write boundary — an invalid value is dropped rather than persisted — so every reader can trust what it loads.
+
+### Three-Tier Setting
+The named persistence pattern for a user preference on the dashboard: a device-local cache for instant reads, a write-through to Global Settings so other Surfaces see it, and a hydrate-on-mount from the server when no local value exists. A local or in-flight user choice always wins over server hydration, and changes propagate to other open tabs.
+
+### Supported Locale
+A language tag in the closed set Fusion ships translations for. Any external tag (browser, environment, flag) is normalized into this set or rejected — never passed through raw. Chinese tags route by script and region so Traditional-script users are never silently served Simplified, and the two Chinese variants never collapse into a generic base tag.
+
 ## Missions
 
 ### Relationships
@@ -88,6 +102,18 @@ The post-merge step that rebases locally-landed merge commits onto the upstream 
 
 ### Contamination
 Foreign commits — work attributed to other Tasks — appearing on a Task's branch beyond its recorded Fork point. Contamination checks must compute their reference base fresh from the Integration branch rather than reuse the Task's stored base, since a stale stored base makes every legitimately merged commit look foreign.
+
+## Chat
+
+### Generation
+A single in-flight assistant turn for a chat session, owned server-side and identified by a generation id. At most one Generation runs per session: starting a new one aborts whatever Generation is still active for that session, so an "extra" send from a client is never harmless. A Generation periodically persists an in-flight snapshot so a reconnecting client can recover the streaming UI.
+
+### Queued message
+A follow-up the user sends while a Generation is active. It is held client-side (and persisted per session so navigation cannot lose it) and flushed — actually sent — only when the session's Generation settles. Flushing decisions must be made against the server's authoritative generation state, not a locally cached copy.
+
+### Enrichment field
+A session field computed at the API route from live server state (whether a Generation is running, last-message preview) rather than stored on the session row. Enrichment fields exist only in responses from enriching endpoints: store-event payloads and SSE broadcasts lack them, so a client that overwrites its session state from those sources silently degrades enrichment fields to absent — any side-effecting decision gated on one must re-fetch from an enriching endpoint.
+
 ## Compound Engineering sessions
 
 ### CE Stage

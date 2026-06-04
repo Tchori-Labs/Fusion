@@ -129,15 +129,17 @@ describe("reliability interactions: FN-5325 scheduler overlap priority inversion
     expect(updateTask).toHaveBeenCalledWith("FN-2", expect.objectContaining({ overlapBlockedBy: "FN-1" }));
   });
 
-  it("emits one inversion audit event per pass for running lower-priority blocker", async () => {
+  it("emits one inversion audit row across repeated unchanged polls", async () => {
     const tasks = [
-      makeTask({ id: "FN-1", column: "in-progress", priority: "normal", createdAt: "2026-01-01T00:01:00.000Z" }),
+      makeTask({ id: "FN-1", column: "in-progress", priority: undefined, createdAt: "2026-01-01T00:01:00.000Z" }),
       makeTask({ id: "FN-2", priority: "urgent", status: "queued", createdAt: "2026-01-01T00:00:00.000Z" }),
     ];
     const { store } = createStore(tasks, { "FN-1": ["src/a.ts"], "FN-2": ["src/a.ts"] });
 
     const scheduler = new Scheduler(store);
     (scheduler as any).running = true;
+    await scheduler.schedule();
+    await scheduler.schedule();
     await scheduler.schedule();
 
     const calls = (store.recordRunAuditEvent as any).mock.calls.filter(
@@ -150,9 +152,61 @@ describe("reliability interactions: FN-5325 scheduler overlap priority inversion
         candidateId: "FN-2",
         blockerId: "FN-1",
         candidatePriority: "urgent",
-        blockerPriority: "normal",
+        blockerPriority: null,
         blockerColumn: "in-progress",
       }),
     });
+  });
+
+  it("re-emits inversion when the blocker changes", async () => {
+    const firstBlocker = makeTask({ id: "FN-1", column: "in-progress", priority: "normal", createdAt: "2026-01-01T00:01:00.000Z" });
+    const secondBlocker = makeTask({ id: "FN-3", column: "todo", priority: "low", createdAt: "2026-01-01T00:02:00.000Z" });
+    const candidate = makeTask({ id: "FN-2", priority: "urgent", status: "queued", createdAt: "2026-01-01T00:00:00.000Z" });
+    const tasks = [firstBlocker, secondBlocker, candidate];
+    const { store } = createStore(tasks, { "FN-1": ["src/a.ts"], "FN-2": ["src/a.ts"], "FN-3": ["src/a.ts"] });
+
+    const scheduler = new Scheduler(store);
+    (scheduler as any).running = true;
+    await scheduler.schedule();
+
+    firstBlocker.column = "done";
+    secondBlocker.column = "in-progress";
+    await scheduler.schedule();
+
+    const calls = (store.recordRunAuditEvent as any).mock.calls.filter(
+      (call: any[]) => call[0]?.mutationType === "scheduler:overlap-priority-inversion",
+    );
+    expect(calls).toHaveLength(2);
+    expect(calls[0][0]?.metadata?.blockerId).toBe("FN-1");
+    expect(calls[1][0]?.metadata?.blockerId).toBe("FN-3");
+  });
+
+  it("re-emits inversion after overlap clears and later returns", async () => {
+    const blocker = makeTask({ id: "FN-1", column: "in-progress", priority: "normal", createdAt: "2026-01-01T00:01:00.000Z" });
+    const candidate = makeTask({ id: "FN-2", priority: "urgent", status: "queued", createdAt: "2026-01-01T00:00:00.000Z" });
+    const tasks = [blocker, candidate];
+    const scopes: Record<string, string[]> = { "FN-1": ["src/a.ts"], "FN-2": ["src/a.ts"] };
+    const { store } = createStore(tasks, scopes);
+
+    const scheduler = new Scheduler(store);
+    (scheduler as any).running = true;
+    await scheduler.schedule();
+
+    blocker.column = "done";
+    candidate.overlapBlockedBy = undefined;
+    scopes["FN-2"] = ["src/b.ts"];
+    await scheduler.schedule();
+
+    candidate.column = "todo";
+    candidate.status = "queued";
+    blocker.column = "in-progress";
+    scopes["FN-2"] = ["src/a.ts"];
+    await scheduler.schedule();
+
+    const calls = (store.recordRunAuditEvent as any).mock.calls.filter(
+      (call: any[]) => call[0]?.mutationType === "scheduler:overlap-priority-inversion",
+    );
+    expect(calls).toHaveLength(2);
+    expect(calls.every((call: any[]) => call[0]?.metadata?.blockerId === "FN-1")).toBe(true);
   });
 });

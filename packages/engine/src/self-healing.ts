@@ -605,6 +605,8 @@ export class SelfHealingManager {
   private deadlockRecoveryCooldown: Map<string, number> = new Map();
   private mergeStarvationDrops: Map<string, number> = new Map();
   private finalizeUnprovenWarned = new Set<string>();
+  private metaResolvedSkipAuditMemo = new Map<string, string>();
+  private metaStalledSkipAuditMemo = new Map<string, string>();
   private maintenanceTickCounter = 0;
   private readonly processBootStartedAt = Date.now();
   private dependencyBlockedTodoReporter: DependencyBlockedTodoReporter | null = null;
@@ -933,6 +935,9 @@ export class SelfHealingManager {
       this.maintenanceInterval = null;
     }
 
+    this.finalizeUnprovenWarned.clear();
+    this.metaResolvedSkipAuditMemo.clear();
+    this.metaStalledSkipAuditMemo.clear();
     log.log("Stopped");
   }
 
@@ -3760,6 +3765,24 @@ export class SelfHealingManager {
     return reasons.length > 0 ? { block: true, reasons } : { block: false };
   }
 
+  private formatReasonSignature(reasons: string[]): string {
+    return reasons.join("|");
+  }
+
+  private shouldEmitReasonMemo(memo: Map<string, string>, taskId: string, reasons: string[]): boolean {
+    const signature = this.formatReasonSignature(reasons);
+    const previous = memo.get(taskId);
+    if (previous === signature) {
+      return false;
+    }
+    memo.set(taskId, signature);
+    return true;
+  }
+
+  private clearReasonMemo(memo: Map<string, string>, taskId: string): void {
+    memo.delete(taskId);
+  }
+
   async autoArchiveResolvedMetaTasks(reboundedTargets?: Set<string>): Promise<number> {
     const tasks = await this.store.listTasks({ slim: false, includeArchived: true });
     const byId = new Map(tasks.map((task) => [task.id.toUpperCase(), task]));
@@ -3768,23 +3791,32 @@ export class SelfHealingManager {
       if (task.column === "archived") continue;
       const classified = this.classifyMetaTask(task);
       const targetTaskId = this.resolveMetaTargetTaskId(byId, task);
-      if (!classified.isMeta || !targetTaskId) continue;
+      if (!classified.isMeta || !targetTaskId) {
+        this.clearReasonMemo(this.metaResolvedSkipAuditMemo, task.id);
+        continue;
+      }
       const chainDepth = this.computeMetaChainDepth(byId, targetTaskId);
       const target = byId.get(targetTaskId.toUpperCase());
       const resolved = Boolean(target && !this.classifyMetaTask(target).isMeta && (target.column === "done" || target.column === "archived" || target.column === "todo"));
       const rebounded = Boolean(reboundedTargets?.has(targetTaskId));
-      if (!resolved && !rebounded && chainDepth < 2) continue;
+      if (!resolved && !rebounded && chainDepth < 2) {
+        this.clearReasonMemo(this.metaResolvedSkipAuditMemo, task.id);
+        continue;
+      }
       const guardResult = await this.evaluateMetaAutoArchiveGuards(task);
       if (guardResult.block) {
-        const auditor = createRunAuditor(this.store, { runId: generateSyntheticRunId("fn4890-meta", task.id), agentId: "self-healing", taskId: task.id, phase: "auto-archive-meta-resolved-skipped" });
-        await auditor.database({
-          type: "task:auto-archive-meta-resolved-skipped",
-          target: task.id,
-          metadata: { taskId: task.id, targetTaskId, targetColumn: target?.column ?? "unknown", chainDepth, blockedBy: guardResult.reasons },
-        });
+        if (this.shouldEmitReasonMemo(this.metaResolvedSkipAuditMemo, task.id, guardResult.reasons)) {
+          const auditor = createRunAuditor(this.store, { runId: generateSyntheticRunId("fn4890-meta", task.id), agentId: "self-healing", taskId: task.id, phase: "auto-archive-meta-resolved-skipped" });
+          await auditor.database({
+            type: "task:auto-archive-meta-resolved-skipped",
+            target: task.id,
+            metadata: { taskId: task.id, targetTaskId, targetColumn: target?.column ?? "unknown", chainDepth, blockedBy: guardResult.reasons },
+          });
+        }
         log.log(`[self-healing] skipped meta-resolved auto-archive for ${task.id}: ${guardResult.reasons.join(",")}`);
         continue;
       }
+      this.clearReasonMemo(this.metaResolvedSkipAuditMemo, task.id);
       try {
         await this.store.logEntry(task.id, `Auto-archived meta-task (FN-4890): target ${targetTaskId} resolved/superseded.`);
         await this.archiveMetaTask(task.id);
@@ -3810,25 +3842,37 @@ export class SelfHealingManager {
       if (task.column === "archived") continue;
       const classified = this.classifyMetaTask(task);
       const targetTaskId = this.resolveMetaTargetTaskId(byId, task);
-      if (!classified.isMeta || !targetTaskId) continue;
+      if (!classified.isMeta || !targetTaskId) {
+        this.clearReasonMemo(this.metaStalledSkipAuditMemo, task.id);
+        continue;
+      }
       const chainDepth = this.computeMetaChainDepth(byId, targetTaskId);
       const ageMs = now - Date.parse(task.columnMovedAt ?? task.updatedAt);
-      if (chainDepth < 2 && (!Number.isFinite(ageMs) || ageMs < thresholdMs)) continue;
+      if (chainDepth < 2 && (!Number.isFinite(ageMs) || ageMs < thresholdMs)) {
+        this.clearReasonMemo(this.metaStalledSkipAuditMemo, task.id);
+        continue;
+      }
       const target = byId.get(targetTaskId.toUpperCase());
       const targetMovedAtMs = Date.parse(target?.columnMovedAt ?? target?.updatedAt ?? "");
       const targetStalled = !Number.isFinite(targetMovedAtMs) || (now - targetMovedAtMs >= thresholdMs);
-      if (chainDepth < 2 && !targetStalled) continue;
+      if (chainDepth < 2 && !targetStalled) {
+        this.clearReasonMemo(this.metaStalledSkipAuditMemo, task.id);
+        continue;
+      }
       const guardResult = await this.evaluateMetaAutoArchiveGuards(task);
       if (guardResult.block) {
-        const auditor = createRunAuditor(this.store, { runId: generateSyntheticRunId("fn4890-meta", task.id), agentId: "self-healing", taskId: task.id, phase: "auto-archive-meta-stalled-skipped" });
-        await auditor.database({
-          type: "task:auto-archive-meta-stalled-skipped",
-          target: task.id,
-          metadata: { taskId: task.id, targetTaskId, chainDepth, stalledMs: Math.max(ageMs, 0), blockedBy: guardResult.reasons },
-        });
+        if (this.shouldEmitReasonMemo(this.metaStalledSkipAuditMemo, task.id, guardResult.reasons)) {
+          const auditor = createRunAuditor(this.store, { runId: generateSyntheticRunId("fn4890-meta", task.id), agentId: "self-healing", taskId: task.id, phase: "auto-archive-meta-stalled-skipped" });
+          await auditor.database({
+            type: "task:auto-archive-meta-stalled-skipped",
+            target: task.id,
+            metadata: { taskId: task.id, targetTaskId, chainDepth, stalledMs: Math.max(ageMs, 0), blockedBy: guardResult.reasons },
+          });
+        }
         log.log(`[self-healing] skipped meta-stalled auto-archive for ${task.id}: ${guardResult.reasons.join(",")}`);
         continue;
       }
+      this.clearReasonMemo(this.metaStalledSkipAuditMemo, task.id);
       try {
         await this.store.logEntry(task.id, `Auto-archived meta-task (FN-4890): superseded — not spawning further meta; rely on self-heal on target ${targetTaskId}`);
         await this.archiveMetaTask(task.id);
@@ -4688,9 +4732,11 @@ export class SelfHealingManager {
             rootDir: this.options.rootDir,
             settings,
           });
+          this.finalizeUnprovenWarned.delete(task.id);
           await this.store.updateTask(task.id, {
             mergeDetails: {
               ...(task.mergeDetails || {}),
+              integrityWarning: undefined,
               commitSha: classification.commit.sha,
               filesChanged: classification.commit.filesChanged,
               insertions: classification.commit.insertions,
@@ -4707,10 +4753,12 @@ export class SelfHealingManager {
         }
 
         if (classification.kind === "proven-no-op") {
+          this.finalizeUnprovenWarned.delete(task.id);
           await this.store.updateTask(task.id, {
             modifiedFiles: [],
             mergeDetails: {
               ...(task.mergeDetails || {}),
+              integrityWarning: undefined,
               mergeConfirmed: true,
               noOpMerge: true,
               noOpReason: `branch has zero commits ahead of ${classification.baseRef}`,
@@ -4726,10 +4774,12 @@ export class SelfHealingManager {
         }
 
         if (classification.kind === "no-changes-finalized") {
+          this.finalizeUnprovenWarned.delete(task.id);
           await this.store.updateTask(task.id, {
             modifiedFiles: [],
             mergeDetails: {
               ...(task.mergeDetails || {}),
+              integrityWarning: undefined,
               mergeConfirmed: true,
               noOpMerge: true,
               noOpReason: "verification-only finalize: no branch and no owned commits",
@@ -4770,14 +4820,14 @@ export class SelfHealingManager {
               },
             },
           });
+          await this.recordIntegrityAudit(task.id, "task:integrity-warning", {
+            reason: classification.reason,
+            modifiedFilesCount: task.modifiedFiles?.length ?? 0,
+            details: classification.details,
+          });
         } else {
           this.finalizeUnprovenWarned.add(task.id);
         }
-        await this.recordIntegrityAudit(task.id, "task:integrity-warning", {
-          reason: classification.reason,
-          modifiedFilesCount: task.modifiedFiles?.length ?? 0,
-          details: classification.details,
-        });
       }
 
       return reconciled;

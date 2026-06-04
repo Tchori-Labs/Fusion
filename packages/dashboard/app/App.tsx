@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useMemo, useRef, lazy, Suspense } from "react";
+import { useTranslation } from "react-i18next";
 import {
   computeCapacityRisk,
   DEFAULT_CAPACITY_RISK_TODO_THRESHOLD,
@@ -31,6 +32,7 @@ import { DbCorruptionBanner } from "./components/DbCorruptionBanner";
 import { UpdateAvailableBanner } from "./components/UpdateAvailableBanner";
 import MergeAdvanceNotice from "./components/MergeAdvanceNotice";
 import { ApprovalNotificationBanner } from "./components/ApprovalNotificationBanner";
+import { GitHubStarPrompt } from "./components/GitHubStarPrompt";
 import { OnboardingResumeCard } from "./components/OnboardingResumeCard";
 import { PostOnboardingRecommendations } from "./components/PostOnboardingRecommendations";
 import {
@@ -43,12 +45,15 @@ import { MobileNavBar } from "./components/MobileNavBar";
 import { QuickChatFAB } from "./components/QuickChatFAB";
 import { ToastContainer } from "./components/ToastContainer";
 import { useBackgroundSessions } from "./hooks/useBackgroundSessions";
+import { useGitHubStarPromptShown, markGitHubStarPromptShown } from "./hooks/useGitHubStarPrompt";
 import { useSessionBannersHidden } from "./hooks/useSessionBannerPref";
 import { useTasks } from "./hooks/useTasks";
 import { useProjects } from "./hooks/useProjects";
 import { useAgents } from "./hooks/useAgents";
 import { useNodes } from "./hooks/useNodes";
 import { useCurrentProject } from "./hooks/useCurrentProject";
+import { I18nextProvider } from "react-i18next";
+import i18n from "./i18n";
 import { ToastProvider, useToast } from "./hooks/useToast";
 import { ConfirmDialogProvider } from "./hooks/useConfirm";
 import { useTheme } from "./hooks/useTheme";
@@ -164,6 +169,10 @@ export function didEnterAwaitingApproval(nextStatus: string | undefined, previou
   return nextStatus === "awaiting-approval" && previousStatus !== "awaiting-approval";
 }
 
+export function didEnterDone(nextStatus: string | undefined, previousStatus: string | undefined): boolean {
+  return nextStatus === "done" && previousStatus !== undefined && previousStatus !== "done";
+}
+
 function parseDateMs(value: string | undefined): number {
   if (!value) return 0;
   const parsed = Date.parse(value);
@@ -234,6 +243,7 @@ export function shouldShowFirstEverBootLoader(projectsLoading: boolean, projectC
 }
 
 function AppInner() {
+  const { t } = useTranslation("app");
   const { toasts, addToast, removeToast } = useToast();
   const { shellApi, state: shellState, ready: shellReady, openConnectionManagerSignal } = useShellConnection();
   const shellHost = useShellHostContext();
@@ -529,9 +539,11 @@ function AppInner() {
   const [chatHasUnreadResponse, setChatHasUnreadResponse] = useState(false);
   const [stashOrphanCount, setStashOrphanCount] = useState(0);
   const [approvalBannerCandidate, setApprovalBannerCandidate] = useState<ApprovalBannerCandidate | null>(null);
+  const [showGitHubStarPrompt, setShowGitHubStarPrompt] = useState(false);
   const taskStatusByIdRef = useRef<Map<string, string | undefined>>(new Map());
   const seenApprovalKeysRef = useRef<Set<string>>(new Set());
   const approvalDismissalsRef = useRef<Map<string, number>>(loadApprovalBannerDismissals());
+  const gitHubStarPromptShown = useGitHubStarPromptShown();
 
   const refreshMailboxUnreadCount = useCallback(() => {
     fetchUnreadCount(currentProject?.id)
@@ -610,6 +622,9 @@ function AppInner() {
             const dedupeKey = `task:${payload.id}`;
             const previousStatus = taskStatusByIdRef.current.get(payload.id);
             taskStatusByIdRef.current.set(payload.id, payload.status);
+            if (!gitHubStarPromptShown && didEnterDone(payload.status, previousStatus)) {
+              setShowGitHubStarPrompt(true);
+            }
             if (payload.status !== "awaiting-approval") {
               seenApprovalKeysRef.current.delete(dedupeKey);
               approvalDismissalsRef.current.delete(dedupeKey);
@@ -633,7 +648,7 @@ function AppInner() {
         },
       },
     });
-  }, [currentProject?.id, refreshMailboxUnreadCount]);
+  }, [currentProject?.id, gitHubStarPromptShown, refreshMailboxUnreadCount]);
 
   useEffect(() => {
     if (taskView === "chat") {
@@ -1361,7 +1376,7 @@ function AppInner() {
     if (showBackendConnectionErrorPage) {
       return (
         <BackendConnectionErrorPage
-          errorMessage={projectsError ?? "Failed to fetch projects"}
+          errorMessage={projectsError ?? t("app.backendError.failedFetch", "Failed to fetch projects")}
           isRetrying={retryingProjects}
           onRetry={handleRetryProjects}
           onManageConnection={shellApi ? () => {
@@ -1945,6 +1960,14 @@ function AppInner() {
           }}
         />
       )}
+      {viewMode === "project" && currentProject && showGitHubStarPrompt && !gitHubStarPromptShown && (
+        <GitHubStarPrompt
+          onDismiss={() => {
+            markGitHubStarPromptShown();
+            setShowGitHubStarPrompt(false);
+          }}
+        />
+      )}
       <div
         className={`project-content${viewMode === "project" && currentProject && (!isMobile || !mobileKeyboardOpen) ? " project-content--with-footer" : ""}${isMobile && !mobileKeyboardOpen ? " project-content--with-mobile-nav" : ""}`}
       >
@@ -2085,16 +2108,18 @@ function AppInner() {
 
 export function App() {
   return (
-    <ToastProvider>
-      <ShellHostProvider>
-        <ShellProvider>
-          <NodeProvider>
-            <ConfirmDialogProvider>
-              <AppInner />
-            </ConfirmDialogProvider>
-          </NodeProvider>
-        </ShellProvider>
-      </ShellHostProvider>
-    </ToastProvider>
+    <I18nextProvider i18n={i18n}>
+      <ToastProvider>
+        <ShellHostProvider>
+          <ShellProvider>
+            <NodeProvider>
+              <ConfirmDialogProvider>
+                <AppInner />
+              </ConfirmDialogProvider>
+            </NodeProvider>
+          </ShellProvider>
+        </ShellHostProvider>
+      </ToastProvider>
+    </I18nextProvider>
   );
 }

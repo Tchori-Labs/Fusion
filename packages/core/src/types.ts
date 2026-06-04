@@ -207,6 +207,24 @@ export const COLOR_THEMES = [
 ] as const;
 export type ColorTheme = (typeof COLOR_THEMES)[number];
 
+/** UI locales supported across the dashboard and terminal UI. `en` is the
+ *  source-of-truth language and the fallback for all others. Adding a locale
+ *  here (plus translated catalogs) is the only code change a new language
+ *  needs — see `@fusion/i18n`. zh-CN and zh-TW are independent catalogs and
+ *  are never auto-converted between scripts. */
+export const SUPPORTED_LOCALES = ["en", "zh-CN", "zh-TW", "fr", "es", "ko"] as const;
+export type Locale = (typeof SUPPORTED_LOCALES)[number];
+/** Source-of-truth language and the fallback for all locales. */
+export const DEFAULT_LOCALE: Locale = "en";
+
+/** Narrow an arbitrary value to a supported `Locale`. */
+export function isLocale(value: unknown): value is Locale {
+  return (
+    typeof value === "string" &&
+    (SUPPORTED_LOCALES as readonly string[]).includes(value)
+  );
+}
+
 export type PrStatus = "open" | "closed" | "merged" | "draft";
 export type MergeStrategy = "direct" | "pull-request";
 export type MergeIntegrationWorktreeMode =
@@ -2444,6 +2462,10 @@ export interface GlobalSettings {
   colorTheme?: ColorTheme;
   /** Dashboard font size scale percentage. Bounded to 85-125. Default: 100. */
   dashboardFontScalePct?: number;
+  /** Active UI locale (e.g. `"en"`, `"zh-CN"`, `"fr"`). One of `SUPPORTED_LOCALES`.
+   *  When unset, each surface resolves the locale at runtime (browser/env
+   *  detection) and falls back to `DEFAULT_LOCALE` ("en"). */
+  language?: Locale;
   /** Default AI model provider name (e.g. `"anthropic"`, `"openai"`).
    *  Must be set together with `defaultModelId`. When both are undefined,
    *  the engine uses pi's automatic model resolution. */
@@ -2896,6 +2918,13 @@ export interface ProjectSettings {
   /** Tracks why globalPause was activated. "rate-limit" for automatic pauses,
    *  "manual" for user-initiated. Cleared on unpause. */
   globalPauseReason?: string;
+  /** Default custom workflow (WF-…) applied to newly created tasks when the
+   *  caller does not specify enabledWorkflowSteps. Overridable per task. */
+  defaultWorkflowId?: string;
+  /** Raw CLI commands a user has explicitly approved for workflow CLI nodes
+   *  (trust-on-first-use). A node's command must appear here before it runs;
+   *  named scripts (settings.scripts) never require approval. */
+  approvedWorkflowCliCommands?: string[];
   /** Engine pause (soft pause): when true, the scheduler and triage
    *  processor stop dispatching **new** work (scheduling, triage
    *  specification, and auto-merge), but currently running agent sessions
@@ -3704,9 +3733,12 @@ export interface ProjectSettings {
    *  Allowed values: 0 (off, default) or one of 7 | 14 | 30 | 60 | 90. Uses messages.updatedAt inactivity age. */
   mailAutoCleanupDays?: number;
   /** Number of days to retain append-only operational-log rows (activityLog,
-   *  runAuditEvents, agentHeartbeats) before periodic maintenance prunes them.
-   *  Agent logs are now stored in per-task JSONL files — see agentLogFileRetentionDays.
-   *  Default: 30. Set 0 to disable pruning. Uses each row's `timestamp` column. */
+   *  runAuditEvents, agentHeartbeats, terminal agentRuns by `endedAt`, and
+   *  agentConfigRevisions by `createdAt`) before periodic maintenance prunes
+   *  them. In-flight agentRuns (`endedAt IS NULL`) and the most-recent config
+   *  revision per agent are always preserved. Agent logs are now stored in
+   *  per-task JSONL files — see agentLogFileRetentionDays. Default: 30. Set 0
+   *  to disable pruning. */
   operationalLogRetentionDays?: number;
   /** Number of days to retain per-task agent-log JSONL files for soft-deleted
    *  and archived tasks. Only affects tasks that are no longer active. Entries

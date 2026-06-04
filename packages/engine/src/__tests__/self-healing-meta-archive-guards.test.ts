@@ -82,6 +82,26 @@ describe("SelfHealingManager meta auto-archive guards", () => {
     }
   });
 
+  it("dedupes resolved skipped audits until the guard reason changes", async () => {
+    const { fixture, meta } = await createResolvedMetaPair();
+    await fixture.store.updateTask(meta.id, { taskDoneRetryCount: 1 } as any);
+    try {
+      await fixture.selfHeal.autoArchiveResolvedMetaTasks();
+      await fixture.selfHeal.autoArchiveResolvedMetaTasks();
+      let events = fixture.store.getRunAuditEvents({ limit: 200 }).filter((e) => e.mutationType === "task:auto-archive-meta-resolved-skipped");
+      expect(events).toHaveLength(1);
+      expect((events[0]?.metadata as any)?.blockedBy).toEqual(expect.arrayContaining(["task-done-retry-pending"]));
+
+      await fixture.store.updateTask(meta.id, { taskDoneRetryCount: 0, status: "merging" } as any);
+      await fixture.selfHeal.autoArchiveResolvedMetaTasks();
+      events = fixture.store.getRunAuditEvents({ limit: 200 }).filter((e) => e.mutationType === "task:auto-archive-meta-resolved-skipped");
+      expect(events).toHaveLength(2);
+      expect(events.some((event) => (event.metadata as any)?.blockedBy?.includes("merge-in-progress"))).toBe(true);
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
   it.each([
     { updates: { mergeDetails: { commitSha: "abc123" } }, label: "merge commitSha exists" },
     { updates: { status: "merging" }, label: "status merging" },
@@ -153,6 +173,31 @@ describe("SelfHealingManager meta auto-archive guards", () => {
       const event = fixture.store.getRunAuditEvents({ limit: 200 }).find((e) => e.mutationType === "task:auto-archive-meta-stalled-skipped");
       expect(event).toBeTruthy();
       expect((event?.metadata as any)?.blockedBy).toEqual(expect.arrayContaining(["task-done-retry-pending"]));
+    } finally {
+      vi.useRealTimers();
+      await fixture.cleanup();
+    }
+  });
+
+  it("dedupes stalled skipped audits until the guard reason changes", async () => {
+    vi.useFakeTimers();
+    const now = new Date("2026-05-18T12:00:00.000Z");
+    vi.setSystemTime(now);
+    const { fixture, meta } = await createResolvedMetaPair({ metaTaskStallAutoCloseMs: 60_000 });
+    await fixture.store.updateTask(meta.id, { taskDoneRetryCount: 1 } as any);
+    vi.setSystemTime(new Date(now.getTime() + 2 * 60 * 60_000));
+    try {
+      await fixture.selfHeal.autoArchiveStalledMetaTasks();
+      await fixture.selfHeal.autoArchiveStalledMetaTasks();
+      let events = fixture.store.getRunAuditEvents({ limit: 200 }).filter((e) => e.mutationType === "task:auto-archive-meta-stalled-skipped");
+      expect(events).toHaveLength(1);
+      expect((events[0]?.metadata as any)?.blockedBy).toEqual(expect.arrayContaining(["task-done-retry-pending"]));
+
+      await fixture.store.updateTask(meta.id, { taskDoneRetryCount: 0, status: "merging" } as any);
+      await fixture.selfHeal.autoArchiveStalledMetaTasks();
+      events = fixture.store.getRunAuditEvents({ limit: 200 }).filter((e) => e.mutationType === "task:auto-archive-meta-stalled-skipped");
+      expect(events).toHaveLength(2);
+      expect(events.some((event) => (event.metadata as any)?.blockedBy?.includes("merge-in-progress"))).toBe(true);
     } finally {
       vi.useRealTimers();
       await fixture.cleanup();

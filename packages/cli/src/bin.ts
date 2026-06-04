@@ -327,7 +327,8 @@ PR:
                                       Cancel an active cited-research run
   fn research retry <run-id> [--json]
                                       Retry a failed/cancelled cited-research run
-  fn mission create [title] [desc]    Create a new mission
+  fn mission create [title] [desc] [--goal <id>] [--base-branch <branch>]
+                                      Create a new mission (repeat --goal to link goals)
   fn mission list | ls                List missions
   fn mission show | info <id>         Show mission details
   fn mission goals <id>               List linked goals for a mission
@@ -431,6 +432,7 @@ Options:
   --interactive              Interactive mode (port selection for dashboard, issue selection for import)
   --paused                   Start with engine paused (automation disabled)
   --dev                      Start dashboard only (no AI engine)
+  --lang <locale>            Terminal-UI locale for this run (en, zh-CN, zh-TW, fr, es, ko); the browser dashboard resolves its own language
   --attach <file>            Attach file(s) on task create (repeatable)
   --depends <id>             Declare dependency on task create (repeatable)
   --no-dedup                 Bypass deterministic duplicate guard on task create
@@ -495,6 +497,22 @@ function getFlagValue(args: string[], flag: string): string | undefined {
   }
 
   return value;
+}
+
+function getRepeatedFlagValues(args: string[], flag: string): string[] {
+  const values: string[] = [];
+  for (let index = 0; index < args.length; index++) {
+    if (args[index] !== flag) {
+      continue;
+    }
+    const value = args[index + 1];
+    if (!value || value.startsWith("-")) {
+      continue;
+    }
+    values.push(value);
+    index += 1;
+  }
+  return values;
 }
 
 function getFlagValueNumber(args: string[], flag: string): number | undefined {
@@ -748,7 +766,18 @@ async function main() {
         const noAuth = args.includes("--no-auth");
         const dashTokenIdx = args.indexOf("--token");
         const token = dashTokenIdx !== -1 && dashTokenIdx + 1 < args.length ? args[dashTokenIdx + 1] : undefined;
-        await runDashboard(port, { paused, dev, interactive, host, noAuth, token });
+        const dashLangIdx = args.indexOf("--lang");
+        const lang = dashLangIdx !== -1 && dashLangIdx + 1 < args.length ? args[dashLangIdx + 1] : undefined;
+        if (lang !== undefined) {
+          // Fail loudly on a bad explicit flag instead of silently falling back
+          // to setting/env resolution inside the TUI.
+          const { isLocale, SUPPORTED_LOCALES } = await import("@fusion/core");
+          if (!isLocale(lang)) {
+            console.error(`Invalid --lang "${lang}". Supported: ${SUPPORTED_LOCALES.join(", ")}`);
+            process.exit(1);
+          }
+        }
+        await runDashboard(port, { paused, dev, interactive, host, noAuth, token, lang });
         break;
       }
 
@@ -1376,10 +1405,13 @@ async function main() {
           case "create": {
             const createArgs = args.slice(2);
             let baseBranch: string | undefined;
+            const goalIds = getRepeatedFlagValues(createArgs, "--goal");
             const positional: string[] = [];
             for (let i = 0; i < createArgs.length; i++) {
               if (createArgs[i] === "--base-branch" && i + 1 < createArgs.length) {
                 baseBranch = createArgs[i + 1];
+                i++;
+              } else if (createArgs[i] === "--goal" && i + 1 < createArgs.length) {
                 i++;
               } else {
                 positional.push(createArgs[i]);
@@ -1387,7 +1419,7 @@ async function main() {
             }
             const title = positional[0];
             const description = positional.length > 1 ? positional.slice(1).join(" ") : undefined;
-            await runMissionCreate(title, description, projectName, baseBranch);
+            await runMissionCreate(title, description, projectName, baseBranch, goalIds);
             break;
           }
           case "list":
