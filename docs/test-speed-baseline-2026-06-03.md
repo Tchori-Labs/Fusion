@@ -204,3 +204,7 @@ change is to `routes-planning-tracking.test.ts`, which is not a top-time file (i
 sibling `routes-planning.test.ts` is a different file) and whose post-fix duration is
 unchanged. A later full refresh via `node scripts/ci-test-shard.mjs --write-timings`
 remains the canonical mechanism.
+
+## U8 gate decision (2026-06-03): Vitest 4.x upgrade DEFERRED
+
+Gate criterion: proceed only if cold-start/transform cost is a top contributor blocking the 30s/5min targets. Evidence: cold-start probe ~1.3-1.8s/process (~35-40s aggregate across ~25 invocations, ~10% of full-suite wall-clock); heavy real-SQLite/real-git integration tests dominate and are irreducible-by-design (U7). Transform/collect is the largest *remaining addressable* cost (dashboard lanes show collect ~= test time), so the upgrade is worthwhile as a dedicated follow-up PR — but it is not the top blocker, and a major-version bump across 28 configs + an experimental cache flag does not belong on this already-large branch. Pre-paid: deprecation delta confirmed zero (U5 audit). Re-open with: normalize caret ranges across ALL packages (incl. desktop/mobile/droid-cli/pi-*), pre-bump peer-dep audit, fsModuleCache with kill switch + stale-transform invalidation test, inventory EQUALITY before/after.
