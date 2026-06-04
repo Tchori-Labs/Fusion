@@ -717,13 +717,20 @@ export async function __runConfiguredCommandForTests(
 // ── Tool parameter schemas (module-level for reuse in ToolDefinition generics) ──
 
 const taskUpdateParams = Type.Object({
-  step: Type.Number({ description: "Step number (1-indexed)" }),
-  status: Type.Union(
+  step: Type.Optional(Type.Number({ description: "Step number (1-indexed). Omit when updating only custom_fields/dependencies." })),
+  status: Type.Optional(Type.Union(
     STEP_STATUSES.map((s) => Type.Literal(s)),
-    { description: "New status: pending, in-progress, done, or skipped" },
-  ),
+    { description: "New status: pending, in-progress, done, or skipped. Required when step is set." },
+  )),
   dependencies: Type.Optional(Type.Array(Type.String(), {
     description: "Optional task dependency array. Replaces existing dependencies. Pass ['FN-001', 'FN-002'] to set dependencies. Pass [] to clear all dependencies. Omit parameter to preserve existing dependencies.",
+  })),
+  custom_fields: Type.Optional(Type.Record(Type.String(), Type.Unknown(), {
+    description:
+      "Optional patch of workflow-defined custom field values, keyed by field id. " +
+      "Values are validated against the task's workflow field schema (type/enum membership); " +
+      "pass null for a field to clear it. Rejected writes return the offending field id and reason. " +
+      "Only fields declared by the task's workflow may be written.",
   })),
 });
 
@@ -7088,10 +7095,44 @@ export class TaskExecutor {
         "Update a step's status. Call before starting a step (in-progress), " +
         "after completing it (done), or to skip it (skipped). " +
         "Optionally update task dependencies by passing a dependencies array. " +
+        "Optionally set workflow-defined custom field values by passing a custom_fields patch " +
+        "(keyed by field id; validated against the workflow's field schema; pass null to clear a field). " +
+        "step/status may be omitted to update only custom_fields or dependencies. " +
         "The board updates in real-time.",
       parameters: taskUpdateParams,
       execute: async (_id: string, params: Static<typeof taskUpdateParams>) => {
-        const { step, status, dependencies } = params;
+        const { step, status, dependencies, custom_fields } = params;
+
+        // Custom-field patch (KTD-13): routed through the store's single write
+        // authority, which validates each value against the task's workflow field
+        // schema. A typed rejection surfaces the offending field id + reason as a
+        // tool error so the agent can correct it. Applied first so a field-only
+        // call (step omitted) returns here.
+        if (custom_fields !== undefined) {
+          const res = await store.updateTaskCustomFields(taskId, custom_fields);
+          if (!res.ok) {
+            const r = res.rejection;
+            return {
+              content: [{
+                type: "text" as const,
+                text: `ERROR: custom field '${r.fieldId}' rejected (${r.code}): ${r.detail}`,
+              }],
+              details: { fieldId: r.fieldId, code: r.code, detail: r.detail },
+              isError: true,
+            };
+          }
+          // A custom-fields-only update (no step) succeeds here.
+          if (step === undefined && status === undefined && dependencies === undefined) {
+            const updatedKeys = Object.keys(custom_fields);
+            return {
+              content: [{
+                type: "text" as const,
+                text: `Updated custom field(s): ${updatedKeys.join(", ")}.`,
+              }],
+              details: { updatedFields: updatedKeys },
+            };
+          }
+        }
 
         // Record step progress for stuck task detection.
         // Step transitions (in-progress, done, skipped) indicate real progress
@@ -7099,6 +7140,44 @@ export class TaskExecutor {
         // tool calls) is tracked separately via recordActivity in AgentLogger.
         if (status === "in-progress" || status === "done" || status === "skipped") {
           stuckDetector?.recordProgress(taskId);
+        }
+
+        // Dependencies-only update (no step) is permitted; handle deps then return.
+        if (step === undefined) {
+          if (dependencies !== undefined) {
+            if (dependencies.includes(taskId)) {
+              return {
+                content: [{ type: "text" as const, text: `Cannot add self-dependency: ${taskId} cannot depend on itself.` }],
+                details: {},
+              };
+            }
+            const invalidIds: string[] = [];
+            for (const depId of dependencies) {
+              try { await store.getTask(depId); } catch { invalidIds.push(depId); }
+            }
+            if (invalidIds.length > 0) {
+              return {
+                content: [{ type: "text" as const, text: `Cannot set dependencies — the following task(s) do not exist: ${invalidIds.join(", ")}` }],
+                details: {},
+              };
+            }
+            await store.updateTask(taskId, { dependencies });
+            return {
+              content: [{ type: "text" as const, text: `Dependencies updated.` }],
+              details: {},
+            };
+          }
+          return {
+            content: [{ type: "text" as const, text: `No-op: provide a step+status, dependencies, or custom_fields to update.` }],
+            details: {},
+          };
+        }
+
+        if (status === undefined) {
+          return {
+            content: [{ type: "text" as const, text: `Step ${step} provided without a status. Pass status (pending/in-progress/done/skipped).` }],
+            details: {},
+          };
         }
 
         if (!Number.isInteger(step) || step < 1) {

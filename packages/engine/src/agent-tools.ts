@@ -1137,7 +1137,22 @@ export function createWorkflowCreateTool(store: TaskStore): ToolDefinition {
     label: "Create Workflow",
     description:
       "Create a new custom workflow definition from a name and a workflow graph (IR). " +
-      "The IR is validated server-side. Returns the new workflow ID.",
+      "The IR is validated server-side; a malformed graph rejects. Returns the new workflow ID.\n" +
+      "v2 IR supports step-inversion constructs (all additive, opt-in): " +
+      "`parse-steps` node {artifact, parser} writes the task step list from a declared artifact " +
+      "(built-in parsers: `step-headings`, `json-steps`; routable `no-steps`/`parse-error` outcomes) — " +
+      "it must precede any `foreach`; " +
+      "`foreach` node {source:'task-steps', template:{nodes,edges}, mode:'sequential'|'parallel', " +
+      "isolation:'shared'|'worktree', concurrency (parallel only, 1-8), maxReworkCycles (1-10)} " +
+      "instantiates its single-entry/exit template subgraph once per planned step " +
+      "(parallel+shared is rejected); a `step-execute` node is legal only inside a foreach template; " +
+      "`step-review` node {type:'plan'|'code', model?} surfaces verdicts as outcome edges " +
+      "(`outcome:approve|revise|rethink|unavailable`); edges may set `kind:'rework'` (the only legal cycles, " +
+      "back to step-execute within an instance; rethink edges trigger a reset-to-baseline); " +
+      "`code` node {source, timeoutMs?} runs sandboxed TypeScript returning {outcome?, contextPatch?, customFields?}. " +
+      "Declare task documents via `artifacts: [{key, title?, producedBy?, role?}]` and custom task fields via " +
+      "`fields: [{id, name, type, required?, default?, options?, render?}]` (types: string/text/number/boolean/" +
+      "enum/multi-enum/date/url; render.placement card|detail|detail-section, render.badge for card chips).",
     parameters: workflowCreateParams,
     execute: async (_id: string, params: Static<typeof workflowCreateParams>) => {
       try {
@@ -1178,7 +1193,10 @@ export function createWorkflowUpdateTool(store: TaskStore): ToolDefinition {
     description:
       "Update a custom workflow definition (name/description/ir/layout). Built-ins cannot be edited. " +
       "If an IR change removes a column that still holds cards, the update is blocked and returns the " +
-      "occupied columns — retry with rehome_to set to a column id that survives in the new IR.",
+      "occupied columns — retry with rehome_to set to a column id that survives in the new IR. " +
+      "The IR accepts the same step-inversion constructs as fn_workflow_create (foreach with mode/isolation/" +
+      "concurrency, step-execute, step-review, parse-steps, code nodes, rework edges, artifacts, fields). " +
+      "Editing `fields` orphans (never destroys) existing task values for removed/incompatible fields.",
     parameters: workflowUpdateParams,
     execute: async (_id: string, params: Static<typeof workflowUpdateParams>) => {
       try {

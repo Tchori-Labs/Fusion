@@ -1,3 +1,14 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// PARITY SUBJECT (test-file ownership, U7 / KTD-9):
+//   This suite owns DEFAULT-WORKFLOW BYTE-IDENTITY parity — it proves the graph
+//   executor reproduces the legacy monolithic execute → review → merge seam
+//   sequence exactly (the parity ORACLE per KTD-1). It deliberately does NOT
+//   cover per-step / updateStep-trajectory parity.
+//
+//   The stepwise per-step trajectory + merge-blocker-window parity (legacy
+//   step-session path vs the stepwise foreach graph) is owned by the sibling
+//   suite `stepwise-workflow-parity.test.ts`. Keep the two concerns separate.
+// ─────────────────────────────────────────────────────────────────────────────
 import { describe, expect, it, vi } from "vitest";
 import type { TaskDetail } from "@fusion/core";
 

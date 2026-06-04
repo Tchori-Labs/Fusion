@@ -63,8 +63,16 @@ export type {
   WorkflowHoldRelease,
   WorkflowJoinMode,
   WorkflowJoinBranchFailure,
+  // Step-inversion (KTD-3/12/13): foreach / artifacts / custom-field IR types.
+  WorkflowForeachConfig,
+  WorkflowIrArtifact,
+  WorkflowFieldDefinition,
+  WorkflowFieldType,
+  WorkflowFieldOption,
+  WorkflowFieldRender,
 } from "./workflow-ir-types.js";
 export { BUILTIN_CODING_WORKFLOW_IR } from "./builtin-coding-workflow-ir.js";
+export { BUILTIN_STEPWISE_CODING_WORKFLOW_IR } from "./builtin-stepwise-coding-workflow-ir.js";
 
 // ── Trait model (U2) ─────────────────────────────────────────────────
 export type {
