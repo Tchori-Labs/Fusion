@@ -144,7 +144,7 @@ function isAgentCreatedTask(task: Task): boolean {
 
 // ── Constants ───────────────────────────────────────────────────────────────
 
-// #1403: widened to ColumnId so `.has(task.column)` accepts custom column ids
+// Issue 1403: widened to ColumnId so `.has(task.column)` accepts custom column ids
 // (which are not members and correctly resolve to false).
 const EDITABLE_COLUMNS: Set<ColumnId> = new Set<ColumnId>(["triage", "todo"]);
 
@@ -2004,7 +2004,7 @@ function TaskCardComponent({
                   className="card-progress-fill"
                   style={{
                     width: `${progressPercent}%`,
-                    // #1403: custom columns have no legacy progress color → fall back to accent.
+                    // Issue 1403: custom columns have no legacy progress color → fall back to accent.
                     backgroundColor:
                       (COLUMN_PROGRESS_COLOR_MAP as Record<string, string>)[task.column] ?? "var(--accent)",
                   }}
