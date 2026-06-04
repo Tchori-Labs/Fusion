@@ -1,7 +1,7 @@
 ---
 title: "perf: Speed up test suite across inner loop, full suite, and CI"
 type: perf
-status: active
+status: completed
 date: 2026-06-03
 ---
 
