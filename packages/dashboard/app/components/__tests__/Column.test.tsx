@@ -122,6 +122,78 @@ describe("Column count-flash", () => {
   });
 });
 
+describe("Column workflow mode (U9)", () => {
+  it("uses the workflow column display name instead of the legacy label", () => {
+    render(
+      <Column
+        {...defaultProps}
+        column={"custom-col" as ColumnType}
+        workflowMode
+        columnDisplayName="Planning Hold"
+        columnFlags={{ hold: true }}
+        tasks={[]}
+      />,
+    );
+    expect(screen.getByRole("heading", { level: 2 }).textContent).toBe("Planning Hold");
+  });
+
+  it("re-keys bulk actions to trait flags (a wip column gets the processing menu)", () => {
+    render(
+      <Column
+        {...defaultProps}
+        column={"exec" as ColumnType}
+        workflowMode
+        columnDisplayName="Executing"
+        columnFlags={{ countsTowardWip: true }}
+        onPauseTask={vi.fn()}
+        tasks={[{ ...makeTask("FN-1"), column: "exec" as ColumnType }]}
+      />,
+    );
+    // The processing-column actions button (column-menu) is present.
+    expect(document.querySelector(".column-menu")).not.toBeNull();
+  });
+
+  it("surfaces a translated rejection messageKey on a failed drop (snap-back)", async () => {
+    const addToast = vi.fn();
+    const onMoveTask = vi.fn().mockRejectedValue({
+      details: { code: "merge-blocked", messageKey: "board.rejection.mergeBlocked", retryable: false },
+    });
+    render(
+      <Column
+        {...defaultProps}
+        column={"done" as ColumnType}
+        workflowMode
+        columnDisplayName="Done"
+        columnFlags={{ complete: true }}
+        addToast={addToast}
+        onMoveTask={onMoveTask}
+        tasks={[]}
+      />,
+    );
+    const columnEl = document.querySelector('[data-column="done"]') as HTMLElement;
+    fireEvent.drop(columnEl, { dataTransfer: { getData: () => "FN-99" } });
+    await waitFor(() => expect(addToast).toHaveBeenCalled());
+    // The toast surfaces the translated merge-blocked copy (not the raw key).
+    expect(addToast.mock.calls[0][0]).toContain("merge step");
+    expect(addToast.mock.calls[0][1]).toBe("error");
+  });
+
+  it("renders a Promote affordance on hold-column cards", () => {
+    render(
+      <Column
+        {...defaultProps}
+        column={"hold-col" as ColumnType}
+        workflowMode
+        columnDisplayName="Hold"
+        columnFlags={{ hold: true }}
+        onPromote={vi.fn().mockResolvedValue(undefined)}
+        tasks={[{ ...makeTask("FN-7"), column: "hold-col" as ColumnType }]}
+      />,
+    );
+    expect(screen.getByTestId("promote-FN-7")).toBeDefined();
+  });
+});
+
 describe("Column memoization", () => {
   it("does not re-render task cards when rerendered with the same task references", () => {
     const tasks = [makeTask("FN-001")];

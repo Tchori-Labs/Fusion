@@ -34,6 +34,15 @@ import { MAX_AUTO_MERGE_RETRIES, type BlockerFanoutEntry } from "../hooks/useBlo
 import { useRetryWarning } from "../context/RetryWarningContext";
 import { useColumnLabel } from "../i18n/labels";
 
+/** Per-branch progress snapshot (U13). Surfaced as an optional additive field
+ *  on the task payload for the parallel-window badge (U9). */
+interface BranchProgressEntry {
+  branchId: string;
+  nodeId: string;
+  status: string;
+}
+type TaskWithBranchProgress = Task & { branchProgress?: BranchProgressEntry[] };
+
 // ── Mission title caching ───────────────────────────────────────────────────
 
 const missionTitleCache = new Map<string, string>();
@@ -484,6 +493,8 @@ function areTaskCardPropsEqual(previous: TaskCardProps, next: TaskCardProps): bo
     previousTask.title === nextTask.title &&
     previousTask.description === nextTask.description &&
     previousTask.column === nextTask.column &&
+    ((previousTask as TaskWithBranchProgress).branchProgress?.length ?? 0) ===
+      ((nextTask as TaskWithBranchProgress).branchProgress?.length ?? 0) &&
     previousTask.columnMovedAt === nextTask.columnMovedAt &&
     previousTask.timedExecutionMs === nextTask.timedExecutionMs &&
     previousTask.updatedAt === nextTask.updatedAt &&
@@ -1746,6 +1757,24 @@ function TaskCardComponent({
             {t("tasks.stuck", "Stuck")}
           </span>
         )}
+        {/* U13/U9: per-branch progress badges while the card is in a parallel
+            window. Reads an optional additive `branchProgress` field on the task
+            payload (server-persisted by U13); absent → nothing renders. */}
+        {Array.isArray((task as TaskWithBranchProgress).branchProgress) &&
+          (task as TaskWithBranchProgress).branchProgress!.length > 0 && (
+            <span
+              className="card-status-badge card-branch-progress"
+              title={t("tasks.branchProgressTitle", "Parallel branches in progress")}
+              data-testid="branch-progress-badge"
+            >
+              {t("tasks.branchProgress", "{{done}}/{{total}} branches", {
+                done: (task as TaskWithBranchProgress).branchProgress!.filter(
+                  (b) => b.status === "completed",
+                ).length,
+                total: (task as TaskWithBranchProgress).branchProgress!.length,
+              })}
+            </span>
+          )}
         {showStalledReview && stalledReview && (
           <span
             className="card-status-badge card-status-badge--in-review stalled-review"

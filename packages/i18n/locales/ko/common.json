@@ -1,23 +1,213 @@
 {
-  "actions": {
-    "cancel": "취소",
-    "close": "닫기",
-    "save": "저장"
+  "agents": {
+    "ratings": {
+      "trendDeclining": "",
+      "trendImproving": "",
+      "trendInsufficient": "",
+      "trendStable": ""
+    },
+    "reflections": {
+      "triggerManual": "",
+      "triggerPeriodic": "",
+      "triggerPostTask": "",
+      "triggerUserRequested": ""
+    },
+    "time": {
+      "daysAgo_other": "",
+      "hoursAgo_other": "",
+      "inAMoment": "",
+      "inDays_other": "",
+      "inHours_other": "",
+      "inMinutes_other": "",
+      "justNow": "",
+      "minutesAgo_other": "",
+      "daysAgo_one": "",
+      "hoursAgo_one": "",
+      "inDays_one": "",
+      "inHours_one": "",
+      "inMinutes_one": "",
+      "minutesAgo_one": ""
+    }
   },
-  "archive": "보관",
-  "cancel": "취소",
-  "close": "닫기",
-  "columns": {
-    "archived": "보관됨",
-    "done": "완료",
-    "in-progress": "진행 중",
-    "in-review": "검토 중",
-    "todo": "할 일",
-    "triage": "계획"
+  "board": {
+    "rejection": {
+      "capacityExhausted": "",
+      "guardRejected": "",
+      "mergeBlocked": "",
+      "unknownColumn": "",
+      "workflowMismatch": ""
+    }
   },
-  "delete": "삭제",
-  "refresh": "새로고침",
-  "retry": "재시도",
-  "skip": "건너뛰기",
-  "tryAgain": "다시 시도"
+  "chat": {
+    "failedToGetResponse": "",
+    "failureReferenceId": "",
+    "failureReferenceKind": "",
+    "failureReferenceLabel": "",
+    "failureReferenceMetaLabel": "",
+    "openMailboxMessage": "",
+    "toolCallArgsPrefix": "",
+    "toolCallResultPrefix": "",
+    "toolCallsCount_other": "",
+    "toolCallsHeader": "",
+    "toolCallStatusCompleted": "",
+    "toolCallStatusError": "",
+    "toolCallStatusErrors": "",
+    "toolCallStatusRunning": "",
+    "viewFailureDetails": "",
+    "toolCallsCount_one": ""
+  },
+  "health": {
+    "anomaly": {
+      "duplicateActiveId": "",
+      "idInBothStorages": "",
+      "sequenceOverlap": "",
+      "unknownPrefix": ""
+    }
+  },
+  "inline": {
+    "connecting": "",
+    "error": "",
+    "offline": "",
+    "online": ""
+  },
+  "merge": {
+    "unknown": ""
+  },
+  "missions": {
+    "autopilotStateActivating": "",
+    "autopilotStateCompleting": "",
+    "autopilotStateInactive": "",
+    "autopilotStateUnknown": "",
+    "autopilotStateWatching": "",
+    "interviewStatusAwaitingInput": "",
+    "interviewStatusComplete": "",
+    "interviewStatusError": "",
+    "interviewStatusGenerating": "",
+    "runHelperActive": "",
+    "runHelperBlocked": "",
+    "runHelperPlanning": ""
+  },
+  "models": {
+    "messages": {
+      "modelSetTo": "",
+      "modelSetToDefault": ""
+    }
+  },
+  "nodes": {
+    "auth": {
+      "differ": "",
+      "differProviders": "",
+      "match": "",
+      "notSynced": ""
+    },
+    "status": {
+      "connecting": "",
+      "creating": "",
+      "deleting": "",
+      "error": "",
+      "exited": "",
+      "offline": "",
+      "online": "",
+      "recreating": "",
+      "running": "",
+      "stopped": ""
+    }
+  },
+  "nodeStatus": {
+    "connecting": "",
+    "error": "",
+    "offline": "",
+    "online": "",
+    "unknown": ""
+  },
+  "research": {
+    "providerGitHub": "",
+    "providerLlmSynthesis": "",
+    "providerLocalDocs": "",
+    "providerPageFetch": "",
+    "providerWebSearch": ""
+  },
+  "routing": {
+    "policyLabel": {
+      "block": "",
+      "fallback": "",
+      "notConfigured": ""
+    }
+  },
+  "setup": {
+    "apiKeyFormatError": "",
+    "apiKeyLabel": {
+      "fallback": "",
+      "kimiCoding": "",
+      "minimax": "",
+      "ollama": "",
+      "openai": "",
+      "openrouter": "",
+      "zai": ""
+    },
+    "apiKeyPlaceholder": {
+      "fallback": "",
+      "kimiCoding": "",
+      "minimax": "",
+      "zai": ""
+    },
+    "apiKeyRequired": "",
+    "apiKeySetup": {
+      "fallback": "",
+      "kimiCoding": "",
+      "minimax": "",
+      "ollama": "",
+      "openai": "",
+      "openrouter": "",
+      "zai": ""
+    },
+    "apiKeyUsage": {
+      "fallback": "",
+      "kimiCoding": "",
+      "minimax": "",
+      "ollama": "",
+      "openai": "",
+      "openrouter": "",
+      "zai": ""
+    },
+    "providerDesc": {
+      "anthropic": "",
+      "fallback": "",
+      "gemini": "",
+      "google": "",
+      "kimi": "",
+      "kimiCoding": "",
+      "minimax": "",
+      "moonshot": "",
+      "ollama": "",
+      "openai": "",
+      "openaiCodex": "",
+      "openrouter": "",
+      "zai": ""
+    }
+  },
+  "taskForm": {
+    "nodeStatusConnecting": "",
+    "nodeStatusError": "",
+    "nodeStatusOffline": "",
+    "nodeStatusOnline": "",
+    "phasePostMerge": "",
+    "phasePreMerge": ""
+  },
+  "taskReview": {
+    "never": "",
+    "refreshSourceBackground": "",
+    "refreshSourceInitialLoad": "",
+    "refreshSourceManual": ""
+  },
+  "workflow": {
+    "postMerge": "",
+    "preMerge": "",
+    "statusAdvisory": "",
+    "statusFailed": "",
+    "statusPassed": "",
+    "statusRunning": "",
+    "statusSkipped": "",
+    "waitingForOutput": ""
+  }
 }
