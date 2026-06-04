@@ -21,6 +21,8 @@ import {
   OccupiedColumnsError,
   assertRehomeTargetValid,
   computeRemovedOccupiedColumns,
+  computeIncompatibleFieldChanges,
+  IncompatibleFieldChangeError,
   resolveEntryColumnId,
   resolveSwitchReconciliation,
   runReconciliationAbort,
@@ -43,7 +45,14 @@ import {
   reconcileHooksRemaining,
 } from "./transition-pending.js";
 import { BUILTIN_CODING_WORKFLOW_IR } from "./builtin-coding-workflow-ir.js";
-import type { WorkflowIr, WorkflowIrColumn } from "./workflow-ir-types.js";
+import type { WorkflowIr, WorkflowIrColumn, WorkflowFieldDefinition } from "./workflow-ir-types.js";
+import {
+  validateCustomFieldPatch,
+  applyFieldDefaults,
+  reconcileFieldsOnWorkflowChange,
+  CustomFieldRejectionError,
+  type CustomFieldRejection,
+} from "./task-fields.js";
 // Side-effect import: registers the 14 built-in trait DEFINITIONS into the
 // shared trait registry on load (the flag-ON path resolves traits by id).
 import "./builtin-traits.js";
@@ -6975,6 +6984,58 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   }
 
   /**
+   * Merge a validated/normalized custom-field patch into the existing values.
+   * `null` in the patch deletes that field's value (the delete sentinel from
+   * {@link validateCustomFieldPatch}); any other value overwrites. Returns a new
+   * object (never mutates the input) so the caller assigns it onto the task.
+   */
+  private mergeCustomFieldPatch(
+    current: Record<string, unknown> | undefined,
+    patch: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const next: Record<string, unknown> = { ...(current ?? {}) };
+    for (const [key, value] of Object.entries(patch)) {
+      if (value === null) {
+        delete next[key];
+      } else {
+        next[key] = value;
+      }
+    }
+    return next;
+  }
+
+  /**
+   * Single write authority for custom task fields (U11 / KTD-13).
+   *
+   * Resolves the task's workflow field definitions, validates `patch` against
+   * them via {@link validateCustomFieldPatch}, merges the normalized result into
+   * `Task.customFields` (delete-on-null), persists through the standard update
+   * path, and emits `task:updated` like every other task mutation. A workflow
+   * with no fields (e.g. the default) rejects any non-empty patch with
+   * `no-fields-defined`. Returns a typed result rather than throwing so callers
+   * (agent tools, HTTP routes) can surface the field path/code directly.
+   */
+  async updateTaskCustomFields(
+    taskId: string,
+    patch: Record<string, unknown>,
+    runContext?: RunMutationContext,
+  ): Promise<{ ok: true; task: Task } | { ok: false; rejection: CustomFieldRejection }> {
+    return this.withTaskLock(taskId, async () => {
+      const defs = this.resolveTaskCustomFieldDefsSync(taskId);
+      const result = validateCustomFieldPatch(defs, patch);
+      if (!result.ok) {
+        return { ok: false as const, rejection: result.rejection };
+      }
+      // Pass the validated PATCH through (with null delete-sentinels) — the
+      // merge-with-delete happens once, inside updateTaskUnlocked, against the
+      // freshly-read task. Pre-merging here would lose the delete semantics on
+      // the second merge.
+      const task = await this.updateTaskUnlocked(taskId, { customFields: result.normalized }, runContext);
+      return { ok: true as const, task };
+    });
+  }
+
+  /**
    * The body of {@link updateTask} WITHOUT acquiring the per-task lock. Callers
    * that already hold `withTaskLock(id)` — e.g. workflow-selection mutations
    * that bundle a `task_workflow_selection`/`workflow_steps` write with the
@@ -7082,10 +7143,19 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         }
       }
       if (updates.steps !== undefined) task.steps = updates.steps;
-      // U4/KTD-13 groundwork: round-trip customFields as an opaque whole-object
-      // patch. The typed validation/write authority (updateTaskCustomFields)
-      // lands in a later unit; for now updateTask just persists what it is given.
-      if (updates.customFields !== undefined) task.customFields = updates.customFields;
+      // U11/KTD-13: customFields writes are validated against the task's workflow
+      // field schema through the single authority (task-fields.ts). The patch is
+      // merged into the existing values (delete-on-null), mirroring
+      // updateTaskCustomFields. Backward-compat note: U4 round-tripped the object
+      // opaquely; the field system now enforces type/enum/unknown-id rules, so a
+      // write against a workflow with no fields (the default) is rejected with a
+      // typed CustomFieldRejectionError rather than silently persisted.
+      if (updates.customFields !== undefined) {
+        const defs = this.resolveTaskCustomFieldDefsSync(id);
+        const result = validateCustomFieldPatch(defs, updates.customFields);
+        if (!result.ok) throw new CustomFieldRejectionError(result.rejection);
+        task.customFields = this.mergeCustomFieldPatch(task.customFields, result.normalized);
+      }
       if (updates.currentStep !== undefined) task.currentStep = updates.currentStep;
       if (updates.status === null) {
         task.status = undefined;
@@ -12293,6 +12363,58 @@ ${stepsSection}`;
         pendingRehome = { rehomeTo: updates.rehomeTo, occupantTaskIds };
       }
     }
+
+    // U11/KTD-13: when the IR changes custom field types incompatibly for tasks
+    // that already hold values, block with a typed IncompatibleFieldChangeError
+    // unless `coerce` is supplied. Removed/added fields never block (removal
+    // orphans). Flag-independent: fields are orthogonal to the columns flag.
+    // Reconciliation runs per occupant task AFTER the IR save commits.
+    let pendingFieldReconcile:
+      | { oldFields: WorkflowFieldDefinition[]; newFields: WorkflowFieldDefinition[]; occupantTaskIds: string[]; coerce?: "drop" | "keep-orphaned" }
+      | undefined;
+    if (updates.ir !== undefined) {
+      const existingForFields = await this.getWorkflowDefinition(id);
+      if (!existingForFields) throw new Error(`Workflow '${id}' not found`);
+      const nextIrForFields = parseWorkflowIr(updates.ir);
+      const oldFields: WorkflowFieldDefinition[] =
+        existingForFields.ir.version === "v2" ? (existingForFields.ir.fields ?? []) : [];
+      const newFields: WorkflowFieldDefinition[] =
+        nextIrForFields.version === "v2" ? (nextIrForFields.fields ?? []) : [];
+      const fieldsChanged =
+        JSON.stringify(oldFields) !== JSON.stringify(newFields);
+      if (fieldsChanged) {
+        const occupantTaskIds = this.listWorkflowOccupantTaskIds(id, false);
+        const occupantsByField = new Map<string, number>();
+        const occupantsWithFields: string[] = [];
+        for (const taskId of occupantTaskIds) {
+          const row = this.db.prepare("SELECT customFields FROM tasks WHERE id = ?").get(taskId) as
+            | { customFields: string | null }
+            | undefined;
+          const values = row?.customFields
+            ? (fromJson<Record<string, unknown>>(row.customFields) ?? {})
+            : {};
+          if (Object.keys(values).length === 0) continue;
+          occupantsWithFields.push(taskId);
+          for (const key of Object.keys(values)) {
+            occupantsByField.set(key, (occupantsByField.get(key) ?? 0) + 1);
+          }
+        }
+        const incompatible = computeIncompatibleFieldChanges(
+          existingForFields.ir,
+          nextIrForFields,
+          occupantsByField,
+        );
+        if (incompatible.length > 0 && updates.coerce === undefined) {
+          throw new IncompatibleFieldChangeError(id, incompatible);
+        }
+        pendingFieldReconcile = {
+          oldFields,
+          newFields,
+          occupantTaskIds: occupantsWithFields,
+          coerce: updates.coerce,
+        };
+      }
+    }
     const saved = await this.withConfigLock(async () => {
       const existing = await this.getWorkflowDefinition(id);
       if (!existing) throw new Error(`Workflow '${id}' not found`);
@@ -12339,6 +12461,23 @@ ${stepsSection}`;
         await this.rehomeOccupant(taskId, pendingRehome.rehomeTo, "workflow-edit-rehome", {
           workflowId: id,
         });
+      }
+    }
+
+    // U11/KTD-13: now that the new field schema is committed, reconcile each
+    // occupant task's stored values against it (orphan-not-delete by default;
+    // coerce:"drop" discards orphans). Each runs under its own task lock.
+    if (pendingFieldReconcile) {
+      const dropOrphans = pendingFieldReconcile.coerce === "drop";
+      for (const taskId of pendingFieldReconcile.occupantTaskIds) {
+        await this.withTaskLock(taskId, () =>
+          this.reconcileTaskCustomFieldsForSchema(
+            taskId,
+            pendingFieldReconcile!.oldFields,
+            pendingFieldReconcile!.newFields,
+            dropOrphans,
+          ),
+        );
       }
     }
     return saved;
@@ -12898,6 +13037,16 @@ ${stepsSection}`;
     return list;
   }
 
+  /**
+   * Resolve the custom-field definitions (KTD-13) governing a task, via its
+   * workflow selection. v1 IR and the default workflow declare none → `[]`.
+   * Pure DB read, safe inside transactions.
+   */
+  private resolveTaskCustomFieldDefsSync(taskId: string): WorkflowFieldDefinition[] {
+    const ir = this.resolveTaskWorkflowIrSync(taskId);
+    return ir.version === "v2" ? (ir.fields ?? []) : [];
+  }
+
   private resolveTaskWorkflowIrSync(taskId: string): WorkflowIr {
     const selection = this.getTaskWorkflowSelection(taskId);
     const workflowId = selection?.workflowId;
@@ -13130,6 +13279,12 @@ ${stepsSection}`;
       // prior selection's rows, so a mid-flight failure never leaves the task
       // referencing already-deleted step ids.
       const priorSelection = this.getTaskWorkflowSelection(taskId);
+      // U11/KTD-13: capture the OLD field schema (from the prior selection's IR)
+      // before the selection row flips, so we can reconcile existing field values
+      // against the NEW workflow's schema below.
+      const oldFieldDefs = this.resolveTaskCustomFieldDefsSync(taskId);
+      const newFieldDefs: WorkflowFieldDefinition[] =
+        def.ir.version === "v2" ? (def.ir.fields ?? []) : [];
       const ids = await this.materializeWorkflowSteps(workflowId, inputs);
       try {
         await this.updateTaskUnlocked(taskId, { enabledWorkflowSteps: ids });
@@ -13155,8 +13310,54 @@ ${stepsSection}`;
         }
         this.workflowStepsCache = null;
       }
+
+      // U11/KTD-13: reconcile custom field values against the NEW workflow's
+      // schema. Same-id, type-compatible values are kept; incompatible/removed
+      // ids are orphaned — but RETAINED in storage (orphan-not-delete) so a later
+      // switch back, or the orphaned-fields disclosure, can still surface them.
+      // Then fill defaults for the new workflow's required+default fields that
+      // are absent. The merged object is written DIRECTLY (bypassing the
+      // validating patch path) because orphaned ids are by definition unknown to
+      // the new schema and would otherwise be rejected.
+      await this.reconcileTaskCustomFieldsForSchema(taskId, oldFieldDefs, newFieldDefs);
+
       return ids;
     });
+  }
+
+  /**
+   * U11/KTD-13: reconcile a task's stored custom field values when its governing
+   * field schema changes (workflow switch or definition edit). Values are
+   * partitioned by {@link reconcileFieldsOnWorkflowChange}; orphans are retained
+   * (never destroyed). Required+default fields absent from the result are filled.
+   * Writes the merged values directly onto task.json — orphaned ids are unknown
+   * to the new schema, so this deliberately bypasses the validating patch path.
+   * Assumes the caller already holds the per-task lock.
+   */
+  private async reconcileTaskCustomFieldsForSchema(
+    taskId: string,
+    oldFieldDefs: WorkflowFieldDefinition[],
+    newFieldDefs: WorkflowFieldDefinition[],
+    dropOrphans = false,
+  ): Promise<void> {
+    const dir = this.taskDir(taskId);
+    const task = await this.readTaskJson(dir);
+    const current = task.customFields ?? {};
+    const { kept, orphaned } = reconcileFieldsOnWorkflowChange(oldFieldDefs, newFieldDefs, current);
+    // Default (keep-orphaned): storage keeps everything (kept ∪ orphaned).
+    // coerce:"drop" discards the orphaned values entirely.
+    const base = dropOrphans ? { ...kept } : { ...kept, ...orphaned };
+    const reconciled = applyFieldDefaults(newFieldDefs, base);
+    // Skip the write when nothing changed (no defaults added, same keys/values).
+    const unchanged =
+      Object.keys(reconciled).length === Object.keys(current).length &&
+      Object.entries(reconciled).every(([k, v]) => current[k] === v);
+    if (unchanged) return;
+    task.customFields = reconciled;
+    task.updatedAt = new Date().toISOString();
+    await this.atomicWriteTaskJson(dir, task);
+    if (this.isWatching) this.taskCache.set(taskId, { ...task });
+    this.emitTaskLifecycleEventSafely("task:updated", [task]);
   }
 
   /**

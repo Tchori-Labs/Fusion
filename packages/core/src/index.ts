@@ -151,9 +151,11 @@ export type { ColumnCapacity } from "./workflow-capacity.js";
 export {
   OccupiedColumnsError,
   InvalidRehomeTargetError,
+  IncompatibleFieldChangeError,
   resolveEntryColumnId,
   resolveSwitchReconciliation,
   computeRemovedOccupiedColumns,
+  computeIncompatibleFieldChanges,
   assertRehomeTargetValid,
   setReconciliationAbort,
   runReconciliationAbort,
@@ -162,9 +164,24 @@ export {
 export type {
   SwitchReconciliation,
   ColumnOccupancy,
+  IncompatibleFieldChange,
   ReconciliationAbort,
   ReconciliationAbortContext,
 } from "./workflow-reconciliation.js";
+export {
+  validateCustomFieldPatch,
+  applyFieldDefaults,
+  reconcileFieldsOnWorkflowChange,
+  makeCustomFieldRejection,
+  CustomFieldRejectionError,
+  CUSTOM_FIELD_REJECTION_CODES,
+} from "./task-fields.js";
+export type {
+  CustomFieldRejection,
+  CustomFieldRejectionCode,
+  CustomFieldPatchResult,
+  FieldReconciliation,
+} from "./task-fields.js";
 export {
   readTransitionPending,
   writeTransitionPending,

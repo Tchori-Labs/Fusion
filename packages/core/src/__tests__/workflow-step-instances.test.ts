@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 
 import type { WorkflowRunStepInstance } from "../types.js";
+import type { WorkflowIr } from "../workflow-ir-types.js";
 import { createTaskStoreTestHarness } from "./store-test-helpers.js";
 
 /**
@@ -174,28 +175,87 @@ describe("workflow_run_step_instances CRUD (U4, KTD-6)", () => {
   });
 });
 
-describe("tasks.customFields raw JSON round-trip (U4 groundwork for KTD-13)", () => {
+describe("tasks.customFields JSON round-trip under a fielded workflow (U11/KTD-13)", () => {
+  // U11 behavior change vs. U4: customFields is no longer an opaque whole-object
+  // round-trip — every write is now validated against the task's workflow field
+  // schema through the single store authority (task-fields.ts). The default
+  // workflow declares no fields, so the original U4 tests (which wrote arbitrary
+  // keys onto a default-workflow task) would now be rejected with
+  // `no-fields-defined`. They are reworked here to attach a workflow that
+  // declares the fields under test, and `updateTask` is now a MERGE-with-delete
+  // patch (not whole-object replacement). The zero-fields rejection path is
+  // covered in task-fields.test.ts.
   const harness = createTaskStoreTestHarness();
   let store: ReturnType<typeof harness.store>;
+
+  // A v2 workflow declaring the fields exercised below.
+  const fieldedIr = (): WorkflowIr =>
+    ({
+      version: "v2",
+      name: "fielded",
+      columns: [
+        { id: "todo", name: "todo", traits: [] },
+        { id: "in-progress", name: "in-progress", traits: [] },
+        { id: "done", name: "done", traits: [] },
+      ],
+      nodes: [
+        { id: "start", kind: "start", column: "todo" },
+        { id: "end", kind: "end", column: "todo" },
+      ],
+      edges: [{ from: "start", to: "end" }],
+      fields: [
+        {
+          id: "severity",
+          name: "Severity",
+          type: "enum",
+          options: [
+            { value: "high", label: "High" },
+            { value: "low", label: "Low" },
+          ],
+        },
+        { id: "points", name: "Points", type: "number" },
+        { id: "flagged", name: "Flagged", type: "boolean" },
+        {
+          id: "tags",
+          name: "Tags",
+          type: "multi-enum",
+          options: [
+            { value: "a", label: "A" },
+            { value: "b", label: "B" },
+          ],
+        },
+        { id: "keep", name: "Keep", type: "string" },
+        { id: "a", name: "A", type: "number" },
+        { id: "b", name: "B", type: "number" },
+      ],
+    }) as unknown as WorkflowIr;
+
+  let workflowId: string;
 
   beforeEach(async () => {
     await harness.beforeEach();
     store = harness.store();
+    const def = await (store as any).createWorkflowDefinition({ name: "Fielded", ir: fieldedIr() });
+    workflowId = def.id;
   });
   afterEach(async () => {
     await harness.afterEach();
   });
 
+  async function fieldedTask(description: string) {
+    const t = await store.createTask({ description });
+    await (store as any).selectTaskWorkflow(t.id, workflowId);
+    return t;
+  }
+
   it("a freshly created task has no customFields (legacy-shape default)", async () => {
     const t = await store.createTask({ description: "no fields" });
     const got = await store.getTask(t.id);
-    // Stored default is '{}' which parses to an empty object; the row→Task map
-    // surfaces that as an empty object, distinguishable from later writes.
     expect(got?.customFields).toEqual({});
   });
 
-  it("round-trips a customFields object through updateTask → getTask", async () => {
-    const t = await store.createTask({ description: "fielded" });
+  it("round-trips a validated customFields object through updateTask → getTask", async () => {
+    const t = await fieldedTask("fielded");
     await store.updateTask(t.id, {
       customFields: { severity: "high", points: 3, flagged: true, tags: ["a", "b"] },
     });
@@ -203,17 +263,25 @@ describe("tasks.customFields raw JSON round-trip (U4 groundwork for KTD-13)", ()
     expect(got?.customFields).toEqual({ severity: "high", points: 3, flagged: true, tags: ["a", "b"] });
   });
 
-  it("updateTask treats customFields as a whole-object opaque patch (replaces, not merges)", async () => {
-    const t = await store.createTask({ description: "replace" });
+  it("updateTask MERGES the customFields patch (U11 change from U4's whole-object replace)", async () => {
+    const t = await fieldedTask("merge");
     await store.updateTask(t.id, { customFields: { a: 1, b: 2 } });
     await store.updateTask(t.id, { customFields: { a: 9 } });
     const got = await store.getTask(t.id);
-    // Whole-object replacement: `b` is gone. (Merge/validation is a later unit.)
-    expect(got?.customFields).toEqual({ a: 9 });
+    // U11 merge semantics: `b` survives, `a` is overwritten. (U4 replaced wholesale.)
+    expect(got?.customFields).toEqual({ a: 9, b: 2 });
+  });
+
+  it("null in the patch deletes that field's value", async () => {
+    const t = await fieldedTask("delete");
+    await store.updateTask(t.id, { customFields: { a: 1, b: 2 } });
+    await store.updateTask(t.id, { customFields: { a: null } });
+    const got = await store.getTask(t.id);
+    expect(got?.customFields).toEqual({ b: 2 });
   });
 
   it("leaves customFields untouched when an unrelated field is updated", async () => {
-    const t = await store.createTask({ description: "untouched" });
+    const t = await fieldedTask("untouched");
     await store.updateTask(t.id, { customFields: { keep: "me" } });
     await store.updateTask(t.id, { summary: "an unrelated change" });
     const got = await store.getTask(t.id);
