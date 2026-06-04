@@ -1077,6 +1077,9 @@ export class ProjectEngine {
         task,
         branch: task.branch ?? "",
         merged: false,
+        // noOp signals "parked cleanly in review, awaiting human merge" so the
+        // merge seam treats this as success rather than a graph failure.
+        noOp: true,
         worktreeRemoved: false,
         branchDeleted: false,
       } as MergeResult;
