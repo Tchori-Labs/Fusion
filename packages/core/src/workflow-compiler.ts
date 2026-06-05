@@ -95,6 +95,10 @@ export function validateLinearity(ir: WorkflowIr): WorkflowCompileError | null {
       return new WorkflowCompileError(`node '${node.id}' has no outgoing edge`);
     }
     if (outs.length > 1) {
+      // NOTE: the `require the workflow interpreter (deferred)` suffix is matched
+      // by the dashboard editor (WorkflowNodeEditor handleSave, KTD-4) to render
+      // an info-tone "interpreter-only" banner instead of an error. Keep both
+      // interpreter-deferred messages carrying this exact suffix in sync.
       return new WorkflowCompileError(
         `node '${node.id}' branches into ${outs.length} edges — graphs with branches require the workflow interpreter (deferred)`,
       );

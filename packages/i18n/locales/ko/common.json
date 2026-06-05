@@ -1,9 +1,4 @@
 {
-  "actions": {
-    "cancel": "취소",
-    "close": "닫기",
-    "save": "저장"
-  },
   "agents": {
     "ratings": {
       "trendDeclining": "",
@@ -34,7 +29,6 @@
       "minutesAgo_other": ""
     }
   },
-  "archive": "보관",
   "board": {
     "rejection": {
       "capacityExhausted": "",
@@ -44,7 +38,6 @@
       "workflowMismatch": ""
     }
   },
-  "cancel": "취소",
   "chat": {
     "failedToGetResponse": "",
     "failureReferenceId": "",
@@ -54,25 +47,15 @@
     "openMailboxMessage": "",
     "toolCallArgsPrefix": "",
     "toolCallResultPrefix": "",
+    "toolCallsCount_one": "",
+    "toolCallsCount_other": "",
+    "toolCallsHeader": "",
     "toolCallStatusCompleted": "",
     "toolCallStatusError": "",
     "toolCallStatusErrors": "",
     "toolCallStatusRunning": "",
-    "toolCallsCount_one": "",
-    "toolCallsCount_other": "",
-    "toolCallsHeader": "",
     "viewFailureDetails": ""
   },
-  "close": "닫기",
-  "columns": {
-    "archived": "보관됨",
-    "done": "완료",
-    "in-progress": "진행 중",
-    "in-review": "검토 중",
-    "todo": "할 일",
-    "triage": "계획"
-  },
-  "delete": "삭제",
   "health": {
     "anomaly": {
       "duplicateActiveId": "",
@@ -110,13 +93,6 @@
       "modelSetToDefault": ""
     }
   },
-  "nodeStatus": {
-    "connecting": "",
-    "error": "",
-    "offline": "",
-    "online": "",
-    "unknown": ""
-  },
   "nodes": {
     "auth": {
       "differ": "",
@@ -137,7 +113,13 @@
       "stopped": ""
     }
   },
-  "refresh": "새로고침",
+  "nodeStatus": {
+    "connecting": "",
+    "error": "",
+    "offline": "",
+    "online": "",
+    "unknown": ""
+  },
   "research": {
     "providerGitHub": "",
     "providerLlmSynthesis": "",
@@ -145,7 +127,6 @@
     "providerPageFetch": "",
     "providerWebSearch": ""
   },
-  "retry": "재시도",
   "routing": {
     "policyLabel": {
       "block": "",
@@ -205,7 +186,6 @@
       "zai": ""
     }
   },
-  "skip": "건너뛰기",
   "taskForm": {
     "nodeStatusConnecting": "",
     "nodeStatusError": "",
@@ -220,7 +200,6 @@
     "refreshSourceInitialLoad": "",
     "refreshSourceManual": ""
   },
-  "tryAgain": "다시 시도",
   "workflow": {
     "postMerge": "",
     "preMerge": "",
@@ -230,5 +209,14 @@
     "statusRunning": "",
     "statusSkipped": "",
     "waitingForOutput": ""
+  },
+  "workflowNodes": {
+    "summaryAwaitInput": "",
+    "summaryCodeDefault": "",
+    "summaryGateAdvisory": "",
+    "summaryGateBlocks": "",
+    "summaryHoldRelease": "",
+    "summaryNotConfigured": "",
+    "summaryReviewType": ""
   }
 }

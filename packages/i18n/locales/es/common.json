@@ -1,9 +1,4 @@
 {
-  "actions": {
-    "cancel": "Cancelar",
-    "close": "Cerrar",
-    "save": "Guardar"
-  },
   "agents": {
     "ratings": {
       "trendDeclining": "",
@@ -34,7 +29,6 @@
       "minutesAgo_other": ""
     }
   },
-  "archive": "Archivar",
   "board": {
     "rejection": {
       "capacityExhausted": "",
@@ -44,7 +38,6 @@
       "workflowMismatch": ""
     }
   },
-  "cancel": "Cancelar",
   "chat": {
     "failedToGetResponse": "",
     "failureReferenceId": "",
@@ -54,25 +47,15 @@
     "openMailboxMessage": "",
     "toolCallArgsPrefix": "",
     "toolCallResultPrefix": "",
+    "toolCallsCount_one": "",
+    "toolCallsCount_other": "",
+    "toolCallsHeader": "",
     "toolCallStatusCompleted": "",
     "toolCallStatusError": "",
     "toolCallStatusErrors": "",
     "toolCallStatusRunning": "",
-    "toolCallsCount_one": "",
-    "toolCallsCount_other": "",
-    "toolCallsHeader": "",
     "viewFailureDetails": ""
   },
-  "close": "Cerrar",
-  "columns": {
-    "archived": "Archivado",
-    "done": "Hecho",
-    "in-progress": "En progreso",
-    "in-review": "En revisión",
-    "todo": "Por hacer",
-    "triage": "Planificación"
-  },
-  "delete": "Eliminar",
   "health": {
     "anomaly": {
       "duplicateActiveId": "",
@@ -110,13 +93,6 @@
       "modelSetToDefault": ""
     }
   },
-  "nodeStatus": {
-    "connecting": "",
-    "error": "",
-    "offline": "",
-    "online": "",
-    "unknown": ""
-  },
   "nodes": {
     "auth": {
       "differ": "",
@@ -137,7 +113,13 @@
       "stopped": ""
     }
   },
-  "refresh": "Actualizar",
+  "nodeStatus": {
+    "connecting": "",
+    "error": "",
+    "offline": "",
+    "online": "",
+    "unknown": ""
+  },
   "research": {
     "providerGitHub": "",
     "providerLlmSynthesis": "",
@@ -145,7 +127,6 @@
     "providerPageFetch": "",
     "providerWebSearch": ""
   },
-  "retry": "Reintentar",
   "routing": {
     "policyLabel": {
       "block": "",
@@ -205,7 +186,6 @@
       "zai": ""
     }
   },
-  "skip": "Omitir",
   "taskForm": {
     "nodeStatusConnecting": "",
     "nodeStatusError": "",
@@ -220,7 +200,6 @@
     "refreshSourceInitialLoad": "",
     "refreshSourceManual": ""
   },
-  "tryAgain": "Reintentar",
   "workflow": {
     "postMerge": "",
     "preMerge": "",
@@ -230,5 +209,14 @@
     "statusRunning": "",
     "statusSkipped": "",
     "waitingForOutput": ""
+  },
+  "workflowNodes": {
+    "summaryAwaitInput": "",
+    "summaryCodeDefault": "",
+    "summaryGateAdvisory": "",
+    "summaryGateBlocks": "",
+    "summaryHoldRelease": "",
+    "summaryNotConfigured": "",
+    "summaryReviewType": ""
   }
 }

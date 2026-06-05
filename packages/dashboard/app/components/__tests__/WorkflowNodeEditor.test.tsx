@@ -652,3 +652,56 @@ describe("WorkflowNodeEditor — built-in stepwise selection render path", () =>
     expect(approve?.kind).toBeUndefined();
   });
 });
+
+// ── U2: edge-condition authoring (compile-banner split) ─────────────────────
+describe("WorkflowNodeEditor — U2 interpreter-only banner", () => {
+  beforeEach(() => {
+    vi.mocked(fetchTraits).mockResolvedValue(TRAIT_CATALOG);
+    vi.mocked(fetchStepParsers).mockResolvedValue(["step-headings", "json-steps"]);
+    vi.mocked(updateWorkflow).mockImplementation(async (_id, updates) => ({
+      ...v2Def(),
+      ...(updates as object),
+    }));
+  });
+  afterEach(() => {
+    cleanup();
+    vi.clearAllMocks();
+  });
+
+  async function saveActive() {
+    await screen.findByText("Save");
+    await waitFor(() => expect(screen.getAllByLabelText(/Column name/i).length).toBeGreaterThan(0));
+    fireEvent.click(screen.getByText("Save").closest("button")!);
+    await waitFor(() => expect(updateWorkflow).toHaveBeenCalled());
+  }
+
+  it("shows an info-tone status banner (not an error) when compile rejects with the interpreter-deferred suffix", async () => {
+    vi.mocked(fetchWorkflows).mockResolvedValue([v2Def()]);
+    vi.mocked(compileWorkflow).mockRejectedValue(
+      new Error(
+        "node 'step' branches into 2 edges — graphs with branches require the workflow interpreter (deferred)",
+      ),
+    );
+
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
+    await saveActive();
+
+    const banner = await screen.findByTestId("wf-interpreter-only-banner");
+    expect(banner).toHaveAttribute("role", "status");
+    expect(banner.className).toMatch(/wf-editor-banner--info/);
+    // No alert-toned error banner.
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("keeps the warning error banner for other (non-interpreter) compile errors", async () => {
+    vi.mocked(fetchWorkflows).mockResolvedValue([v2Def()]);
+    vi.mocked(compileWorkflow).mockRejectedValue(new Error("node 'step' has no outgoing edge"));
+
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
+    await saveActive();
+
+    const banner = await screen.findByRole("alert");
+    expect(banner).toHaveTextContent(/no outgoing edge/i);
+    expect(screen.queryByTestId("wf-interpreter-only-banner")).not.toBeInTheDocument();
+  });
+});

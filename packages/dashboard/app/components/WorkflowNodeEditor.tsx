@@ -7,7 +7,6 @@ import {
   Background,
   Controls,
   MiniMap,
-  addEdge,
   useNodesState,
   useEdgesState,
   type Connection,
@@ -51,6 +50,10 @@ import {
   isColumnBandNode,
   foreachChildFlowId,
   shortConditionLabel,
+  edgeClassName,
+  edgeConditionEditability,
+  buildConnectionEdge,
+  WF_EDGE_INTERACTION_WIDTH,
   FOREACH_GROUP_WIDTH,
   FOREACH_GROUP_HEIGHT,
   FOREACH_CHILD_X,
@@ -131,6 +134,10 @@ function InnerEditor({
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
+  // Info-tone state (KTD-4): set when a save compiles-rejects solely because the
+  // graph branches (interpreter-only), distinct from the warning-toned
+  // validationError used for genuine problems.
+  const [interpreterOnly, setInterpreterOnly] = useState<boolean>(false);
   const [nodes, setNodes, onNodesChange] = useNodesState<FlowNode<WorkflowFlowNodeData>>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<FlowEdge>([]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
@@ -225,6 +232,7 @@ function InnerEditor({
     setSelectedNodeId(null);
     setSelectedEdgeId(null);
     setValidationError(null);
+    setInterpreterOnly(false);
   }, [activeWorkflow, setNodes, setEdges]);
 
   // Server-reported node error (e.g. seam-in-branch) attributed to a node id.
@@ -240,13 +248,28 @@ function InnerEditor({
     });
   }, [columns, setNodes]);
 
+  // Append a new (success) edge directly rather than via React Flow's addEdge,
+  // which dedupes on source/target/handles and would block parallel
+  // success+failure edges between the same pair (KTD-3). buildConnectionEdge
+  // reimplements addEdge's sanity guards plus the author-time cycle guard (KTD-9).
   const onConnect = useCallback(
     (connection: Connection) => {
-      setEdges((eds) =>
-        addEdge({ ...connection, label: "success", data: { condition: "success" } }, eds),
-      );
+      const result = buildConnectionEdge(connection, edges, nodes);
+      if ("error" in result) {
+        if (result.error === "cycle") {
+          addToast(
+            t(
+              "workflowNodes.cycleBlocked",
+              "That connection would create a cycle — only rework edges inside a for-each template may loop back",
+            ),
+            "warning",
+          );
+        }
+        return;
+      }
+      setEdges((eds) => [...eds, result.edge]);
     },
-    [setEdges],
+    [edges, nodes, setEdges, addToast, t],
   );
 
   // Dragging a step node into a column band sets node.column (position-based
@@ -372,7 +395,7 @@ function InnerEditor({
             data: { ...(e.data ?? {}), condition, kind: rework ? "rework" : undefined },
             type: rework ? "step" : undefined,
             animated: rework,
-            className: rework ? "wf-edge-rework" : undefined,
+            className: edgeClassName(condition, rework),
           };
         }),
       );
@@ -459,6 +482,7 @@ function InnerEditor({
 
     setSaving(true);
     setValidationError(null);
+    setInterpreterOnly(false);
     setServerNodeError(null);
     try {
       const { ir, layout } = flowToIr(
@@ -475,9 +499,19 @@ function InnerEditor({
         await compileWorkflow(updated.id, projectId);
         addToast(t("workflows.saved", "Workflow saved"), "success");
       } catch (compileErr) {
-        setValidationError(
-          getErrorMessage(compileErr) || t("workflows.savedNotCompilable", "Workflow saved but cannot be compiled"),
-        );
+        const compileMsg = getErrorMessage(compileErr) || "";
+        // KTD-4: branching graphs reject with this shared suffix from
+        // workflow-compiler.ts (both the fan-out and off-main-path messages).
+        // Such a graph still runs on the interpreter — present it as info, not a
+        // warning. NOTE: this string is coupled to the compiler's message; if
+        // that wording changes, update both sites (see compiler message site).
+        if (compileMsg.includes("require the workflow interpreter (deferred)")) {
+          setInterpreterOnly(true);
+        } else {
+          setValidationError(
+            compileMsg || t("workflows.savedNotCompilable", "Workflow saved but cannot be compiled"),
+          );
+        }
       }
     } catch (err) {
       const message = getErrorMessage(err) || t("workflows.saveFailed", "Failed to save workflow");
@@ -530,12 +564,13 @@ function InnerEditor({
 
   const selectedNode = nodes.find((n) => n.id === selectedNodeId) ?? null;
   const selectedEdge = edges.find((e) => e.id === selectedEdgeId) ?? null;
-  // The edge inspector's verdict/rework controls apply only when the edge's
-  // source node is a step-review node (KTD-4).
-  const selectedEdgeSourceIsReview = useMemo(() => {
-    if (!selectedEdge) return false;
+  // The edge inspector renders different controls per source-node kind (KTD-2):
+  // step-review → verdict controls; prompt/script/gate/code/foreach →
+  // success/failure select; everything else → a read-only condition note.
+  const selectedEdgeEditability = useMemo(() => {
+    if (!selectedEdge) return "readonly" as const;
     const src = nodes.find((n) => n.id === selectedEdge.source);
-    return src?.data.kind === "step-review";
+    return edgeConditionEditability(src?.data.kind);
   }, [selectedEdge, nodes]);
 
   // Artifacts the active workflow declares (KTD-12). The parse-steps inspector
@@ -711,6 +746,18 @@ function InnerEditor({
                     {validationError}
                   </div>
                 )}
+                {interpreterOnly && (
+                  <div
+                    className="wf-editor-banner wf-editor-banner--info"
+                    role="status"
+                    data-testid="wf-interpreter-only-banner"
+                  >
+                    {t(
+                      "workflowNodes.interpreterOnly",
+                      "This workflow branches, so it runs on the graph interpreter — it can't compile to the linear step engine, but it will still run.",
+                    )}
+                  </div>
+                )}
                 {unplaced.length > 0 && (
                   <div className="wf-editor-banner wf-editor-banner--warn" role="alert" data-testid="wf-unplaced-summary">
                     {t("workflowColumns.unplacedCount", "{{count}} nodes not placed in a column", {
@@ -741,6 +788,7 @@ function InnerEditor({
                       setSelectedNodeId(null);
                       setSelectedEdgeId(null);
                     }}
+                    defaultEdgeOptions={{ interactionWidth: WF_EDGE_INTERACTION_WIDTH }}
                     fitView
                   >
                     <Background />
@@ -1350,7 +1398,7 @@ function InnerEditor({
             <aside className="wf-editor-inspector" data-testid="wf-edge-inspector">
               <h3>{t("workflowNodes.edgeInspector", "Edge")}</h3>
               <fieldset className="wf-inspector-fields" disabled={isBuiltin}>
-                {selectedEdgeSourceIsReview ? (
+                {selectedEdgeEditability === "verdicts" ? (
                   <>
                     <label className="wf-field">
                       <span>{t("workflowNodes.edgeVerdict", "Review verdict")}</span>
@@ -1389,6 +1437,18 @@ function InnerEditor({
                       )}
                     </p>
                   </>
+                ) : selectedEdgeEditability === "conditions" ? (
+                  <label className="wf-field">
+                    <span>{t("workflowNodes.edgeCondition", "Condition")}</span>
+                    <select
+                      data-testid="wf-edge-condition"
+                      value={String(selectedEdge.data?.condition ?? "success")}
+                      onChange={(e) => updateSelectedEdge({ condition: e.target.value })}
+                    >
+                      <option value="success">success</option>
+                      <option value="failure">failure</option>
+                    </select>
+                  </label>
                 ) : (
                   <p className="wf-inspector-note">
                     {t(

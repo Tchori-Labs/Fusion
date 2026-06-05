@@ -14,6 +14,10 @@ import {
   foreachChildFlowId,
   templateNodeIdFromChild,
   shortConditionLabel,
+  edgeClassName,
+  edgeConditionEditability,
+  wouldCreateCycle,
+  buildConnectionEdge,
   COLUMN_BAND_HEIGHT,
   WF_CARD_WIDTH,
   WF_CARD_MAX_WIDTH,
@@ -455,5 +459,145 @@ describe("card dimension constants (U1)", () => {
     // card never overflows or gets clamped by extent:"parent".
     expect(FOREACH_CHILD_X + WF_CARD_MAX_WIDTH).toBeLessThanOrEqual(FOREACH_GROUP_WIDTH);
     expect(FOREACH_CHILD_Y + WF_CARD_HEIGHT).toBeLessThanOrEqual(FOREACH_GROUP_HEIGHT);
+  });
+});
+
+describe("edge-condition authoring (U2)", () => {
+  it("round-trips a failure condition through flowToIr → irToFlow with class + label", () => {
+    const ir: WorkflowDefinition["ir"] = {
+      version: "v1",
+      name: "wf",
+      nodes: [
+        { id: "start", kind: "start" },
+        { id: "n1", kind: "prompt", config: { prompt: "do" } },
+        { id: "ok", kind: "prompt", config: { prompt: "ok" } },
+        { id: "bad", kind: "prompt", config: { prompt: "bad" } },
+        { id: "end", kind: "end" },
+      ],
+      edges: [
+        { from: "start", to: "n1", condition: "success" },
+        { from: "n1", to: "ok", condition: "success" },
+        { from: "n1", to: "bad", condition: "failure" },
+        { from: "ok", to: "end", condition: "success" },
+        { from: "bad", to: "end", condition: "success" },
+      ],
+    };
+    const { nodes, edges } = irToFlow(makeDef(ir));
+    const failFlow = edges.find((e) => e.source === "n1" && e.target === "bad")!;
+    expect(failFlow.data?.condition).toBe("failure");
+    expect(failFlow.label).toBe("failure");
+    expect(failFlow.className).toBe("wf-edge-failure");
+
+    const { ir: out } = flowToIr("wf", nodes, edges);
+    const irFail = out.edges.find((e) => e.from === "n1" && e.to === "bad");
+    expect(irFail?.condition).toBe("failure");
+  });
+
+  it("preserves parallel success+failure edges between the same pair through the round-trip", () => {
+    const flowNodes: FlowNode<WorkflowFlowNodeData>[] = [
+      { id: "a", type: "prompt", position: { x: 0, y: 0 }, data: { kind: "prompt", label: "a" } },
+      { id: "b", type: "prompt", position: { x: 100, y: 0 }, data: { kind: "prompt", label: "b" } },
+    ];
+    const flowEdges = [
+      { id: "e-1", source: "a", target: "b", data: { condition: "success" } },
+      { id: "e-2", source: "a", target: "b", data: { condition: "failure" } },
+    ];
+    const { ir } = flowToIr("wf", flowNodes, flowEdges);
+    expect(ir.edges).toHaveLength(2);
+    expect(ir.edges.map((e) => e.condition).sort()).toEqual(["failure", "success"]);
+
+    const { edges: reFlow } = irToFlow(makeDef(ir));
+    expect(reFlow).toHaveLength(2);
+    const ids = new Set(reFlow.map((e) => e.id));
+    expect(ids.size).toBe(2);
+  });
+
+  it("edgeClassName: failure → wf-edge-failure, rework precedence, success → undefined", () => {
+    expect(edgeClassName("failure", false)).toBe("wf-edge-failure");
+    expect(edgeClassName("success", false)).toBeUndefined();
+    expect(edgeClassName("failure", true)).toBe("wf-edge-rework");
+  });
+
+  it("edgeConditionEditability gates by source kind (KTD-2)", () => {
+    expect(edgeConditionEditability("step-review")).toBe("verdicts");
+    expect(edgeConditionEditability("prompt")).toBe("conditions");
+    expect(edgeConditionEditability("script")).toBe("conditions");
+    expect(edgeConditionEditability("gate")).toBe("conditions");
+    expect(edgeConditionEditability("code")).toBe("conditions");
+    expect(edgeConditionEditability("foreach")).toBe("conditions");
+    expect(edgeConditionEditability("split")).toBe("readonly");
+    expect(edgeConditionEditability("parse-steps")).toBe("readonly");
+    expect(edgeConditionEditability("start")).toBe("readonly");
+    expect(edgeConditionEditability(undefined)).toBe("readonly");
+  });
+
+  it("wouldCreateCycle detects back-edges and ignores forward + rework edges", () => {
+    const chain = [
+      { id: "1", source: "a", target: "b", data: { condition: "success" } },
+      { id: "2", source: "b", target: "c", data: { condition: "success" } },
+    ];
+    // c → a closes the loop a→b→c→a.
+    expect(wouldCreateCycle(chain, "c", "a")).toBe(true);
+    // a → c is forward, no cycle.
+    expect(wouldCreateCycle(chain, "a", "c")).toBe(false);
+    // self-loop.
+    expect(wouldCreateCycle(chain, "a", "a")).toBe(true);
+
+    // rework edges are excluded from the reachability walk.
+    const withRework = [
+      { id: "1", source: "a", target: "b", data: { condition: "success" } },
+      { id: "2", source: "b", target: "c", data: { condition: "success", kind: "rework" } },
+    ];
+    // c only reachable from b via a rework edge, so c→a is NOT a (non-rework) cycle.
+    expect(wouldCreateCycle(withRework, "c", "a")).toBe(false);
+  });
+
+  it("buildConnectionEdge: builds a success edge, rejects missing endpoints, duplicates, cycles", () => {
+    const nodes: FlowNode<WorkflowFlowNodeData>[] = [
+      { id: "a", type: "prompt", position: { x: 0, y: 0 }, data: { kind: "prompt", label: "a" } },
+      { id: "b", type: "prompt", position: { x: 100, y: 0 }, data: { kind: "prompt", label: "b" } },
+      { id: "c", type: "prompt", position: { x: 200, y: 0 }, data: { kind: "prompt", label: "c" } },
+    ];
+    const edges = [
+      { id: "1", source: "a", target: "b", data: { condition: "success" } },
+      { id: "2", source: "b", target: "c", data: { condition: "success" } },
+    ];
+
+    // happy path: new success edge with a unique id + interactionWidth.
+    const ok = buildConnectionEdge({ source: "a", target: "c" }, edges, nodes);
+    expect("edge" in ok).toBe(true);
+    if ("edge" in ok) {
+      expect(ok.edge.data?.condition).toBe("success");
+      expect(ok.edge.label).toBe("success");
+      expect(ok.edge.interactionWidth).toBeGreaterThan(0);
+      expect(typeof ok.edge.id).toBe("string");
+    }
+
+    // missing endpoint.
+    expect(buildConnectionEdge({ source: "a", target: null }, edges, nodes)).toEqual({
+      error: "missing-endpoint",
+    });
+
+    // duplicate of the same condition.
+    expect(buildConnectionEdge({ source: "a", target: "b" }, edges, nodes)).toEqual({
+      error: "duplicate",
+    });
+
+    // cycle: c→a closes a→b→c→a.
+    expect(buildConnectionEdge({ source: "c", target: "a" }, edges, nodes)).toEqual({
+      error: "cycle",
+    });
+  });
+
+  it("buildConnectionEdge exempts intra-foreach-template connections from the cycle guard", () => {
+    const nodes: FlowNode<WorkflowFlowNodeData>[] = [
+      { id: "g", type: "foreach", position: { x: 0, y: 0 }, data: { kind: "foreach", label: "g" } },
+      { id: "g::a", type: "prompt", position: { x: 0, y: 0 }, parentId: "g", data: { kind: "prompt", label: "a" } },
+      { id: "g::b", type: "prompt", position: { x: 0, y: 0 }, parentId: "g", data: { kind: "prompt", label: "b" } },
+    ];
+    const edges = [{ id: "1", source: "g::a", target: "g::b", data: { condition: "success" } }];
+    // b→a would be a cycle, but both are children of the same group → allowed.
+    const res = buildConnectionEdge({ source: "g::b", target: "g::a" }, edges, nodes);
+    expect("edge" in res).toBe(true);
   });
 });

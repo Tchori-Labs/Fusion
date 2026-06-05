@@ -152,8 +152,19 @@ function foreachConfigOf(node: WorkflowIrNode): WorkflowForeachConfig | undefine
   return cfg as WorkflowForeachConfig;
 }
 
+/** CSS class for an edge given its condition + rework kind. Rework takes
+ *  precedence; failure edges get the distinct failure styling; success and other
+ *  conditions get no class (default styling). R2's two-channel rule (label always
+ *  rendered + dash pattern) plus color is enforced by the CSS for these classes. */
+export function edgeClassName(condition: string, isRework: boolean): string | undefined {
+  if (isRework) return "wf-edge-rework";
+  if (condition === "failure") return "wf-edge-failure";
+  return undefined;
+}
+
 /** Build a React Flow edge from an IR edge. Rework edges (KTD-5) carry kind so
- *  the editor renders them dashed in the accent color. */
+ *  the editor renders them dashed in the accent color. Failure edges (R2) carry
+ *  the wf-edge-failure class for a distinct dash + error-token stroke. */
 function irEdgeToFlow(edge: WorkflowIrEdge, index: number, idScope = ""): FlowEdge {
   const condition = edge.condition ?? "success";
   const isRework = edge.kind === "rework";
@@ -165,10 +176,15 @@ function irEdgeToFlow(edge: WorkflowIrEdge, index: number, idScope = ""): FlowEd
     data: { condition, kind: isRework ? "rework" : undefined },
     type: isRework ? "step" : undefined,
     animated: isRework,
-    className: isRework ? "wf-edge-rework" : undefined,
+    className: edgeClassName(condition, isRework),
+    interactionWidth: WF_EDGE_INTERACTION_WIDTH,
     markerEnd: undefined,
   };
 }
+
+/** Default edge hit-target width (px) so edges are clickable/tappable even when
+ *  visually thin. Applied per-edge (defaultEdgeOptions only seeds new edges). */
+export const WF_EDGE_INTERACTION_WIDTH = 24;
 
 /** Short display label for an edge condition. `outcome:<verdict>` conditions
  *  render as the verdict alone (KTD-4); everything else verbatim. */
@@ -397,6 +413,123 @@ function flowEdgeToIr(edge: FlowEdge, groupId?: string): WorkflowIrEdge {
   const from = groupId ? templateNodeIdFromChild(groupId, edge.source) : edge.source;
   const to = groupId ? templateNodeIdFromChild(groupId, edge.target) : edge.target;
   return { from, to, condition, ...(isRework ? { kind: "rework" as const } : {}) };
+}
+
+// ── Edge-condition authoring (U2) ────────────────────────────────────────────
+
+/** Editor node kinds whose edges expose a success/failure condition select
+ *  (KTD-2). step-review uses verdict controls; all other kinds are read-only. */
+const CONDITION_EDITABLE_KINDS = new Set<string>(["prompt", "script", "gate", "code", "foreach"]);
+
+/** Decide what the edge inspector renders for an edge sourced from `sourceKind`:
+ *  - "verdicts": step-review verdict select + rework checkbox (existing);
+ *  - "conditions": success/failure native select (KTD-2);
+ *  - "readonly": a read-only condition note. Pure so the gating is unit-testable
+ *  without rendering edges (jsdom can't). */
+export function edgeConditionEditability(
+  sourceKind: string | undefined,
+): "verdicts" | "conditions" | "readonly" {
+  if (sourceKind === "step-review") return "verdicts";
+  if (sourceKind && CONDITION_EDITABLE_KINDS.has(sourceKind)) return "conditions";
+  return "readonly";
+}
+
+/** True when adding an edge source→target would create a cycle, i.e. `target`
+ *  can already reach `source` by walking existing non-rework edges (rework edges
+ *  are the only legal cycles and are excluded from the reachability walk, per
+ *  KTD-9). Pure + exported so the connect-time guard is testable at the mapping
+ *  layer. */
+export function wouldCreateCycle(edges: FlowEdge[], source: string, target: string): boolean {
+  if (source === target) return true;
+  // Build adjacency over non-rework edges only.
+  const adj = new Map<string, string[]>();
+  for (const e of edges) {
+    if ((e.data?.kind as string | undefined) === "rework") continue;
+    const arr = adj.get(e.source) ?? [];
+    arr.push(e.target);
+    adj.set(e.source, arr);
+  }
+  // Can `target` reach `source`? If so, the new source→target edge closes a loop.
+  const seen = new Set<string>();
+  const stack = [target];
+  while (stack.length) {
+    const cur = stack.pop()!;
+    if (cur === source) return true;
+    if (seen.has(cur)) continue;
+    seen.add(cur);
+    for (const next of adj.get(cur) ?? []) stack.push(next);
+  }
+  return false;
+}
+
+let edgeSeq = 0;
+/** Allocate a globally-unique edge id (mirrors the editor's newNodeId pattern).
+ *  Used by buildConnectionEdge so parallel success+failure edges between the same
+ *  pair don't collide (KTD-3). */
+export function newEdgeId(): string {
+  edgeSeq += 1;
+  return `e-${Date.now().toString(36)}-${edgeSeq}`;
+}
+
+/** Result of attempting to build an edge from a React Flow connection. */
+export type BuildConnectionResult =
+  | { edge: FlowEdge }
+  | { error: "missing-endpoint" | "duplicate" | "cycle" };
+
+/** Construct a new success edge for a React Flow connection, reimplementing the
+ *  sanity guards React Flow's addEdge provided (KTD-3) plus the author-time cycle
+ *  guard (KTD-9). Returns an error tag instead of an edge when the connection is
+ *  rejected so the caller can surface a toast:
+ *    - missing-endpoint: source or target absent;
+ *    - duplicate: an edge with the same source+target+condition already exists
+ *      (parallel edges of a DIFFERENT condition between the same pair ARE allowed);
+ *    - cycle: the connection would close a non-rework loop, and the endpoints are
+ *      not both children of the same foreach template (intra-template rework
+ *      cycles are authored separately and exempt).
+ */
+export function buildConnectionEdge(
+  connection: { source?: string | null; target?: string | null },
+  edges: FlowEdge[],
+  nodes: FlowNode<WorkflowFlowNodeData>[],
+): BuildConnectionResult {
+  const source = connection.source ?? undefined;
+  const target = connection.target ?? undefined;
+  if (!source || !target) return { error: "missing-endpoint" };
+
+  const condition = "success";
+  // Skip exact duplicates of the SAME condition (a second identical edge is
+  // pointless); different conditions between the same pair are allowed.
+  const isDuplicate = edges.some(
+    (e) =>
+      e.source === source &&
+      e.target === target &&
+      ((e.data?.condition as string | undefined) ?? "success") === condition,
+  );
+  if (isDuplicate) return { error: "duplicate" };
+
+  // Cycle guard (KTD-9). Exempt connections where both endpoints are children of
+  // the same foreach template — those may legitimately be rework cycles authored
+  // separately; the simplest correct rule applies the guard only to non-template
+  // connections.
+  const srcNode = nodes.find((n) => n.id === source);
+  const tgtNode = nodes.find((n) => n.id === target);
+  const bothTemplateChildren =
+    !!srcNode?.parentId && srcNode.parentId === tgtNode?.parentId;
+  if (!bothTemplateChildren && wouldCreateCycle(edges, source, target)) {
+    return { error: "cycle" };
+  }
+
+  return {
+    edge: {
+      id: newEdgeId(),
+      source,
+      target,
+      label: shortConditionLabel(condition),
+      data: { condition, kind: undefined },
+      className: edgeClassName(condition, false),
+      interactionWidth: WF_EDGE_INTERACTION_WIDTH,
+    },
+  };
 }
 
 // ── Client-side validation (U10) ─────────────────────────────────────────────

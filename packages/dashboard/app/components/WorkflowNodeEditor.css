@@ -202,6 +202,14 @@
   font-size: 0.85rem;
 }
 
+/* Info-tone banner (KTD-4): branching graph runs on the interpreter only — not a
+ *  failure, so it uses the info token rather than the warning treatment. */
+.wf-editor-banner--info {
+  border-bottom-color: var(--ws-info);
+  color: var(--ws-info);
+  background: color-mix(in srgb, var(--ws-info) 6%, var(--bg-secondary));
+}
+
 .wf-editor-canvas {
   flex: 1;
   min-height: 0;
@@ -415,6 +423,16 @@
 .wf-edge-rework .react-flow__edge-path {
   stroke: var(--accent, var(--ws-info));
   stroke-dasharray: 5 4;
+  stroke-width: 2;
+}
+
+/* Failure edges (R2): a distinct dash pattern from rework plus an error-token
+ *  stroke. Two-channel rule — the condition label is always rendered (third
+ *  channel is color) so failure edges stay distinguishable in low-contrast
+ *  themes. */
+.react-flow__edge.wf-edge-failure .react-flow__edge-path {
+  stroke: var(--ws-error);
+  stroke-dasharray: 2 4;
   stroke-width: 2;
 }
 

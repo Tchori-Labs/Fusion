@@ -6112,6 +6112,12 @@
     "switchToPlainText": "Switch to plain text",
     "yes": "Yes"
   },
+  "taskFields": {
+    "moreFields": "Additional fields",
+    "orphaned": "Orphaned fields",
+    "saveFailed": "Failed to save field",
+    "unset": "—"
+  },
   "taskForm": {
     "addDependencies": "Add dependencies",
     "attachHint": "You can also paste images or drag & drop",
@@ -6734,8 +6740,8 @@
     "optionColor": "Option color",
     "optionLabel": "Option label",
     "optionN": "Option {{n}}",
-    "optionValue": "Option value",
     "options": "Options",
+    "optionValue": "Option value",
     "placement": "Placement",
     "placementCard": "Card badge",
     "placementDetail": "Detail (inline)",
@@ -6754,6 +6760,8 @@
     "codeNote": "Runs sandboxed TypeScript. Syntax is validated at save.",
     "codeSource": "Source (TypeScript)",
     "codeTimeout": "Timeout (ms)",
+    "cycleBlocked": "That connection would create a cycle — only rework edges inside a for-each template may loop back",
+    "edgeCondition": "Condition",
     "edgeConditionLabel": "Condition: {{condition}}",
     "edgeInspector": "Edge",
     "edgeNoVerdict": "— success (no verdict) —",
@@ -6775,6 +6783,7 @@
     "foreachWorktree": "Per-step worktree",
     "gateBlocks": "Gate (blocks)",
     "gateMode": "Gate mode",
+    "interpreterOnly": "This workflow branches, so it runs on the graph interpreter — it can't compile to the linear step engine, but it will still run.",
     "joinAll": "All branches",
     "joinAny": "Any branch",
     "joinMode": "Join mode",
@@ -6795,14 +6804,7 @@
     "reviewPlan": "Plan review",
     "reviewType": "Review type",
     "splitNote": "Branches run concurrently from this node. Execute and merge seams are not allowed inside a branch.",
-    "stepExecuteLabel": "Step execute",
-    "summaryAwaitInput": "Waits for user input",
-    "summaryCodeDefault": "TypeScript",
-    "summaryGateAdvisory": "Advisory",
-    "summaryGateBlocks": "Gate (blocks)",
-    "summaryHoldRelease": "Release: {{release}}",
-    "summaryNotConfigured": "Not configured",
-    "summaryReviewType": "{{type}} review"
+    "stepExecuteLabel": "Step execute"
   },
   "workflows": {
     "duplicateToCustomize": "Duplicate to customize",
@@ -6833,11 +6835,5 @@
     "installRequestTitle": "Worktrunk install request",
     "sha256": "SHA-256",
     "version": "Version"
-  },
-  "taskFields": {
-    "unset": "—",
-    "moreFields": "Additional fields",
-    "orphaned": "Orphaned fields",
-    "saveFailed": "Failed to save field"
   }
 }

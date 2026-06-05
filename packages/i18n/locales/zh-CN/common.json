@@ -1,9 +1,4 @@
 {
-  "actions": {
-    "cancel": "取消",
-    "close": "关闭",
-    "save": "保存"
-  },
   "agents": {
     "ratings": {
       "trendDeclining": "",
@@ -34,7 +29,6 @@
       "minutesAgo_other": ""
     }
   },
-  "archive": "归档",
   "board": {
     "rejection": {
       "capacityExhausted": "",
@@ -44,7 +38,6 @@
       "workflowMismatch": ""
     }
   },
-  "cancel": "取消",
   "chat": {
     "failedToGetResponse": "",
     "failureReferenceId": "",
@@ -54,25 +47,15 @@
     "openMailboxMessage": "",
     "toolCallArgsPrefix": "",
     "toolCallResultPrefix": "",
+    "toolCallsCount_one": "",
+    "toolCallsCount_other": "",
+    "toolCallsHeader": "",
     "toolCallStatusCompleted": "",
     "toolCallStatusError": "",
     "toolCallStatusErrors": "",
     "toolCallStatusRunning": "",
-    "toolCallsCount_one": "",
-    "toolCallsCount_other": "",
-    "toolCallsHeader": "",
     "viewFailureDetails": ""
   },
-  "close": "关闭",
-  "columns": {
-    "archived": "已归档",
-    "done": "已完成",
-    "in-progress": "进行中",
-    "in-review": "审核中",
-    "todo": "待办",
-    "triage": "规划"
-  },
-  "delete": "删除",
   "health": {
     "anomaly": {
       "duplicateActiveId": "",
@@ -110,13 +93,6 @@
       "modelSetToDefault": ""
     }
   },
-  "nodeStatus": {
-    "connecting": "",
-    "error": "",
-    "offline": "",
-    "online": "",
-    "unknown": ""
-  },
   "nodes": {
     "auth": {
       "differ": "",
@@ -137,7 +113,13 @@
       "stopped": ""
     }
   },
-  "refresh": "刷新",
+  "nodeStatus": {
+    "connecting": "",
+    "error": "",
+    "offline": "",
+    "online": "",
+    "unknown": ""
+  },
   "research": {
     "providerGitHub": "",
     "providerLlmSynthesis": "",
@@ -145,7 +127,6 @@
     "providerPageFetch": "",
     "providerWebSearch": ""
   },
-  "retry": "重试",
   "routing": {
     "policyLabel": {
       "block": "",
@@ -205,7 +186,6 @@
       "zai": ""
     }
   },
-  "skip": "跳过",
   "taskForm": {
     "nodeStatusConnecting": "",
     "nodeStatusError": "",
@@ -220,7 +200,6 @@
     "refreshSourceInitialLoad": "",
     "refreshSourceManual": ""
   },
-  "tryAgain": "重试",
   "workflow": {
     "postMerge": "",
     "preMerge": "",
@@ -230,5 +209,14 @@
     "statusRunning": "",
     "statusSkipped": "",
     "waitingForOutput": ""
+  },
+  "workflowNodes": {
+    "summaryAwaitInput": "",
+    "summaryCodeDefault": "",
+    "summaryGateAdvisory": "",
+    "summaryGateBlocks": "",
+    "summaryHoldRelease": "",
+    "summaryNotConfigured": "",
+    "summaryReviewType": ""
   }
 }
