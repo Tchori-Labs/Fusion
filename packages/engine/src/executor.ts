@@ -1144,9 +1144,26 @@ export class TaskExecutor {
     lastTaskModelProvider?: string | null;
     lastTaskModelId?: string | null;
     lastAssignedAgentId?: string | null;
+    // Column-agent restart-invalidation (plan U5, R7/KTD-4). The effective
+    // column-agent id governing this session's seam (undefined when no binding
+    // governs — the legacy path). Tracked so the watcher can detect a workflow-
+    // definition edit or agent runtimeConfig change that re-keys the column-
+    // effective agent/model mid-flight and trigger the same restart path a
+    // task.modelProvider change does today.
+    lastEffectiveColumnAgentId?: string | null;
   }>();
   /** Active step-session executors per task (mutually exclusive with activeSessions). */
   private activeStepExecutors = new Map<string, StepSessionExecutor>();
+  /** Column-agent principal alignment (plan U5, R6): the EFFECTIVE column-agent id
+   *  currently running each executing task's coding/step session, when an
+   *  override/defer binding governs the in-flight seam. Keyed by task id, populated
+   *  by the execute / step-execute seam right after `resolveSeamColumnAgent` yields a
+   *  column agent, and cleared alongside the session (deleteActiveSession /
+   *  deleteActiveStepExecutor). Powers `isAgentEffectivelyExecuting`, the
+   *  reverse-direction heartbeat-scheduler guard that must know an agent is running a
+   *  task it is not `assignedAgentId` on. Empty for the legacy/no-binding path, so
+   *  that path is byte-identical. */
+  private effectiveColumnAgentByTask = new Map<string, string>();
   /** Active pre-merge workflow step sessions per task. */
   private activeWorkflowStepSessions = new Map<string, AgentSession>();
   /** Active configured-command abort controllers keyed by task. */
@@ -1194,6 +1211,7 @@ export class TaskExecutor {
     lastTaskModelProvider?: string | null;
     lastTaskModelId?: string | null;
     lastAssignedAgentId?: string | null;
+    lastEffectiveColumnAgentId?: string | null;
   }, worktreePath: string): void {
     this.activeSessions.set(taskId, sessionState);
     activeSessionRegistry.registerPath(worktreePath, { taskId, kind: "executor", ownerKey: taskId });
@@ -1201,6 +1219,8 @@ export class TaskExecutor {
 
   private deleteActiveSession(taskId: string, worktreePath?: string): void {
     this.activeSessions.delete(taskId);
+    // U5: drop the effective column-agent principal for this task's session.
+    this.effectiveColumnAgentByTask.delete(taskId);
     const resolvedWorktreePath = worktreePath ?? this.activeWorktrees.get(taskId);
     if (resolvedWorktreePath) {
       activeSessionRegistry.unregisterPath(resolvedWorktreePath);
@@ -1214,6 +1234,8 @@ export class TaskExecutor {
 
   private deleteActiveStepExecutor(taskId: string, worktreePath?: string): void {
     this.activeStepExecutors.delete(taskId);
+    // U5: drop the effective column-agent principal for this task's step session.
+    this.effectiveColumnAgentByTask.delete(taskId);
     const resolvedWorktreePath = worktreePath ?? this.activeWorktrees.get(taskId);
     if (resolvedWorktreePath) {
       activeSessionRegistry.unregisterPath(resolvedWorktreePath);
@@ -2055,6 +2077,96 @@ export class TaskExecutor {
               });
           }
           return;
+        }
+
+        // Column-agent restart-invalidation (plan U5, R7/KTD-4). A workflow-
+        // definition edit (re-pointing a column's agent) or an agent runtimeConfig
+        // change mutates NOTHING the task-field diff below observes — the watcher
+        // would never see it. KTD-4's primary mechanism is event-driven invalidation,
+        // but no `workflow:updated`/`agent:updated` store event exists on TaskStore
+        // today (only task:/settings: events). Per the unit's documented fallback, we
+        // re-resolve the column-effective agent/model on each `task:updated` tick for
+        // GRAPH-MODE active entries ONLY (those whose session adopted a column agent —
+        // `lastEffectiveColumnAgentId != null`). This is bounded by the active session
+        // count, and only graph runs with a real column binding pay any cost. The
+        // weaker guarantee (vs an arbitrary-time diff) is that a stale session
+        // restarts on the next tick, not instantly — acceptable per the Risks note.
+        //
+        // agent-DELETED → fall back per R8 (no restart; the running session finishes
+        // on its current model). agent-CHANGED (different effective agent OR same
+        // agent with a new runtimeConfig model) → hot-swap, same path as a
+        // task.modelProvider change.
+        if (
+          this.activeSessions.has(task.id)
+          && !task.paused
+          && (this.activeSessions.get(task.id)!.lastEffectiveColumnAgentId ?? null) !== null
+          && this.graphSeamGoverningNodeId.has(task.id)
+          && this.graphColumnAgentResolver.has(task.id)
+        ) {
+          const activeEntry = this.activeSessions.get(task.id)!;
+          const governingNodeId = this.graphSeamGoverningNodeId.get(task.id)!;
+          const resolveBinding = this.graphColumnAgentResolver.get(task.id)!;
+          const binding = resolveBinding(governingNodeId);
+          if (binding) {
+            const ownModelComplete = Boolean(task.modelProvider && task.modelId);
+            const effective = resolveEffectiveAgent({
+              binding,
+              ownAgentId: (task.assignedAgentId ?? "").trim() || undefined,
+              ownModelProvider: ownModelComplete ? task.modelProvider : undefined,
+              ownModelId: ownModelComplete ? task.modelId : undefined,
+            });
+            if (effective.source === "column-agent") {
+              // Fetch the (possibly changed) effective column agent, best-effort.
+              const newAgent = await this.options.agentStore?.getAgent(effective.agentId).catch(() => null) ?? null;
+              if (!newAgent) {
+                // agent-DELETED (R8): fall back, NO restart. The running session
+                // keeps its current model; the NEXT resolution falls back. Update the
+                // tracked id so we stop probing for the missing agent every tick.
+                if (activeEntry.lastEffectiveColumnAgentId !== null) {
+                  executorLog.log(`${task.id}: column agent '${effective.agentId}' deleted mid-session — falling back, no restart (R8)`);
+                  await this.store.logEntry(
+                    task.id,
+                    `Column agent '${effective.agentId}' deleted mid-session — falling back to current model, no restart (R8)`,
+                    undefined,
+                    this.getRunContextFor(task.id),
+                  );
+                  activeEntry.lastEffectiveColumnAgentId = null;
+                }
+              } else {
+                const settings = await this.store.getSettings();
+                const { provider: newProvider, modelId: newModelId } = resolveExecutorSessionModel(
+                  task.modelProvider,
+                  task.modelId,
+                  settings,
+                  (newAgent.runtimeConfig ?? undefined) as Record<string, unknown> | undefined,
+                );
+                const agentChanged = (activeEntry.lastEffectiveColumnAgentId ?? null) !== newAgent.id;
+                const providerChanged = newProvider !== activeEntry.lastResolvedModelProvider;
+                const modelIdChanged = newModelId !== activeEntry.lastResolvedModelId;
+                if (agentChanged || providerChanged || modelIdChanged) {
+                  activeEntry.lastEffectiveColumnAgentId = newAgent.id;
+                  activeEntry.lastResolvedModelProvider = newProvider;
+                  activeEntry.lastResolvedModelId = newModelId;
+                  if (newProvider && newModelId) {
+                    try {
+                      const model = this.modelRegistry.find(newProvider, newModelId);
+                      if (model) {
+                        await activeEntry.session.setModel(model);
+                        executorLog.log(`${task.id}: column-agent hot-swap → agent '${newAgent.id}' model ${newProvider}/${newModelId}`);
+                        await this.store.logEntry(task.id, `Column agent changed — model now ${newProvider}/${newModelId} (agent ${newAgent.id})`, undefined, this.getRunContextFor(task.id));
+                      } else {
+                        executorLog.log(`${task.id}: column-agent model ${newProvider}/${newModelId} not found in registry for hot-swap`);
+                      }
+                    } catch (err: unknown) {
+                      const errorMessage = err instanceof Error ? err.message : String(err);
+                      executorLog.error(`${task.id}: failed to column-agent hot-swap: ${errorMessage}`);
+                      await this.store.logEntry(task.id, `Column-agent change failed: ${errorMessage}`, undefined, this.getRunContextFor(task.id));
+                    }
+                  }
+                }
+              }
+            }
+          }
         }
 
         // Handle executor model hot-swap on active single-session executions
@@ -3050,30 +3162,100 @@ export class TaskExecutor {
   }
 
   /**
-   * Re-dispatch execute() for any unstarted in-progress task belonging to the
-   * given agent. Called after a heartbeat run completes to unblock tasks that
-   * were deferred by the allowParallelExecution=false gate.
+   * Re-dispatch execute() for any unstarted in-progress task whose EFFECTIVE
+   * principal is the given agent. Called after a heartbeat run completes to unblock
+   * tasks that were deferred by the allowParallelExecution=false gate.
+   *
+   * TWO-PASS (plan U5, R6) — the `assignedAgentId`-only filter alone misses tasks an
+   * override/defer column binding re-keys to the column agent:
+   *   1. Tasks directly `assignedAgentId === agentId` (legacy, byte-identical).
+   *   2. Tasks whose effective column agent resolves to `agentId` for their
+   *      governing execute / step-execute seam — resolved per candidate via the core
+   *      column-agent resolver against the task's workflow IR. Bounded: only
+   *      not-already-executing in-progress tasks are probed, and the IR resolution is
+   *      best-effort (failure → skip, never strands resume).
+   * A task re-dispatched by pass 1 is not re-dispatched by pass 2 (dedupe set).
    */
   async resumeTaskForAgent(agentId: string): Promise<void> {
     const settings = await this.store.getSettings();
     if (settings.globalPause || settings.enginePaused) return;
     const tasks = await this.store.listTasks({ slim: true, column: "in-progress" });
+    const dispatched = new Set<string>();
+    const isDispatchable = (task: Task): boolean =>
+      !task.deletedAt
+      && !task.paused
+      && !this.executing.has(task.id)
+      && !this.activeSessions.has(task.id)
+      && !this.activeStepExecutors.has(task.id)
+      && !this.activeWorkflowStepSessions.has(task.id);
+    const dispatch = (task: Task, reason: string): void => {
+      if (dispatched.has(task.id)) return;
+      dispatched.add(task.id);
+      executorLog.log(`${task.id}: re-dispatching execute() after heartbeat completion for agent ${agentId} (${reason})`);
+      this.execute(task).catch((err) =>
+        executorLog.error(`Failed to resume ${task.id} after heartbeat completion:`, err),
+      );
+    };
+
+    // Pass 1: directly-assigned tasks (legacy behavior, byte-identical).
     for (const task of tasks) {
-      if (
-        task.assignedAgentId === agentId
-        && !task.deletedAt
-        && !task.paused
-        && !this.executing.has(task.id)
-        && !this.activeSessions.has(task.id)
-        && !this.activeStepExecutors.has(task.id)
-        && !this.activeWorkflowStepSessions.has(task.id)
-      ) {
-        executorLog.log(`${task.id}: re-dispatching execute() after heartbeat completion for agent ${agentId}`);
-        this.execute(task).catch((err) =>
-          executorLog.error(`Failed to resume ${task.id} after heartbeat completion:`, err),
-        );
+      if (task.assignedAgentId === agentId && isDispatchable(task)) {
+        dispatch(task, "assigned");
       }
     }
+
+    // Pass 2: tasks whose EFFECTIVE column agent resolves to `agentId`. Only
+    // experimental graph-executor tasks can carry a column binding; the IR resolve
+    // is best-effort and skipped for tasks already dispatched/executing.
+    if (!isExperimentalFeatureEnabled(settings, "workflowGraphExecutor")) return;
+    for (const task of tasks) {
+      if (dispatched.has(task.id) || !isDispatchable(task)) continue;
+      // Skip tasks the assigned-agent filter already covers — a redundant column
+      // binding to the same agent would only re-confirm pass 1.
+      if (task.assignedAgentId === agentId) continue;
+      let matches = false;
+      try {
+        matches = await this.taskEffectiveAgentMatches(task, agentId);
+      } catch {
+        matches = false;
+      }
+      if (matches) dispatch(task, "effective-column-agent");
+    }
+  }
+
+  /** Column-agent principal alignment (plan U5, R6). True when the EFFECTIVE agent
+   *  governing `task`'s execute or step-execute seam — resolved through the shared
+   *  core resolver against the task's workflow IR — is `agentId`. Used by the
+   *  `resumeTaskForAgent` second pass to re-dispatch column-bound tasks the
+   *  `assignedAgentId` filter misses. Best-effort: an unresolvable IR yields false. */
+  private async taskEffectiveAgentMatches(task: Task, agentId: string): Promise<boolean> {
+    const ir = await resolveWorkflowIrForTask(this.store, task.id);
+    if (!ir || ir.version !== "v2") return false;
+
+    const ownAgentId = typeof task.assignedAgentId === "string" && task.assignedAgentId.trim()
+      ? task.assignedAgentId.trim()
+      : undefined;
+    const ownModelComplete = Boolean(task.modelProvider && task.modelId);
+
+    // Governing seam nodes: the execute-seam prompt node and any step-execute seam
+    // prompt nodes (the latter resolve their column via template inheritance, which
+    // resolveColumnAgentBinding handles by node id).
+    for (const node of ir.nodes) {
+      const seam = node.kind === "prompt" ? node.config?.seam : undefined;
+      if (seam !== "execute" && seam !== "step-execute") continue;
+      const binding = resolveColumnAgentBinding(ir, node.id);
+      if (!binding) continue;
+      const effective = resolveEffectiveAgent({
+        binding,
+        ownAgentId,
+        ownModelProvider: ownModelComplete ? task.modelProvider : undefined,
+        ownModelId: ownModelComplete ? task.modelId : undefined,
+      });
+      if (effective.source === "column-agent" && effective.agentId === agentId) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /**
@@ -4690,6 +4872,63 @@ export class TaskExecutor {
     return { agent, mode: binding.mode };
   }
 
+  /**
+   * Column-agent principal alignment (plan U5, R6). Resolve the EFFECTIVE
+   * principal id for the in-flight seam WITHOUT fetching the full Agent or
+   * emitting an adoption log — a light counterpart to {@link resolveSeamColumnAgent}
+   * used by the heartbeat-deferral gate (which only needs the id to call
+   * {@link shouldDeferForHeartbeat}, which itself loads the agent).
+   *
+   * Returns the column-agent id when a governing binding selects it via the shared
+   * core resolver (`resolveEffectiveAgent`, KTD-2/KTD-5), else `task.assignedAgentId`
+   * (the legacy principal). Returns `undefined` only when there is no principal at
+   * all (no binding AND no assigned agent) — keeping the no-binding path
+   * byte-identical to the prior `assignedAgentId` deferral behavior.
+   */
+  private resolveEffectivePrincipalId(
+    task: Task,
+    detail: Task,
+  ): string | undefined {
+    const assignedAgentId = typeof detail.assignedAgentId === "string" && detail.assignedAgentId.trim()
+      ? detail.assignedAgentId.trim()
+      : undefined;
+
+    const governingNodeId = this.graphSeamGoverningNodeId.get(task.id);
+    const resolveBinding = this.graphColumnAgentResolver.get(task.id);
+    if (!governingNodeId || !resolveBinding) return assignedAgentId;
+
+    const binding = resolveBinding(governingNodeId);
+    if (!binding) return assignedAgentId;
+
+    const ownModelComplete = Boolean(detail.modelProvider && detail.modelId);
+    const effective = resolveEffectiveAgent({
+      binding,
+      ownAgentId: assignedAgentId,
+      ownModelProvider: ownModelComplete ? detail.modelProvider : undefined,
+      ownModelId: ownModelComplete ? detail.modelId : undefined,
+    });
+    if (effective.source === "column-agent") return effective.agentId;
+    return assignedAgentId;
+  }
+
+  /**
+   * Column-agent principal alignment (plan U5, R6). True when `agentId` is the
+   * EFFECTIVE column-agent principal currently running some executing task's
+   * coding/step session — i.e. an override/defer-bound column staffs it, even
+   * though the agent is not the task's `assignedAgentId`. Injected into the
+   * heartbeat scheduler's reverse-direction parallel-execution guards
+   * (`agent-heartbeat.ts`) so an `allowParallelExecution=false` column agent does
+   * not heartbeat concurrently with its own override session. Returns false for the
+   * legacy/no-binding path (the map is empty), preserving prior behavior exactly.
+   */
+  isAgentEffectivelyExecuting(agentId: string): boolean {
+    if (!agentId) return false;
+    for (const effectiveId of this.effectiveColumnAgentByTask.values()) {
+      if (effectiveId === agentId) return true;
+    }
+    return false;
+  }
+
   /** Run a custom (non-seam) graph node on the proven WorkflowStep machinery.
    *
    *  `columnBinding` (plan U3) is the agent binding governing this node's
@@ -4970,9 +5209,17 @@ export class TaskExecutor {
       return;
     }
 
-    const assignedAgentId = task.assignedAgentId;
-    if (assignedAgentId && await this.shouldDeferForHeartbeat(assignedAgentId)) {
-      executorLog.log(`${task.id}: skipping execute — agent ${assignedAgentId} has active heartbeat run (allowParallelExecution=false)`);
+    // Column-agent principal alignment (plan U5, R6): the heartbeat-deferral gate
+    // must consult the EFFECTIVE principal, not blindly `assignedAgentId`. For a
+    // graph-routed seam the binding context (governing node id + per-run resolver)
+    // is already set by the time the seam re-enters execute() — so the effective
+    // column agent (when an override/defer binding governs) is the principal whose
+    // `allowParallelExecution=false` must serialize. For the legacy/no-binding path
+    // `resolveEffectivePrincipalId` returns `assignedAgentId`, so the gate is
+    // byte-identical to before.
+    const deferralPrincipalId = this.resolveEffectivePrincipalId(task, task);
+    if (deferralPrincipalId && await this.shouldDeferForHeartbeat(deferralPrincipalId)) {
+      executorLog.log(`${task.id}: skipping execute — agent ${deferralPrincipalId} has active heartbeat run (allowParallelExecution=false)`);
       // Release the slot we just claimed — we never actually ran.
       this.executing.delete(task.id);
       executingTaskLock.release(task.id);
@@ -5414,11 +5661,18 @@ export class TaskExecutor {
         // step-execute node's declared column binds an agent that supersedes the
         // task's assigned agent, the per-step session's MODEL, runtime hint, and
         // attribution adopt the column agent. The core resolver decides defer vs
-        // override (KTD-2); a missing agent logs + falls back (R8). Gating contexts
-        // still key off the ASSIGNED agent here — principal substitution for
-        // gating/heartbeat is U5 (kept out of this unit deliberately).
+        // override (KTD-2); a missing agent logs + falls back (R8). Principal
+        // alignment (U5, R5/R6): the gating contexts below ALSO key off the
+        // effective `stepIdentityAgent`, and the effective principal is tracked for
+        // the reverse-direction heartbeat guard.
         const stepColumnAgent = await this.resolveSeamColumnAgent(task, detail);
         const stepIdentityAgent = stepColumnAgent?.agent ?? stepSessionAgent;
+        // U5 (R6): track the effective column-agent principal so the heartbeat
+        // scheduler's reverse guard knows this agent is executing a task it may not
+        // be assigned to. Cleared in deleteActiveStepExecutor.
+        if (stepColumnAgent?.agent) {
+          this.effectiveColumnAgentByTask.set(task.id, stepColumnAgent.agent.id);
+        }
         const stepSessionRuntimeHint = extractRuntimeHint(stepIdentityAgent?.runtimeConfig);
 
         let accumulatedStepTokenUsage = detail.tokenUsage;
@@ -5438,8 +5692,8 @@ export class TaskExecutor {
           // Attribute the per-step run auditor to the column agent when it governs
           // (U4); absent → StepSessionExecutor falls back to assignedAgentId.
           effectiveAgentId: stepColumnAgent?.agent.id,
-          actionGateContext: this.buildActionGateContext(task.id, stepSessionAgent, settings.defaultAgentPermissionPolicy),
-          permanentAgentGating: this.buildPermanentAgentGatingContext(task.id, stepSessionAgent, settings.defaultAgentPermissionPolicy),
+          actionGateContext: this.buildActionGateContext(task.id, stepIdentityAgent, settings.defaultAgentPermissionPolicy),
+          permanentAgentGating: this.buildPermanentAgentGatingContext(task.id, stepIdentityAgent, settings.defaultAgentPermissionPolicy),
           // Pass skill selection context from the main executor session
           skillSelection: skillContext.skillSelectionContext,
           // Pass agentStore and messageStore for delegation and messaging tools
@@ -5929,6 +6183,12 @@ export class TaskExecutor {
       const columnAgentSeam = await this.resolveSeamColumnAgent(task, detail);
       const identityAgent = columnAgentSeam?.agent ?? assignedAgent;
       const executorRuntimeHint = extractRuntimeHint(identityAgent?.runtimeConfig);
+      // U5 (R6): track the effective column-agent principal so the heartbeat
+      // scheduler's reverse guard knows this agent is executing a task it may not
+      // be assigned to. Cleared in deleteActiveSession.
+      if (columnAgentSeam?.agent) {
+        this.effectiveColumnAgentByTask.set(task.id, columnAgentSeam.agent.id);
+      }
 
       // Log fast mode status
       if (executionMode === "fast") {
@@ -6140,8 +6400,14 @@ export class TaskExecutor {
             taskEnv,
             // Skill selection: use assigned agent skills if available, otherwise role fallback
             ...(skillContext.skillSelectionContext ? { skillSelection: skillContext.skillSelectionContext } : {}),
-            actionGateContext: this.buildActionGateContext(task.id, assignedAgent, settings.defaultAgentPermissionPolicy),
-            permanentAgentGating: this.buildPermanentAgentGatingContext(task.id, assignedAgent, settings.defaultAgentPermissionPolicy),
+            // Column-agent principal alignment (plan U5, R5): action gating is
+            // computed for the agent ACTUALLY RUNNING. When the governing execute
+            // seam's column binds an agent that supersedes the assigned agent,
+            // `identityAgent` is that column agent; otherwise it is `assignedAgent`
+            // (byte-identical to before). The builders already accept an `Agent`
+            // object, so this is a call-site object swap, not gating-internals surgery.
+            actionGateContext: this.buildActionGateContext(task.id, identityAgent, settings.defaultAgentPermissionPolicy),
+            permanentAgentGating: this.buildPermanentAgentGatingContext(task.id, identityAgent, settings.defaultAgentPermissionPolicy),
             taskId: task.id,
             taskTitle: detail.title,
             onFallbackModelUsed: createFallbackModelObserver({
@@ -6195,6 +6461,10 @@ export class TaskExecutor {
           lastTaskModelProvider: detail.modelProvider,
           lastTaskModelId: detail.modelId,
           lastAssignedAgentId: detail.assignedAgentId ?? null,
+          // U5 (R7): the effective column-agent governing this session (null when no
+          // binding governs — legacy path). The watcher re-resolves this for graph-
+          // mode entries to detect a mid-flight workflow-edit / agent-config change.
+          lastEffectiveColumnAgentId: columnAgentSeam?.agent.id ?? null,
         }, worktreePath);
 
         let leaseRenewalTimer: ReturnType<typeof setInterval> | undefined;
@@ -6570,8 +6840,10 @@ export class TaskExecutor {
                   taskEnv,
                   // Skill selection: use assigned agent skills if available, otherwise role fallback
                   ...(skillContext.skillSelectionContext ? { skillSelection: skillContext.skillSelectionContext } : {}),
-                  actionGateContext: this.buildActionGateContext(task.id, assignedAgent, settings.defaultAgentPermissionPolicy),
-                  permanentAgentGating: this.buildPermanentAgentGatingContext(task.id, assignedAgent, settings.defaultAgentPermissionPolicy),
+                  // U5 (R5): retry session re-keys gating to the effective principal,
+                  // mirroring the primary execute-seam session above.
+                  actionGateContext: this.buildActionGateContext(task.id, identityAgent, settings.defaultAgentPermissionPolicy),
+                  permanentAgentGating: this.buildPermanentAgentGatingContext(task.id, identityAgent, settings.defaultAgentPermissionPolicy),
                 });
                 retrySession = createdRetrySession.session;
                 if (createdRetrySession.sessionFile) {
@@ -6591,6 +6863,8 @@ export class TaskExecutor {
                   lastTaskModelProvider: detail.modelProvider,
                   lastTaskModelId: detail.modelId,
                   lastAssignedAgentId: detail.assignedAgentId ?? null,
+                  // U5 (R7): preserve the effective column-agent across the retry.
+                  lastEffectiveColumnAgentId: columnAgentSeam?.agent.id ?? null,
                 }, worktreePath);
                 stuckDetector?.trackTask(task.id, retrySession);
 

@@ -1974,6 +1974,11 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
           });
         },
         store,
+        // Dev-mode scheduler: no TaskExecutor runs here (engine not started), so
+        // neither `isTaskExecuting` nor the U5 reverse-direction
+        // `isAgentEffectivelyExecuting` guard has a source — both stay unwired (the
+        // guards simply never fire), matching the prior `isTaskExecuting` omission.
+        // The real wiring is the InProcessRuntime construction site.
       );
       triggerScheduler.start();
 
