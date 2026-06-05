@@ -66,3 +66,14 @@ export {
 } from "./badge-pubsub.js";
 
 export * from "./plugins/index.js";
+
+// CLI-session terminal-output hardening — re-exported so the TUI passthrough
+// (packages/cli, U14) applies the IDENTICAL neutralization set as the dashboard
+// WS bridge (U10). The host TTY honors more escape sequences than xterm.js, so
+// the TUI MUST reuse this single implementation rather than fork it.
+export {
+  neutralizeTerminalOutput,
+  flushTerminalOutput,
+  MAX_CARRY_LENGTH,
+  type NeutralizeResult,
+} from "./cli-session-output-filter.js";
