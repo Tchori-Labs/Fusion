@@ -60,6 +60,7 @@ export type {
   WorkflowIrNodeKind,
   WorkflowIrColumn,
   WorkflowIrColumnTrait,
+  WorkflowColumnAgent,
   WorkflowHoldRelease,
   WorkflowJoinMode,
   WorkflowJoinBranchFailure,
@@ -71,6 +72,17 @@ export type {
   WorkflowFieldOption,
   WorkflowFieldRender,
 } from "./workflow-ir-types.js";
+export {
+  instanceNodeId,
+  parseInstanceNodeId,
+  resolveColumnAgentBinding,
+  resolveEffectiveAgent,
+} from "./column-agent-resolver.js";
+export type {
+  ParsedInstanceNodeId,
+  EffectiveAgentInput,
+  EffectiveAgentResult,
+} from "./column-agent-resolver.js";
 export { BUILTIN_CODING_WORKFLOW_IR } from "./builtin-coding-workflow-ir.js";
 export { BUILTIN_STEPWISE_CODING_WORKFLOW_IR } from "./builtin-stepwise-coding-workflow-ir.js";
 
@@ -292,8 +304,13 @@ export {
   normalizeAgentPermissionPolicy,
   resolveEffectiveAgentPermissionPolicy,
   isAgentPermissionPolicyPresetId,
+  isPolicyBroaderThanDefault,
 } from "./agent-permission-policy.js";
 export type { BuiltInAgentPermissionPolicyPreset } from "./agent-permission-policy.js";
+export {
+  validateColumnAgentBindings,
+  ColumnAgentBindingError,
+} from "./column-agent-binding-validation.js";
 export { AgentStore, DEFAULT_AGENT_HEARTBEAT_INTERVAL_MS } from "./agent-store.js";
 export type { AgentStoreEvents } from "./agent-store.js";
 export {
