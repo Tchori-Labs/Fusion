@@ -923,6 +923,9 @@ export function stripApprovalBypassFlags(ir: WorkflowIr): { ir: WorkflowIr; stri
   if (!Array.isArray(nodes)) return { ir, stripped: false };
   let stripped = false;
   const stripNode = (node: WorkflowIrNode): void => {
+    // Untrusted input may contain non-object entries (null, strings, numbers)
+    // in `nodes` / `template.nodes`; skip them rather than dereferencing.
+    if (!node || typeof node !== "object") return;
     const cfg = node.config as Record<string, unknown> | undefined;
     if (cfg && typeof cfg === "object") {
       if ("cliSkipApproval" in cfg) {

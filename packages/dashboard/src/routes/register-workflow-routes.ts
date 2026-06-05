@@ -52,6 +52,13 @@ const designRateLimits = new Map<string, DesignRateLimitEntry>();
  *  when the 10/hour window is exhausted. Same shape as ai-refine.checkRateLimit. */
 function checkDesignRateLimit(ip: string): boolean {
   const now = Date.now();
+  // Prune expired-window entries so the map can't grow unbounded across many
+  // distinct IPs (each request triggers a cheap sweep of stale entries).
+  for (const [key, value] of designRateLimits) {
+    if (now - value.firstRequestAt > DESIGN_RATE_LIMIT_WINDOW_MS) {
+      designRateLimits.delete(key);
+    }
+  }
   const entry = designRateLimits.get(ip);
   if (!entry || now - entry.firstRequestAt > DESIGN_RATE_LIMIT_WINDOW_MS) {
     designRateLimits.set(ip, { count: 1, firstRequestAt: now });
@@ -688,8 +695,11 @@ export function registerWorkflowRoutes(ctx: ApiRoutesContext): void {
       const userPrompt = baseIrJson
         ? `Modify the following base workflow per the request below. Output the full updated WorkflowIr.\n\nBASE WORKFLOW IR:\n${baseIrJson}\n\nREQUEST:\n${prompt}`
         : `Design a workflow for the following request:\n\n${prompt}`;
-      await designSession.prompt(userPrompt);
-      designSession.dispose();
+      try {
+        await designSession.prompt(userPrompt);
+      } finally {
+        designSession.dispose();
+      }
 
       // Extract JSON (handles fences/prose) → JSON.parse → parseWorkflowIr.
       const candidate = extractJsonFromText(output);

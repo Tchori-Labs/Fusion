@@ -584,10 +584,35 @@ describe("edge-condition authoring (U2)", () => {
       error: "missing-endpoint",
     });
 
-    // duplicate of the same condition.
-    expect(buildConnectionEdge({ source: "a", target: "b" }, edges, nodes)).toEqual({
+    // second connect of an existing success pair (prompt source supports
+    // conditions) → births the parallel failure edge rather than rejecting.
+    const failureBirth = buildConnectionEdge({ source: "a", target: "b" }, edges, nodes);
+    expect("edge" in failureBirth).toBe(true);
+    if ("edge" in failureBirth) {
+      expect(failureBirth.edge.data?.condition).toBe("failure");
+    }
+
+    // once BOTH success and failure exist, a third connect is a duplicate.
+    const bothConditions = [
+      ...edges,
+      { id: "3", source: "a", target: "b", data: { condition: "failure" } },
+    ];
+    expect(buildConnectionEdge({ source: "a", target: "b" }, bothConditions, nodes)).toEqual({
       error: "duplicate",
     });
+
+    // a source kind that does NOT support conditions stays a hard duplicate.
+    const readonlyNodes: FlowNode<WorkflowFlowNodeData>[] = [
+      { id: "a", type: "start", position: { x: 0, y: 0 }, data: { kind: "start", label: "a" } },
+      { id: "b", type: "prompt", position: { x: 100, y: 0 }, data: { kind: "prompt", label: "b" } },
+    ];
+    expect(
+      buildConnectionEdge(
+        { source: "a", target: "b" },
+        [{ id: "1", source: "a", target: "b", data: { condition: "success" } }],
+        readonlyNodes,
+      ),
+    ).toEqual({ error: "duplicate" });
 
     // cycle: c→a closes a→b→c→a.
     expect(buildConnectionEdge({ source: "c", target: "a" }, edges, nodes)).toEqual({
@@ -867,6 +892,59 @@ describe("insertFragment", () => {
     const allIds = second.nodes.map((n) => n.id);
     expect(new Set(allIds).size).toBe(allIds.length);
   });
+
+  it("expands a foreach fragment's template so flowToIr round-trips the full template", () => {
+    // Fragment: start → loop(foreach with a 2-node template) → end.
+    const foreachFragment: WorkflowDefinition["ir"] = {
+      version: "v1",
+      name: "frag",
+      nodes: [
+        { id: "start", kind: "start" },
+        {
+          id: "loop",
+          kind: "foreach",
+          config: {
+            source: "task-steps",
+            template: {
+              nodes: [
+                { id: "t1", kind: "prompt", config: { prompt: "inner1" } },
+                { id: "t2", kind: "prompt", config: { prompt: "inner2" } },
+              ],
+              edges: [{ from: "t1", to: "t2", condition: "success" }],
+            },
+          },
+        },
+        { id: "end", kind: "end" },
+      ],
+      edges: [
+        { from: "start", to: "loop", condition: "success" },
+        { from: "loop", to: "end", condition: "success" },
+      ],
+    };
+
+    const existing = irToFlow(u8ChainDef());
+    const { nodes, edges, insertedNodeIds } = insertFragment(
+      existing.nodes,
+      existing.edges,
+      foreachFragment,
+      { x: 400, y: 200 },
+    );
+
+    // The foreach group's template children were expanded as parented nodes.
+    const groupId = insertedNodeIds[0];
+    const children = nodes.filter((n) => n.parentId === groupId);
+    expect(children).toHaveLength(2);
+
+    // Round-trip the live canvas back to IR — the inserted foreach must carry its
+    // full template (not an empty one) with both inner nodes and the inner edge.
+    const { ir: out } = flowToIr("wf", nodes, edges);
+    const loop = out.nodes.find((n) => n.kind === "foreach")!;
+    expect(loop).toBeTruthy();
+    const template = (loop.config as { template?: { nodes: unknown[]; edges: unknown[] } })
+      .template;
+    expect(template?.nodes).toHaveLength(2);
+    expect(template?.edges).toHaveLength(1);
+  });
 });
 
 describe("fragmentSeamConflicts", () => {
@@ -998,5 +1076,38 @@ describe("copyIrWithFreshIds", () => {
       // Node columns carried through.
       expect(result.ir.nodes.every((n) => n.column === "in-progress")).toBe(true);
     }
+  });
+
+  it("remaps namespaced foreach child layout keys consistently with the template ids", () => {
+    const ir = v2WithForeach();
+    const layout = {
+      start: { x: 0, y: 0 },
+      loop: { x: 100, y: 0 },
+      "loop::t1": { x: 10, y: 20 },
+      "loop::t2": { x: 270, y: 20 },
+      end: { x: 400, y: 0 },
+    };
+    const result = copyIrWithFreshIds(ir, layout);
+
+    const loop = result.ir.nodes.find((n) => n.kind === "foreach")!;
+    const template = (loop.config as { template: { nodes: { id: string }[] } }).template;
+    const newGroupId = loop.id;
+    const childKeys = Object.keys(result.layout).filter((k) => k.includes("::"));
+
+    // Both namespaced child keys survive (count preserved).
+    expect(childKeys).toHaveLength(2);
+    // Each child key is `${newGroupId}::${newTemplateId}` for a real template id.
+    const newInnerIds = new Set(template.nodes.map((n) => n.id));
+    for (const k of childKeys) {
+      const [g, inner] = k.split("::");
+      expect(g).toBe(newGroupId);
+      expect(newInnerIds.has(inner)).toBe(true);
+      // No stale original ids leak through.
+      expect(g).not.toBe("loop");
+      expect(["t1", "t2"]).not.toContain(inner);
+    }
+    // Values preserved by position (t1's offset stays with the remapped t1 key).
+    const t1NewId = result.layout[`${newGroupId}::${template.nodes[0].id}`];
+    expect(t1NewId).toEqual({ x: 10, y: 20 });
   });
 });

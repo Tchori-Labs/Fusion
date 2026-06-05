@@ -6,7 +6,7 @@ import {
   WF_CARD_HEIGHT,
   COLUMN_BAND_HEIGHT,
   bandTop,
-  columnForY,
+  strictColumnForY,
   isColumnBandNode,
 } from "./workflow-flow-mapping";
 
@@ -174,8 +174,20 @@ export function autoLayout(
     const rowsPerColumn = new Map<string, number>();
     for (const id of sorted) {
       const node = byId.get(id)!;
-      const colId = node.data.column ?? columnForY(node.position.y, columns);
-      const colIndex = colId ? columns.findIndex((c) => c.id === colId) : -1;
+      // Resolve the node's column WITHOUT clamping: an explicit column id, or a
+      // strict band hit-test. A node with neither (parked outside every band and
+      // carrying no column) is "unplaced" and must stay that way — auto-layout
+      // never silently re-columns it into the nearest band. We give it the new
+      // layer x (so the tidy still flows it left-to-right) but preserve its y so
+      // strictColumnForY(newY) remains undefined.
+      const colId =
+        node.data.column ??
+        (strictColumnForY(node.position.y, columns) ? strictColumnForY(node.position.y, columns) : undefined);
+      if (!colId) {
+        positions.set(id, { x: layerX, y: node.position.y });
+        continue;
+      }
+      const colIndex = columns.findIndex((c) => c.id === colId);
       const safeColIndex = colIndex >= 0 ? colIndex : 0;
 
       const top = bandTop(safeColIndex);

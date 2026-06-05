@@ -4161,7 +4161,24 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       : undefined;
 
     let pendingWorkflowSelection: { workflowId: string; stepIds: string[] } | undefined;
-    if (input.enabledWorkflowSteps === undefined && options.applyDefaultWorkflowSteps !== false) {
+    // U6/R3/KTD-4: an explicit create-time workflowId beats the project default,
+    // mirroring createTask(). `null` is an explicit opt-out, `string` materializes
+    // that workflow, `undefined` falls through to the default-workflow behavior.
+    // Explicit enabledWorkflowSteps still wins over workflowId for trusted callers.
+    const explicitWorkflowId =
+      input.enabledWorkflowSteps === undefined ? input.workflowId : undefined;
+    if (explicitWorkflowId !== undefined) {
+      if (explicitWorkflowId === null) {
+        // Explicit "No workflow": skip default materialization entirely.
+        resolvedWorkflowSteps = undefined;
+      } else {
+        // Compile + materialize up front so unknown/fragment ids throw BEFORE
+        // the task row is created (no orphaned steps, no half-created task).
+        const selected = await this.materializeExplicitWorkflowSteps(explicitWorkflowId);
+        resolvedWorkflowSteps = selected.stepIds;
+        pendingWorkflowSelection = selected;
+      }
+    } else if (input.enabledWorkflowSteps === undefined && options.applyDefaultWorkflowSteps !== false) {
       // Mirror createTask: a configured project default workflow takes
       // precedence over legacy default-on steps on this creation path too.
       try {
@@ -13010,6 +13027,13 @@ ${stepsSection}`;
     if (workflowId) {
       const exists = await this.getWorkflowDefinition(workflowId);
       if (!exists) throw new Error(`Workflow '${workflowId}' not found`);
+      // KTD-1/R6: a fragment is a reusable palette piece, not a selectable
+      // workflow. Reject it at the write boundary so a fragment can never be
+      // persisted as the project default (the read-side skip in
+      // materializeDefaultWorkflowSteps remains as defense in depth).
+      if (exists.kind === "fragment") {
+        throw new Error(`Workflow '${workflowId}' is a fragment and cannot be set as the project default`);
+      }
     }
     // null is updateSettings' explicit-delete sentinel for project keys.
     await this.updateSettings({ defaultWorkflowId: workflowId } as unknown as Partial<Settings>);
@@ -13090,10 +13114,10 @@ ${stepsSection}`;
     combinedWorkflowId?: string;
   }> {
     // Resolve async prerequisites BEFORE the synchronous transaction: the
-    // workflow-columns flag (for flag-aware persistence) and the current project
-    // default (for the no-clobber guard).
+    // workflow-columns flag (for flag-aware persistence). The project default is
+    // re-read AFTER the transaction (compare-and-set) so a concurrently-set
+    // default is never clobbered.
     const flagOn = await this.workflowColumnsFlagOn();
-    const existingDefaultId = await this.getDefaultWorkflowId();
 
     const result = this.db.transactionImmediate(() => {
       // Write lock is now held. Read the raw step rows directly (the cached,
@@ -13118,13 +13142,16 @@ ${stepsSection}`;
 
       // Every unmigrated user step → a single-node fragment; stamp the source row.
       for (const step of unmigrated) {
+        // parseWorkflowIr runs inside both insertWorkflowDefinitionSync and
+        // layoutForIr, so compute the fragment IR once and reuse it.
+        const fragmentIr = stepToFragmentIr(step);
         const fragment = this.insertWorkflowDefinitionSync(
           {
             name: step.name,
             description: step.description,
             kind: "fragment",
-            ir: stepToFragmentIr(step),
-            layout: layoutForIr(stepToFragmentIr(step)),
+            ir: fragmentIr,
+            layout: layoutForIr(fragmentIr),
           },
           flagOn,
         );
@@ -13159,10 +13186,25 @@ ${stepsSection}`;
     // Set the combined workflow as the project default — only when one was
     // created AND no explicit default is already set (don't clobber a user
     // choice). Done outside the transaction via the async setter so the project
-    // default-workflow hooks run. Racing re-runs are harmless: the second run
-    // creates no combined workflow, so this branch is skipped.
-    if (result.combinedWorkflowId && !existingDefaultId) {
-      await this.setDefaultWorkflowId(result.combinedWorkflowId);
+    // default-workflow hooks run. Compare-and-set against the CURRENT default
+    // (re-read immediately before writing, not the pre-transaction snapshot) so
+    // a default set concurrently by another writer is never overwritten. If the
+    // set fails, swallow the error: a missing migrated default is recoverable
+    // (the user can set one), but throwing here would surface the whole
+    // migration as failed even though the definitions were written.
+    if (result.combinedWorkflowId) {
+      const currentDefaultId = await this.getDefaultWorkflowId();
+      if (!currentDefaultId) {
+        try {
+          await this.setDefaultWorkflowId(result.combinedWorkflowId);
+        } catch (err) {
+          storeLog.warn("Failed to set migrated combined workflow as project default", {
+            phase: "migrateLegacyWorkflowSteps:set-default",
+            combinedWorkflowId: result.combinedWorkflowId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
     }
 
     return result;

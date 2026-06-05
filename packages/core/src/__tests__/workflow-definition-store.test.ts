@@ -273,4 +273,39 @@ describe("TaskStore workflow definitions (U1)", () => {
     const task = await store.createTask({ description: "t" });
     await expect(store.selectTaskWorkflow(task.id, frag.id)).rejects.toThrow(/fragment/i);
   });
+
+  it("setDefaultWorkflowId rejects a fragment id at the write boundary", async () => {
+    const frag = await store.createWorkflowDefinition({ name: "Frag", ir: fragmentIr(), kind: "fragment" });
+    await expect(store.setDefaultWorkflowId(frag.id)).rejects.toThrow(/fragment/i);
+    expect(await store.getDefaultWorkflowId()).toBeUndefined();
+  });
+
+  it("setDefaultWorkflowId accepts a real workflow and clears with null", async () => {
+    const wf = await store.createWorkflowDefinition({ name: "W", ir: makeIr() });
+    await store.setDefaultWorkflowId(wf.id);
+    expect(await store.getDefaultWorkflowId()).toBe(wf.id);
+    await store.setDefaultWorkflowId(null);
+    expect(await store.getDefaultWorkflowId()).toBeUndefined();
+  });
+
+  it("createTaskWithReservedId honors an explicit workflowId (precedence over default)", async () => {
+    const def = await store.createWorkflowDefinition({ name: "Explicit", ir: makeIr() });
+    const task = await store.createTaskWithReservedId(
+      { description: "t", workflowId: def.id },
+      { taskId: "task-explicit-wf" },
+    );
+    const sel = store.getTaskWorkflowSelection(task.id);
+    expect(sel?.workflowId).toBe(def.id);
+  });
+
+  it("createTaskWithReservedId treats workflowId:null as explicit opt-out", async () => {
+    const def = await store.createWorkflowDefinition({ name: "Def", ir: makeIr() });
+    await store.setDefaultWorkflowId(def.id);
+    const task = await store.createTaskWithReservedId(
+      { description: "t", workflowId: null },
+      { taskId: "task-optout-wf" },
+    );
+    const sel = store.getTaskWorkflowSelection(task.id);
+    expect(sel?.workflowId ?? undefined).toBeUndefined();
+  });
 });

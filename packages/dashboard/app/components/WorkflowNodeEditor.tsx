@@ -743,6 +743,11 @@ function InnerEditor({
   const activeWorkflow = useMemo(() => workflows.find((w) => w.id === activeId), [workflows, activeId]);
   const isBuiltin = !!activeWorkflow && isBuiltinWorkflowId(activeWorkflow.id);
 
+  // Live mirror of the active workflow id, readable inside async callbacks that
+  // captured an earlier value before an await (e.g. the AI-design round-trip).
+  const activeIdRef = useRef(activeId);
+  activeIdRef.current = activeId;
+
   // Trivial-graph palette hint (R9): a user-owned workflow whose graph carries no
   // user-authored node yet (everything is start/end/column-band — column bands map
   // to data.kind "start"). Disappears as soon as any user node exists; never shows
@@ -1216,14 +1221,26 @@ function InnerEditor({
     }
     const controller = new AbortController();
     aiEditAbortRef.current = controller;
+    // Capture the target workflow up-front: if the user switches the active
+    // workflow during the (long) design round-trip, we must NOT apply the result
+    // to whatever workflow happens to be active when it resolves.
+    const targetWorkflow = activeWorkflow;
     setAiEditBusy(true);
     setAiEditError(null);
     try {
       const result = await designWorkflow(
-        { prompt: trimmed, workflowId: activeWorkflow.id },
+        { prompt: trimmed, workflowId: targetWorkflow.id },
         projectId,
         controller.signal,
       );
+      // The active workflow changed mid-flight → discard the stale result.
+      if (activeIdRef.current !== targetWorkflow.id) {
+        addToast(
+          t("workflows.aiStaleDiscarded", "Discarded AI design — you switched workflows"),
+          "warning",
+        );
+        return;
+      }
       // Always confirm before the destructive replace.
       const ok = await confirm({
         title: t("workflows.aiReplaceTitle", "Replace graph?"),
@@ -1238,14 +1255,14 @@ function InnerEditor({
       // Map the returned IR through irToFlow on a definition-shaped object,
       // mirroring the active-workflow load effect's mapping.
       const flow = irToFlow({
-        ...activeWorkflow,
+        ...targetWorkflow,
         ir: result.ir,
         layout: result.layout,
       });
       setNodes(flow.nodes);
       setEdges(flow.edges);
-      setColumns(columnsOf({ ...activeWorkflow, ir: result.ir }));
-      setFields(fieldsOf({ ...activeWorkflow, ir: result.ir }));
+      setColumns(columnsOf({ ...targetWorkflow, ir: result.ir }));
+      setFields(fieldsOf({ ...targetWorkflow, ir: result.ir }));
       setSelectedNodeId(null);
       setSelectedEdgeId(null);
       setValidationError(null);

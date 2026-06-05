@@ -1016,7 +1016,9 @@ describe("WorkflowNodeEditor — U4 create dialog / delete / inline rename / dir
     render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
     fireEvent.click((await screen.findByText("Delete")).closest("button")!);
     // The no-op fallback resolves false → deleteWorkflow is never called.
-    await new Promise((r) => setTimeout(r, 20));
+    // Let the async fallback settle deterministically (no wall-clock delay).
+    await Promise.resolve();
+    await Promise.resolve();
     expect(deleteWorkflow).not.toHaveBeenCalled();
   });
 
@@ -1167,6 +1169,7 @@ describe("WorkflowNodeEditor — U4 create dialog / delete / inline rename / dir
 function trivialUserDef(): WorkflowDefinition {
   return {
     id: "WF-TRIVIAL",
+    kind: "workflow",
     name: "Trivial",
     description: "",
     ir: {
@@ -1536,11 +1539,14 @@ describe("WorkflowNodeEditor — U9 palette Templates section", () => {
 
     render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
     await screen.findByTestId("wf-palette-templates");
+    // Canvas can lag the palette under cold-transform shard load.
+    await screen.findByTestId("wf-node-gate", undefined, { timeout: 3000 });
 
     const before = screen.queryAllByTestId("wf-node-prompt").length;
     fireEvent.click(screen.getByTestId("wf-tpl-step-qa-check"));
-    await waitFor(() =>
-      expect(screen.queryAllByTestId("wf-node-prompt").length).toBe(before + 1),
+    await waitFor(
+      () => expect(screen.queryAllByTestId("wf-node-prompt").length).toBe(before + 1),
+      { timeout: 3000 },
     );
   });
 

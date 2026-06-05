@@ -1108,23 +1108,39 @@ describe("TaskForm workflow picker (U6/R3)", () => {
     renderTaskForm({ onWorkflowIdChange: vi.fn() });
 
     expect(screen.getByTestId("task-workflow-loading")).toBeTruthy();
-    resolveFn([]);
-  });
+    resolveFn([{ id: "WF-1", name: "QA" }]);
 
-  it("regression: no per-step checkboxes and no fetchWorkflowSteps usage", async () => {
-    await mockWorkflows([{ id: "WF-1", name: "QA" }]);
-    renderTaskForm({ onWorkflowIdChange: vi.fn() });
-
+    // After the promise resolves, the loading placeholder is replaced by the
+    // populated select containing the fetched workflow option.
     await waitFor(() => {
-      expect(screen.getByTestId("task-workflow-select")).toBeTruthy();
+      expect(screen.queryByTestId("task-workflow-loading")).toBeNull();
     });
-    // The old per-step checkbox UI and execution-order controls are gone.
-    expect(screen.queryByTestId("workflow-step-order")).toBeNull();
-    expect(document.querySelector('[data-testid^="workflow-step-checkbox-"]')).toBeNull();
-    // The api mock no longer needs a fetchWorkflowSteps export — TaskForm never
-    // calls it. (If it still did, rendering above would have thrown on the
-    // missing mock export, so reaching this point is itself the regression proof.)
+    const select = screen.getByTestId("task-workflow-select") as HTMLSelectElement;
+    const optionValues = Array.from(select.options).map((o) => o.value);
+    expect(optionValues).toContain("WF-1");
   });
+
+  it.each([
+    ["create", { mode: "create" as const }],
+    ["edit", { mode: "edit" as const, title: "Existing task", onTitleChange: vi.fn() }],
+  ])(
+    "regression: no per-step checkboxes and no fetchWorkflowSteps usage (%s mode)",
+    async (_label, modeProps) => {
+      await mockWorkflows([{ id: "WF-1", name: "QA" }]);
+      renderTaskForm({ onWorkflowIdChange: vi.fn(), ...modeProps });
+
+      await waitFor(() => {
+        expect(screen.getByTestId("task-workflow-select")).toBeTruthy();
+      });
+      // The old per-step checkbox UI and execution-order controls are gone on
+      // every TaskForm surface (create and edit).
+      expect(screen.queryByTestId("workflow-step-order")).toBeNull();
+      expect(document.querySelector('[data-testid^="workflow-step-checkbox-"]')).toBeNull();
+      // The api mock no longer needs a fetchWorkflowSteps export — TaskForm never
+      // calls it. (If it still did, rendering above would have thrown on the
+      // missing mock export, so reaching this point is itself the regression proof.)
+    },
+  );
 });
 
 describe("TaskForm focus behavior (FN-1459)", () => {

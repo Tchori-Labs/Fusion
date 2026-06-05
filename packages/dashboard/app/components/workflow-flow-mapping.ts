@@ -574,23 +574,38 @@ export function buildConnectionEdge(
   const target = connection.target ?? undefined;
   if (!source || !target) return { error: "missing-endpoint" };
 
-  const condition = "success";
-  // Skip exact duplicates of the SAME condition (a second identical edge is
-  // pointless); different conditions between the same pair are allowed.
-  const isDuplicate = edges.some(
-    (e) =>
-      e.source === source &&
-      e.target === target &&
-      ((e.data?.condition as string | undefined) ?? "success") === condition,
+  const srcNode = nodes.find((n) => n.id === source);
+  const tgtNode = nodes.find((n) => n.id === target);
+
+  // Existing conditions already authored between this exact pair.
+  const existingConditions = new Set(
+    edges
+      .filter((e) => e.source === source && e.target === target)
+      .map((e) => (e.data?.condition as string | undefined) ?? "success"),
   );
-  if (isDuplicate) return { error: "duplicate" };
+
+  // New edges are normally born "success". But a second connect gesture between a
+  // pair that already has a success edge should author the *parallel* "failure"
+  // edge (rather than being rejected as a duplicate), so users can build a
+  // success/failure split with two connect gestures — but only when the source
+  // kind actually exposes a condition select. Block only when both conditions
+  // already exist (or the only available condition is already taken).
+  const supportsConditions = edgeConditionEditability(srcNode?.data.kind) === "conditions";
+  let condition = "success";
+  if (existingConditions.has("success")) {
+    if (supportsConditions && !existingConditions.has("failure")) {
+      condition = "failure";
+    } else {
+      return { error: "duplicate" };
+    }
+  } else if (existingConditions.has(condition)) {
+    return { error: "duplicate" };
+  }
 
   // Cycle guard (KTD-9). Exempt connections where both endpoints are children of
   // the same foreach template — those may legitimately be rework cycles authored
   // separately; the simplest correct rule applies the guard only to non-template
   // connections.
-  const srcNode = nodes.find((n) => n.id === source);
-  const tgtNode = nodes.find((n) => n.id === target);
   const bothTemplateChildren =
     !!srcNode?.parentId && srcNode.parentId === tgtNode?.parentId;
   if (!bothTemplateChildren && wouldCreateCycle(edges, source, target)) {
@@ -899,6 +914,12 @@ export function insertFragment(
   const minY = placed.length ? Math.min(...placed.map((p) => p.y)) : 0;
 
   const insertedNodeIds: string[] = [];
+  // foreach template children are expanded into parented child flow nodes (the
+  // same way irToFlow does), so an inserted foreach round-trips its full template
+  // through flowToIr instead of dropping config.template (which flowToIr would
+  // otherwise rebuild as an empty template from the absent children).
+  const childNodes: FlowNode<WorkflowFlowNodeData>[] = [];
+  const childEdges: FlowEdge[] = [];
   const newNodes = bodyNodes.map((node, index): FlowNode<WorkflowFlowNodeData> => {
     const id = idMap.get(node.id)!;
     insertedNodeIds.push(id);
@@ -906,6 +927,40 @@ export function insertFragment(
     const pos = fromLayout
       ? { x: position.x + (fromLayout.x - minX), y: position.y + (fromLayout.y - minY) }
       : { x: position.x + index * 180, y: position.y };
+    const foreachCfg = foreachConfigOf(node);
+    if (foreachCfg) {
+      const template = foreachCfg.template;
+      template.nodes.forEach((inner, innerIdx) => {
+        const innerKind = editorKind(inner);
+        childNodes.push({
+          id: foreachChildFlowId(id, inner.id),
+          type: innerKind,
+          position: { x: FOREACH_CHILD_X + innerIdx * FOREACH_CHILD_STEP_X, y: FOREACH_CHILD_Y },
+          parentId: id,
+          extent: "parent",
+          data: { kind: innerKind, label: nodeLabel(inner), config: { ...(inner.config ?? {}) } },
+          deletable: true,
+        });
+      });
+      template.edges.forEach((edge, eIdx) => {
+        childEdges.push(irEdgeToFlow(edge, eIdx, `${id}${FOREACH_CHILD_SEP}`));
+      });
+      // The group node keeps everything except the template (children carry it).
+      const { template: _t, ...restCfg } = (node.config ?? {}) as Record<string, unknown>;
+      return {
+        id,
+        type: "foreach",
+        position: pos,
+        data: {
+          kind: "foreach",
+          label: nodeLabel(node),
+          config: { ...restCfg },
+          templateEmpty: template.nodes.length === 0,
+        },
+        style: { width: FOREACH_GROUP_WIDTH, height: FOREACH_GROUP_HEIGHT },
+        deletable: true,
+      };
+    }
     return irNodeToFlowNode(node, id, pos);
   });
 
@@ -925,8 +980,9 @@ export function insertFragment(
     });
 
   return {
-    nodes: [...nodes, ...newNodes],
-    edges: [...edges, ...newEdges],
+    // Group nodes (in newNodes) must precede their children (childNodes).
+    nodes: [...nodes, ...newNodes, ...childNodes],
+    edges: [...edges, ...newEdges, ...childEdges],
     insertedNodeIds,
   };
 }
@@ -935,11 +991,10 @@ export function insertFragment(
  *  new template object; the original is untouched. Template-local ids are scoped
  *  to the template, so a fresh local id space suffices (and keeps config compact
  *  rather than reusing global ids). */
-function copyForeachTemplate(template: {
-  nodes: WorkflowIrNode[];
-  edges: WorkflowIrEdge[];
-}): { nodes: WorkflowIrNode[]; edges: WorkflowIrEdge[] } {
-  const innerMap = new Map<string, string>();
+function copyForeachTemplate(
+  template: { nodes: WorkflowIrNode[]; edges: WorkflowIrEdge[] },
+  innerMap: Map<string, string>,
+): { nodes: WorkflowIrNode[]; edges: WorkflowIrEdge[] } {
   for (const n of template.nodes) innerMap.set(n.id, newNodeId());
   const nodes = template.nodes.map((n) => copyIrNode(n, innerMap.get(n.id)!));
   const edges = template.edges.map((e) => ({
@@ -951,12 +1006,21 @@ function copyForeachTemplate(template: {
 }
 
 /** Deep-ish copy of an IR node under a new id, recursing into a foreach
- *  template's internal node references so they remain self-consistent. */
-function copyIrNode(node: WorkflowIrNode, newId: string): WorkflowIrNode {
+ *  template's internal node references so they remain self-consistent. When the
+ *  node is a foreach, its template-local id remap is recorded in `templateMaps`
+ *  keyed by the node's ORIGINAL id, so the caller can remap namespaced
+ *  `${groupId}::${templateNodeId}` layout keys consistently. */
+function copyIrNode(
+  node: WorkflowIrNode,
+  newId: string,
+  templateMaps?: Map<string, Map<string, string>>,
+): WorkflowIrNode {
   const config = node.config ? { ...node.config } : undefined;
   const foreach = foreachConfigOf(node);
   if (foreach && config) {
-    config.template = copyForeachTemplate(foreach.template);
+    const innerMap = new Map<string, string>();
+    config.template = copyForeachTemplate(foreach.template, innerMap);
+    templateMaps?.set(node.id, innerMap);
   }
   const copy: WorkflowIrNode = { id: newId, kind: node.kind };
   if (node.column !== undefined) copy.column = node.column;
@@ -978,16 +1042,34 @@ export function copyIrWithFreshIds(
   const idMap = new Map<string, string>();
   for (const n of ir.nodes) idMap.set(n.id, newNodeId());
 
-  const nodes = ir.nodes.map((n) => copyIrNode(n, idMap.get(n.id)!));
+  // Per foreach group (by ORIGINAL group id): its template-local id remap, so
+  // namespaced layout keys `${groupId}::${templateNodeId}` can be remapped to
+  // `${newGroupId}::${newTemplateNodeId}` consistently.
+  const templateMaps = new Map<string, Map<string, string>>();
+  const nodes = ir.nodes.map((n) => copyIrNode(n, idMap.get(n.id)!, templateMaps));
   const edges = ir.edges.map((e) => ({
     ...e,
     from: idMap.get(e.from) ?? e.from,
     to: idMap.get(e.to) ?? e.to,
   }));
 
-  // Remap layout keys for top-level nodes; leave any unrelated keys as-is.
+  // Remap layout keys. Top-level node keys remap via idMap; namespaced foreach
+  // child keys remap via the owning group's idMap entry + its inner map; any
+  // unrelated keys pass through unchanged.
   const newLayout: Record<string, { x: number; y: number }> = {};
   for (const [key, pos] of Object.entries(layout)) {
+    const sepIdx = key.indexOf(FOREACH_CHILD_SEP);
+    if (sepIdx >= 0) {
+      const groupId = key.slice(0, sepIdx);
+      const innerId = key.slice(sepIdx + FOREACH_CHILD_SEP.length);
+      const newGroupId = idMap.get(groupId);
+      const innerMap = templateMaps.get(groupId);
+      const newInnerId = innerMap?.get(innerId);
+      if (newGroupId && newInnerId) {
+        newLayout[foreachChildFlowId(newGroupId, newInnerId)] = { ...pos };
+        continue;
+      }
+    }
     const mapped = idMap.get(key);
     newLayout[mapped ?? key] = { ...pos };
   }

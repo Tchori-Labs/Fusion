@@ -76,4 +76,36 @@ describe("stripApprovalBypassFlags", () => {
     const ir = { version: "v1", name: "wf" } as unknown as WorkflowIr;
     expect(stripApprovalBypassFlags(ir).stripped).toBe(false);
   });
+
+  it("tolerates non-object entries in nodes (untrusted input)", () => {
+    const ir = {
+      version: "v1",
+      name: "wf",
+      nodes: [null, "bogus", 42, { id: "n1", kind: "prompt", config: { cliSkipApproval: true } }],
+      edges: [],
+    } as unknown as WorkflowIr;
+    const { ir: out, stripped } = stripApprovalBypassFlags(ir);
+    expect(stripped).toBe(true);
+    expect((out as any).nodes[3].config.cliSkipApproval).toBeUndefined();
+  });
+
+  it("tolerates non-object entries in nested template.nodes", () => {
+    const ir = {
+      version: "v1",
+      name: "wf",
+      nodes: [
+        {
+          id: "fe",
+          kind: "foreach",
+          config: {
+            template: { nodes: [null, 0, "x", { id: "inner", kind: "prompt", config: { autoApprove: true } }] },
+          },
+        },
+      ],
+      edges: [],
+    } as unknown as WorkflowIr;
+    const { ir: out, stripped } = stripApprovalBypassFlags(ir);
+    expect(stripped).toBe(true);
+    expect((out as any).nodes[0].config.template.nodes[3].config.autoApprove).toBeUndefined();
+  });
 });

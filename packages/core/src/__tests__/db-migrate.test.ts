@@ -1073,6 +1073,8 @@ describe("schema migration", () => {
     expect(reopened.getSchemaVersion()).toBe(109);
     const workflowColumns = reopened.prepare("PRAGMA table_info(workflows)").all() as Array<{ name: string }>;
     expect(workflowColumns.filter((c) => c.name === "kind")).toHaveLength(1);
+    const stepColumns = reopened.prepare("PRAGMA table_info(workflow_steps)").all() as Array<{ name: string }>;
+    expect(stepColumns.filter((c) => c.name === "migrated_fragment_id")).toHaveLength(1);
     reopened.close();
   });
 });

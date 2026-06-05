@@ -45,6 +45,26 @@ function makeFakeAgent(text: string) {
   return { factory, captured };
 }
 
+/** A fake agent whose prompt rejects; tracks whether dispose() was called so we
+ *  can assert the route releases the session even when the model turn throws. */
+function makeRejectingAgent() {
+  const state = { disposed: false };
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const factory: any = async () => {
+    const session = {
+      on(_event: "text", _listener: (delta: string) => void) {},
+      async prompt() {
+        throw new Error("model turn failed");
+      },
+      dispose() {
+        state.disposed = true;
+      },
+    };
+    return { session };
+  };
+  return { factory, state };
+}
+
 /** A minimal valid v1 linear IR (start → prompt → end). */
 function linearIr(overrides?: { nodeConfig?: Record<string, unknown> }): WorkflowIr {
   return {
@@ -171,6 +191,17 @@ describe("POST /api/workflows/design (U7/R11/KTD-6)", () => {
     const before = await userDefCount();
     const res = await postJson("/api/workflows/design", { prompt: "x" });
     expect(res.status).toBe(422);
+    expect(await userDefCount()).toBe(before);
+  });
+
+  it("prompt rejects → 5xx but session is still disposed (no leak)", async () => {
+    const { factory, state } = makeRejectingAgent();
+    __setCreateFnAgentForDesign(factory);
+
+    const before = await userDefCount();
+    const res = await postJson("/api/workflows/design", { prompt: "x" });
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect(state.disposed).toBe(true);
     expect(await userDefCount()).toBe(before);
   });
 

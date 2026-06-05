@@ -155,6 +155,36 @@ describe("TaskStore.migrateLegacyWorkflowSteps (U2/R5)", () => {
     expect(await store.getDefaultWorkflowId()).toBe(existing.id);
   });
 
+  it("compare-and-set: re-reads the default after the transaction and skips when a concurrent writer set one", async () => {
+    await store.createWorkflowStep({ name: "A", description: "a", prompt: "a", defaultOn: true });
+
+    const concurrent = await store.createWorkflowDefinition({
+      name: "Concurrent",
+      ir: {
+        version: "v1",
+        name: "Concurrent",
+        nodes: [
+          { id: "start", kind: "start" },
+          { id: "end", kind: "end" },
+        ],
+        edges: [{ from: "start", to: "end", condition: "success" }],
+      },
+      kind: "workflow",
+    });
+
+    // A project default exists when migration's post-transaction compare-and-set
+    // re-reads it. Because the set is gated on the re-read (not a pre-transaction
+    // snapshot), an existing default is observed and never clobbered.
+    await store.setDefaultWorkflowId(concurrent.id);
+
+    const result = await store.migrateLegacyWorkflowSteps();
+
+    expect(result.combinedWorkflowId).toBeTruthy();
+    expect(result.combinedWorkflowId).not.toBe(concurrent.id);
+    // The compare-and-set re-read observed the existing default and did NOT clobber it.
+    expect(await store.getDefaultWorkflowId()).toBe(concurrent.id);
+  });
+
   it("is a no-op with zero user steps", async () => {
     const result = await store.migrateLegacyWorkflowSteps();
     expect(result).toEqual({ migrated: 0, skipped: 0, combinedWorkflowId: undefined });

@@ -201,6 +201,25 @@ describe("autoLayout — foreach / unreachable / cycles", () => {
     expect(strictColumnForY(o.y, COLUMNS_3)).toBe("done");
   });
 
+  it("leaves an unplaced node (no column, parked outside all bands) unplaced", () => {
+    // y far below the last band, with no explicit column → strictColumnForY undefined.
+    const outsideY = bandTop(COLUMNS_3.length) + 5000;
+    const nodes: N[] = [
+      node("start", "start", 0, midBand(0), { column: "triage" }),
+      node("a", "prompt", 0, midBand(1), { column: "in-progress" }),
+      node("loose", "prompt", 0, outsideY),
+    ];
+    const edges = [edge("start", "a"), edge("a", "loose")];
+    const pos = autoLayout(nodes, edges, COLUMNS_3);
+
+    const loose = pos.get("loose")!;
+    // y is preserved (still outside every band) — NOT clamped into a band.
+    expect(loose.y).toBe(outsideY);
+    expect(strictColumnForY(loose.y, COLUMNS_3)).toBeUndefined();
+    // x still flows left-to-right with the layering tidy.
+    expect(loose.x).toBeGreaterThan(pos.get("a")!.x);
+  });
+
   it("terminates and stays sane with a rework cycle edge present", () => {
     const nodes: N[] = [
       node("start", "start", 0, midBand(0), { column: "triage" }),
