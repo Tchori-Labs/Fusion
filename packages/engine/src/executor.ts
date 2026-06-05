@@ -2107,12 +2107,51 @@ export class TaskExecutor {
           const governingNodeId = this.graphSeamGoverningNodeId.get(task.id)!;
           const resolveBinding = this.graphColumnAgentResolver.get(task.id)!;
           const binding = resolveBinding(governingNodeId);
-          if (binding) {
-            const effective = resolveEffectiveAgent({
-              binding,
-              ...this.extractOwnSettings(task),
-            });
-            if (effective.source === "column-agent") {
+          const effective = binding
+            ? resolveEffectiveAgent({ binding, ...this.extractOwnSettings(task) })
+            : undefined;
+          if (!effective || effective.source !== "column-agent") {
+            // Binding RELEASED (PR #1432 review): a workflow edit removed the
+            // binding, or `defer` now resolves to the task's own settings. Hand the
+            // session back to normal resolution: hot-swap to the assigned/task
+            // model (the same resolution the legacy block below owns), clear the
+            // column-agent tracking, and release the reverse heartbeat guard so
+            // isAgentEffectivelyExecuting() stops blocking the OLD agent.
+            executorLog.log(`${task.id}: column-agent binding released — reverting session to own-settings resolution`);
+            activeEntry.lastEffectiveColumnAgentId = null;
+            this.effectiveColumnAgentByTask.delete(task.id);
+            // Fire-and-forget audit (matches the deletion-fallback posture above).
+            this.store.logEntry(
+              task.id,
+              "Column-agent binding released — session reverts to its own model/agent resolution",
+              undefined,
+              this.getRunContextFor(task.id),
+            ).catch((err: unknown) => executorLog.warn(`${task.id}: failed to log column-agent release: ${err instanceof Error ? err.message : String(err)}`));
+            const settings = await this.store.getSettings();
+            const assignedRuntimeConfig = await this.getAssignedAgentRuntimeConfig(task.assignedAgentId);
+            const { provider: ownProvider, modelId: ownModelId } = resolveExecutorSessionModel(
+              task.modelProvider,
+              task.modelId,
+              settings,
+              assignedRuntimeConfig,
+            );
+            const providerChanged = ownProvider !== activeEntry.lastResolvedModelProvider;
+            const modelIdChanged = ownModelId !== activeEntry.lastResolvedModelId;
+            if ((providerChanged || modelIdChanged) && ownProvider && ownModelId) {
+              activeEntry.lastResolvedModelProvider = ownProvider;
+              activeEntry.lastResolvedModelId = ownModelId;
+              try {
+                const model = this.modelRegistry.find(ownProvider, ownModelId);
+                if (model) {
+                  await activeEntry.session.setModel(model);
+                  executorLog.log(`${task.id}: binding released — model reverted to ${ownProvider}/${ownModelId}`);
+                }
+              } catch (err: unknown) {
+                executorLog.error(`${task.id}: failed to revert model after binding release: ${err instanceof Error ? err.message : String(err)}`);
+              }
+            }
+          } else {
+            {
               // Fetch the (possibly changed) effective column agent, best-effort.
               const newAgent = await this.options.agentStore?.getAgent(effective.agentId).catch(() => null) ?? null;
               if (!newAgent) {
@@ -2131,6 +2170,10 @@ export class TaskExecutor {
                     this.getRunContextFor(task.id),
                   ).catch((err: unknown) => executorLog.warn(`${task.id}: failed to log column-agent deletion fallback: ${err instanceof Error ? err.message : String(err)}`));
                   activeEntry.lastEffectiveColumnAgentId = null;
+                  // Release the reverse heartbeat guard for the deleted agent
+                  // (PR #1432 review): isAgentEffectivelyExecuting() must not keep
+                  // blocking an agent that no longer governs this session.
+                  this.effectiveColumnAgentByTask.delete(task.id);
                 }
               } else {
                 const settings = await this.store.getSettings();
@@ -2145,6 +2188,9 @@ export class TaskExecutor {
                 const modelIdChanged = newModelId !== activeEntry.lastResolvedModelId;
                 if (agentChanged || providerChanged || modelIdChanged) {
                   activeEntry.lastEffectiveColumnAgentId = newAgent.id;
+                  // Re-key the reverse heartbeat guard to the NEW agent (PR #1432
+                  // review): the old agent stops being blocked, the new one starts.
+                  this.effectiveColumnAgentByTask.set(task.id, newAgent.id);
                   activeEntry.lastResolvedModelProvider = newProvider;
                   activeEntry.lastResolvedModelId = newModelId;
                   if (newProvider && newModelId) {
@@ -4311,6 +4357,7 @@ export class TaskExecutor {
     task: Task,
     stepIndex: number,
     instanceId?: string,
+    governingNodeId?: string,
   ): Promise<{ success: boolean; error?: string }> {
     // Pin step-session physics for the run before the implementation pass.
     this.graphStepSessionPinned.add(task.id);
@@ -4325,8 +4372,27 @@ export class TaskExecutor {
     // in-flight callers within a single attempt still share the one promise.
     let phase = this.graphStepRunOnce.get(task.id);
     if (!phase) {
+      // Column-agent governing-node ownership (PR #1432 review): the slot is
+      // written ONLY by the caller that CREATES the memoized pass, and cleared
+      // when that pass settles. One step-session pass serves every foreach
+      // instance, so the session-identity binding is the pass-INITIATING
+      // instance's — deterministic, instead of concurrent seam invocations
+      // racing set/delete on a shared per-task slot (parallel foreach could
+      // otherwise stamp another instance's node mid-build or clear it before
+      // the session resolved the binding).
+      if (typeof governingNodeId === "string") {
+        this.graphSeamGoverningNodeId.set(task.id, governingNodeId);
+      }
       phase = this.runImplementationPhase(task);
       this.graphStepRunOnce.set(task.id, phase);
+      void phase
+        .catch(() => undefined)
+        .finally(() => {
+          // Clear only our own stamp — a rework re-run may have installed a new one.
+          if (typeof governingNodeId === "string" && this.graphSeamGoverningNodeId.get(task.id) === governingNodeId) {
+            this.graphSeamGoverningNodeId.delete(task.id);
+          }
+        });
     }
     try {
       await phase;
@@ -4484,45 +4550,42 @@ export class TaskExecutor {
         // Stamp the active instance so `runGraphTaskStep` can honor
         // `deferDoneToReview` when judging a non-terminal step (FIX 3).
         this.graphStepActiveContext.set(this.graphActiveContextKey(seamTask.id, active.instanceId), active);
-        // Column-agent seam wiring (U4, R4): record the governing node id — the
-        // foreach INSTANCE node id (`<foreachId>#<i>:<templateNodeId>`) stamped into
-        // context by createPromptLikeHandler — so the step-session implementation
-        // pass resolves the column-agent binding for the step-execute node's effective
-        // column (template-node column, else inherited foreach column). Set
-        // UNCONDITIONALLY per invocation (replacing the prior first-writer-wins guard)
-        // and clear it in a finally after runTaskStep, mirroring the execute seam.
-        // This makes two step-execute nodes in one template with DIFFERENT columns
-        // resolve correctly per-instance instead of all inheriting the first node's
-        // binding.
+        // Column-agent seam wiring (U4, R4): the governing node id — the foreach
+        // INSTANCE node id (`<foreachId>#<i>:<templateNodeId>`) stamped into
+        // context by createPromptLikeHandler — threads INTO runGraphTaskStep,
+        // which stamps the per-task slot only when it CREATES the memoized
+        // implementation pass and clears it when that pass settles (PR #1432
+        // review). One step-session pass serves every instance, so the
+        // session-identity binding is deterministically the pass-initiating
+        // instance's; per-invocation set/delete here would race under parallel
+        // foreach (overwrite mid-build, or clear while the shared pass is live).
         const stepGoverningNodeId = context[SEAM_GOVERNING_NODE_CONTEXT_KEY];
-        if (typeof stepGoverningNodeId === "string") {
-          this.graphSeamGoverningNodeId.set(seamTask.id, stepGoverningNodeId);
-        }
-        let result: Awaited<ReturnType<typeof runTaskStep>>;
-        try {
-          result = await runTaskStep(
-            {
-              store: this.store,
-              worktreePath,
-              // U6/U8: per-step session physics — graph-owned runs force
-              // step-session mode for the run (KTD-2/KTD-8) regardless of the
-              // runStepsInNewSessions setting. The agent authors the step's commit;
-              // this driver only observes (KTD-2). Thread the instanceId so the
-              // active-context read is per-instance (parallel-foreach safe).
-              runStep: (stepIndex) => this.runGraphTaskStep(seamTask, stepIndex, active.instanceId),
-            },
-            { id: seamTask.id, steps: live.steps },
-            active.stepIndex,
-            {
-              // Single-authority done-marking (U6/KTD-4): when the foreach template
-              // has a step-review node, leave the step in-progress so the review's
-              // APPROVE marks it done (the review is the single done authority).
-              markDoneOnSuccess: active.deferDoneToReview !== true,
-            },
-          );
-        } finally {
-          this.graphSeamGoverningNodeId.delete(seamTask.id);
-        }
+        const result: Awaited<ReturnType<typeof runTaskStep>> = await runTaskStep(
+          {
+            store: this.store,
+            worktreePath,
+            // U6/U8: per-step session physics — graph-owned runs force
+            // step-session mode for the run (KTD-2/KTD-8) regardless of the
+            // runStepsInNewSessions setting. The agent authors the step's commit;
+            // this driver only observes (KTD-2). Thread the instanceId so the
+            // active-context read is per-instance (parallel-foreach safe).
+            runStep: (stepIndex) =>
+              this.runGraphTaskStep(
+                seamTask,
+                stepIndex,
+                active.instanceId,
+                typeof stepGoverningNodeId === "string" ? stepGoverningNodeId : undefined,
+              ),
+          },
+          { id: seamTask.id, steps: live.steps },
+          active.stepIndex,
+          {
+            // Single-authority done-marking (U6/KTD-4): when the foreach template
+            // has a step-review node, leave the step in-progress so the review's
+            // APPROVE marks it done (the review is the single done authority).
+            markDoneOnSuccess: active.deferDoneToReview !== true,
+          },
+        );
         // Capture baseline/checkpoint back into the reserved active context so the
         // foreach sub-walk threads them to later template nodes (step-review/reset).
         active.baselineSha = result.baselineSha;

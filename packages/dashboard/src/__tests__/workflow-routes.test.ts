@@ -627,4 +627,24 @@ describe("workflow routes — column agents (U6)", () => {
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/triage/);
   });
+
+  it("PATCH enforces the policy-escalation gate the same way as POST (FN-5893)", async () => {
+    await store.updateSettings({ defaultAgentPermissionPolicy: { rules: { file_write_delete: "block" } } as never });
+    const agentId = await makeAgent({ permissionPolicy: { presetId: "unrestricted" } });
+
+    const created = await post("/api/workflows", { name: "EditableEsc", ir: boundIr() });
+    expect(created.status).toBe(201);
+    const id = (created.body as { id: string }).id;
+
+    const denied = await patch(`/api/workflows/${id}`, { ir: boundIr({ agentId, mode: "override" }) });
+    expect(denied.status).toBe(400);
+    expect(denied.body.error).toMatch(/broader/i);
+    expect((denied.body as { details?: { policyEscalation?: boolean } }).details?.policyEscalation).toBe(true);
+
+    const ok = await patch(`/api/workflows/${id}`, {
+      ir: boundIr({ agentId, mode: "override" }),
+      confirmPolicyEscalation: true,
+    });
+    expect(ok.status).toBe(200);
+  });
 });

@@ -453,8 +453,7 @@ describe("column-agent principal alignment (plan U5)", () => {
       // and lastEffectiveColumnAgentId = agent-X — matching the agent's model.
       const { setModel } = activeGraphSession(executor, task.id, "exec-node", OVERRIDE_COL);
 
-      store._trigger("task:updated", task);
-      await new Promise((r) => setTimeout(r, 0));
+      await store._triggerAsync("task:updated", task);
 
       // No agent change, no model change → no hot-swap.
       expect(setModel).not.toHaveBeenCalled();
@@ -485,8 +484,7 @@ describe("column-agent principal alignment (plan U5)", () => {
 
       const { setModel } = activeGraphSession(executor, task.id, "exec-node", OVERRIDE_COL);
 
-      store._trigger("task:updated", task);
-      await new Promise((r) => setTimeout(r, 0));
+      await store._triggerAsync("task:updated", task);
 
       // The legacy block is short-circuited under override: the assigned/own model
       // (openai/gpt-edited) is NEVER applied via setModel.
@@ -497,6 +495,36 @@ describe("column-agent principal alignment (plan U5)", () => {
       expect(loggedLines(store).some((l) => l.includes("openai/gpt-edited"))).toBe(false);
       // The tracked effective principal stays the column agent.
       expect((executor as any).activeSessions.get(task.id).lastEffectiveColumnAgentId).toBe("agent-X");
+    });
+
+    it("binding removed by a workflow edit → session reverts to own-settings model and the reverse guard releases", async () => {
+      // PR #1432 review: when the binding disappears (or defer re-resolves to own
+      // settings) the watcher must hand the session back to normal resolution —
+      // hot-swap to the assigned/task model, clear the tracked column agent, and
+      // release isAgentEffectivelyExecuting() for the old agent.
+      const store = createMockStore();
+      const find = vi.fn().mockReturnValue({ provider: "openai", modelId: "gpt-y" });
+      const task = singleSessionTask({ assignedAgentId: "agent-Y" });
+      const { executor } = makeExecutor(store, {
+        "agent-Y": makeAssignedAgent({ id: "agent-Y", runtimeConfig: { model: "openai/gpt-y" } }),
+      });
+      (executor as any)._modelRegistry = { find };
+
+      const { setModel } = activeGraphSession(executor, task.id, "exec-node", OVERRIDE_COL);
+      // The workflow edit removed the binding: re-seed the resolver to yield none,
+      // and mark X as effectively executing so we can observe the release.
+      seedSeam(executor, task.id, "exec-node", undefined);
+      (executor as any).effectiveColumnAgentByTask.set(task.id, "agent-X");
+
+      await store._triggerAsync("task:updated", task);
+
+      // Session reverted to the assigned agent's model.
+      expect(find).toHaveBeenCalledWith("openai", "gpt-y");
+      expect(setModel).toHaveBeenCalledWith({ provider: "openai", modelId: "gpt-y" });
+      // Column-agent tracking cleared; reverse heartbeat guard released.
+      expect((executor as any).activeSessions.get(task.id).lastEffectiveColumnAgentId).toBeNull();
+      expect(executor.isAgentEffectivelyExecuting("agent-X")).toBe(false);
+      expect(loggedLines(store).some((l) => l.includes("binding released"))).toBe(true);
     });
 
     it("legacy entry (no effective column agent) → the column-invalidation block is skipped", async () => {
@@ -519,8 +547,7 @@ describe("column-agent principal alignment (plan U5)", () => {
       });
       // No seam slots seeded.
 
-      store._trigger("task:updated", task);
-      await new Promise((r) => setTimeout(r, 0));
+      await store._triggerAsync("task:updated", task);
 
       // The column-invalidation block never ran (no column-agent fetch / swap).
       expect(loggedLines(store).some((l) => l.includes("Column agent changed"))).toBe(false);

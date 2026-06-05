@@ -10,7 +10,7 @@
 //   suite `stepwise-workflow-parity.test.ts`. Keep the two concerns separate.
 // ─────────────────────────────────────────────────────────────────────────────
 import { describe, expect, it, vi } from "vitest";
-import type { TaskDetail, WorkflowIrV2 } from "@fusion/core";
+import type { TaskDetail, WorkflowIrV2, WorkflowStage } from "@fusion/core";
 import {
   BUILTIN_CODING_WORKFLOW_IR,
   buildWorkflowObservation,
@@ -179,6 +179,10 @@ describe("column-agent feature is invisible when unbound (U7 / R9)", () => {
       experimentalFeatures: { workflowGraphExecutor: true },
     });
     expect(result.outcome).toBe("success");
+    // Bind the invariant to actual executor behavior (PR #1432 review): the
+    // observation below derives from the run-captured seam sequence, so seam
+    // drift fails here instead of being masked by a hard-coded literal.
+    expect(stages).toEqual(["execute", "review", "merge"]);
 
     // Legacy authoritative observation: a clean run that lands in `done`/merged.
     const legacyObs = buildWorkflowObservationFromTask(
@@ -187,7 +191,7 @@ describe("column-agent feature is invisible when unbound (U7 / R9)", () => {
     );
     // Interpreter (binding-free) observation assembled from the same run.
     const interpreterObs = buildWorkflowObservation({
-      stageTransitions: ["triage", "execute", "review", "merge"],
+      stageTransitions: ["triage", ...stages] as WorkflowStage[],
       terminalColumn: "done",
       terminalStatus: "done",
       reviewVerdict: "approve",

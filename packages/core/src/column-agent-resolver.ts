@@ -48,10 +48,20 @@ export interface ParsedInstanceNodeId {
  *  `nodeId` is not in instance form. Defensive against `templateNodeId` itself
  *  containing `:` — split on the FIRST `#`, then the FIRST `:` of the remainder,
  *  and keep everything after that as the template node id. The `templateNodeId` is
- *  not sanitized against `:`, so a greedy/last-delimiter split would corrupt it. */
+ *  not sanitized against `:`, so a greedy/last-delimiter split would corrupt it.
+ *
+ *  NOTE: a `foreachNodeId` that itself contains `#` is ambiguous under any single
+ *  split. Callers that hold the IR should use {@link parseInstanceNodeIdCandidates}
+ *  and validate each candidate's `foreachNodeId` against the graph (as
+ *  `resolveColumnAgentBinding` does) instead of trusting one split position. */
 export function parseInstanceNodeId(nodeId: string): ParsedInstanceNodeId | undefined {
   const hashIndex = nodeId.indexOf("#");
   if (hashIndex < 0) return undefined;
+  return parseInstanceNodeIdAt(nodeId, hashIndex);
+}
+
+/** Parse treating the `#` at `hashIndex` as the instance-id delimiter. */
+function parseInstanceNodeIdAt(nodeId: string, hashIndex: number): ParsedInstanceNodeId | undefined {
   const foreachNodeId = nodeId.slice(0, hashIndex);
   const remainder = nodeId.slice(hashIndex + 1);
   const colonIndex = remainder.indexOf(":");
@@ -63,6 +73,21 @@ export function parseInstanceNodeId(nodeId: string): ParsedInstanceNodeId | unde
   if (!/^\d+$/.test(stepIndexRaw)) return undefined;
   const stepIndex = Number(stepIndexRaw);
   return { foreachNodeId, stepIndex, templateNodeId };
+}
+
+/** Every plausible parse of `nodeId` as an instance id — one candidate per `#`
+ *  whose suffix matches the `<digits>:` shape. The id format is ambiguous when
+ *  node ids themselves contain `#` (e.g. foreach `f#a`, instance `f#a#0:t` — both
+ *  the first and second `#` look like delimiters), so callers with access to the
+ *  graph validate each candidate's `foreachNodeId` against real foreach nodes
+ *  rather than committing to a single split position. Ordered left-to-right. */
+export function parseInstanceNodeIdCandidates(nodeId: string): ParsedInstanceNodeId[] {
+  const candidates: ParsedInstanceNodeId[] = [];
+  for (let i = nodeId.indexOf("#"); i >= 0; i = nodeId.indexOf("#", i + 1)) {
+    const parsed = parseInstanceNodeIdAt(nodeId, i);
+    if (parsed) candidates.push(parsed);
+  }
+  return candidates;
 }
 
 // ── Binding lookup ───────────────────────────────────────────────────────────
@@ -104,22 +129,26 @@ export function resolveColumnAgentBinding(
   }
 
   // Foreach instance node: resolve against the enclosing foreach, honoring a
-  // template node's own declared column.
-  const parsed = parseInstanceNodeId(nodeId);
-  if (!parsed) return undefined;
+  // template node's own declared column. The instance-id format is ambiguous when
+  // node ids contain `#`, so try every plausible split and accept the first whose
+  // foreachNodeId names a REAL foreach node in this graph — a single fixed split
+  // (first-# or last-#) silently bypasses bindings for ids on the other side of
+  // the ambiguity (PR #1432 review).
+  for (const parsed of parseInstanceNodeIdCandidates(nodeId)) {
+    const foreachNode = nodesById.get(parsed.foreachNodeId);
+    if (!foreachNode || foreachNode.kind !== "foreach") continue;
 
-  const foreachNode = nodesById.get(parsed.foreachNodeId);
-  if (!foreachNode || foreachNode.kind !== "foreach") return undefined;
+    const cfg = foreachNode.config as Partial<WorkflowForeachConfig> | undefined;
+    const templateNodes = cfg?.template?.nodes ?? [];
+    const templateNode = templateNodes.find((n) => n.id === parsed.templateNodeId);
 
-  const cfg = foreachNode.config as Partial<WorkflowForeachConfig> | undefined;
-  const templateNodes = cfg?.template?.nodes ?? [];
-  const templateNode = templateNodes.find((n) => n.id === parsed.templateNodeId);
-
-  // Template node's own column wins; otherwise inherit the foreach node's column.
-  if (templateNode?.column !== undefined) {
-    return bindingForColumn(templateNode.column);
+    // Template node's own column wins; otherwise inherit the foreach node's column.
+    if (templateNode?.column !== undefined) {
+      return bindingForColumn(templateNode.column);
+    }
+    return bindingForColumn(foreachNode.column);
   }
-  return bindingForColumn(foreachNode.column);
+  return undefined;
 }
 
 // ── Effective-agent precedence (defer / override) ────────────────────────────

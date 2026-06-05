@@ -65,7 +65,7 @@ The `workflowColumns` track introduces **IR v2** (`version: "v2"`), where a work
 
 A v2 column can optionally name a **permanent agent** from the agent registry, staffing every card that flows through it once instead of node-by-node or task-by-task. The binding is a first-class optional field on the column (not a trait — traits are board-transition policy; this is execution identity):
 
-```
+```ts
 { id: "review", name: "Review", traits: [],
   agent: { agentId: "agent-001", mode: "defer" | "override" } }
 ```

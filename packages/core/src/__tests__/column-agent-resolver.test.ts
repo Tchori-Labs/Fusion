@@ -79,6 +79,15 @@ describe("resolveEffectiveAgent — precedence matrix (U2)", () => {
     ).toEqual({ source: "column-agent", agentId: "col-agent" });
   });
 
+  it("defer × lone modelId (incomplete pair, no agentId) → column agent wins", () => {
+    // Symmetric incomplete-pair surface (FN-5893: assert the invariant across
+    // ALL known surfaces, not only the provider-only reproduction).
+    expect(resolveEffectiveAgent({ binding: deferBinding, ownModelId: "claude-x" })).toEqual({
+      source: "column-agent",
+      agentId: "col-agent",
+    });
+  });
+
   it("defer × bare → column agent wins", () => {
     expect(resolveEffectiveAgent({ binding: deferBinding })).toEqual({
       source: "column-agent",
@@ -190,6 +199,19 @@ describe("resolveColumnAgentBinding — foreach instance inheritance (U2)", () =
     const ir = foreachIr({ reviewAgent: overrideBinding });
     const nodeId = instanceNodeId("fe", 0, "se");
     expect(resolveColumnAgentBinding(ir, nodeId)).toBeUndefined();
+  });
+
+  it("resolves bindings when the foreach node id itself contains '#'", () => {
+    // The instance-id format is delimiter-ambiguous; the resolver validates each
+    // candidate split against real foreach nodes instead of trusting the first '#'
+    // (PR #1432 review).
+    const ir = foreachIr({ foreachColumn: "review", reviewAgent: overrideBinding });
+    const fe = ir.nodes.find((n) => n.id === "fe");
+    if (!fe) throw new Error("fixture foreach missing");
+    fe.id = "fe#a";
+    const nodeId = instanceNodeId("fe#a", 0, "se");
+    expect(nodeId).toBe("fe#a#0:se");
+    expect(resolveColumnAgentBinding(ir, nodeId)).toEqual(overrideBinding);
   });
 });
 

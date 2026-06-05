@@ -142,7 +142,11 @@ export function WorkflowColumnPanel({
     [columns, setColumnAgent],
   );
 
-  const agentPickerDisabled = readOnly || !columnAgentsEnabled || agentsLoading;
+  // `!!agentsError` (PR #1432 review): when the registry fetch failed, the select
+  // would render enabled with only "(none)" while the bound id has no matching
+  // option — interacting with it could silently clear a binding. Disabled while
+  // the registry is unavailable, consistent with the loading guard.
+  const agentPickerDisabled = readOnly || !columnAgentsEnabled || agentsLoading || !!agentsError;
 
   const workflowWide = violations.filter((v) => v.columnId === null);
   const violationsFor = useCallback(

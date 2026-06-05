@@ -475,15 +475,42 @@ function InnerEditor({
         columns.length ? columns : undefined,
         fields.length ? fields : undefined,
       );
-      const updated = await updateWorkflow(activeWorkflow.id, { ir, layout }, projectId);
-      setWorkflows((ws) => ws.map((w) => (w.id === updated.id ? updated : w)));
-      // Validate by compiling — surfaces non-linear graphs as a banner.
+      const finishSave = async (updated: Awaited<ReturnType<typeof updateWorkflow>>) => {
+        setWorkflows((ws) => ws.map((w) => (w.id === updated.id ? updated : w)));
+        // Validate by compiling — surfaces non-linear graphs as a banner.
+        try {
+          await compileWorkflow(updated.id, projectId);
+          addToast(t("workflows.saved", "Workflow saved"), "success");
+        } catch (compileErr) {
+          setValidationError(
+            getErrorMessage(compileErr) || t("workflows.savedNotCompilable", "Workflow saved but cannot be compiled"),
+          );
+        }
+      };
       try {
-        await compileWorkflow(updated.id, projectId);
-        addToast(t("workflows.saved", "Workflow saved"), "success");
-      } catch (compileErr) {
-        setValidationError(
-          getErrorMessage(compileErr) || t("workflows.savedNotCompilable", "Workflow saved but cannot be compiled"),
+        await finishSave(await updateWorkflow(activeWorkflow.id, { ir, layout }, projectId));
+      } catch (err) {
+        // Policy-escalation handshake (R13, PR #1432 review): the route rejects a
+        // binding to a broader-than-default agent until the author explicitly
+        // confirms. Surface the server's explanation, then retry with the flag —
+        // otherwise such bindings would be unsavable from the dashboard.
+        // Shape-checked rather than `instanceof ApiRequestError` so test doubles
+        // (and any error wrapper) that carry the details payload still route here.
+        const escalation =
+          (err as { details?: { policyEscalation?: boolean } } | null)?.details?.policyEscalation === true;
+        if (!escalation) throw err;
+        const proceed = window.confirm(
+          `${getErrorMessage(err)}\n\n${t(
+            "workflowColumns.confirmPolicyEscalation",
+            "Bind it anyway? The column agent will run with broader permissions than this project's default.",
+          )}`,
+        );
+        if (!proceed) {
+          addToast(t("workflowColumns.escalationDeclined", "Save cancelled — column agent binding not confirmed"), "error");
+          return;
+        }
+        await finishSave(
+          await updateWorkflow(activeWorkflow.id, { ir, layout, confirmPolicyEscalation: true }, projectId),
         );
       }
     } catch (err) {
@@ -568,12 +595,20 @@ function InnerEditor({
   // column agent" note so authors don't diagnose override as a bug (R11). Keyed
   // on the column id + binding, not array identity.
   const overrideColumnBinding = useMemo(() => {
-    const columnId = selectedNode?.data.column;
+    // Foreach template children don't carry their own column in irToFlow — they
+    // inherit the enclosing foreach group's column at execution (R4). Mirror that
+    // inheritance here so a step-execute prompt inside an override-bound foreach
+    // still shows the note (PR #1432 review).
+    const columnId =
+      selectedNode?.data.column
+      ?? (selectedNode?.parentId
+        ? nodes.find((n) => n.id === selectedNode.parentId)?.data.column
+        : undefined);
     if (!columnId) return undefined;
     const col = columns.find((c) => c.id === columnId);
     if (!col?.agent || col.agent.mode !== "override") return undefined;
     return col.agent;
-  }, [selectedNode?.data.column, columns]);
+  }, [selectedNode?.data.column, selectedNode?.parentId, nodes, columns]);
 
   // Resolve the override agent's display name from the loaded registry; when the
   // id is stale (not in the list) fall back to the not-found treatment.
@@ -596,7 +631,10 @@ function InnerEditor({
         addToast(getErrorMessage(err) || "Failed to load models", "error");
       });
     } else if (currentExecutor === "agent" && agents.length === 0) {
-      fetchAgents().then(setAgents).catch((err) => {
+      // Project-scoped, matching WorkflowColumnPanel's fetchAgents(undefined,
+      // projectId) — an unscoped fetch returns the wrong registry in
+      // multi-project deployments (PR #1432 review).
+      fetchAgents(undefined, projectId).then(setAgents).catch((err) => {
         addToast(getErrorMessage(err) || "Failed to load agents", "error");
       });
     } else if (currentExecutor === "skill" && skills.length === 0) {
@@ -621,7 +659,10 @@ function InnerEditor({
   useEffect(() => {
     if (!overrideColumnBinding || agents.length > 0) return;
     let cancelled = false;
-    Promise.resolve(fetchAgents()).then((list) => {
+    // Project-scoped (PR #1432 review): without projectId this resolves from the
+    // wrong scope in multi-project deployments — the override note would show a
+    // false "not found" for a perfectly valid project agent.
+    Promise.resolve(fetchAgents(undefined, projectId)).then((list) => {
       if (!cancelled) setAgents(list ?? []);
     }).catch((err) => {
       if (!cancelled) addToast(getErrorMessage(err) || "Failed to load agents", "error");
@@ -629,7 +670,7 @@ function InnerEditor({
     return () => {
       cancelled = true;
     };
-  }, [overrideColumnBinding, agents.length, addToast]);
+  }, [overrideColumnBinding, agents.length, projectId, addToast]);
 
   const overlayProps = useOverlayDismiss(onClose);
 
