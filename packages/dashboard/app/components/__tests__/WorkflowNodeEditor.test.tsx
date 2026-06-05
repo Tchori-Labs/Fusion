@@ -378,10 +378,17 @@ describe("WorkflowNodeEditor — U8 step-inversion authoring", () => {
 
     render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
     await screen.findByText("Save");
+    // Wait for graph/column hydration before driving the palette — clicking
+    // mid-hydration races the flow-state seeding and the added node may never
+    // render (same flake class as the seam-in-branch badge deflake, 86867c57b).
+    expect(await screen.findByTestId("wf-column-panel")).toBeInTheDocument();
     // Adding a foreach renders a group node with an empty inspector hint absent
     // (it has a child) and an inspector for the foreach.
     fireEvent.click(screen.getByText("For-each step").closest("button")!);
-    await waitFor(() => expect(screen.getByTestId("wf-node-foreach")).toBeInTheDocument());
+    await waitFor(
+      () => expect(screen.getByTestId("wf-node-foreach")).toBeInTheDocument(),
+      { timeout: 5000 },
+    );
     // The foreach inspector shows the Mode select (KTD-3).
     expect(screen.getByText("Mode")).toBeInTheDocument();
     // No empty-state hint because the palette seeded a step-execute child.
