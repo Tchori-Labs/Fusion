@@ -16,6 +16,7 @@ export type {
   EntryPointBranchAssignment,
 } from "./branch-assignment.js";
 export { customProviderRegistryKey } from "./custom-provider-key.js";
+export { redactSecrets } from "./redact-secrets.js";
 export { MOCK_PROVIDER_ID } from "./mock-provider-constants.js";
 export type { MockProviderId, MockSessionPurpose } from "./mock-provider-constants.js";
 export {

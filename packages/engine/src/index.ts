@@ -614,3 +614,12 @@ export {
   type RuntimeStatus,
   type RuntimeMetrics,
 } from "./project-runtime.js";
+// Shared node-pty native-asset loader
+export {
+  loadPtyModule,
+  ensureNodePtyNativePermissions,
+  findStagedNativeDir,
+  findInstalledNodePtyNativeDir,
+  getNativePrebuildName,
+  resetPtyModuleCacheForTests,
+} from "./pty-native.js";
