@@ -1,0 +1,21 @@
+# Branch-scoped review config for the cli-agent executor PR (#1446).
+# Limits CodeRabbit to the core cli-agent source so the review fits under
+# CodeRabbit's 150-changed-file cap and focuses on the new logic.
+# NOTE: remove this file before merge if a repo-wide review scope is desired on main.
+reviews:
+  path_filters:
+    - "packages/engine/src/cli-agent/**"
+    - "packages/engine/src/cli-agent-validator.ts"
+    - "packages/engine/src/runtimes/in-process-runtime.ts"
+    - "packages/dashboard/src/cli-chat.ts"
+    - "packages/dashboard/src/cli-session-output-filter.ts"
+    - "packages/dashboard/src/cli-session-transport.ts"
+    - "packages/dashboard/src/cli-session-ws.ts"
+    - "packages/dashboard/src/routes/cli-sessions.ts"
+    - "packages/dashboard/src/routes/cli-agent-hooks.ts"
+    - "packages/dashboard/src/routes/cli-agent-settings.ts"
+    - "packages/dashboard/app/components/SessionTerminal.tsx"
+    - "packages/dashboard/app/components/CliChatSurface.tsx"
+    - "packages/core/src/cli-session-store.ts"
+    - "packages/core/src/cli-session-types.ts"
+    - "packages/core/src/redact-secrets.ts"
