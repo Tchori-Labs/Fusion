@@ -4363,8 +4363,10 @@ export class Database {
         const now = Date.now();
         // Copy legacy branch-group PRs (only groups that claim an open/merged PR)
         // into entities. INSERT OR IGNORE makes the copy idempotent across a
-        // re-run after a partial migration: rows that already landed collide on
-        // the open-source / open-branch / number indexes and are skipped.
+        // re-run after a partial migration: the deterministic PRIMARY KEY
+        // ('pr-bg-' || bg.id) collides for any row that already landed and is
+        // skipped (terminal-state rows are excluded from the open-* partial
+        // indexes, so the PK — not those indexes — is the re-run guard).
         this.db
           .prepare(
             `INSERT OR IGNORE INTO pull_requests

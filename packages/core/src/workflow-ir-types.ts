@@ -54,8 +54,9 @@ export interface WorkflowIrEdge {
    *  by the foreach `maxReworkCycles`; U6 generalizes the same mechanism to the
    *  top-level walk so a PR review region (await-review → pr-respond → back to
    *  await-review) is a legal bounded cycle too. The bound on a top-level rework
-   *  edge is `maxReworkCycles` on this edge's `from` node config (the loop head),
-   *  defaulting to {@link DEFAULT_MAX_REWORK_CYCLES}. Either way, rework edges are
+   *  edge is `maxReworkCycles` on this edge's `to` node config (the loop-region
+   *  head, which must set `reworkRegion: true`), defaulting to
+   *  {@link DEFAULT_MAX_REWORK_CYCLES}. Either way, rework edges are
    *  exempt from "Cycle detected"; every other back-edge still throws. */
   kind?: "rework";
 }

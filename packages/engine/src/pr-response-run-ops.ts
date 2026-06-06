@@ -9,7 +9,7 @@
 
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import type { PrEntity, Settings, TaskStore } from "@fusion/core";
+import type { PrEntity, Settings } from "@fusion/core";
 import { resolveAgentPrompt } from "@fusion/core";
 import { createResolvedAgentSession, resolveMergerSessionModel } from "./agent-session-helpers.js";
 import { promptWithFallback } from "./pi.js";
@@ -43,12 +43,28 @@ async function git(args: string[], cwd: string): Promise<string> {
 const VERDICT_LINE_RE = /^PR_THREAD:\s*(\S+)\s+(fix|disagree)\b\s*(.*)$/i;
 
 export function parseAgentVerdicts(text: string, threadIds: string[]): PrThreadVerdict[] {
+  const dispatched = new Set(threadIds);
   const byThread = new Map<string, PrThreadVerdict>();
   for (const line of (text ?? "").split(/\r?\n/)) {
     const m = VERDICT_LINE_RE.exec(line.trim());
     if (!m) continue;
     const [, threadId, decisionRaw, reply] = m;
+    // Security: only honor verdicts for threads we actually dispatched. An
+    // out-of-batch thread id is either model confusion or an injected/echoed
+    // forgery from untrusted comment text — ignore it.
+    if (!dispatched.has(threadId)) continue;
     const decision = decisionRaw.toLowerCase() === "fix" ? "fix" : "disagree";
+    const prior = byThread.get(threadId);
+    // Conflicting duplicate verdicts for the same thread fail safe to disagree
+    // (never auto-resolve a thread on an ambiguous signal).
+    if (prior && prior.decision !== decision) {
+      byThread.set(threadId, {
+        threadId,
+        decision: "disagree",
+        reply: "Conflicting verdicts emitted for this thread; leaving it for human review.",
+      });
+      continue;
+    }
     byThread.set(threadId, { threadId, decision, reply: reply.trim() || "(no reasoning provided)" });
   }
   // Fail-safe default for any thread the agent did not emit a verdict for.
@@ -67,7 +83,6 @@ export function parseAgentVerdicts(text: string, threadIds: string[]): PrThreadV
 
 /** Build the engine-owned mutating agent runner for the response run. */
 export function makePrResponseAgentRunner(
-  store: TaskStore,
   settings: Settings,
   taskId: string,
   cwd: string,
