@@ -210,12 +210,12 @@ export function registerPlanningSubtaskRoutes(ctx: ApiRoutesContext, deps: Plann
       const { branch: resolvedBranch, baseBranch: resolvedBaseBranch } =
         resolveBranchSelection(branchSelection, branch, baseBranch);
       const { mode: branchMode } = resolveBranchAssignmentContext(branchAssignment);
-      const planningBranchContext = {
-        groupId: `planning:${sessionId}`,
-        source: "planning" as const,
-        assignmentMode: branchMode,
-        inheritedBaseBranch: resolvedBaseBranch,
-      };
+      // Stamp the real BranchGroup id (BG-…) so listTasksByBranchGroup(group.id)
+      // resolves members. The group is only ensured (and the id set) in shared
+      // mode below. Non-shared members get NO groupId — stamping a synthetic
+      // `planning:<id>` would let the legacy membership fallback sweep them into
+      // a shared group later created for the same planning session.
+      let planningGroupId: string | undefined;
 
       if (branchMode === "shared") {
         const settings = await scopedStore.getSettings();
@@ -225,11 +225,21 @@ export function registerPlanningSubtaskRoutes(ctx: ApiRoutesContext, deps: Plann
             : "main";
         const settingsAutoMerge = typeof settings.autoMerge === "boolean" ? settings.autoMerge : false;
         const branchGroupStore = scopedStore as { ensureBranchGroupForSource?: TaskStore["ensureBranchGroupForSource"] };
-        branchGroupStore.ensureBranchGroupForSource?.("planning", sessionId, {
+        const group = branchGroupStore.ensureBranchGroupForSource?.("planning", sessionId, {
           branchName: resolvedBranch ?? resolvedBaseBranch ?? settingsDefaultBranch,
           autoMerge: session.autoMerge ?? settingsAutoMerge,
         });
+        if (group) {
+          planningGroupId = group.id;
+        }
       }
+
+      const planningBranchContext = {
+        ...(planningGroupId ? { groupId: planningGroupId } : {}),
+        source: "planning" as const,
+        assignmentMode: branchMode,
+        inheritedBaseBranch: resolvedBaseBranch,
+      };
 
       const createdTasks = [] as Awaited<ReturnType<TaskStore["createTask"]>>[];
       const tempIdToTaskId = new Map<string, string>();
@@ -983,6 +993,25 @@ export function registerPlanningSubtaskRoutes(ctx: ApiRoutesContext, deps: Plann
     };
   };
 
+  const logPlanningCreateWarning = (message: string, error: unknown, metadata?: Record<string, unknown>): void => {
+    planningLogger.warn(message, {
+      ...metadata,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  };
+
+  const runPlanningCreateSideEffect = async (
+    message: string,
+    work: () => Promise<unknown> | unknown,
+    metadata?: Record<string, unknown>,
+  ): Promise<void> => {
+    try {
+      await work();
+    } catch (error) {
+      logPlanningCreateWarning(message, error, metadata);
+    }
+  };
+
   /**
    * POST /api/planning/create-task
    * Create a task from a completed planning session.
@@ -1103,18 +1132,30 @@ export function registerPlanningSubtaskRoutes(ctx: ApiRoutesContext, deps: Plann
         baseBranch: resolvedBaseBranch,
       });
 
-      // Update task with suggested size if provided
+      // Update task with suggested size if provided.
       if (summary.suggestedSize) {
-        await scopedStore.updateTask(task.id, { size: summary.suggestedSize });
+        await runPlanningCreateSideEffect(
+          "Planning create-task size update failed",
+          () => scopedStore.updateTask(task.id, { size: summary.suggestedSize }),
+          { taskId: task.id, sessionId },
+        );
       }
 
-      // Log the planning mode creation
-      await scopedStore.logEntry(task.id, "Created via Planning Mode", `Initial plan: ${(initialPlan ?? "").slice(0, 200)}`);
+      // Log the planning mode creation.
+      await runPlanningCreateSideEffect(
+        "Planning create-task log entry failed",
+        () => scopedStore.logEntry(task.id, "Created via Planning Mode", `Initial plan: ${(initialPlan ?? "").slice(0, 200)}`),
+        { taskId: task.id, sessionId },
+      );
 
       // Release any live in-memory planning runtime for this session, but
       // keep the persisted completed row so planning history can still list
       // and restore the summary after single-task creation.
-      releaseSession(sessionId);
+      await runPlanningCreateSideEffect(
+        "Planning create-task session release failed",
+        () => releaseSession(sessionId),
+        { taskId: task.id, sessionId },
+      );
 
       res.status(201).json(task);
     } catch (err: unknown) {
@@ -1267,12 +1308,12 @@ export function registerPlanningSubtaskRoutes(ctx: ApiRoutesContext, deps: Plann
       const { branch: resolvedBranch, baseBranch: resolvedBaseBranch } =
         resolveBranchSelection(branchSelection, branch, baseBranch);
       const { mode: branchMode } = resolveBranchAssignmentContext(branchAssignment);
-      const planningBranchContext = {
-        groupId: `planning:${planningSessionId}`,
-        source: "planning" as const,
-        assignmentMode: branchMode,
-        inheritedBaseBranch: resolvedBaseBranch,
-      };
+      // Stamp the real BranchGroup id (BG-…) so listTasksByBranchGroup(group.id)
+      // resolves members. The group is only ensured (and the id set) in shared
+      // mode below. Non-shared members get NO groupId — stamping a synthetic
+      // `planning:<id>` would let the legacy membership fallback sweep them into
+      // a shared group later created for the same planning session.
+      let planningGroupId: string | undefined;
 
       if (branchMode === "shared") {
         const settings = await scopedStore.getSettings();
@@ -1282,11 +1323,21 @@ export function registerPlanningSubtaskRoutes(ctx: ApiRoutesContext, deps: Plann
             : "main";
         const settingsAutoMerge = typeof settings.autoMerge === "boolean" ? settings.autoMerge : false;
         const branchGroupStore = scopedStore as { ensureBranchGroupForSource?: TaskStore["ensureBranchGroupForSource"] };
-        branchGroupStore.ensureBranchGroupForSource?.("planning", planningSessionId, {
+        const group = branchGroupStore.ensureBranchGroupForSource?.("planning", planningSessionId, {
           branchName: resolvedBranch ?? resolvedBaseBranch ?? settingsDefaultBranch,
           autoMerge: session.autoMerge ?? settingsAutoMerge,
         });
+        if (group) {
+          planningGroupId = group.id;
+        }
       }
+
+      const planningBranchContext = {
+        ...(planningGroupId ? { groupId: planningGroupId } : {}),
+        source: "planning" as const,
+        assignmentMode: branchMode,
+        inheritedBaseBranch: resolvedBaseBranch,
+      };
 
       const createdTasks = [] as Awaited<ReturnType<TaskStore["createTask"]>>[];
       const tempIdToTaskId = new Map<string, string>();
@@ -1314,7 +1365,11 @@ export function registerPlanningSubtaskRoutes(ctx: ApiRoutesContext, deps: Plann
         createdTasks.push(task);
 
         if (item.suggestedSize === "S" || item.suggestedSize === "M" || item.suggestedSize === "L") {
-          await scopedStore.updateTask(task.id, { size: item.suggestedSize });
+          await runPlanningCreateSideEffect(
+            "Planning create-tasks size update failed",
+            () => scopedStore.updateTask(task.id, { size: item.suggestedSize }),
+            { taskId: task.id, planningSessionId },
+          );
         }
       }
 
@@ -1326,14 +1381,28 @@ export function registerPlanningSubtaskRoutes(ctx: ApiRoutesContext, deps: Plann
           : [];
 
         if (resolvedDependencies.length > 0) {
-          const updated = await scopedStore.updateTask(created.id, { dependencies: resolvedDependencies });
-          createdTasks[index] = updated;
+          await runPlanningCreateSideEffect(
+            "Planning create-tasks dependency update failed",
+            async () => {
+              const updated = await scopedStore.updateTask(created.id, { dependencies: resolvedDependencies });
+              createdTasks[index] = updated;
+            },
+            { taskId: created.id, planningSessionId },
+          );
         }
 
-        await scopedStore.logEntry(created.id, "Created via Planning Mode (multi-task)", logDetails);
+        await runPlanningCreateSideEffect(
+          "Planning create-tasks log entry failed",
+          () => scopedStore.logEntry(created.id, "Created via Planning Mode (multi-task)", logDetails),
+          { taskId: created.id, planningSessionId },
+        );
       }
 
-      cleanupSession(planningSessionId);
+      await runPlanningCreateSideEffect(
+        "Planning create-tasks session cleanup failed",
+        () => cleanupSession(planningSessionId),
+        { planningSessionId },
+      );
 
       res.status(201).json({ tasks: createdTasks });
     } catch (err: unknown) {
@@ -1463,6 +1532,8 @@ export function registerPlanningSubtaskRoutes(ctx: ApiRoutesContext, deps: Plann
           res.end();
         }
       });
+
+      planningStreamManager.consumeInitialTurn(sessionId)?.();
 
       // Handle client disconnect
       req.on("close", () => {

@@ -9,9 +9,11 @@ import {
   computeUserCommentFingerprint,
 } from "../triage.js";
 import { join } from "node:path";
+import { readFileSync } from "node:fs";
 import { mkdir, writeFile, rm, mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { setTimeout as delay } from "node:timers/promises";
+import { fileURLToPath } from "node:url";
 import { planLog } from "../logger.js";
 
 const { mockReviewStep, mockCreateFnAgent } = vi.hoisted(() => ({
@@ -642,6 +644,67 @@ describe("TRIAGE_SYSTEM_PROMPT", () => {
     expect(TRIAGE_SYSTEM_PROMPT).toContain(
       "7-10 focused steps within a coherent scope is fine as one unit",
     );
+  });
+});
+
+describe("FN-5893 invariant regression wording", () => {
+  const corePromptSource = readFileSync(
+    fileURLToPath(new URL("../../../core/src/agent-prompts.ts", import.meta.url)),
+    "utf8",
+  );
+
+  it("requires invariant-level regression coverage in standard, fast, and core triage prompts", () => {
+    for (const prompt of [
+      TRIAGE_SYSTEM_PROMPT,
+      FAST_TRIAGE_SYSTEM_PROMPT,
+      corePromptSource,
+    ]) {
+      expect(prompt).toContain("invariant across all known surfaces");
+      expect(prompt).toContain("provider/bridge");
+      expect(prompt).toContain("desktop + mobile breakpoints");
+      expect(prompt).toContain("empty/undefined/populated data states");
+      expect(prompt).toContain("FN-5787/FN-5789/FN-5803");
+      expect(prompt).toContain("FN-5751");
+    }
+  });
+
+  it("requires a Surface Enumeration section and blocking REVISE guidance for bug-fix specs", () => {
+    for (const prompt of [TRIAGE_SYSTEM_PROMPT, FAST_TRIAGE_SYSTEM_PROMPT]) {
+      expect(prompt).toContain("## Surface Enumeration");
+      expect(prompt).toContain("spec MUST include a `## Surface Enumeration` section");
+      expect(prompt).toContain("blocking REVISE");
+      expect(prompt).toContain("docs/testing.md");
+      expect(prompt).toContain("duplicate / populated data states");
+      expect(prompt).toContain("shared hooks/components/modules/helpers");
+    }
+
+    expect(corePromptSource).toContain("## Surface Enumeration");
+    expect(corePromptSource).toContain("spec MUST include a \\`## Surface Enumeration\\` section");
+    expect(corePromptSource).toContain("blocking REVISE");
+    expect(corePromptSource).toContain("docs/testing.md");
+    expect(corePromptSource).toContain("duplicate / populated data states");
+    expect(corePromptSource).toContain("shared hooks/components/modules/helpers");
+  });
+
+  it("requires implementation-step testing guidance to enumerate invariant surfaces in standard and fast prompts", () => {
+    for (const prompt of [TRIAGE_SYSTEM_PROMPT, FAST_TRIAGE_SYSTEM_PROMPT]) {
+      expect(prompt).toContain(
+        "Run targeted tests for changed files, asserting the invariant across all known surfaces",
+      );
+      expect(prompt).toContain(
+        "For bug-fix tasks, paste and fill in this checklist in the `## Surface Enumeration` section",
+      );
+    }
+  });
+
+  it("pins the canonical docs checklist heading", () => {
+    const docsTestingSource = readFileSync(
+      fileURLToPath(new URL("../../../../docs/testing.md", import.meta.url)),
+      "utf8",
+    );
+
+    expect(docsTestingSource).toContain("### Surface Enumeration checklist");
+    expect(docsTestingSource).toContain("Providers / bridges / execution paths touched by the invariant");
   });
 });
 

@@ -4,6 +4,16 @@ import * as api from "../../api";
 import { PlanningModeModal } from "../PlanningModeModal";
 import { TaskDetailModal } from "../TaskDetailModal";
 
+const mockAddToast = vi.fn();
+
+vi.mock("../../hooks/useToast", () => ({
+  useToast: () => ({
+    addToast: mockAddToast,
+    removeToast: vi.fn(),
+    toasts: [],
+  }),
+}));
+
 vi.mock("../../hooks/useNavigationHistory", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../hooks/useNavigationHistory")>();
   return {
@@ -113,6 +123,7 @@ describe("PlanningModeModal", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockAddToast.mockReset();
     mockConfirm.mockReset();
     mockConfirm.mockResolvedValue(true);
     MockEventSource.reset();

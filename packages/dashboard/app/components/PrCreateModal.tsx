@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties } from "react";
+import { createPortal } from "react-dom";
+import { useTranslation } from "react-i18next";
 import { AlertTriangle, CheckCircle2, RefreshCw, Sparkles, X, XCircle } from "lucide-react";
 import { getErrorMessage, type PrInfo, type StructuredGhError } from "@fusion/core";
 import {
@@ -6,6 +8,8 @@ import {
   fetchPrOptions,
   fetchPrPreflight,
   generatePrMetadata,
+  pushPrBranch,
+  resolvePrConflicts,
   type PrOptionsLabel,
   type PrOptionsResponse,
   type PrOptionsUser,
@@ -96,6 +100,7 @@ function OptionChips<T extends { login?: string; name?: string; color?: string }
         value={query}
         onChange={(event) => setQuery(event.target.value)}
         placeholder={`Filter ${label.toLowerCase()}`}
+        aria-label={`Filter ${label.toLowerCase()}`}
       />
       {filtered.length > 0 && (
         <div className="pr-create-modal__option-list">
@@ -127,13 +132,24 @@ export function PrCreateModal({
   onCreated,
   addToast,
 }: PrCreateModalProps) {
+  const { t } = useTranslation("app");
   const headingId = useId();
   const modalRef = useRef<HTMLDivElement | null>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
-  const requestSeqRef = useRef(0);
-  const [loading, setLoading] = useState(false);
+  const requestSeqRef = useRef({ metadata: 0, preflight: 0, options: 0 });
+  const preflightRef = useRef<PrPreflightResponse | null>(null);
+  const optionsRef = useRef<PrOptionsResponse | null>(null);
+  const baseBranchTouchedRef = useRef(false);
+  const [metadataLoading, setMetadataLoading] = useState(false);
+  const [preflightLoading, setPreflightLoading] = useState(false);
+  const [optionsLoading, setOptionsLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [metadataError, setMetadataError] = useState<string | null>(null);
+  const [preflightError, setPreflightError] = useState<string | null>(null);
+  const [optionsError, setOptionsError] = useState<string | null>(null);
+  const [pushBranchError, setPushBranchError] = useState<string | null>(null);
+  const [resolveConflictError, setResolveConflictError] = useState<string | null>(null);
   const [lastGhError, setLastGhError] = useState<ModalGhError | null>(null);
   const [aiTitle, setAiTitle] = useState("");
   const [aiBody, setAiBody] = useState("");
@@ -146,54 +162,139 @@ export function PrCreateModal({
   const [preflight, setPreflight] = useState<PrPreflightResponse | null>(null);
   const [baseBranch, setBaseBranch] = useState("");
   const [draft, setDraft] = useState(false);
+  const [pushingBranch, setPushingBranch] = useState(false);
+  const [resolvingConflicts, setResolvingConflicts] = useState(false);
   const [reviewers, setReviewers] = useState<PrOptionsUser[]>([]);
   const [assignees, setAssignees] = useState<PrOptionsUser[]>([]);
   const [labels, setLabels] = useState<PrOptionsLabel[]>([]);
 
   useModalResizePersist(modalRef, open, "fusion:pr-create-modal-size");
 
-  const loadData = useCallback(async (baseOverride?: string) => {
-    const requestId = ++requestSeqRef.current;
-    setLoading(true);
-    setError(null);
+  const applyPreferredBase = useCallback((baseOverride?: string, nextPreflight?: PrPreflightResponse | null, nextOptions?: PrOptionsResponse | null) => {
+    if (baseBranchTouchedRef.current) {
+      return;
+    }
+    const preferredBase = baseOverride
+      ?? defaultBaseBranch
+      ?? nextPreflight?.defaultBaseBranch
+      ?? nextOptions?.baseBranches[0]
+      ?? "";
+    setBaseBranch(preferredBase);
+  }, [defaultBaseBranch]);
+
+  const loadMetadata = useCallback(async (resetContent = false) => {
+    const requestId = ++requestSeqRef.current.metadata;
+    setMetadataLoading(true);
+    setMetadataError(null);
+    if (resetContent) {
+      setAiTitle("");
+      setAiBody("");
+      setTitle("");
+      setBody("");
+      setTemplateUsed(false);
+      setUserEditedTitle(false);
+      setUserEditedBody(false);
+    }
     try {
-      const [metadata, preflightData, optionsData] = await Promise.all([
-        generatePrMetadata(taskId, projectId),
-        fetchPrPreflight(taskId, projectId, baseOverride),
-        fetchPrOptions(taskId, projectId),
-      ]);
-      if (requestId !== requestSeqRef.current) {
+      const metadata = await generatePrMetadata(taskId, projectId);
+      if (requestId !== requestSeqRef.current.metadata) {
         return;
       }
       setAiTitle(metadata.title);
       setAiBody(metadata.body);
-      setTitle((current) => (current || metadata.title));
-      setBody((current) => (current || metadata.body));
+      setTitle((current) => (current.trim() ? current : metadata.title));
+      setBody((current) => (current.trim() ? current : metadata.body));
       setTemplateUsed(metadata.templateUsed);
-      setPreflight(preflightData);
-      setOptions(optionsData);
-      const preferredBase = baseOverride
-        ?? defaultBaseBranch
-        ?? preflightData.defaultBaseBranch
-        ?? optionsData.baseBranches[0]
-        ?? "";
-      setBaseBranch(preferredBase);
     } catch (loadError) {
-      if (requestId === requestSeqRef.current) {
-        setError(getErrorMessage(loadError));
+      if (requestId === requestSeqRef.current.metadata) {
+        setMetadataError(getErrorMessage(loadError));
       }
     } finally {
-      if (requestId === requestSeqRef.current) {
-        setLoading(false);
+      if (requestId === requestSeqRef.current.metadata) {
+        setMetadataLoading(false);
       }
     }
-  }, [defaultBaseBranch, projectId, taskId]);
+  }, [projectId, taskId]);
+
+  const loadPreflight = useCallback(async (baseOverride?: string, resetData = false) => {
+    const requestId = ++requestSeqRef.current.preflight;
+    setPreflightLoading(true);
+    setPreflightError(null);
+    setPushBranchError(null);
+    setResolveConflictError(null);
+    if (resetData) {
+      preflightRef.current = null;
+      setPreflight(null);
+    }
+    try {
+      const preflightData = await fetchPrPreflight(taskId, projectId, baseOverride);
+      if (requestId !== requestSeqRef.current.preflight) {
+        return;
+      }
+      preflightRef.current = preflightData;
+      setPreflight(preflightData);
+      applyPreferredBase(baseOverride, preflightData, optionsRef.current);
+    } catch (loadError) {
+      if (requestId === requestSeqRef.current.preflight) {
+        setPreflightError(getErrorMessage(loadError));
+      }
+    } finally {
+      if (requestId === requestSeqRef.current.preflight) {
+        setPreflightLoading(false);
+      }
+    }
+  }, [applyPreferredBase, projectId, taskId]);
+
+  const loadOptions = useCallback(async (resetData = false) => {
+    const requestId = ++requestSeqRef.current.options;
+    setOptionsLoading(true);
+    setOptionsError(null);
+    if (resetData) {
+      optionsRef.current = null;
+      setOptions(null);
+    }
+    try {
+      const optionsData = await fetchPrOptions(taskId, projectId);
+      if (requestId !== requestSeqRef.current.options) {
+        return;
+      }
+      optionsRef.current = optionsData;
+      setOptions(optionsData);
+      applyPreferredBase(undefined, preflightRef.current, optionsData);
+    } catch (loadError) {
+      if (requestId === requestSeqRef.current.options) {
+        setOptionsError(getErrorMessage(loadError));
+      }
+    } finally {
+      if (requestId === requestSeqRef.current.options) {
+        setOptionsLoading(false);
+      }
+    }
+  }, [applyPreferredBase, projectId, taskId]);
+
+  const loadData = useCallback((baseOverride?: string) => {
+    baseBranchTouchedRef.current = false;
+    setSubmitError(null);
+    setLastGhError(null);
+    setPushBranchError(null);
+    setResolveConflictError(null);
+    setDraft(false);
+    setReviewers([]);
+    setAssignees([]);
+    setLabels([]);
+    setBaseBranch("");
+    void loadMetadata(true);
+    void loadPreflight(baseOverride, true);
+    void loadOptions(true);
+  }, [loadMetadata, loadOptions, loadPreflight]);
 
   useEffect(() => {
     if (!open) return;
-    void loadData();
+    loadData();
     return () => {
-      requestSeqRef.current += 1;
+      requestSeqRef.current.metadata += 1;
+      requestSeqRef.current.preflight += 1;
+      requestSeqRef.current.options += 1;
     };
   }, [loadData, open]);
 
@@ -232,8 +333,14 @@ export function PrCreateModal({
   }, [onClose, open]);
 
   const regenerate = useCallback(async () => {
+    const requestId = ++requestSeqRef.current.metadata;
+    setMetadataLoading(true);
+    setMetadataError(null);
     try {
       const metadata = await generatePrMetadata(taskId, projectId);
+      if (requestId !== requestSeqRef.current.metadata) {
+        return;
+      }
       setAiTitle(metadata.title);
       setAiBody(metadata.body);
       setTitle(metadata.title);
@@ -242,7 +349,13 @@ export function PrCreateModal({
       setUserEditedTitle(false);
       setUserEditedBody(false);
     } catch (regenerateError) {
-      setError(getErrorMessage(regenerateError));
+      if (requestId === requestSeqRef.current.metadata) {
+        setMetadataError(getErrorMessage(regenerateError));
+      }
+    } finally {
+      if (requestId === requestSeqRef.current.metadata) {
+        setMetadataLoading(false);
+      }
     }
   }, [projectId, taskId]);
 
@@ -251,43 +364,73 @@ export function PrCreateModal({
     return [
       {
         key: "branch",
-        label: "Branch pushed to remote",
+        label: t("pr.checkBranch", "Branch pushed to remote"),
         ok: preflight.branchOnRemote,
-        message: preflight.branchOnRemote ? "Remote branch is available." : "Push branch to remote before creating a PR.",
+        message: preflight.branchOnRemote ? t("pr.branchRemoteOk", "Remote branch is available.") : t("pr.branchRemoteFail", "Push branch to remote before creating a PR."),
       },
       {
         key: "commits",
-        label: "Commits available",
+        label: t("pr.checkCommits", "Commits available"),
         ok: preflight.commitsPresent,
-        message: preflight.commitsPresent ? "Commits are ready to submit." : "No commits found for this branch.",
+        message: preflight.commitsPresent ? t("pr.commitsOk", "Commits are ready to submit.") : t("pr.commitsFail", "No commits found for this branch."),
       },
       {
         key: "conflicts",
-        label: "No conflicts with base",
+        label: t("pr.checkConflicts", "No conflicts with base"),
         ok: !preflight.conflictsWithBase,
         warning: preflight.conflictsWithBase,
-        message: preflight.conflictsWithBase ? "Conflicts detected. Resolve conflicts or re-run preflight." : "No merge conflicts detected.",
+        message: preflight.conflictsWithBase ? t("pr.conflictsDetected", "Conflicts detected. Resolve conflicts or re-run preflight.") : t("pr.noConflicts", "No merge conflicts detected."),
       },
       {
         key: "auth",
-        label: "GitHub auth available",
+        label: t("pr.checkAuth", "GitHub auth available"),
         ok: preflight.ghAuthOk,
-        message: preflight.ghAuthOk ? "GitHub CLI auth is available." : "Run gh auth login and try again.",
+        message: preflight.ghAuthOk ? t("pr.authOk", "GitHub CLI auth is available.") : t("pr.authFail", "Run gh auth login and try again."),
       },
     ];
-  }, [preflight]);
+  }, [preflight, t]);
 
   const canSubmit = useMemo(() => checks.every((check) => check.ok), [checks]);
 
   const handleBaseChange = useCallback(async (nextBase: string) => {
+    baseBranchTouchedRef.current = true;
     setBaseBranch(nextBase);
+    await loadPreflight(nextBase);
+  }, [loadPreflight]);
+
+  const handlePushBranch = useCallback(async () => {
+    if (!baseBranch || pushingBranch) return;
+    setPushingBranch(true);
+    setPushBranchError(null);
     try {
-      const nextPreflight = await fetchPrPreflight(taskId, projectId, nextBase);
-      setPreflight(nextPreflight);
-    } catch (loadError) {
-      setError(getErrorMessage(loadError));
+      const response = await pushPrBranch(taskId, baseBranch, projectId);
+      preflightRef.current = response.preflight;
+      setPreflight(response.preflight);
+      setPreflightError(null);
+      addToast(response.result.message, "success");
+    } catch (pushError) {
+      setPushBranchError(getErrorMessage(pushError));
+    } finally {
+      setPushingBranch(false);
     }
-  }, [projectId, taskId]);
+  }, [addToast, baseBranch, projectId, pushingBranch, taskId]);
+
+  const handleResolveConflicts = useCallback(async () => {
+    if (!baseBranch || resolvingConflicts) return;
+    setResolvingConflicts(true);
+    setResolveConflictError(null);
+    try {
+      const response = await resolvePrConflicts(taskId, baseBranch, projectId);
+      preflightRef.current = response.preflight;
+      setPreflight(response.preflight);
+      setPreflightError(null);
+      addToast("Resolved PR conflicts and pushed branch", "success");
+    } catch (resolveError) {
+      setResolveConflictError(getErrorMessage(resolveError));
+    } finally {
+      setResolvingConflicts(false);
+    }
+  }, [addToast, baseBranch, projectId, resolvingConflicts, taskId]);
 
   const payload = useMemo(() => ({
     title: title.trim(),
@@ -302,7 +445,7 @@ export function PrCreateModal({
   const submit = useCallback(async () => {
     if (!payload.title || submitting) return;
     setSubmitting(true);
-    setError(null);
+    setSubmitError(null);
     setLastGhError(null);
     try {
       const prInfo = await createPr(taskId, payload, projectId);
@@ -315,7 +458,7 @@ export function PrCreateModal({
         ? { ...details, operation: "create" }
         : { code: "unknown", message: getErrorMessage(submitError), retryable: true, action: { kind: "retry" }, operation: "create" };
       setLastGhError(structured);
-      setError(structured.message);
+      setSubmitError(structured.message);
     } finally {
       setSubmitting(false);
     }
@@ -323,7 +466,7 @@ export function PrCreateModal({
 
   if (!open) return null;
 
-  return (
+  return createPortal(
     <div className="modal-overlay open" onClick={(event) => event.target === event.currentTarget && onClose()}>
       <div
         ref={modalRef}
@@ -333,67 +476,112 @@ export function PrCreateModal({
         aria-labelledby={headingId}
       >
         <div className="modal-header">
-          <h2 id={headingId}>Create Pull Request</h2>
-          <button type="button" className="modal-close" onClick={onClose} aria-label="Close create pull request modal">
+          <h2 id={headingId}>{t("pr.createTitle", "Create Pull Request")}</h2>
+          <button type="button" className="modal-close" onClick={onClose} aria-label={t("actions.close", "Close")}>
             <X size={20} />
           </button>
         </div>
 
         <div className="pr-create-modal__body">
-          {loading ? <div className="pr-create-modal__loading">Loading PR metadata…</div> : (
-            <>
-              <section className="pr-create-modal__section">
-              <h3 className="pr-create-modal__section-title">Pre-flight checks</h3>
-              <div className="pr-create-modal__preflight">
-                {checks.map((check) => (
-                  <div key={check.key} className={`pr-create-modal__preflight-row ${check.ok ? "is-ok" : "is-failed"}`}>
-                    <span className={`status-dot ${check.ok ? "status-dot--online" : check.warning ? "status-dot--pending" : "status-dot--error"}`} aria-hidden="true" />
-                    {check.ok ? <CheckCircle2 size={16} /> : check.warning ? <AlertTriangle size={16} /> : <XCircle size={16} />}
-                    <div>
-                      <p className="pr-create-modal__preflight-label">{check.label}</p>
-                      <p className="pr-create-modal__preflight-message">{check.message}</p>
-                    </div>
+          <>
+            <section className="pr-create-modal__section">
+              <h3 className="pr-create-modal__section-title">{t("pr.preflightChecks", "Pre-flight checks")}</h3>
+              {preflightLoading ? <div className="pr-create-modal__loading pr-create-modal__section-loading"><span className="status-dot status-dot--pending" aria-hidden="true" />Loading pre-flight checks…</div> : null}
+              {preflightError ? <div className="form-error pr-error" role="alert"><p>{preflightError}</p></div> : null}
+              {!preflightLoading && !preflightError ? (
+                <>
+                  <div className="pr-create-modal__preflight">
+                    {checks.map((check) => (
+                      <div key={check.key} className={`pr-create-modal__preflight-row ${check.ok ? "is-ok" : "is-failed"}`}>
+                        <span className={`status-dot ${check.ok ? "status-dot--online" : check.warning ? "status-dot--pending" : "status-dot--error"}`} aria-hidden="true" />
+                        {check.ok ? <CheckCircle2 size={16} /> : check.warning ? <AlertTriangle size={16} /> : <XCircle size={16} />}
+                        <div>
+                          <p className="pr-create-modal__preflight-label">{check.label}</p>
+                          <p className="pr-create-modal__preflight-message">{check.message}</p>
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-              <button type="button" className="btn btn-sm" onClick={() => void handleBaseChange(baseBranch)}>
-                Re-run preflight
-              </button>
+                  <button type="button" className="btn btn-sm" onClick={() => void handleBaseChange(baseBranch)} disabled={preflightLoading}>
+                    {preflightLoading ? <RefreshCw size={14} className="spin" /> : null}
+                    {t("pr.rerunPreflight", "Re-run preflight")}
+                  </button>
+                  {!preflight?.branchOnRemote ? (
+                    <div className="card pr-create-modal__preflight-remediation">
+                      <div className="pr-create-modal__conflict-copy">
+                        <p className="pr-create-modal__conflict-title">Push branch to remote</p>
+                        <p className="pr-create-modal__conflict-message">Fusion will push this task&apos;s branch to origin so the PR can be created.</p>
+                      </div>
+                      <button
+                        type="button"
+                        className="btn btn-sm"
+                        onClick={() => void handlePushBranch()}
+                        disabled={pushingBranch || preflightLoading || !baseBranch}
+                      >
+                        {pushingBranch ? <RefreshCw size={14} className="spin" /> : null}
+                        Push branch to remote
+                      </button>
+                    </div>
+                  ) : null}
+                  {preflight?.conflictsWithBase ? (
+                    <div className="card pr-create-modal__conflict-resolution">
+                      <div className="pr-create-modal__conflict-copy">
+                        <p className="pr-create-modal__conflict-title">Resolve conflicts with AI</p>
+                        <p className="pr-create-modal__conflict-message">Fusion will use AI to resolve conflicts on this branch and push it.</p>
+                      </div>
+                      <button
+                        type="button"
+                        className="btn btn-sm"
+                        onClick={() => void handleResolveConflicts()}
+                        disabled={resolvingConflicts || preflightLoading || !baseBranch}
+                      >
+                        {resolvingConflicts ? <RefreshCw size={14} className="spin" /> : null}
+                        Resolve conflicts with AI
+                      </button>
+                    </div>
+                  ) : null}
+                </>
+              ) : null}
             </section>
 
             <section className="pr-create-modal__section">
               <div className="pr-create-modal__title-row">
-                <label className="pr-create-modal__label" htmlFor="pr-create-modal-title">Title</label>
+                <label className="pr-create-modal__label" htmlFor="pr-create-modal-title">{t("pr.titleLabel", "Title")}</label>
                 <div className="pr-create-modal__inline-actions">
-                  <button type="button" className="btn btn-sm" onClick={() => void regenerate()}><Sparkles size={14} />Regenerate</button>
-                  {userEditedTitle && <button type="button" className="btn btn-sm" onClick={() => { setTitle(aiTitle); setUserEditedTitle(false); }}>Revert to AI version</button>}
+                  <button type="button" className="btn btn-sm" onClick={() => void regenerate()} disabled={metadataLoading}><Sparkles size={14} />{t("pr.regenerate", "Regenerate")}</button>
+                  {userEditedTitle && <button type="button" className="btn btn-sm" onClick={() => { setTitle(aiTitle); setUserEditedTitle(false); }}>{t("pr.revertToAi", "Revert to AI version")}</button>}
                 </div>
               </div>
+              {metadataLoading ? <div className="pr-create-modal__loading pr-create-modal__section-loading"><span className="status-dot status-dot--pending" aria-hidden="true" />Generating AI title…</div> : null}
+              {metadataError ? <div className="form-error pr-error" role="alert"><p>{metadataError}</p></div> : null}
               <input id="pr-create-modal-title" className="input" value={title} onChange={(event) => { setTitle(event.target.value); setUserEditedTitle(true); }} />
             </section>
 
             <section className="pr-create-modal__section">
               <div className="pr-create-modal__title-row">
-                <label className="pr-create-modal__label" htmlFor="pr-create-modal-body">Body</label>
+                <label className="pr-create-modal__label" htmlFor="pr-create-modal-body">{t("pr.bodyLabel", "Body")}</label>
                 <div className="pr-create-modal__inline-actions">
-                  <button type="button" className="btn btn-sm" onClick={() => void regenerate()}><Sparkles size={14} />Regenerate</button>
-                  {userEditedBody && <button type="button" className="btn btn-sm" onClick={() => { setBody(aiBody); setUserEditedBody(false); }}>Revert to AI version</button>}
+                  <button type="button" className="btn btn-sm" onClick={() => void regenerate()} disabled={metadataLoading}><Sparkles size={14} />{t("pr.regenerate", "Regenerate")}</button>
+                  {userEditedBody && <button type="button" className="btn btn-sm" onClick={() => { setBody(aiBody); setUserEditedBody(false); }}>{t("pr.revertToAi", "Revert to AI version")}</button>}
                 </div>
               </div>
+              {metadataLoading ? <div className="pr-create-modal__loading pr-create-modal__section-loading"><span className="status-dot status-dot--pending" aria-hidden="true" />Generating AI body…</div> : null}
               <textarea id="pr-create-modal-body" className="input pr-create-modal__body-input" value={body} onChange={(event) => { setBody(event.target.value); setUserEditedBody(true); }} rows={8} />
-              {templateUsed && <p className="pr-create-template-hint">Using <code>.github/pull_request_template.md</code></p>}
+              {templateUsed && <p className="pr-create-template-hint">{t("pr.usingTemplate", "Using <code>.github/pull_request_template.md</code>")}</p>}
             </section>
 
             <section className="pr-create-modal__section pr-create-modal__grid-two">
               <div>
-                <label className="pr-create-modal__label" htmlFor="pr-create-modal-base">Base branch</label>
-                <select id="pr-create-modal-base" className="select" value={baseBranch} onChange={(event) => void handleBaseChange(event.target.value)}>
+                <label className="pr-create-modal__label" htmlFor="pr-create-modal-base">{t("pr.baseBranch", "Base branch")}</label>
+                {optionsLoading ? <div className="pr-create-modal__loading pr-create-modal__section-loading"><span className="status-dot status-dot--pending" aria-hidden="true" />Loading PR options…</div> : null}
+                {optionsError ? <div className="form-error pr-error" role="alert"><p>{optionsError}</p></div> : null}
+                <select id="pr-create-modal-base" className="select" value={baseBranch} onChange={(event) => void handleBaseChange(event.target.value)} disabled={optionsLoading || Boolean(optionsError) || (options?.baseBranches?.length ?? 0) === 0}>
                   {(options?.baseBranches ?? []).map((branch) => <option key={branch} value={branch}>{branch}</option>)}
                 </select>
               </div>
               <label className="checkbox-label pr-create-modal__draft">
                 <input type="checkbox" checked={draft} onChange={(event) => setDraft(event.target.checked)} />
-                Create as draft
+                {t("pr.createAsDraft", "Create as draft")}
               </label>
             </section>
 
@@ -424,9 +612,10 @@ export function PrCreateModal({
             />
 
             <details className="pr-create-collapsible" open>
-              <summary>Diff & commit preview</summary>
+              <summary>{t("pr.previewTitle", "Diff & commit preview")}</summary>
               <div className="pr-create-modal__preview">
-                <h4>Commits</h4>
+                <h4>{t("pr.commitsLabel", "Commits")}</h4>
+                {!preflightLoading && !preflightError && (preflight?.commits?.length ?? 0) === 0 ? <p className="pr-create-template-hint">No commits found.</p> : null}
                 {(preflight?.commits ?? []).map((commit) => (
                   <div className="pr-create-modal__commit-row" key={commit.sha}>
                     <code>{commit.sha.slice(0, 7)}</code>
@@ -434,7 +623,8 @@ export function PrCreateModal({
                     <span>{commit.author}</span>
                   </div>
                 ))}
-                <h4>Changed files</h4>
+                <h4>{t("pr.changedFilesLabel", "Changed files")}</h4>
+                {!preflightLoading && !preflightError && (preflight?.changedFiles?.length ?? 0) === 0 ? <p className="pr-create-template-hint">No changed files detected.</p> : null}
                 {(preflight?.changedFiles ?? []).map((file) => (
                   <div className="pr-create-modal__file-row" key={file.path}>
                     <span>{file.path}</span>
@@ -445,30 +635,48 @@ export function PrCreateModal({
               </div>
             </details>
 
-              {error && (
-                <div className="form-error pr-error" role="alert">
-                  <p>{error}</p>
-                  {lastGhError?.hint ? <p className="pr-error__hint">{lastGhError.hint}</p> : null}
-                  <div className="pr-error__actions">
-                    {lastGhError?.action?.kind === "shell" ? <p>Action: run <code>{lastGhError.action.command}</code></p> : null}
-                    {lastGhError?.action?.kind === "open" ? <p>Action: open <a href={lastGhError.action.url} target="_blank" rel="noreferrer">docs</a></p> : null}
-                    {lastGhError?.retryable ? <button type="button" className="btn btn-sm pr-error__retry" onClick={() => void submit()}>Retry</button> : null}
-                    <button type="button" className="btn btn-sm pr-error__dismiss" onClick={() => { setLastGhError(null); setError(null); }} aria-label="Dismiss PR error">×</button>
-                  </div>
+            {pushBranchError ? (
+              <div className="form-error pr-error" role="alert">
+                <p>{pushBranchError}</p>
+                <div className="pr-error__actions">
+                  <button type="button" className="btn btn-sm pr-error__dismiss" onClick={() => setPushBranchError(null)} aria-label="Dismiss push branch error">×</button>
                 </div>
-              )}
-            </>
-          )}
+              </div>
+            ) : null}
+
+            {resolveConflictError ? (
+              <div className="form-error pr-error" role="alert">
+                <p>{resolveConflictError}</p>
+                <div className="pr-error__actions">
+                  <button type="button" className="btn btn-sm pr-error__dismiss" onClick={() => setResolveConflictError(null)} aria-label="Dismiss conflict resolution error">×</button>
+                </div>
+              </div>
+            ) : null}
+
+            {submitError && (
+              <div className="form-error pr-error" role="alert">
+                <p>{submitError}</p>
+                {lastGhError?.hint ? <p className="pr-error__hint">{lastGhError.hint}</p> : null}
+                <div className="pr-error__actions">
+                  {lastGhError?.action?.kind === "shell" ? <p>Action: run <code>{lastGhError.action.command}</code></p> : null}
+                  {lastGhError?.action?.kind === "open" ? <p>Action: open <a href={lastGhError.action.url} target="_blank" rel="noreferrer">docs</a></p> : null}
+                  {lastGhError?.retryable ? <button type="button" className="btn btn-sm pr-error__retry" onClick={() => void submit()}>{t("actions.retry", "Retry")}</button> : null}
+                  <button type="button" className="btn btn-sm pr-error__dismiss" onClick={() => { setLastGhError(null); setSubmitError(null); }} aria-label={t("pr.dismissError", "Dismiss PR error")}>×</button>
+                </div>
+              </div>
+            )}
+          </>
         </div>
 
         <div className="modal-actions">
-          <button type="button" className="btn" onClick={onClose} disabled={submitting}>Cancel</button>
-          <button type="button" className="btn btn-primary" onClick={() => void submit()} disabled={!canSubmit || !title.trim() || submitting || loading}>
+          <button type="button" className="btn" onClick={onClose} disabled={submitting}>{t("actions.cancel", "Cancel")}</button>
+          <button type="button" className="btn btn-primary" onClick={() => void submit()} disabled={!preflight || preflightLoading || !canSubmit || !title.trim() || submitting}>
             {submitting ? <RefreshCw size={14} className="spin" /> : null}
-            {draft ? "Create draft PR" : "Create PR"}
+            {draft ? t("pr.createDraftPr", "Create draft PR") : t("pr.createPr", "Create PR")}
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

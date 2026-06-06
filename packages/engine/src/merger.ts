@@ -1,11 +1,17 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { execSync, exec, execFile } from "node:child_process";
+import { execSync, exec } from "node:child_process";
+import * as childProcess from "node:child_process";
 import { promisify } from "node:util";
 import { IDENTITY_GUARD_BYPASS_ENV } from "./worktree-hooks.js";
 
 // Internal git plumbing intentionally bypasses sandbox backends.
 const execAsync = promisify(exec);
-const execFileAsync = promisify(execFile);
+// `execFile` is resolved lazily through the namespace import so test mocks that
+// only stub `exec`/`execSync` (the repo's established node:child_process mock
+// convention) can still load this module; `execFile` is only required when a
+// code path actually shells out.
+const execFileAsync: (file: string, args: string[], opts?: import("node:child_process").ExecFileOptions) => Promise<{ stdout: string; stderr: string }> = (file, args, opts) =>
+  (promisify(childProcess.execFile) as (f: string, a: string[], o?: object) => Promise<{ stdout: string; stderr: string }>)(file, args, opts);
 
 /**
  * Env for merger-driven `git commit` calls so the identity-guard pre-commit
@@ -86,6 +92,7 @@ import {
   normalizeMergeAdvanceAutoSyncMode,
   isMergeRequestContractShadowEnabled,
 } from "@fusion/core";
+import { resolveMergePolicy, type MergeFileScopeMode } from "./merge-trait.js";
 import { describeModel, promptWithFallback } from "./pi.js";
 import { accumulateSessionTokenUsage } from "./session-token-usage.js";
 import { createResolvedAgentSession, extractRuntimeHint, resolveMergerSessionModel } from "./agent-session-helpers.js";
@@ -495,14 +502,23 @@ export function hasInstallState(rootDir: string): boolean {
 export function shouldSyncDependenciesForMerge(
   stagedFiles: string[],
   installStatePresent: boolean,
+  hasConfiguredInitCommand = false,
 ): boolean {
+  if (hasConfiguredInitCommand) return true;
   if (!installStatePresent) return true;
   return stagedFiles.some((file) =>
     DEPENDENCY_SYNC_TRIGGER_PATTERNS.some((pattern) => matchGlob(file, pattern)),
   );
 }
 
-function getDependencySyncCommand(rootDir: string): string | null {
+function getConfiguredWorktreeInitCommand(settings?: Settings | null): string | null {
+  const trimmed = settings?.worktreeInitCommand?.trim();
+  return trimmed ? trimmed : null;
+}
+
+function getDependencySyncCommand(rootDir: string, settings?: Settings | null): string | null {
+  const configuredCommand = getConfiguredWorktreeInitCommand(settings);
+  if (configuredCommand) return configuredCommand;
   if (existsSync(join(rootDir, "pnpm-lock.yaml"))) return "pnpm install --frozen-lockfile";
   if (existsSync(join(rootDir, "package-lock.json"))) return "npm install";
   if (existsSync(join(rootDir, "yarn.lock"))) return "yarn install --frozen-lockfile";
@@ -550,17 +566,21 @@ async function syncDependenciesForMerge(
   store: TaskStore,
   rootDir: string,
   taskId: string,
+  settings?: Settings | null,
   signal?: AbortSignal,
 ): Promise<void> {
-  const installCommand = getDependencySyncCommand(rootDir);
+  const configuredCommand = getConfiguredWorktreeInitCommand(settings);
+  const installCommand = getDependencySyncCommand(rootDir, settings);
   if (!installCommand) return;
+
+  const shouldUseInstallMarker = configuredCommand === null;
 
   // Skip the install if node_modules is present and the lockfile content
   // matches the hash recorded after the last successful install. Caller's
   // shouldSyncDependenciesForMerge gate already filters most no-ops; this
   // covers the case where package.json (but not the lockfile) is staged, and
   // the case where multiple merge attempts hit the same worktree in a row.
-  const lockHash = computeLockfileHash(rootDir);
+  const lockHash = shouldUseInstallMarker ? computeLockfileHash(rootDir) : null;
   if (lockHash && hasInstallState(rootDir) && readInstallMarker(rootDir) === lockHash) {
     mergerLog.log(`${taskId}: skipping dependency sync (lockfile unchanged since last install)`);
     await store.logEntry(
@@ -4911,10 +4931,16 @@ export async function assertSquashOverlapsFileScope(params: {
   taskId: string;
   rootDir: string;
   task: Task;
+  /** U7 (R10): when the merge trait's `fileScope: "custom"` mode is active,
+   *  these glob/path rules replace the task's File Scope section as the
+   *  declared scope. `scopeOverride` is a documented no-op only under
+   *  `fileScope: "off"` (handled by the caller, which skips this assert). */
+  customScopeRules?: string[];
 }): Promise<void> {
-  const { store, taskId, rootDir, task } = params;
+  const { store, taskId, rootDir, task, customScopeRules } = params;
+  const hasCustomRules = Array.isArray(customScopeRules) && customScopeRules.length > 0;
 
-  if (task.scopeOverride === true) {
+  if (!hasCustomRules && task.scopeOverride === true) {
     const reasonSuffix = task.scopeOverrideReason?.trim()
       ? ` — reason: ${task.scopeOverrideReason.trim()}`
       : "";
@@ -4928,11 +4954,16 @@ export async function assertSquashOverlapsFileScope(params: {
     return;
   }
 
-  if (typeof (store as Partial<TaskStore>).parseFileScopeFromPrompt !== "function") {
-    return;
+  let declaredScope: string[];
+  if (hasCustomRules) {
+    // Custom rules replace the parsed File Scope section entirely.
+    declaredScope = customScopeRules;
+  } else {
+    if (typeof (store as Partial<TaskStore>).parseFileScopeFromPrompt !== "function") {
+      return;
+    }
+    declaredScope = await store.parseFileScopeFromPrompt(taskId);
   }
-
-  const declaredScope = await store.parseFileScopeFromPrompt(taskId);
   if (declaredScope.length === 0) {
     return;
   }
@@ -4967,10 +4998,68 @@ export async function enforceSquashFileScopeInvariant(params: {
   resetLabel: string;
   auditor?: RunAuditor;
 }): Promise<void> {
+  // U7 (R10): resolve the file-scope enforcement mode from the merge trait
+  // (flag ON) or settings (back-compat). The lost-work guard trio is NOT gated
+  // by this mode — it lives elsewhere in the mechanics and stays enforced for
+  // every mode (KTD-6).
+  const policy = await resolveMergePolicy(params.store, params.task);
+  const mode: MergeFileScopeMode = policy.fileScope;
+
+  if (mode === "off") {
+    // Skip the violation throw, but emit exactly one per-merge audit event
+    // recording that scope enforcement was disabled by workflow config. Per-task
+    // `scopeOverride` is a documented no-op in this mode (the scope check itself
+    // is disabled, so there is nothing to override).
+    if (params.auditor) {
+      try {
+        await params.auditor.git({
+          type: "merge:file-scope-enforcement-disabled",
+          target: params.taskId,
+          metadata: {
+            resetLabel: params.resetLabel,
+            mode: "off",
+            disabledByWorkflowConfig: true,
+            scopeOverrideIsNoOp: params.task.scopeOverride === true,
+          },
+        });
+      } catch (auditErr) {
+        mergerLog.warn(`${params.taskId}: failed to emit run_audit event for file-scope-enforcement-disabled: ${auditErr instanceof Error ? auditErr.message : String(auditErr)}`);
+      }
+    }
+    return;
+  }
+
+  const customScopeRules = mode === "custom" ? policy.fileScopeRules : undefined;
+
   try {
-    await assertSquashOverlapsFileScope(params);
+    await assertSquashOverlapsFileScope({ ...params, customScopeRules });
   } catch (error: unknown) {
     if (!(error instanceof FileScopeViolationError)) {
+      throw error;
+    }
+    // `strict` re-throws the violation (hard guardrail that blocks the merge);
+    // `warn`/`custom` log + proceed, with the audit carrying the violating file
+    // list (same payload as the error).
+    if (mode === "strict") {
+      if (params.auditor) {
+        try {
+          await params.auditor.git({
+            type: "merge:file-scope-violation",
+            target: params.taskId,
+            metadata: {
+              resetLabel: params.resetLabel,
+              mode: "strict",
+              stagedFiles: error.stagedFiles,
+              declaredScope: error.declaredScope,
+              stagedFileCount: error.stagedFiles.length,
+              declaredScopeCount: error.declaredScope.length,
+              warningOnly: false,
+            },
+          });
+        } catch (auditErr) {
+          mergerLog.warn(`${params.taskId}: failed to emit run_audit event for FileScopeViolationError (strict): ${auditErr instanceof Error ? auditErr.message : String(auditErr)}`);
+        }
+      }
       throw error;
     }
     const warningMessage = `${error.message} Warning only — continuing merge.`;
@@ -5928,6 +6017,21 @@ export interface MergerOptions {
   allowDirtyLocalCheckoutSync?: boolean;
   /** Plugin runner for runtime selection. When provided, enables plugin runtime lookup. */
   pluginRunner?: import("./plugin-runner.js").PluginRunner;
+  /**
+   * Injected group-PR sync callback (KTD7, U6). When a shared branch-group
+   * member lands and its group has a persisted open PR, the merger uses this to
+   * push an updated PR body (member checklist + x/N completion). Failures are
+   * non-fatal and retryable on the next landing. Injected from the CLI layer so
+   * the engine never imports the dashboard GitHub client.
+   */
+  syncGroupPr?: import("./group-merge-coordinator.js").SyncGroupPrFn;
+  /**
+   * Test seam (T14): the group-PR sync is fired-and-forgotten so a hung GitHub
+   * call can never stall merge completion. When provided, the merger hands the
+   * background sync promise here so deterministic tests can `await` it instead of
+   * racing the fire-and-forget. Production callers omit this.
+   */
+  onGroupPrSyncSettled?: (settled: Promise<void>) => void;
 }
 
 function quoteArg(value: string): string {
@@ -7201,9 +7305,10 @@ async function tryEarlyEmptyOwnDiffFinalize(input: {
   log: { warn: (m: string) => void; log: (m: string) => void };
   projectRootDir: string;
   mergeTargetBranch: string;
+  mergeTargetSource: MergeDetails["mergeTargetSource"];
   completeTask: (result: MergeResult) => Promise<void>;
 }): Promise<MergeResult | null> {
-  const { task, taskId, store, audit, log, projectRootDir, mergeTargetBranch } = input;
+  const { task, taskId, store, audit, log, projectRootDir, mergeTargetBranch, mergeTargetSource } = input;
   const branch = resolveTaskWorkingBranch(task);
 
   // 1. Branch exists?
@@ -7265,6 +7370,7 @@ async function tryEarlyEmptyOwnDiffFinalize(input: {
     mergedAt,
     prNumber: task.prInfo?.number,
     mergeTargetBranch,
+    mergeTargetSource,
   };
   await store.updateTask(taskId, { mergeDetails, modifiedFiles: [] });
   await store.logEntry(
@@ -7404,9 +7510,58 @@ async function tryEarlyEmptyOwnDiffFinalize(input: {
     noOpReason,
     mergedAt,
     mergeTargetBranch,
+    mergeTargetSource,
   };
   await input.completeTask(result);
   return result;
+}
+
+/**
+ * U6 (R6) sync-on-landing seam, extracted for narrow unit testing (FN-5048: the
+ * stale-snapshot write guard is covered in-memory, not via the slow real-git
+ * reliability suite). Pushes the group PR body for a group with a persisted
+ * open PR, then persists out-of-band reconciliation — but only when the group
+ * still points at the exact PR snapshot that was synced (same prNumber AND
+ * prState). A newer landing/promotion that swapped in a different PR mid-sync
+ * must not be clobbered by this stale write.
+ */
+export async function syncGroupPrOnLanding(input: {
+  store: Pick<TaskStore, "getBranchGroup" | "listTasksByBranchGroup" | "updateBranchGroup">;
+  groupId: string;
+  cwd: string;
+  syncGroupPr: import("./group-merge-coordinator.js").SyncGroupPrFn;
+}): Promise<void> {
+  const { store, groupId, cwd, syncGroupPr } = input;
+  const latestGroup = store.getBranchGroup(groupId);
+  if (!latestGroup || latestGroup.prNumber == null || latestGroup.prState !== "open") {
+    return;
+  }
+  const members = await store.listTasksByBranchGroup(latestGroup.id);
+  const reconciled = await syncGroupPr({
+    cwd,
+    group: latestGroup,
+    members,
+  });
+  // Guard against stale snapshots: a newer landing/promotion may have stored a
+  // different (e.g. newer open) PR for this group while we were awaiting the
+  // sync. Re-read and only persist when the snapshot still matches.
+  const currentGroup = store.getBranchGroup(groupId);
+  if (
+    !currentGroup ||
+    currentGroup.prNumber !== latestGroup.prNumber ||
+    currentGroup.prState !== latestGroup.prState
+  ) {
+    return;
+  }
+  // Out-of-band reconciliation: if GitHub reports the PR is no longer open
+  // (closed/merged), persist the corrected prState rather than leaving a stale "open".
+  if (reconciled.prState !== currentGroup.prState) {
+    store.updateBranchGroup(currentGroup.id, {
+      prState: reconciled.prState,
+      prNumber: reconciled.prNumber,
+      prUrl: reconciled.prUrl,
+    });
+  }
 }
 
 export async function aiMergeTask(
@@ -7449,6 +7604,11 @@ export async function aiMergeTask(
 
   const projectRootDir = rootDir;
   const settings = await store.getSettings();
+  // U7 (R10): resolve the merge trait's policy (strategy / fileScope / rules)
+  // from the task's workflow when the workflowColumns flag is ON, falling back
+  // to the existing settings knobs otherwise. Read-through only — merge
+  // mechanics (and the non-configurable lost-work guard trio) are untouched.
+  const mergePolicy = await resolveMergePolicy(store, task, settings);
   const resolvedIntegrationBranch = await resolveIntegrationBranch(projectRootDir, settings);
   const groupRouting = await resolveBranchGroupMergeRouting({
     task,
@@ -7495,6 +7655,47 @@ export async function aiMergeTask(
       });
     } catch {
       // best-effort audit
+    }
+
+    // U6 (R6): keep the single managed group PR in sync as members land. Only
+    // when the group already has a persisted open PR; the body always reflects
+    // the full current member state, so each landing pushes the latest x/N
+    // (idempotent body rewrite — coalesces naturally, no queue).
+    //
+    // T14: this is TRULY best-effort. A hung GitHub call must NOT stall merge
+    // completion, so we fire-and-forget the sync and route any failure to the
+    // existing non-fatal audit event via `.catch`. `cwd` is the project root so
+    // the callback resolves the repo identity per-project (not from process cwd)
+    // in multi-project daemons. The optional `onGroupPrSyncSettled` hands the
+    // background promise to tests so they can await it deterministically.
+    if (options.syncGroupPr) {
+      const syncGroupPr = options.syncGroupPr;
+      const groupId = groupRouting.branchGroup.id;
+      const settled = syncGroupPrOnLanding({
+        store,
+        groupId,
+        cwd: projectRootDir,
+        syncGroupPr,
+      }).catch((err) => {
+        // Non-fatal: never fail the merge/landing because PR sync failed.
+        try {
+          store.recordRunAuditEvent({
+            taskId,
+            agentId: "merger",
+            runId: `merge-${taskId}`,
+            domain: "git",
+            mutationType: "merge:branch-group-pr-sync-failed",
+            target: taskId,
+            metadata: {
+              groupId,
+              error: err instanceof Error ? err.message : String(err),
+            },
+          });
+        } catch {
+          // best-effort audit
+        }
+      });
+      options.onGroupPrSyncSettled?.(settled);
     }
   };
   if (groupRouting) {
@@ -7613,6 +7814,7 @@ export async function aiMergeTask(
         log: mergerLog,
         projectRootDir,
         mergeTargetBranch: mergeTarget.branch,
+        mergeTargetSource: mergeTarget.source,
         completeTask: (result) => completeTask(store, taskId, result),
       });
       if (earlyResult) return earlyResult;
@@ -9077,8 +9279,17 @@ export async function aiMergeTask(
 
   let selectedPostMergeAuditStrategy: PostMergeAuditStrategy = "squash";
   let classifiedBranchCommits: BranchCommitClassification[] = [];
-  if (settings.mergeStrategy !== "pull-request") {
-    const configuredRoute = resolveDirectMergeCommitStrategy(settings, task.prompt);
+  // U7 (R10): `pr-only` authored on the merge trait routes through the PR flow
+  // exactly like `settings.mergeStrategy === "pull-request"` — no direct-merge
+  // commit routing runs.
+  const isPullRequestRoute = settings.mergeStrategy === "pull-request" || mergePolicy.pullRequestOnly;
+  if (!isPullRequestRoute) {
+    // When the workflow's merge trait authored a commit strategy, it takes
+    // precedence over the project/prompt setting (read-through, mechanics
+    // unchanged); otherwise fall back to the existing resolver.
+    const configuredRoute = mergePolicy.source === "workflow"
+      ? { strategy: mergePolicy.commitStrategy, source: "workflow" as const }
+      : resolveDirectMergeCommitStrategy(settings, task.prompt);
     if (configuredRoute.strategy === "auto") {
       try {
         const classification = await classifyBranchCommitsForDirectMerge(
@@ -10947,8 +11158,15 @@ export async function executeMergeAttempt(
     if (testCommand || buildCommand) {
       throwIfAborted(options.signal, taskId);
       const stagedFiles = await getStagedFiles(rootDir);
-      if (shouldSyncDependenciesForMerge(stagedFiles, hasInstallState(rootDir))) {
-        await syncDependenciesForMerge(store, rootDir, taskId, options.signal);
+      const configuredMergeInitCommand = getConfiguredWorktreeInitCommand(settings as Settings);
+      if (
+        shouldSyncDependenciesForMerge(
+          stagedFiles,
+          hasInstallState(rootDir),
+          configuredMergeInitCommand !== null,
+        )
+      ) {
+        await syncDependenciesForMerge(store, rootDir, taskId, settings as Settings, options.signal);
       }
     }
 

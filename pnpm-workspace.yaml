@@ -1,3 +1,17 @@
+ignoredBuiltDependencies:
+  - '@google/genai'
+  - better-sqlite3
+  - cpu-features
+  - electron-winstaller
+  - keytar
+  - sharp
+  - ssh2
+onlyBuiltDependencies:
+  - '@homebridge/node-pty-prebuilt-multiarch'
+  - electron
+  - esbuild
+  - koffi
+  - protobufjs
 packages:
   - "packages/*"
   - "plugins/examples/*"
@@ -7,9 +21,11 @@ packages:
   - "plugins/fusion-plugin-openclaw-runtime"
   - "plugins/fusion-plugin-hermes-runtime"
   - "plugins/fusion-plugin-droid-runtime"
+  - "plugins/fusion-plugin-acp-runtime"
   - "plugins/fusion-plugin-cursor-runtime"
   - "plugins/fusion-plugin-agent-browser"
   - "plugins/fusion-plugin-whatsapp-chat"
   - "plugins/fusion-plugin-roadmap"
   - "plugins/fusion-plugin-even-realities-glasses"
   - "plugins/fusion-plugin-reports"
+  - "plugins/fusion-plugin-compound-engineering"

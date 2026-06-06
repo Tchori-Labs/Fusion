@@ -17,6 +17,7 @@ import { Scheduler } from "../scheduler.js";
 import type { PrMonitor, PrComment } from "../pr-monitor.js";
 import type { PrInfo } from "@fusion/core";
 import { TaskExecutor, type TaskExecutorOptions } from "../executor.js";
+import { buildPrNodeDeps } from "../pr-nodes.js";
 import { WorktreePool, isGitRepository, type PoolInvariantViolation } from "../worktree-pool.js";
 import { AgentSemaphore } from "../concurrency.js";
 import { HeartbeatMonitor, HeartbeatTriggerScheduler, type WakeContext } from "../agent-heartbeat.js";
@@ -34,7 +35,7 @@ import type {
 import { runtimeLog } from "../logger.js";
 import { StuckTaskDetector } from "../stuck-task-detector.js";
 import type { UsageLimitPauser } from "../usage-limit-detector.js";
-import { SelfHealingManager } from "../self-healing.js";
+import { SelfHealingManager, VALIDATOR_RUN_STALE_MAX_AGE_MS } from "../self-healing.js";
 import { RestartRecoveryCoordinator } from "../restart-recovery-coordinator.js";
 import { MeshLeaseManager } from "../mesh-lease-manager.js";
 import { PluginRunner } from "../plugin-runner.js";
@@ -131,6 +132,7 @@ export class InProcessRuntime
    * before `start()` via `setMergeEnqueuer`.
    */
   private mergeEnqueuer?: (taskId: string) => boolean;
+  private mergeRequester?: (taskId: string) => Promise<import("@fusion/core").MergeResult>;
   private clearMergeActive?: (taskId: string) => void;
   private activeMergeTaskIdProvider?: () => string | null;
   /** Tracks whether startup recovery was intentionally deferred due to pause state. */
@@ -441,6 +443,7 @@ export class InProcessRuntime
         }
       }
 
+      const prNodeGithubOps = this.config.prNodeGithubOps;
       const executorOptions: TaskExecutorOptions = {
         semaphore: this.globalSemaphore,
         pool: this.worktreePool,
@@ -450,6 +453,13 @@ export class InProcessRuntime
         messageStore: this.messageStore,
         missionStore,
         reflectionService,
+        // PR-entity nodes (U3): assemble the handler deps from the CLI-injected
+        // GitHub ops (createPr/mergePr/respond) + the engine-owned store. The CLI
+        // layer never holds a store reference; the engine binds it here. Absent
+        // ops → undefined → the pr-* node kinds fail closed.
+        prNodes: prNodeGithubOps
+          ? buildPrNodeDeps(() => this.taskStore, prNodeGithubOps)
+          : undefined,
         onSliceComplete: (slice) => {
           void this.scheduler.onSliceComplete(slice);
         },
@@ -495,6 +505,9 @@ export class InProcessRuntime
         this.config.workingDirectory,
         executorOptions
       );
+      if (this.mergeRequester) {
+        this.executor.setMergeRequester(this.mergeRequester);
+      }
 
       this.worktreePool.setInvariantViolationHandler((violation: PoolInvariantViolation) => {
         void (async () => {
@@ -737,6 +750,12 @@ export class InProcessRuntime
             return { recoveredCount: 0 };
           }
           return this.missionExecutionLoop.recoverActiveMissions();
+        },
+        reapStaleMissionValidatorRuns: async () => {
+          if (!this.missionExecutionLoop) {
+            return { reapedCount: 0 };
+          }
+          return this.missionExecutionLoop.reapStaleValidatorRuns(VALIDATOR_RUN_STALE_MAX_AGE_MS);
         },
         reconcileAllMissionFeatures: async () => this.scheduler.reconcileAllMissionFeatures(),
         chatStore: this.chatStore,
@@ -1034,6 +1053,16 @@ export class InProcessRuntime
    */
   setMergeEnqueuer(enqueueMerge: (taskId: string) => boolean): void {
     this.mergeEnqueuer = enqueueMerge;
+  }
+
+  /**
+   * Wire the workflow-graph merge seam to ProjectEngine.onMerge. Late-bindable:
+   * forwards immediately when the executor already exists, and is re-applied at
+   * executor construction during start().
+   */
+  setMergeRequester(requestMerge: (taskId: string) => Promise<import("@fusion/core").MergeResult>): void {
+    this.mergeRequester = requestMerge;
+    this.executor?.setMergeRequester(requestMerge);
   }
 
   setMergeActiveClearer(clearMergeActive: (taskId: string) => void): void {

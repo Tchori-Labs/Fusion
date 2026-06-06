@@ -113,7 +113,7 @@ Planning Mode now includes branch controls on the summary screen before you crea
 
 These values are sent with the Planning Mode create-task request as `branchSelection`, so created tasks persist branch/base-branch settings consistently with other branch-aware task creation flows.
 
-Completed single-task planning sessions remain in the Planning Mode history after you create the task, and selecting one restores the completed summary instead of restarting the composer.
+Completed single-task planning sessions remain in the Planning Mode history after you create the task, and selecting one restores the completed summary instead of restarting the composer. History rows are deduplicated by session id even if the initial load and live session updates arrive out of order, and deleting a history entry now waits for the server delete to persist (failures keep the row visible and surface an error instead of silently disappearing until refresh).
 
 ## New Task Modal Branch Strategy
 
@@ -211,9 +211,10 @@ Mailbox view shows inbox/outbox communication threads and unread state.
 - reply rows in the mailbox modal can expand inline to show the replied-to message context for easier thread reading
 - mailbox now includes an **Approvals** tab with pending and history filters (`approved` / `denied` / `completed`), approval detail context, and inline approve/deny actions for pending requests
 - in the **Agents** tab, the agent selector now includes **All agents**, which shows one combined agent-to-agent stream (with sender + recipient labels); selecting a specific agent still shows Inbox/Outbox subtabs
-- mailbox entry points now show pending-approval indicators: Header mailbox toggle dot, Header overflow mailbox badge, Mobile mailbox tab dot, and Mobile More → Mailbox badge
+- mailbox entry points now show unread/pending indicators: the desktop Header mailbox toggle shows a pending-approval dot first or an unread dot when unread mail exists without pending approvals, while Header overflow + Mobile mailbox entry points continue to surface mailbox badges/dots
 - approval lifecycle SSE events (`approval:requested`, `approval:updated`, `approval:decided`) trigger mailbox approvals refresh without manual reload
 - when a task newly enters `awaiting-approval`, the app shows a persistent approval banner above project content with an **Open Mailbox** CTA; dismissals are remembered per approval item until that item advances or a different one arrives
+- when a task first transitions into `done`, the dashboard shows a one-time **Enjoying Fusion?** GitHub star prompt in the project view; clicking **Star on GitHub** or dismissing the card marks it shown in browser `localStorage`, so it does not reappear on reload or later task completions
 - Visible message history/threading is driven by explicit `message.metadata.replyTo.messageId` links
 - Separate top-level messages from the same sender remain independent in the inbox and detail pane
 
@@ -613,6 +614,8 @@ Inspect task definition, logs, review feedback, comments, documents, workflow ou
 - In shared task edit/create forms, GitHub Tracking appears at the bottom of **More options**, after **Workflow Steps**.
 - From this section you can explicitly enable/disable tracking and manage a per-task repo override (`owner/repo`). Clearing the override saves `null` and falls back to project/global defaults.
 - In `in-review`, pull-request controls/status (including stall badges) are in a dedicated **Pull Request** tab instead of the Definition tab.
+- The **Create Pull Request** modal now offers in-app remediation for every blocking preflight check. If `branchOnRemote` is false, use **Push branch to remote** and Fusion will publish `fusion/<task-id-lower>` to `origin` and refresh preflight. If `conflictsWithBase` is true, use **Resolve conflicts with AI** and Fusion will use an AI coding agent to resolve merge markers on the task branch, commit the result, push the branch, and refresh preflight so normal PR creation can continue once all checks pass.
+- The modal shell renders immediately: preflight checks and PR options load independently of AI-generated title/body metadata, so slow AI suggestions no longer block base-branch selection, diagnostics, or manual PR authoring.
 - The **Review** tab is separate from **Comments**: Review shows actionable PR/reviewer feedback and same-task revision controls, while Comments remains the general collaboration thread.
 - **Request revision** in Review resumes work on the same task ID (no refinement task): `in-progress` tasks get steering injection, while `in-review` tasks are moved back to `in-progress` for the same branch/worktree revision pass.
 - Review supports a manual **Refresh** action in-place: PR mode pulls latest GitHub review state/decision, while direct mode rehydrates reviewer-agent feedback from persisted task data (no GitHub call).
@@ -756,6 +759,8 @@ For setup prerequisites, security caveats for tokenized URLs/QR links, and troub
 
 ## Skills API
 
+The Skills view now supports the full browse-and-install loop for skills.sh entries: use **Skills Catalog** to search the catalog, click **Install** on any card with a source repository, and the dashboard will run the same installer as the CLI (`npx skills add <owner/repo> -y -a pi`, with `--skill <slug>` when applicable). On success, the view refreshes **Discovered Skills** immediately so the newly installed skill appears without a page reload.
+
 The Skills API provides endpoints for managing execution skills. Skills are toggled via project-scoped settings in `.fusion/settings.json`.
 
 ![Skills view](./screenshots/skills-view.png)
@@ -869,6 +874,49 @@ Toggle a skill's enabled/disabled state.
 - `404 Not Found` — Adapter not configured
   ```json
   { "error": "Skills adapter not configured", "code": "adapter_not_configured" }
+  ```
+
+### POST /api/skills/install
+
+Install a catalog skill into the current project.
+
+**Request Body:**
+```json
+{
+  "source": "owner/repo",
+  "skill": "example-skill"
+}
+```
+
+**Behavior:**
+- Validates `source` in `owner/repo` format before spawning anything
+- Runs `npx skills add <source> -y -a pi`
+- Appends `--skill <skill>` when `skill` is provided
+- Uses the scoped project root as `cwd`, so installed files land in the current project's skill directories
+
+**Response:** `200 OK`
+```json
+{
+  "success": true
+}
+```
+
+**Error Responses:**
+- `400 Bad Request` — missing source
+  ```json
+  { "error": "source is required", "code": "invalid_body" }
+  ```
+- `400 Bad Request` — malformed source
+  ```json
+  { "error": "Invalid source format. Use owner/repo.", "code": "invalid_source" }
+  ```
+- `404 Not Found` — adapter not configured
+  ```json
+  { "error": "Skills adapter not configured", "code": "adapter_not_configured" }
+  ```
+- `502 Bad Gateway` — installer failed/timed out/could not start
+  ```json
+  { "error": "installer failed", "code": "install_failed" }
   ```
 
 ### GET /api/skills/catalog
@@ -1026,7 +1074,7 @@ The `index.html` shell is templated server-side: the server injects a per-user `
 
 ### Design tokens
 
-`styles.css` is the source of truth for tokens (`--space-*`, `--radius-*`, `--shadow-*`, `--transition-*`, `--font-*`, `--header-height`, `--mobile-nav-height`, `--standalone-bottom-gap`, `--overlay-padding-top`) and color variables (`--bg`, `--surface`, `--card`, `--text`, `--text-muted`, status colors `--triage`/`--todo`/`--in-progress`/`--in-review`/`--done`, semantic `--color-success`/`--color-error`/`--color-warning`/`--color-info`, status backgrounds `--status-*-bg`).
+`styles.css` is the source of truth for tokens (`--space-*`, `--radius-*`, `--shadow-*`, `--duration-*`, `--transition-*`, `--font-*`, `--header-height`, `--mobile-nav-height`, `--standalone-bottom-gap`, `--overlay-padding-top`) and color variables (`--bg`, `--surface`, `--card`, `--text`, `--text-muted`, status colors `--triage`/`--todo`/`--in-progress`/`--in-review`/`--done`, semantic `--color-success`/`--color-error`/`--color-warning`/`--color-info`, status backgrounds `--status-*-bg`).
 
 **Always reference tokens. Never hardcode pixels, hex, or `rgba()` in component CSS** — the only exception is inside `:root`/theme blocks where tokens are *defined*. For translucent backgrounds use `color-mix(in srgb, var(--color) X%, transparent)`, not `rgba()`.
 
@@ -1044,18 +1092,22 @@ Dark/light modes via `data-theme`; 54 color themes via `data-color-theme` (lazy-
 
 Reuse existing primitives from `styles.css`:
 - **Buttons**: `.btn`, `.btn-primary`, `.btn-danger`, `.btn-warning`, `.btn-sm`, `.btn-icon`, `.btn-icon--active`, `.btn-badge`. All inherit `:focus-visible` via `--focus-ring-strong` and `:active` via `transform: scale(0.97)`.
-- **Modals**: `.modal-overlay[.open]`, `.modal`, `.modal-lg`, `.modal-header`, `.modal-close`, `.modal-actions`, `.modal-actions-left/right`. Overlay pads top with `--overlay-padding-top`.
+- **Modals**: `.modal-overlay[.open]`, `.modal`, `.modal-lg`, `.modal-header`, `.modal-close`, `.modal-actions`, `.modal-actions-left/right`. Overlay pads top with `--overlay-padding-top`. Overlay dialogs should render through `createPortal(..., document.body)` so `position: fixed` overlays escape transformed, contained, or fixed ancestors.
 - **Forms**: `.form-group`, `.input`, `.select`, `.checkbox-label`, `.form-error`. Inputs in `.form-group` get focus styles automatically.
 - **Cards**: `.card`, `.card-header`, `.card-id`, `.card-title`, `.card-meta`, `.card-status-badge--{triage,todo,in-progress,in-review,done,archived}`.
 - **Utility**: `.touch-target` (44px min), `.visually-hidden`.
 
 Don't create parallel button/form variants — add states (`:hover`, `:focus-visible`, `:active`) to the existing primitives.
 
+Small fixed notification cards (for example the first-task GitHub star prompt) should reuse `.card`, `.btn`, and `.btn-icon`, anchor themselves with tokenized `position: fixed` offsets, and include a mobile `@media (max-width: 768px)` override so they clear the mobile nav/FAB region.
+
 ### Mobile responsive
 
 Breakpoints: 768px (primary mobile), 1024px (tablet `min-width: 769px and max-width: 1024px`), 640px (compact), 480px (xs). Mobile overrides go in `@media (max-width: 768px)` blocks at the bottom of `styles.css` after base styles.
 
 **Bottom spacing:** `--mobile-nav-height` (44px) + `env(safe-area-inset-bottom, 0px)` + `--standalone-bottom-gap` (0/8px PWA). All bottom-positioned mobile elements compose those. When the soft keyboard opens, the mobile nav bar stays pinned to page bottom cross-platform; the executor footer keyboard-collapse pin is iOS-only. On Android (`interactive-widget=resizes-content`), the footer keeps its stacked position above the nav bar to avoid overlap after keyboard dismiss.
+
+**Footer-safe fill layouts:** View wrappers that reserve footer/mobile-nav space (for example `.project-content`) should be flex containers with `min-height: 0` / `min-width: 0`, and child surfaces like `.board` should use `flex: 1 1 auto` plus the same min-size guards. This keeps the board/columns stretched between the header and fixed bottom bars across desktop, tablet, and mobile while allowing internal scroll regions to own overflow.
 
 **Touch targets:** Standing button-freeze directive supersedes per-button touch-target guidance. For non-button elements, primary controls (nav bar, FAB, tab action rows, modal CTAs, list-row tap targets, form controls) must be ≥36px on mobile. Secondary controls inside a card/list-row where the row itself is the tap target stay compact (24–28px or small chips).
 
@@ -1120,6 +1172,7 @@ Reuse `packages/dashboard/app/utils/filePathLinkify.tsx` and `FileBrowserContext
 - **Mobile board scroll-snap (FN-001)** — `scroll-snap-type: x mandatory` on mobile `.board` causes iOS Safari to compress the viewport when switching from ListView. Use `x proximity` + `overflow-anchor: none`.
 - **`lucide-react` icon adds** — update `vi.mock("lucide-react")` test mocks immediately; missing exports cascade.
 - **`.spin` is global** — don't redefine the generic spin keyframes in component CSS.
+- **Animation durations use `--duration-*`, never `--transition-*`** — transition tokens carry a `duration easing` pair; substituting one into an `animation` shorthand that names its own easing (or into `calc()`) is invalid at computed-value time and silently resolves the whole declaration to `animation: none`. Enforced by `animation-duration-tokens.css.test.ts`; see `docs/solutions/ui-bugs/css-animation-frozen-by-transition-token-shape-mismatch.md`.
 
 ## Integration Branch Push to Origin
 

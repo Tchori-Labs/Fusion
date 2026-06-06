@@ -5,9 +5,11 @@ import {
   TaskStore,
   COLUMNS,
   COLUMN_LABELS,
+  buildAutoPauseClearPatch,
   buildManualRetryResetPatch,
   validateNodeOverrideChange,
   type Task,
+  type ColumnId,
   type InsightCategory,
   type TaskPriority,
   type InsightStatus,
@@ -55,6 +57,12 @@ import { existsSync } from "node:fs";
 import { spawn, type ChildProcess } from "node:child_process";
 
 // ── Helpers ────────────────────────────────────────────────────────
+
+/** #1403: display a column's label, falling back to the raw id for
+ *  workflow-defined custom columns that have no legacy label. */
+function columnLabel(column: ColumnId): string {
+  return (COLUMN_LABELS as Record<string, string>)[column] ?? column;
+}
 
 const MIME_TYPES: Record<string, string> = {
   ".png": "image/png",
@@ -781,7 +789,7 @@ export default function kbExtension(pi: ExtensionAPI) {
       const lines: string[] = [];
       lines.push(`${task.id}: ${task.title || task.description}`);
       lines.push(
-        `Column: ${COLUMN_LABELS[task.column]}` +
+        `Column: ${columnLabel(task.column)}` +
           (task.size ? ` · Size: ${task.size}` : "") +
           (task.reviewLevel !== undefined ? ` · Review: ${task.reviewLevel}` : ""),
       );
@@ -990,6 +998,10 @@ export default function kbExtension(pi: ExtensionAPI) {
         };
       }
       
+      const autoPauseClearPatch = buildAutoPauseClearPatch(task);
+      const clearedDeadlockAutoPause = Object.keys(autoPauseClearPatch).length > 0;
+      const retryLogSuffix = clearedDeadlockAutoPause ? ", cleared deadlock auto-pause" : "";
+
       // In-review retry: distinguish between execution failures and merge failures.
       if (task.column === 'in-review') {
         const hasIncompleteSteps = task.steps.some(
@@ -1004,9 +1016,10 @@ export default function kbExtension(pi: ExtensionAPI) {
           await store.updateTask(params.id, {
             status: null,
             error: null,
+            ...autoPauseClearPatch,
             ...buildManualRetryResetPatch(),
           });
-          await store.logEntry(params.id, "Retry requested via Fusion extension (execution failure in-review → todo, preserving progress)");
+          await store.logEntry(params.id, `Retry requested via Fusion extension (execution failure in-review → todo, preserving progress${retryLogSuffix})`);
           await store.moveTask(params.id, "todo", { preserveProgress: true });
           return {
             content: [{ type: "text", text: `Retried ${params.id} → todo (execution failure, preserving step progress)` }],
@@ -1017,9 +1030,10 @@ export default function kbExtension(pi: ExtensionAPI) {
         await store.updateTask(params.id, {
           status: null,
           error: null,
+          ...autoPauseClearPatch,
           ...buildManualRetryResetPatch({ resetMergeRetries: true }),
         });
-        await store.logEntry(params.id, "Retry requested via Fusion extension (in-review merge retry, mergeRetries reset)");
+        await store.logEntry(params.id, `Retry requested via Fusion extension (in-review merge retry, mergeRetries reset${retryLogSuffix})`);
         return {
           content: [{ type: "text", text: `Retried ${params.id} → in-review (merge retry state cleared)` }],
           details: { taskId: params.id, newColumn: 'in-review' },
@@ -1030,6 +1044,7 @@ export default function kbExtension(pi: ExtensionAPI) {
       await store.updateTask(params.id, {
         status: null,
         error: null,
+        ...autoPauseClearPatch,
         ...buildManualRetryResetPatch({ resetMergeRetries: true }),
       });
       
@@ -1137,7 +1152,7 @@ export default function kbExtension(pi: ExtensionAPI) {
       const task = await store.archiveTask(params.id);
 
       return {
-        content: [{ type: "text", text: `Archived ${task.id} → ${COLUMN_LABELS[task.column]}` }],
+        content: [{ type: "text", text: `Archived ${task.id} → ${columnLabel(task.column)}` }],
         details: { taskId: task.id, column: task.column },
       };
     },
@@ -1165,7 +1180,7 @@ export default function kbExtension(pi: ExtensionAPI) {
       const task = await store.unarchiveTask(params.id);
 
       return {
-        content: [{ type: "text", text: `Unarchived ${task.id} → ${COLUMN_LABELS[task.column]}` }],
+        content: [{ type: "text", text: `Unarchived ${task.id} → ${columnLabel(task.column)}` }],
         details: { taskId: task.id, column: task.column },
       };
     },
@@ -2644,6 +2659,16 @@ export default function kbExtension(pi: ExtensionAPI) {
       }
       lines.push("");
 
+      lines.push("Linked Goals:");
+      if ((mission.linkedGoals?.length ?? 0) === 0) {
+        lines.push("No linked goals.");
+      } else {
+        for (const goal of mission.linkedGoals ?? []) {
+          lines.push(`- ${goal.id}: ${goal.title}`);
+        }
+      }
+      lines.push("");
+
       if (mission.milestones.length === 0) {
         lines.push("No milestones yet.");
       } else {
@@ -2671,6 +2696,183 @@ export default function kbExtension(pi: ExtensionAPI) {
       return {
         content: [{ type: "text", text: lines.join("\n") }],
         details: { mission },
+      };
+    },
+  });
+
+  // ── fn_mission_list_goals ─────────────────────────────────────
+
+  pi.registerTool({
+    name: "fn_mission_list_goals",
+    label: "fn: List Mission Goals",
+    description: "List goals linked to a mission.",
+    promptSnippet: "List goals linked to a mission",
+    promptGuidelines: [
+      "Use after fn_mission_list or fn_mission_show when you need goal linkage details",
+      "Returns linked goals in mission-link order",
+      "Prefer this before linking or unlinking to avoid duplicate work",
+    ],
+    parameters: Type.Object({
+      missionId: Type.String({ description: "Mission ID (e.g., M-001)" }),
+    }),
+
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const store = await getStore(ctx.cwd);
+      const missionStore = store.getMissionStore();
+      const goalStore = store.getGoalStore();
+      const mission = missionStore.getMission(params.missionId);
+
+      if (!mission) {
+        return {
+          content: [{ type: "text", text: `Mission ${params.missionId} not found` }],
+          isError: true,
+          details: { code: "MISSION_NOT_FOUND", missionId: params.missionId },
+        };
+      }
+
+      const goals = missionStore
+        .listGoalIdsForMission(params.missionId)
+        .map((goalId) => goalStore.getGoal(goalId))
+        .filter((goal): goal is NonNullable<typeof goal> => Boolean(goal));
+
+      const lines = [`Linked goals for ${mission.id}: ${mission.title}`];
+      if (goals.length === 0) {
+        lines.push("No linked goals.");
+      } else {
+        for (const goal of goals) {
+          const description = goal.description ? ` — ${goal.description}` : "";
+          lines.push(`- ${goal.id} [${goal.status}] ${goal.title}${description}`);
+        }
+      }
+
+      return {
+        content: [{ type: "text", text: lines.join("\n") }],
+        details: {
+          missionId: mission.id,
+          missionTitle: mission.title,
+          goals,
+        },
+      };
+    },
+  });
+
+  // ── fn_mission_link_goal ───────────────────────────────────────
+
+  pi.registerTool({
+    name: "fn_mission_link_goal",
+    label: "fn: Link Mission Goal",
+    description: "Link a goal to a mission.",
+    promptSnippet: "Link a goal to a mission",
+    promptGuidelines: [
+      "Use after confirming both the mission and goal IDs",
+      "Idempotent: linking an already-linked goal is safe",
+      "Use fn_mission_list_goals afterward to verify the resulting set",
+    ],
+    parameters: Type.Object({
+      missionId: Type.String({ description: "Mission ID (e.g., M-001)" }),
+      goalId: Type.String({ description: "Goal ID (e.g., G-001)" }),
+    }),
+
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const store = await getStore(ctx.cwd);
+      const missionStore = store.getMissionStore();
+      const goalStore = store.getGoalStore();
+      const mission = missionStore.getMission(params.missionId);
+      if (!mission) {
+        return {
+          content: [{ type: "text", text: `Mission ${params.missionId} not found` }],
+          isError: true,
+          details: { code: "MISSION_NOT_FOUND", missionId: params.missionId },
+        };
+      }
+
+      const goal = goalStore.getGoal(params.goalId);
+      if (!goal) {
+        return {
+          content: [{ type: "text", text: `Goal ${params.goalId} not found` }],
+          isError: true,
+          details: { code: "GOAL_NOT_FOUND", goalId: params.goalId },
+        };
+      }
+      if (goal.status === "archived") {
+        return {
+          content: [{ type: "text", text: `Goal ${params.goalId} is archived and cannot be linked` }],
+          isError: true,
+          details: { code: "GOAL_ARCHIVED", goalId: params.goalId },
+        };
+      }
+
+      missionStore.linkGoal(params.missionId, params.goalId);
+      const goals = missionStore
+        .listGoalIdsForMission(params.missionId)
+        .map((goalId) => goalStore.getGoal(goalId))
+        .filter((linkedGoal): linkedGoal is NonNullable<typeof linkedGoal> => Boolean(linkedGoal));
+
+      return {
+        content: [{ type: "text", text: `Linked ${goal.id}: ${goal.title} → ${mission.id}` }],
+        details: {
+          missionId: mission.id,
+          missionTitle: mission.title,
+          goal,
+          goals,
+        },
+      };
+    },
+  });
+
+  // ── fn_mission_unlink_goal ─────────────────────────────────────
+
+  pi.registerTool({
+    name: "fn_mission_unlink_goal",
+    label: "fn: Unlink Mission Goal",
+    description: "Unlink a goal from a mission.",
+    promptSnippet: "Unlink a goal from a mission",
+    promptGuidelines: [
+      "Use when a goal no longer belongs on a mission",
+      "Idempotent: unlinking an absent link is safe",
+      "Returns the remaining linked goals for quick verification",
+    ],
+    parameters: Type.Object({
+      missionId: Type.String({ description: "Mission ID (e.g., M-001)" }),
+      goalId: Type.String({ description: "Goal ID (e.g., G-001)" }),
+    }),
+
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const store = await getStore(ctx.cwd);
+      const missionStore = store.getMissionStore();
+      const goalStore = store.getGoalStore();
+      const mission = missionStore.getMission(params.missionId);
+      if (!mission) {
+        return {
+          content: [{ type: "text", text: `Mission ${params.missionId} not found` }],
+          isError: true,
+          details: { code: "MISSION_NOT_FOUND", missionId: params.missionId },
+        };
+      }
+
+      const goal = goalStore.getGoal(params.goalId);
+      if (!goal) {
+        return {
+          content: [{ type: "text", text: `Goal ${params.goalId} not found` }],
+          isError: true,
+          details: { code: "GOAL_NOT_FOUND", goalId: params.goalId },
+        };
+      }
+
+      missionStore.unlinkGoal(params.missionId, params.goalId);
+      const goals = missionStore
+        .listGoalIdsForMission(params.missionId)
+        .map((goalId) => goalStore.getGoal(goalId))
+        .filter((linkedGoal): linkedGoal is NonNullable<typeof linkedGoal> => Boolean(linkedGoal));
+
+      return {
+        content: [{ type: "text", text: `Unlinked ${goal.id}: ${goal.title} from ${mission.id}` }],
+        details: {
+          missionId: mission.id,
+          missionTitle: mission.title,
+          goal,
+          goals,
+        },
       };
     },
   });

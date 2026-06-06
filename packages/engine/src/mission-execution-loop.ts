@@ -19,9 +19,20 @@ import type {
   MissionFeature,
   MissionValidatorRun,
   AgentStore,
+  Settings,
+  Milestone,
+} from "@fusion/core";
+import {
+  TEST_MODE_RESOLVED,
+  isTestModeActive,
+  resolveTaskValidatorModel,
 } from "@fusion/core";
 import { createFnAgent, promptWithFallback, type AgentResult } from "./pi.js";
-import { createResolvedAgentSession, extractRuntimeHint } from "./agent-session-helpers.js";
+import {
+  createResolvedAgentSession,
+  extractRuntimeHint,
+  extractRuntimeModel,
+} from "./agent-session-helpers.js";
 import { createLogger } from "./logger.js";
 import { createFallbackModelObserver } from "./fallback-model-observer.js";
 import { createRunAuditor, generateSyntheticRunId } from "./run-audit.js";
@@ -130,6 +141,57 @@ export class MissionExecutionLoop extends EventEmitter {
   }
 
   /**
+   * Reap validator runs that have been left in status='running' beyond the stale window.
+   *
+   * Runs still actively owned by this process are skipped so live validations are never
+   * terminated by maintenance while their session is still in-flight.
+   */
+  async reapStaleValidatorRuns(maxAgeMs: number): Promise<{ reapedCount: number }> {
+    const staleRuns = this.missionStore.listStaleRunningValidatorRuns(maxAgeMs);
+    let reapedCount = 0;
+
+    for (const run of staleRuns) {
+      if (this.activeValidations.has(run.featureId)) {
+        continue;
+      }
+
+      try {
+        const reapedRun = this.missionStore.reapValidatorRun(
+          run.id,
+          `Validator run reaped after exceeding stale threshold (${maxAgeMs}ms) without a live owner.`,
+        );
+        reapedCount += 1;
+
+        try {
+          const milestone = this.missionStore.getMilestone(reapedRun.milestoneId);
+          const missionId = milestone ? this.missionStore.getMission(milestone.missionId)?.id : undefined;
+          const elapsedMs = Math.max(0, Date.now() - new Date(run.startedAt).getTime());
+          this.taskStore.recordRunAuditEvent({
+            agentId: "store",
+            runId: "validator-run-reaper",
+            domain: "database",
+            mutationType: "mission:validator-run-reaped",
+            target: reapedRun.id,
+            metadata: {
+              runId: reapedRun.id,
+              featureId: reapedRun.featureId,
+              missionId,
+              triggerType: reapedRun.triggerType,
+              elapsedMs,
+            },
+          });
+        } catch (auditErr) {
+          loopLog.warn(`Failed to record validator-run reaper audit for ${run.id}:`, auditErr);
+        }
+      } catch (err) {
+        loopLog.warn(`Failed to reap stale validator run ${run.id}:`, err);
+      }
+    }
+
+    return { reapedCount };
+  }
+
+  /**
    * Recover active missions on startup.
    *
    * Finds all features in "validating" or "needs_fix" state and re-enqueues
@@ -231,6 +293,42 @@ export class MissionExecutionLoop extends EventEmitter {
                   loopLog.error(`Recovery failed for implementing feature ${feature.id}:`, err);
                 }
               }
+
+              // Features marked "done" but stranded in "implementing" with no
+              // linked task can never validate on their own: the branches above
+              // only re-drive features that still carry a taskId. Meanwhile the
+              // slice-completion gate (MissionStore.computeSliceStatus) refuses
+              // to count an assertion-linked "done" feature until its validator
+              // passes — so the slice, milestone, and mission can never
+              // auto-progress. Re-drive validation directly so the gate can
+              // resolve. Validation is a read-only judge (no board task, no code
+              // changes); on pass the feature becomes legitimately complete, on
+              // fail the normal fix-feature flow takes over.
+              if (
+                feature.loopState === "implementing"
+                && !feature.taskId
+                && feature.status === "done"
+                && feature.lastValidatorStatus !== "passed"
+                && !this.activeValidations.has(feature.id)
+              ) {
+                const currentFeature = this.missionStore.getFeature(feature.id) ?? feature;
+                if (
+                  currentFeature.loopState === "passed"
+                  || currentFeature.lastValidatorStatus === "passed"
+                ) {
+                  continue;
+                }
+                try {
+                  loopLog.warn(
+                    `Recovery: re-validating stranded "done" feature ${feature.id} `
+                    + `(loopState=${feature.loopState}, no linked task) so its slice can complete`,
+                  );
+                  recoveredCount++;
+                  await this.runFeatureValidation(currentFeature);
+                } catch (err) {
+                  loopLog.error(`Recovery failed for stranded done feature ${feature.id}:`, err);
+                }
+              }
             }
           }
         }
@@ -269,6 +367,11 @@ export class MissionExecutionLoop extends EventEmitter {
         return;
       }
 
+      if (feature.loopState === "needs_fix") {
+        this.missionStore.transitionLoopState(feature.id, "implementing");
+        feature.loopState = "implementing";
+      }
+
       // Only validate features in "implementing" state
       if (feature.loopState !== "implementing") {
         loopLog.log(`Feature ${feature.id} loopState is "${feature.loopState}"; skipping validation`);
@@ -287,44 +390,56 @@ export class MissionExecutionLoop extends EventEmitter {
         return;
       }
 
-      // Get linked assertions for this feature
-      const assertions = this.missionStore.listAssertionsForFeature(feature.id);
-      if (assertions.length === 0) {
-        loopLog.log(`Feature ${feature.id} has no linked assertions; marking as passed`);
-        // No assertions = automatically pass
-        await this.handleValidationPass(feature.id, undefined, "No assertions linked");
-        return;
-      }
-
-      // Mark feature as being validated
-      this.activeValidations.add(feature.id);
-
-      try {
-        loopLog.log(`Running internal validation for feature ${feature.id} — no board task created (policy: docs/missions.md)`);
-
-        // Start the validator run (no board task per docs/missions.md)
-        const run = this.missionStore.startValidatorRun(feature.id, "task_completion");
-        loopLog.log(`Started validator run ${run.id} for feature ${feature.id}`);
-
-        // Run the validation
-        const result = await this.runValidation(feature, assertions, run);
-
-        // Handle the result
-        if (result.status === "pass") {
-          await this.handleValidationPass(feature.id, run.id, result.summary);
-        } else if (result.status === "fail") {
-          await this.handleValidationFail(feature.id, run.id, result);
-        } else if (result.status === "blocked") {
-          await this.handleValidationBlocked(feature.id, run.id, result.blockedReason);
-        } else if (result.status === "error") {
-          await this.handleValidationError(feature.id, run.id, result.summary);
-        }
-      } finally {
-        this.activeValidations.delete(feature.id);
-      }
+      await this.runFeatureValidation(feature);
     } catch (err) {
       loopLog.error(`Error processing task outcome for ${taskId}:`, err);
       // Don't crash the loop - log and continue
+    }
+  }
+
+  /**
+   * Run assertion validation for a feature and apply the outcome.
+   *
+   * Shared by processTaskOutcome (task-triggered) and recoverActiveMissions
+   * (self-healing for features stranded mid-loop with no board task). Callers
+   * are responsible for confirming the feature is eligible to validate; this
+   * method handles lazy assertion linkage, validator run bookkeeping, and
+   * dispatch of the validation result.
+   */
+  private async runFeatureValidation(feature: MissionFeature): Promise<void> {
+    // Lazily guarantee a linked assertion before validation so every feature
+    // is evaluated by the validator even when legacy data is missing links.
+    let assertions = this.missionStore.listAssertionsForFeature(feature.id);
+    if (assertions.length === 0) {
+      loopLog.log(`Feature ${feature.id} has no linked assertions; lazily ensuring store-managed assertion linkage`);
+      assertions = this.missionStore.ensureFeatureAssertionLinked(feature.id);
+    }
+
+    // Mark feature as being validated
+    this.activeValidations.add(feature.id);
+
+    try {
+      loopLog.log(`Running internal validation for feature ${feature.id} — no board task created (policy: docs/missions.md)`);
+
+      // Start the validator run (no board task per docs/missions.md)
+      const run = this.missionStore.startValidatorRun(feature.id, "task_completion");
+      loopLog.log(`Started validator run ${run.id} for feature ${feature.id}`);
+
+      // Run the validation
+      const result = await this.runValidation(feature, assertions, run);
+
+      // Handle the result
+      if (result.status === "pass") {
+        await this.handleValidationPass(feature.id, run.id, result.summary);
+      } else if (result.status === "fail") {
+        await this.handleValidationFail(feature.id, run.id, result);
+      } else if (result.status === "blocked") {
+        await this.handleValidationBlocked(feature.id, run.id, result.blockedReason);
+      } else if (result.status === "error") {
+        await this.handleValidationError(feature.id, run.id, result.summary);
+      }
+    } finally {
+      this.activeValidations.delete(feature.id);
     }
   }
 
@@ -342,15 +457,24 @@ export class MissionExecutionLoop extends EventEmitter {
   ): Promise<ValidationResult> {
     loopLog.log(`Running validation for feature ${feature.id} with ${assertions.length} assertions`);
 
+    const milestone = this.resolveFeatureMilestone(feature);
+
     // Build the validation prompt
-    const prompt = this.buildValidationPrompt(feature, assertions);
+    const prompt = this.buildValidationPrompt(feature, assertions, milestone);
 
     // Get task context for validation
     const task = feature.taskId ? await this.taskStore.getTask(feature.taskId) : null;
     const taskContext = task ? this.buildTaskContext(task) : "";
-    const validationRuntimeHint = task?.assignedAgentId && this.agentStore
-      ? extractRuntimeHint((await this.agentStore.getAgent(task.assignedAgentId).catch(() => null))?.runtimeConfig)
-      : undefined;
+    const assignedAgent = task?.assignedAgentId && this.agentStore
+      ? await this.agentStore.getAgent(task.assignedAgentId).catch(() => null)
+      : null;
+    const validationRuntimeHint = extractRuntimeHint(assignedAgent?.runtimeConfig);
+    const settings = await this.taskStore.getSettings().catch(() => undefined);
+    const validationSessionModel = this.resolveValidationSessionModel(
+      task,
+      settings,
+      assignedAgent?.runtimeConfig,
+    );
 
     let session: AgentResult | null = null;
 
@@ -368,10 +492,15 @@ export class MissionExecutionLoop extends EventEmitter {
         runtimeHint: validationRuntimeHint,
         pluginRunner: this.pluginRunner,
         cwd: this.rootDir,
-        systemPrompt: this.buildValidationSystemPrompt(feature, assertions, taskContext),
+        systemPrompt: this.buildValidationSystemPrompt(feature, assertions, taskContext, milestone),
         tools: "readonly",
+        defaultProvider: validationSessionModel.provider,
+        defaultModelId: validationSessionModel.modelId,
+        fallbackProvider: settings?.fallbackProvider,
+        fallbackModelId: settings?.fallbackModelId,
         defaultThinkingLevel: "medium",
         runAuditor,
+        settings,
         onText: (_delta) => {
           // Could stream this to a log entry if needed
         },
@@ -410,7 +539,7 @@ export class MissionExecutionLoop extends EventEmitter {
 
       // Return an error result - the loop will handle it
       return {
-        status: "fail",
+        status: "error",
         assertions: assertions.map((a) => ({
           assertionId: a.id,
           passed: false,
@@ -429,6 +558,37 @@ export class MissionExecutionLoop extends EventEmitter {
         }
       }
     }
+  }
+
+  private resolveValidationSessionModel(
+    task: Awaited<ReturnType<TaskStore["getTask"]>> | null,
+    settings: Partial<Settings> | undefined,
+    assignedAgentRuntimeConfig?: Record<string, unknown>,
+  ): { provider: string | undefined; modelId: string | undefined } {
+    if (isTestModeActive(settings)) {
+      return {
+        provider: TEST_MODE_RESOLVED.provider,
+        modelId: TEST_MODE_RESOLVED.modelId,
+      };
+    }
+
+    const assignedRuntimeModel = extractRuntimeModel(assignedAgentRuntimeConfig);
+    if (assignedRuntimeModel.provider && assignedRuntimeModel.modelId) {
+      return assignedRuntimeModel;
+    }
+
+    const resolvedTaskModel = resolveTaskValidatorModel(
+      {
+        validatorModelProvider: task?.validatorModelProvider,
+        validatorModelId: task?.validatorModelId,
+      },
+      settings,
+    );
+
+    return {
+      provider: resolvedTaskModel.provider,
+      modelId: resolvedTaskModel.modelId,
+    };
   }
 
   /**
@@ -687,19 +847,27 @@ export class MissionExecutionLoop extends EventEmitter {
   /**
    * Build the validation prompt sent to the AI agent.
    */
-  private buildValidationPrompt(feature: MissionFeature, assertions: MissionContractAssertion[]): string {
+  private buildValidationPrompt(
+    feature: MissionFeature,
+    assertions: MissionContractAssertion[],
+    milestone?: Milestone,
+  ): string {
     const assertionTexts = assertions
       .map((a, i) => `${i + 1}. **${a.title}**: ${a.assertion}`)
       .join("\n");
+    const milestoneAcceptanceCriteria = milestone?.acceptanceCriteria?.trim();
+    const milestoneContext = milestoneAcceptanceCriteria
+      ? `\nMilestone acceptance criteria (must also be satisfied for this feature to pass):\n${milestoneAcceptanceCriteria}\n`
+      : "";
 
     return `Evaluate the implementation for feature "${feature.title}" against the following contract assertions:
 
-${assertionTexts}
-
+${assertionTexts}${milestoneContext}
 For each assertion:
 - Determine if the implementation satisfies the assertion (pass/fail/blocked)
 - If failed, explain what was expected vs what was actually observed
 - If blocked, explain what external factor prevented validation
+- Also verify that the implementation satisfies any milestone acceptance criteria provided above
 
 Respond with a JSON object in this format:
 {
@@ -724,22 +892,25 @@ Be thorough and objective. If any assertion fails, the overall status should be 
    * Build the system prompt for the validation agent.
    */
   private buildValidationSystemPrompt(
-    feature: MissionFeature,
+    _feature: MissionFeature,
     _assertions: MissionContractAssertion[],
     taskContext: string,
+    milestone?: Milestone,
   ): string {
+    const milestoneAcceptanceCriteria = milestone?.acceptanceCriteria?.trim();
     return `You are a validation agent responsible for evaluating whether an implementation satisfies its contract assertions.
 
 You will receive:
 1. A feature description with its acceptance criteria
 2. Contract assertions to evaluate against
-3. Task context including the implementation details
+3. Task context including the implementation details${milestoneAcceptanceCriteria ? `\n4. Milestone acceptance criteria text that also applies to this feature: ${milestoneAcceptanceCriteria}` : ""}
 
 Your job is to:
 1. Carefully review the implementation as described in the task context
 2. Evaluate each contract assertion objectively
 3. Determine if the implementation fully satisfies each assertion
-4. Return a structured JSON response with your findings
+4. Verify the implementation also satisfies any milestone acceptance criteria provided for the parent milestone
+5. Return a structured JSON response with your findings
 
 Be thorough and precise. A contract assertion represents a commitment made during planning - the implementation must fully satisfy it or it is considered failed.
 
@@ -748,6 +919,7 @@ Evaluation guidance:
 - "fail" means one or more assertions are unmet or only partially satisfied.
 - "blocked" means you cannot evaluate due to missing/insufficient evidence or external constraints.
 - Partial satisfaction must be marked as failed with clear expected vs actual details.
+- Milestone acceptance criteria are validator-executed requirements, not informational context.
 
 Response format: Return ONLY a JSON object (no additional text) with this structure:
 {
@@ -789,6 +961,39 @@ ${taskContext ? `\n\nImplementation context:\n${taskContext}` : ""}`;
     return lines.join("\n");
   }
 
+  private resolveFeatureMilestone(feature: MissionFeature): Milestone | undefined {
+    const slice = this.missionStore.getSlice(feature.sliceId);
+    if (!slice) {
+      return undefined;
+    }
+
+    return this.missionStore.getMilestone(slice.milestoneId);
+  }
+
+  private completeValidatorRunIfStillRunning(
+    runId: string | undefined,
+    status: "passed" | "failed" | "blocked" | "error",
+    summaryOrReason?: string,
+  ): boolean {
+    if (!runId) {
+      return false;
+    }
+
+    if (typeof this.missionStore.getValidatorRun !== "function") {
+      this.missionStore.completeValidatorRun(runId, status, summaryOrReason);
+      return true;
+    }
+
+    const run = this.missionStore.getValidatorRun(runId);
+    if (!run || run.status !== "running") {
+      loopLog.warn(`Validator run ${runId} is no longer running; skipping ${status} completion.`);
+      return false;
+    }
+
+    this.missionStore.completeValidatorRun(runId, status, summaryOrReason);
+    return true;
+  }
+
   /**
    * Handle a successful validation (pass).
    */
@@ -798,40 +1003,11 @@ ${taskContext ? `\n\nImplementation context:\n${taskContext}` : ""}`;
     summary: string,
   ): Promise<void> {
     try {
-      if (runId) {
-        this.missionStore.completeValidatorRun(runId, "passed", summary);
-      }
+      this.completeValidatorRunIfStillRunning(runId, "passed", summary);
 
       const feature = this.missionStore.getFeature(featureId);
       if (feature && feature.status !== "done") {
         this.missionStore.updateFeatureStatus(featureId, "done");
-      }
-
-      if (!runId && feature) {
-        const alreadyAutoPassed =
-          feature.status === "done" &&
-          feature.loopState === "passed" &&
-          feature.lastValidatorStatus === "passed";
-
-        if (!alreadyAutoPassed) {
-          // Auto-pass path has no validator run, so we must advance loop bookkeeping here.
-          if (feature.loopState !== "passed" || feature.lastValidatorStatus !== "passed") {
-            this.missionStore.updateFeature(featureId, {
-              loopState: "passed",
-              lastValidatorStatus: "passed",
-            });
-          }
-
-          this.logFeatureWarningEvent(
-            featureId,
-            "validation_auto_passed_no_assertions",
-            `Feature ${featureId} auto-passed because no assertions were linked.`,
-            {
-              taskId: feature.taskId,
-              reason: "No assertions linked",
-            },
-          );
-        }
       }
 
       loopLog.log(`Feature ${featureId} passed validation`);
@@ -867,13 +1043,15 @@ ${taskContext ? `\n\nImplementation context:\n${taskContext}` : ""}`;
           actual: a.actual,
         }));
 
-      if (runId && failures.length > 0) {
+      const canCompleteRun = runId
+        ? typeof this.missionStore.getValidatorRun !== "function" || this.missionStore.getValidatorRun(runId)?.status === "running"
+        : false;
+
+      if (runId && failures.length > 0 && canCompleteRun) {
         this.missionStore.recordValidatorFailures(runId, failures);
       }
 
-      if (runId) {
-        this.missionStore.completeValidatorRun(runId, "failed", result.summary);
-      }
+      this.completeValidatorRunIfStillRunning(runId, "failed", result.summary);
 
       loopLog.log(`Feature ${featureId} failed validation with ${failures.length} failures`);
 
@@ -931,9 +1109,7 @@ ${taskContext ? `\n\nImplementation context:\n${taskContext}` : ""}`;
     blockedReason: string | undefined,
   ): Promise<void> {
     try {
-      if (runId) {
-        this.missionStore.completeValidatorRun(runId, "blocked", blockedReason);
-      }
+      this.completeValidatorRunIfStillRunning(runId, "blocked", blockedReason);
       loopLog.log(`Feature ${featureId} blocked: ${blockedReason}`);
       this.logFeatureErrorEvent(featureId, "validation_blocked", `Validation blocked for feature ${featureId}: ${blockedReason ?? "no reason provided"}`, {
         runId,
@@ -960,9 +1136,7 @@ ${taskContext ? `\n\nImplementation context:\n${taskContext}` : ""}`;
     error: string,
   ): Promise<void> {
     try {
-      if (runId) {
-        this.missionStore.completeValidatorRun(runId, "error", error);
-      }
+      this.completeValidatorRunIfStillRunning(runId, "error", error);
       loopLog.error(`Feature ${featureId} validation error: ${error}`);
       this.logFeatureErrorEvent(featureId, "validation_error", `Validation error for feature ${featureId}: ${error}`, {
         runId,

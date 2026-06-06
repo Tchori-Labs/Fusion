@@ -4,12 +4,13 @@
 
 Executor, heartbeat, and planning runs emit one goal-injection diagnostic with outcome `applied`, `no-goals`, or `disabled-or-failed`.
 
-- Run-audit event: `prompt:goal-injection` (`database` domain, target lane) with metadata `{ lane, outcome, goalCount, goalIds, truncated, reason?, errorClass?, runId?, agentId?, taskId? }`.
+- Run-audit event: `prompt:goal-injection` (`database` domain, target lane) with metadata `{ lane, outcome, goalCount, goalIds, provenanceGoalIds, truncated, reason?, errorClass?, runId?, agentId?, taskId? }`.
 - Goal anchoring events also persist `metadata.goalIds` (alongside existing count/tool fields):
   - `goal:injection-applied` / `goal:injection-skipped` → `{ lane, count, goalIds, truncated?, reason? }`
   - `goal:retrieval-invoked` → `{ toolName, count, goalIds, notFound }`
 - Run cited-goals read path: `GET /api/agents/:id/runs/:runId/cited-goals` returns `{ runId, taskId?, injectedGoalIds, retrievedGoalIds, citedGoalIds }` aggregated from `goal:*` + `prompt:goal-injection` run-audit events.
-- Task log (executor lane with `taskId`): `[goal-injection] <outcome> count=<n> ids=<json-array> truncated=<bool> ...`.
+- Task log (executor lane with `taskId`): `[goal-injection] <outcome> count=<n> ids=<json-array> provenance=<json-array> truncated=<bool> ...`.
+- `goalIds` / `goalCount` describe the active goals injected into the prompt; `provenanceGoalIds` additively records mission-derived task provenance and does not affect prompt selection.
 - Guardrail: diagnostics persist goal IDs/counts only; never prompt text, goal titles, or goal descriptions.
 
 ## Insight run sweeper (`[insight-sweeper]`)
@@ -126,7 +127,7 @@ FN-5416 extends resume-correlation coverage to stream-focused hooks and their pr
   - `useDevServerLogs`: `project-context-change`, `sse-open`, `sse-reconnect`
   - `useResearch`: `sse-open`, `sse-reconnect`
   - `useBackgroundSessions`: `sse-open`, `sse-reconnect`
-  - `useAgentLogs`: `project-context-change`, `sse-open`, `sse-reconnect` on `/api/tasks/:id/logs/stream`
+  - `useAgentLogs`: `project-context-change`, `sse-open`, `sse-reconnect` on `/api/tasks/:id/logs/stream` (live tail via SSE; historical reads are backed by `.fusion/tasks/{ID}/agent-log.jsonl`)
 - Route shells
   - `DevServerView`: `remount` / `route-active` / `route-inactive`
   - `ResearchView`: `remount` / `route-active` / `route-inactive`

@@ -31,6 +31,7 @@ export const mockApprovePlan = vi.fn();
 export const mockRejectPlan = vi.fn();
 export const mockRefineTask = vi.fn();
 export const mockFetchAiSessions = vi.fn();
+export const mockDeleteAiSession = vi.fn();
 
 export const mockConfirm = vi.fn();
 

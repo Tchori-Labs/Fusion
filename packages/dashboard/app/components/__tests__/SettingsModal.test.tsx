@@ -247,7 +247,7 @@ type PersistSettingInput = {
 };
 
 async function expectSettingPersists({ section, label, kind, value, scope, expectedKey }: PersistSettingInput) {
-  const user = userEvent.setup();
+  const user = userEvent.setup({ delay: null });
   renderModal();
   await waitForSettingsModalReady();
   await user.click(screen.getByRole("button", { name: new RegExp(`^${section}$`, "i") }));
@@ -282,7 +282,7 @@ async function expectSettingPersists({ section, label, kind, value, scope, expec
 }
 
 async function assertProjectModelSavePayload(provider: string, modelId: string, expectedKeys: string[]) {
-  const user = userEvent.setup();
+  const user = userEvent.setup({ delay: null });
   renderModal({ initialSection: "project-models" });
   await waitForSettingsModalReady();
 
@@ -469,7 +469,6 @@ describe("SettingsModal", () => {
     mockFetchProjects.mockResolvedValueOnce([{ id: "p-1", name: "Alpha" }]);
     mockFetchSettings.mockResolvedValueOnce({
       ...defaultSettings,
-      merger: { mode: "legacy" },
       mergeIntegrationWorktree: "cwd-main",
       merger: { mode: "deterministic" },
     });
@@ -794,12 +793,30 @@ describe("SettingsModal", () => {
   });
 
   describe("Global General", () => {
-    it("defaults persistAgentToolOutput checkbox to checked", async () => {
+    // Read-only default-render assertions are merged into one rendered
+    // instance to avoid re-rendering the full modal per pure-display check.
+    it("renders default global logging fields, helper text, and tracking repo control", async () => {
       renderModal({ initialSection: "global-general" });
       await waitForSettingsModalReady();
 
+      // persistAgentToolOutput defaults to checked; Star-on-GitHub control absent.
       expect(screen.getByRole("checkbox", { name: "Save tool output in agent logs" })).toBeChecked();
       expect(screen.queryByRole("checkbox", { name: /Show "Star on GitHub" button in Settings header/i })).toBeNull();
+
+      // thinking-log checkboxes default to unchecked.
+      expect(screen.getByRole("checkbox", { name: "Save AI thinking for permanent agents" })).not.toBeChecked();
+      expect(screen.getByRole("checkbox", { name: "Save AI thinking for ephemeral / task-worker agents" })).not.toBeChecked();
+
+      // Helper descriptions render as small text (not .settings-field-help).
+      expect(document.querySelector(".settings-field-help")).toBeNull();
+      const toolOutputHelper = screen.getByText(/When disabled, tool rows are still logged but detailed tool payloads are omitted/i);
+      expect(toolOutputHelper.closest("small")).toBeTruthy();
+      const thinkingHelper = screen.getByText(/Leave both thinking toggles off to keep the original default behavior/i);
+      expect(thinkingHelper.closest("small")).toBeTruthy();
+
+      // Global default tracking repo control + inheritance hint render.
+      expect(screen.getByRole("combobox", { name: "Global default tracking repo" })).toBeInTheDocument();
+      expect(screen.getByText(/Projects inherit this value when they do not set a project default tracking repo/i)).toBeInTheDocument();
     });
 
     it("reflects persisted unchecked value from global settings", async () => {
@@ -816,14 +833,6 @@ describe("SettingsModal", () => {
       await waitForSettingsModalReady();
 
       expect(screen.getByRole("checkbox", { name: "Save tool output in agent logs" })).not.toBeChecked();
-    });
-
-    it("defaults thinking-log checkboxes to unchecked", async () => {
-      renderModal({ initialSection: "global-general" });
-      await waitForSettingsModalReady();
-
-      expect(screen.getByRole("checkbox", { name: "Save AI thinking for permanent agents" })).not.toBeChecked();
-      expect(screen.getByRole("checkbox", { name: "Save AI thinking for ephemeral / task-worker agents" })).not.toBeChecked();
     });
 
     it("falls back to legacy thinking-log flag when granular fields are unset", async () => {
@@ -884,28 +893,6 @@ describe("SettingsModal", () => {
         expect(projectPayload.persistAgentThinkingLogEphemeral).toBeUndefined();
         expect(projectPayload.persistAgentThinkingLog).toBeUndefined();
       }
-    });
-
-    it("renders helper descriptions as small text for global logging fields", async () => {
-      renderModal({ initialSection: "global-general" });
-      await waitForSettingsModalReady();
-
-      expect(document.querySelector(".settings-field-help")).toBeNull();
-
-      const toolOutputHelper = screen.getByText(/When disabled, tool rows are still logged but detailed tool payloads are omitted/i);
-      expect(toolOutputHelper.closest("small")).toBeTruthy();
-
-      const thinkingHelper = screen.getByText(/Leave both thinking toggles off to keep the original default behavior/i);
-      expect(thinkingHelper.closest("small")).toBeTruthy();
-    });
-
-    it("renders global default tracking repo control", async () => {
-      renderModal({ initialSection: "global-general" });
-      await waitForSettingsModalReady();
-
-      const control = screen.getByRole("combobox", { name: "Global default tracking repo" }) as HTMLSelectElement;
-      expect(control).toBeInTheDocument();
-      expect(screen.getByText(/Projects inherit this value when they do not set a project default tracking repo/i)).toBeInTheDocument();
     });
 
     it("saves global default tracking repo via global settings payload only", async () => {
@@ -997,6 +984,14 @@ describe("SettingsModal", () => {
         value: 14,
         scope: "project",
         expectedKey: "chatAutoCleanupDays",
+      },
+      {
+        section: "Project General",
+        label: "Operational log retention",
+        kind: "select",
+        value: 7,
+        scope: "project",
+        expectedKey: "operationalLogRetentionDays",
       },
     ])("persists $expectedKey through the expected settings scope", async (input) => {
       await expectSettingPersists(input);
@@ -1521,7 +1516,7 @@ describe("SettingsModal", () => {
   });
 
   describe("settings header actions", () => {
-    it("renders Help, Discord, and GitHub star controls", async () => {
+    it("renders Help, Discord (hardened), and GitHub star controls", async () => {
       renderModal();
       await waitForSettingsModalReady();
 
@@ -1541,30 +1536,29 @@ describe("SettingsModal", () => {
       expect(helpLink).toHaveAttribute("target", "_blank");
       expect(helpLink).toHaveAttribute("rel", expect.stringContaining("noopener"));
       expect(helpLink).toHaveAttribute("rel", expect.stringContaining("noreferrer"));
-    });
 
-    it("renders Discord link with hardened external attributes", async () => {
-      renderModal();
-      await waitForSettingsModalReady();
-
+      // Discord link uses hardened external attributes and branded icon.
       const discordLink = screen.getByRole("link", { name: "Join our Discord" });
       expect(discordLink).toHaveAttribute("href", "https://discord.gg/ksrfuy7WYR");
       expect(discordLink).toHaveAttribute("target", "_blank");
       expect(discordLink).toHaveAttribute("rel", expect.stringContaining("noopener"));
       expect(discordLink).toHaveAttribute("rel", expect.stringContaining("noreferrer"));
-
       expect(within(discordLink).getByTestId("discord-icon")).toBeInTheDocument();
       expect(within(discordLink).queryByTestId("lucide-message-circle")).not.toBeInTheDocument();
     });
   });
 
   describe("settings version display", () => {
-    it("renders the app version from the health endpoint", async () => {
+    it("renders the app version and the check-for-updates button in the header", async () => {
       renderModal();
       await waitForSettingsModalReady();
 
       expect(await screen.findByText("Version 1.2.3")).toBeInTheDocument();
       expect(mockFetchDashboardHealth).toHaveBeenCalledTimes(1);
+
+      expect(screen.getByRole("button", { name: "Check for updates" })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Check Now" })).not.toBeInTheDocument();
+      expect(screen.queryByText("Manually check for the latest version right now.")).not.toBeInTheDocument();
     });
 
     it("keeps settings interactive when version lookup fails", async () => {
@@ -1578,15 +1572,6 @@ describe("SettingsModal", () => {
       await userEvent.click(screen.getByText("Scheduling"));
       expect(await screen.findByLabelText("Max Concurrent Tasks")).toBeInTheDocument();
       expect(addToast).not.toHaveBeenCalled();
-    });
-
-    it("renders check for updates button in header", async () => {
-      renderModal();
-      await waitForSettingsModalReady();
-
-      expect(screen.getByRole("button", { name: "Check for updates" })).toBeInTheDocument();
-      expect(screen.queryByRole("button", { name: "Check Now" })).not.toBeInTheDocument();
-      expect(screen.queryByText("Manually check for the latest version right now.")).not.toBeInTheDocument();
     });
 
     it("clicking check for updates shows up-to-date message", async () => {
@@ -1755,65 +1740,13 @@ describe("SettingsModal", () => {
         expect(mockExportSettings).toHaveBeenCalled();
       });
 
-      // Assert the filename uses fusion-settings- prefix
+      // Assert the filename uses fusion-settings- prefix and NOT the legacy kb- prefix.
       expect(createdElements.length).toBeGreaterThanOrEqual(1);
       const anchorElement = createdElements[0];
       expect(anchorElement.download).toMatch(/^fusion-settings-/);
       expect(anchorElement.download).toMatch(/^fusion-settings-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.json$/);
-    });
-
-    it("does not use kb-settings- prefix for exported filename", async () => {
-      const mockExportData: SettingsExportData = {
-        version: 1,
-        exportedAt: "2026-04-04T12:00:00.000Z",
-        global: undefined,
-        project: { maxConcurrent: 2 },
-      };
-      mockExportSettings.mockResolvedValue(mockExportData);
-
-      // Capture filenames set on dynamically-created anchor elements
-      const capturedFilenames: string[] = [];
-      const originalCreateElement = document.createElement.bind(document);
-      vi.spyOn(document, "createElement").mockImplementation((tagName: string) => {
-        const el = originalCreateElement(tagName);
-        if (tagName.toLowerCase() === "a") {
-          const origDownloadDescriptor = Object.getOwnPropertyDescriptor(
-            HTMLAnchorElement.prototype,
-            "download"
-          );
-          Object.defineProperty(el, "download", {
-            set(v: string) {
-              capturedFilenames.push(v);
-              origDownloadDescriptor?.set?.call(el, v);
-            },
-            get() {
-              return origDownloadDescriptor?.get?.call(el) ?? "";
-            },
-            configurable: true,
-          });
-        }
-        return el;
-      });
-
-      vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:http://localhost/mock");
-      vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
-
-      renderModal();
-
-      await waitFor(() => {
-        expect(mockFetchSettings).toHaveBeenCalled();
-      });
-
-      fireEvent.click(screen.getByTitle("Export settings to JSON file"));
-
-      await waitFor(() => {
-        expect(mockExportSettings).toHaveBeenCalled();
-      });
-
-      // Negative assertion: filename must NOT use the old kb- prefix
-      expect(capturedFilenames.length).toBeGreaterThanOrEqual(1);
-      for (const filename of capturedFilenames) {
-        expect(filename).not.toMatch(/^kb-settings-/);
+      for (const { download } of createdElements) {
+        expect(download).not.toMatch(/^kb-settings-/);
       }
     });
   });
@@ -3384,35 +3317,29 @@ describe("SettingsModal", () => {
       expect(await screen.findByText("Experimental Features")).toBeInTheDocument();
     });
 
-    it("shows known experimental features (Insights, Roadmaps) even when no custom features are configured", async () => {
+    // Read-only feature-list assertions share one render + section open.
+    // All pure label-presence checks are asserted against a single rendered
+    // instance to avoid re-rendering the full modal per feature.
+    it("shows known features and the full experimental feature list with a single Dev Server toggle", async () => {
       renderModal();
-
       await openExperimentalFeaturesSection();
 
-      // Known features should always be shown
+      // Known features are always shown even with no custom features configured.
       expect(screen.getByText("Insights")).toBeInTheDocument();
       expect(screen.getByText("Roadmaps")).toBeInTheDocument();
-    });
 
-    it.each([
-      "Research View",
-      "Evals View",
-      "Chat Rooms",
-      "Sandbox (command isolation)",
-      "Planning-style Agent Onboarding",
-    ])("shows %s in the Experimental Features list", async (featureLabel) => {
-      renderModal();
-      await openExperimentalFeaturesSection();
-      expect(screen.getByLabelText(featureLabel)).toBeInTheDocument();
-    });
+      for (const featureLabel of [
+        "Research View",
+        "Evals View",
+        "Chat Rooms",
+        "Sandbox (command isolation)",
+        "Planning-style Agent Onboarding",
+      ]) {
+        expect(screen.getByLabelText(featureLabel)).toBeInTheDocument();
+      }
 
-    it("shows a single canonical Dev Server toggle", async () => {
-      renderModal();
-
-      await openExperimentalFeaturesSection();
-
-      const devServerToggles = screen.getAllByLabelText("Dev Server");
-      expect(devServerToggles).toHaveLength(1);
+      // Dev Server has a single canonical toggle (no legacy duplicate).
+      expect(screen.getAllByLabelText("Dev Server")).toHaveLength(1);
     });
 
     it("does not render duplicate Dev Server rows when legacy and canonical keys are both present", async () => {
@@ -4793,6 +4720,13 @@ describe("SettingsModal", () => {
       expect(details).toHaveAttribute("open");
       expect(await screen.findByLabelText("SearXNG URL")).toBeInTheDocument();
       expect(screen.getByText(/Open Authentication Settings/i)).toBeInTheDocument();
+
+      const advancedBody = details?.querySelector(".settings-research-provider-advanced-body");
+      expect(advancedBody).toBeTruthy();
+      expect(advancedBody?.querySelectorAll(".form-group")).toHaveLength(3);
+      expect(screen.getByLabelText("Search Provider")).toHaveClass("input");
+      expect(screen.getByLabelText("SearXNG URL")).toHaveClass("input");
+      expect(screen.getByLabelText("Google Search CX")).toHaveClass("input");
     });
 
     it("keeps default max sources outside advanced details and groups provider controls", async () => {
@@ -4813,6 +4747,54 @@ describe("SettingsModal", () => {
       expect(providerGroup).toContainElement(screen.getByText(/No API key required\./i));
     });
 
+    it("keeps research limits and source controls inside desktop containment grids for both sections", async () => {
+      renderModal();
+      await waitForSettingsModalReady();
+      await openResearchGlobalSection();
+
+      const defaultMaxConcurrent = screen.getByLabelText("Default Max Concurrent Runs");
+      const defaultMaxSources = screen.getByLabelText("Default Max Sources Per Run");
+      const defaultMaxDuration = screen.getByLabelText("Default Max Duration (ms)");
+      const defaultRequestTimeout = screen.getByLabelText("Request Timeout (ms)");
+
+      const globalLimitsGrid = defaultMaxConcurrent.closest(".settings-research-limits-grid");
+      expect(globalLimitsGrid).toBeTruthy();
+      expect(defaultMaxSources.closest(".settings-research-limits-grid")).toBe(globalLimitsGrid);
+      expect(defaultMaxDuration.closest(".settings-research-limits-grid")).toBe(globalLimitsGrid);
+      expect(defaultRequestTimeout.closest(".settings-research-limits-grid")).toBe(globalLimitsGrid);
+      expect(defaultMaxConcurrent).toHaveClass("input");
+      expect(defaultMaxSources).toHaveClass("input");
+      expect(defaultMaxDuration).toHaveClass("input");
+      expect(defaultRequestTimeout).toHaveClass("input");
+
+      const globalSourceGrid = screen.getByRole("checkbox", { name: "GitHub" }).closest(".settings-research-source-grid");
+      expect(globalSourceGrid).toBeTruthy();
+      expect(screen.getByRole("checkbox", { name: "Local Docs" }).closest(".settings-research-source-grid")).toBe(globalSourceGrid);
+
+      await openResearchProjectSection();
+
+      const projectMaxConcurrent = screen.getByLabelText("Max Concurrent Runs");
+      const projectMaxSources = screen.getByLabelText("Max Sources Per Run");
+      const projectMaxDuration = screen.getByLabelText("Max Duration (ms)");
+      const projectRequestTimeout = screen.getByLabelText("Request Timeout (ms)");
+
+      const projectLimitsGrid = projectMaxConcurrent.closest(".settings-research-limits-grid");
+      expect(projectLimitsGrid).toBeTruthy();
+      expect(projectMaxSources.closest(".settings-research-limits-grid")).toBe(projectLimitsGrid);
+      expect(projectMaxDuration.closest(".settings-research-limits-grid")).toBe(projectLimitsGrid);
+      expect(projectRequestTimeout.closest(".settings-research-limits-grid")).toBe(projectLimitsGrid);
+      expect(projectMaxConcurrent).toHaveClass("input");
+      expect(projectMaxSources).toHaveClass("input");
+      expect(projectMaxDuration).toHaveClass("input");
+      expect(projectRequestTimeout).toHaveClass("input");
+
+      const projectSourceGrid = screen.getByRole("checkbox", { name: "Page Fetch" }).closest(".settings-research-source-grid");
+      expect(projectSourceGrid).toBeTruthy();
+      expect(screen.getByRole("checkbox", { name: "GitHub" }).closest(".settings-research-source-grid")).toBe(projectSourceGrid);
+      expect(screen.getByRole("checkbox", { name: "Local Docs" }).closest(".settings-research-source-grid")).toBe(projectSourceGrid);
+      expect(screen.getByRole("checkbox", { name: "LLM Synthesis" }).closest(".settings-research-source-grid")).toBe(projectSourceGrid);
+    });
+
     it("groups project limits fields in one grid and keeps validation error visible", async () => {
       renderModal();
       await waitForSettingsModalReady();
@@ -4828,6 +4810,16 @@ describe("SettingsModal", () => {
       expect(maxSources.closest(".settings-research-limits-grid")).toBe(limitsGrid);
       expect(maxDuration.closest(".settings-research-limits-grid")).toBe(limitsGrid);
       expect(requestTimeout.closest(".settings-research-limits-grid")).toBe(limitsGrid);
+      expect(maxConcurrent).toHaveClass("input");
+      expect(maxSources).toHaveClass("input");
+      expect(maxDuration).toHaveClass("input");
+      expect(requestTimeout).toHaveClass("input");
+
+      const sourceGrid = screen.getByRole("checkbox", { name: "Page Fetch" }).closest(".settings-research-source-grid");
+      expect(sourceGrid).toBeTruthy();
+      expect(screen.getByRole("checkbox", { name: "GitHub" }).closest(".settings-research-source-grid")).toBe(sourceGrid);
+      expect(screen.getByRole("checkbox", { name: "Local Docs" }).closest(".settings-research-source-grid")).toBe(sourceGrid);
+      expect(screen.getByRole("checkbox", { name: "LLM Synthesis" }).closest(".settings-research-source-grid")).toBe(sourceGrid);
 
       fireEvent.change(maxConcurrent, { target: { value: "0" } });
       await userEvent.click(screen.getByText("Save"));

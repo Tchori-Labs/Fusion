@@ -28,7 +28,7 @@ import { promisify } from "node:util";
 import { setImmediate as setImmediateCb } from "node:timers";
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
-import { IN_REVIEW_STALL_DEADLOCK_LOG_PREFIX, IN_REVIEW_STALL_LOG_PREFIX, countRecentIdenticalStallEntries, detectDependencyCycle, detectSelfDefeatingDependency, getInReviewStalledSignal, getInReviewStallReason, getPrimaryPrInfo, getStalePausedReviewSignal, getStalePausedTodoSignal, getTaskHardMergeBlocker, getTaskMergeBlocker, isEphemeralAgent, isMergeRequestContractShadowEnabled, isSharedBranchGroupMemberIntegration, parseExplicitDuplicateMarker, type AgentStore, type ChatStore, type MessageStore, type TaskStore, type Settings, type Task, type MergeDetails, type TaskPriority, type MergeResult } from "@fusion/core";
+import { IN_REVIEW_STALL_DEADLOCK_LOG_PREFIX, IN_REVIEW_STALL_LOG_PREFIX, allowsAutoMergeProcessing, countRecentIdenticalStallEntries, detectDependencyCycle, detectSelfDefeatingDependency, getInReviewStalledSignal, getInReviewStallReason, getPrimaryPrInfo, getStalePausedReviewSignal, getStalePausedTodoSignal, getTaskHardMergeBlocker, getTaskMergeBlocker, isEphemeralAgent, isMergeRequestContractShadowEnabled, isWorkflowColumnsEnabled, isSharedBranchGroupMemberIntegration, parseExplicitDuplicateMarker, type AgentStore, type ChatStore, type MessageStore, type TaskStore, type Settings, type Task, type MergeDetails, type TaskPriority, type MergeResult } from "@fusion/core";
 import type { MeshLeaseManager } from "./mesh-lease-manager.js";
 import { createLogger, schedulerLog } from "./logger.js";
 import { RemovalReason, classifyTaskWorktree, getRegisteredWorktreeBranchMap, getRegisteredWorktreePaths, isUsableTaskWorktree, removeWorktree, resolveWorktreeBackend, scanIdleWorktrees, scanOrphanedBranches } from "./worktree-pool.js";
@@ -110,7 +110,9 @@ export async function archiveAsGhostBug(
       findings: decision.findings.slice(0, 10),
     },
   });
-  await store.moveTask(taskId, "archived");
+  // #1411: recovery/terminal move — recoveryRehome skips order-derived adjacency
+  // so a custom-workflow card can always reach the terminal column.
+  await store.moveTask(taskId, "archived", { moveSource: "engine", recoveryRehome: true });
 }
 
 async function classifyOwnedLandedEvidenceForSelfHealing(rootDir: string, task: Task, mergeTargetBranch: string): Promise<OwnedLandedClassification> {
@@ -289,6 +291,8 @@ export interface SelfHealingOptions {
   reconcileAllMissionFeatures?: () => Promise<number>;
   /** Optional callback to re-run mission validation recovery during maintenance. */
   recoverActiveMissionValidations?: () => Promise<{ recoveredCount: number }>;
+  /** Optional callback to reap stale mission validator runs during startup and maintenance. */
+  reapStaleMissionValidatorRuns?: () => Promise<{ reapedCount: number }>;
 }
 
 const APPROVED_TRIAGE_RECOVERY_GRACE_MS = 60_000;
@@ -296,6 +300,7 @@ const STARVED_REFINEMENT_RECOVERY_GRACE_MS = 10 * 60_000;
 const STARVED_PEER_PROGRESS_THRESHOLD = 3;
 const STARVED_REFINEMENT_ESCALATION_COOLDOWN_MS = STARVED_REFINEMENT_RECOVERY_GRACE_MS * 4;
 const ORPHANED_EXECUTION_RECOVERY_GRACE_MS = 60_000;
+export const VALIDATOR_RUN_STALE_MAX_AGE_MS = 6 * 60 * 60 * 1000;
 const ACTIVE_MERGE_STATUSES = new Set(["merging", "merging-pr", "merging-fix"]);
 const NON_TERMINAL_STEP_STATUSES = new Set(["pending", "in-progress"]);
 const STRANDED_COMPLETED_TODO_ACTIVE_STATUSES = new Set([
@@ -434,9 +439,10 @@ export async function autoRecoverWorktreeSessionStartFailure(
         : `Auto-recovered: retry/verification session targeted unusable worktree${staleWorktree ? ` (${staleWorktree})` : ""} — cleared stale session metadata and requeued to todo (attempt ${nextCount}/${MAX_WORKTREE_SESSION_RETRIES}, failure: ${failureExcerpt})`,
   );
   if (noProgress) {
-    await store.moveTask(task.id, "todo");
+    // #1411: backward recovery move — recoveryRehome skips order-derived adjacency.
+    await store.moveTask(task.id, "todo", { moveSource: "engine", recoveryRehome: true });
   } else {
-    await store.moveTask(task.id, "todo", { preserveProgress: true });
+    await store.moveTask(task.id, "todo", { preserveProgress: true, moveSource: "engine", recoveryRehome: true });
   }
   return { outcome: "requeue-todo", retries: nextCount, classification };
 }
@@ -490,9 +496,13 @@ function commitOwnedByTask(taskId: string, lineageId: string | undefined, subjec
   if (new RegExp(`(?:^|\\n)Fusion-Task-Id: ${escapeRegex(taskId)}\\s*(?:\\n|$)`).test(body)) {
     return true;
   }
-  // Subject anchor: `<scope>(<taskId>...): …` or `<taskId>: …` at start.
+  // Subject anchor: `<type>(<…taskId…>): …` or `<taskId>: …` at start.
+  // The conventional scope group is intentionally NOT optional: a bare
+  // `<type>: …` (e.g. `feat: unrelated change`) carries no task ID and is NOT
+  // ownership evidence, even if the body mentions the task in prose (incident
+  // bug #2 — a prose-mention must never claim a task).
   const subjectAnchor = new RegExp(
-    `^(?:[A-Za-z]+(?:\\([^)]*\\b${escapeRegex(taskId)}\\b[^)]*\\))?:|${escapeRegex(taskId)}:)`,
+    `^(?:[A-Za-z]+\\([^)]*\\b${escapeRegex(taskId)}\\b[^)]*\\):|${escapeRegex(taskId)}:)`,
   );
   return subjectAnchor.test(subject);
 }
@@ -598,6 +608,8 @@ export class SelfHealingManager {
   private deadlockRecoveryCooldown: Map<string, number> = new Map();
   private mergeStarvationDrops: Map<string, number> = new Map();
   private finalizeUnprovenWarned = new Set<string>();
+  private metaResolvedSkipAuditMemo = new Map<string, string>();
+  private metaStalledSkipAuditMemo = new Map<string, string>();
   private maintenanceTickCounter = 0;
   private readonly processBootStartedAt = Date.now();
   private dependencyBlockedTodoReporter: DependencyBlockedTodoReporter | null = null;
@@ -854,6 +866,16 @@ export class SelfHealingManager {
       { name: "orphaned-planning", fn: () => this.recoverOrphanedPlanningTasks().then(() => undefined) },
       { name: "recover-orphaned-agents", fn: () => this.recoverOrphanedAgents().then(() => undefined) },
       { name: "recover-stale-heartbeat-runs", fn: () => this.recoverStaleHeartbeatRuns().then(() => undefined) },
+      {
+        name: "reap-stale-mission-validator-runs",
+        fn: async () => {
+          if (!this.options.reapStaleMissionValidatorRuns) {
+            return undefined;
+          }
+          await this.options.reapStaleMissionValidatorRuns();
+          return undefined;
+        },
+      },
       { name: "recover-running-on-inactive-tasks", fn: () => this.recoverAgentsRunningOnInactiveTasks().then(() => undefined) },
       { name: "recover-drifted-agent-task-links", fn: () => this.recoverDriftedAgentTaskLinks().then(() => undefined) },
       { name: "reconcile-soft-delete-column-drift", fn: () => this.reconcileSoftDeletedColumnDrift().then(() => undefined) },
@@ -916,6 +938,9 @@ export class SelfHealingManager {
       this.maintenanceInterval = null;
     }
 
+    this.finalizeUnprovenWarned.clear();
+    this.metaResolvedSkipAuditMemo.clear();
+    this.metaStalledSkipAuditMemo.clear();
     log.log("Stopped");
   }
 
@@ -1090,6 +1115,9 @@ export class SelfHealingManager {
             await this.store.moveTask(taskId, "todo", {
               preserveProgress: true,
               preserveStatus: true,
+              // #1411: backward recovery — skip order-derived adjacency.
+              moveSource: "engine",
+              recoveryRehome: true,
             });
           } catch (moveErr: unknown) {
             const moveErrMessage = moveErr instanceof Error ? moveErr.message : String(moveErr);
@@ -1644,6 +1672,18 @@ export class SelfHealingManager {
             log.log(`Maintenance batch 1 step "prune-operational-logs" succeeded — deleted=${deletedTotal}${detail ? ` (${detail})` : ""}`);
           },
         },
+        {
+          name: "prune-agent-log-files",
+          fn: async () => {
+            const days = Number(settings.agentLogFileRetentionDays ?? 0);
+            if (!Number.isFinite(days) || days <= 0) {
+              log.log("Maintenance batch 1 step \"prune-agent-log-files\" skipped — agentLogFileRetentionDays is not enabled");
+              return;
+            }
+            const { prunedFiles, prunedEntries, freedBytes } = this.store.pruneAgentLogFiles(days);
+            log.log(`Maintenance batch 1 step "prune-agent-log-files" succeeded — files=${prunedFiles} entries=${prunedEntries} bytes=${freedBytes}`);
+          },
+        },
         { name: "checkpoint-wal", fn: () => Promise.resolve(this.checkpointWal()) },
         { name: "enforce-worktree-cap", fn: () => this.enforceWorktreeCap() },
       ];
@@ -1674,6 +1714,15 @@ export class SelfHealingManager {
                 return;
               }
               await this.options.recoverActiveMissionValidations();
+            },
+          },
+          {
+            name: "reap-stale-mission-validator-runs",
+            fn: async () => {
+              if (!this.options.reapStaleMissionValidatorRuns) {
+                return;
+              }
+              await this.options.reapStaleMissionValidatorRuns();
             },
           },
           {
@@ -1725,6 +1774,10 @@ export class SelfHealingManager {
           { name: "auto-archive-meta-resolved", fn: () => this.autoArchiveResolvedMetaTasks() },
           { name: "auto-archive-meta-stalled", fn: () => this.autoArchiveStalledMetaTasks() },
           { name: "board-stall-auto-recovery", fn: () => this.runBoardStallAutoRecoverySweep() },
+          // #1401: periodically recover transitionPending markers stranded by a
+          // crash between the in-txn write and the post-commit clear (flag-ON
+          // only; a no-op when there are no markers).
+          { name: "recover-stale-transition-pending", fn: () => this.runStaleTransitionPendingSweep() },
           { name: "reconcile-self-defeating-deps", fn: () => this.reconcileSelfDefeatingDependencies() },
           { name: "reconcile-dependency-cycles", fn: () => this.reconcileDependencyCycles().then(() => undefined) },
           { name: "reclaim-pr-conflicts", fn: () => this.reclaimPrConflicts() },
@@ -2157,6 +2210,8 @@ export class SelfHealingManager {
           });
           await this.store.moveTask(task.id, "todo", {
             moveSource: "engine",
+            // #1411: backward recovery — skip order-derived adjacency.
+            recoveryRehome: true,
             preserveWorktree: true,
             preserveProgress: true,
             preserveResumeState: true,
@@ -2268,14 +2323,14 @@ export class SelfHealingManager {
    * Backward lifecycle move gated on triple proof (FN-5335).
    * When the predicate fails, emits `task:reclaim-self-owned-branch-conflict-no-action` and skips lifecycle mutation.
    *
-   * No-op when `settings.autoMerge === false` — PR-based review flow owns lifecycle until human merge.
+   * Skips tasks not eligible for auto-merge processing (global `autoMerge`
+   * off without an explicit per-task `autoMerge: true` override) — PR-based
+   * review flow owns lifecycle until human merge.
    */
   async reclaimSelfOwnedBranchConflicts(): Promise<number> {
     try {
       const settings = await this.store.getSettings();
       if (settings.globalPause || settings.enginePaused) return 0;
-      if (settings.autoMerge === false) return 0;
-
       const todoCandidates = await this.store.listTasks({ column: "todo", slim: true });
       const inProgressCandidates = await this.store.listTasks({ column: "in-progress", slim: true });
       const inProgressByWorktree = new Map<string, string>();
@@ -2286,7 +2341,14 @@ export class SelfHealingManager {
       }
       const inReviewPausedCandidates = (await this.store.listTasks({ column: "in-review", slim: true }))
         .filter((task) => task.paused === true && task.pausedReason === "branch-conflict-unrecoverable");
-      const candidates = [...todoCandidates, ...inProgressCandidates, ...inReviewPausedCandidates];
+      // Per-task auto-merge gating applies to ALL candidate columns, not just
+      // in-review: the FN-5704 regression contract ("short-circuits reclaim
+      // when autoMerge is false") deliberately keeps execution-stage reclaim
+      // and resume-limbo escalation inert in manual-review projects. The
+      // per-task override preserves that for override-less tasks while letting
+      // explicit autoMerge:true tasks recover.
+      const candidates = [...todoCandidates, ...inProgressCandidates, ...inReviewPausedCandidates]
+        .filter((task) => allowsAutoMergeProcessing(task, settings));
 
       const activeTaskIds = new Set<string>();
       if (this.options.agentStore) {
@@ -2417,6 +2479,8 @@ export class SelfHealingManager {
                 } else {
                   await this.store.moveTask(task.id, "todo", {
                     moveSource: "engine",
+                    // #1411: backward recovery — skip order-derived adjacency.
+                    recoveryRehome: true,
                     preserveProgress: true,
                     preserveResumeState: true,
                   });
@@ -2520,6 +2584,8 @@ export class SelfHealingManager {
                   } else {
                     await this.store.moveTask(task.id, "todo", {
                       moveSource: "engine",
+                      // #1411: backward recovery — skip order-derived adjacency.
+                      recoveryRehome: true,
                       preserveProgress: true,
                       preserveResumeState: true,
                     });
@@ -2587,6 +2653,8 @@ export class SelfHealingManager {
             const idleMs = Number.isFinite(idleAnchorMs) ? Math.max(0, Date.now() - idleAnchorMs) : null;
             await this.store.moveTask(task.id, "todo", {
               moveSource: "engine",
+              // #1411: backward recovery — skip order-derived adjacency.
+              recoveryRehome: true,
               preserveWorktree: true,
               preserveProgress: true,
               preserveResumeState: true,
@@ -2653,6 +2721,8 @@ export class SelfHealingManager {
             } else {
               await this.store.moveTask(task.id, "todo", {
                 moveSource: "engine",
+                // #1411: backward recovery — skip order-derived adjacency.
+                recoveryRehome: true,
                 preserveWorktree: true,
                 preserveProgress: true,
                 preserveResumeState: true,
@@ -3571,6 +3641,8 @@ export class SelfHealingManager {
         preserveWorktree: true,
         preserveResumeState: true,
         moveSource: "engine",
+        // #1411: backward recovery — skip order-derived adjacency.
+        recoveryRehome: true,
       });
       await this.store.logEntry(
         task.id,
@@ -3715,6 +3787,24 @@ export class SelfHealingManager {
     return reasons.length > 0 ? { block: true, reasons } : { block: false };
   }
 
+  private formatReasonSignature(reasons: string[]): string {
+    return reasons.join("|");
+  }
+
+  private shouldEmitReasonMemo(memo: Map<string, string>, taskId: string, reasons: string[]): boolean {
+    const signature = this.formatReasonSignature(reasons);
+    const previous = memo.get(taskId);
+    if (previous === signature) {
+      return false;
+    }
+    memo.set(taskId, signature);
+    return true;
+  }
+
+  private clearReasonMemo(memo: Map<string, string>, taskId: string): void {
+    memo.delete(taskId);
+  }
+
   async autoArchiveResolvedMetaTasks(reboundedTargets?: Set<string>): Promise<number> {
     const tasks = await this.store.listTasks({ slim: false, includeArchived: true });
     const byId = new Map(tasks.map((task) => [task.id.toUpperCase(), task]));
@@ -3723,23 +3813,32 @@ export class SelfHealingManager {
       if (task.column === "archived") continue;
       const classified = this.classifyMetaTask(task);
       const targetTaskId = this.resolveMetaTargetTaskId(byId, task);
-      if (!classified.isMeta || !targetTaskId) continue;
+      if (!classified.isMeta || !targetTaskId) {
+        this.clearReasonMemo(this.metaResolvedSkipAuditMemo, task.id);
+        continue;
+      }
       const chainDepth = this.computeMetaChainDepth(byId, targetTaskId);
       const target = byId.get(targetTaskId.toUpperCase());
       const resolved = Boolean(target && !this.classifyMetaTask(target).isMeta && (target.column === "done" || target.column === "archived" || target.column === "todo"));
       const rebounded = Boolean(reboundedTargets?.has(targetTaskId));
-      if (!resolved && !rebounded && chainDepth < 2) continue;
+      if (!resolved && !rebounded && chainDepth < 2) {
+        this.clearReasonMemo(this.metaResolvedSkipAuditMemo, task.id);
+        continue;
+      }
       const guardResult = await this.evaluateMetaAutoArchiveGuards(task);
       if (guardResult.block) {
-        const auditor = createRunAuditor(this.store, { runId: generateSyntheticRunId("fn4890-meta", task.id), agentId: "self-healing", taskId: task.id, phase: "auto-archive-meta-resolved-skipped" });
-        await auditor.database({
-          type: "task:auto-archive-meta-resolved-skipped",
-          target: task.id,
-          metadata: { taskId: task.id, targetTaskId, targetColumn: target?.column ?? "unknown", chainDepth, blockedBy: guardResult.reasons },
-        });
+        if (this.shouldEmitReasonMemo(this.metaResolvedSkipAuditMemo, task.id, guardResult.reasons)) {
+          const auditor = createRunAuditor(this.store, { runId: generateSyntheticRunId("fn4890-meta", task.id), agentId: "self-healing", taskId: task.id, phase: "auto-archive-meta-resolved-skipped" });
+          await auditor.database({
+            type: "task:auto-archive-meta-resolved-skipped",
+            target: task.id,
+            metadata: { taskId: task.id, targetTaskId, targetColumn: target?.column ?? "unknown", chainDepth, blockedBy: guardResult.reasons },
+          });
+        }
         log.log(`[self-healing] skipped meta-resolved auto-archive for ${task.id}: ${guardResult.reasons.join(",")}`);
         continue;
       }
+      this.clearReasonMemo(this.metaResolvedSkipAuditMemo, task.id);
       try {
         await this.store.logEntry(task.id, `Auto-archived meta-task (FN-4890): target ${targetTaskId} resolved/superseded.`);
         await this.archiveMetaTask(task.id);
@@ -3765,25 +3864,37 @@ export class SelfHealingManager {
       if (task.column === "archived") continue;
       const classified = this.classifyMetaTask(task);
       const targetTaskId = this.resolveMetaTargetTaskId(byId, task);
-      if (!classified.isMeta || !targetTaskId) continue;
+      if (!classified.isMeta || !targetTaskId) {
+        this.clearReasonMemo(this.metaStalledSkipAuditMemo, task.id);
+        continue;
+      }
       const chainDepth = this.computeMetaChainDepth(byId, targetTaskId);
       const ageMs = now - Date.parse(task.columnMovedAt ?? task.updatedAt);
-      if (chainDepth < 2 && (!Number.isFinite(ageMs) || ageMs < thresholdMs)) continue;
+      if (chainDepth < 2 && (!Number.isFinite(ageMs) || ageMs < thresholdMs)) {
+        this.clearReasonMemo(this.metaStalledSkipAuditMemo, task.id);
+        continue;
+      }
       const target = byId.get(targetTaskId.toUpperCase());
       const targetMovedAtMs = Date.parse(target?.columnMovedAt ?? target?.updatedAt ?? "");
       const targetStalled = !Number.isFinite(targetMovedAtMs) || (now - targetMovedAtMs >= thresholdMs);
-      if (chainDepth < 2 && !targetStalled) continue;
+      if (chainDepth < 2 && !targetStalled) {
+        this.clearReasonMemo(this.metaStalledSkipAuditMemo, task.id);
+        continue;
+      }
       const guardResult = await this.evaluateMetaAutoArchiveGuards(task);
       if (guardResult.block) {
-        const auditor = createRunAuditor(this.store, { runId: generateSyntheticRunId("fn4890-meta", task.id), agentId: "self-healing", taskId: task.id, phase: "auto-archive-meta-stalled-skipped" });
-        await auditor.database({
-          type: "task:auto-archive-meta-stalled-skipped",
-          target: task.id,
-          metadata: { taskId: task.id, targetTaskId, chainDepth, stalledMs: Math.max(ageMs, 0), blockedBy: guardResult.reasons },
-        });
+        if (this.shouldEmitReasonMemo(this.metaStalledSkipAuditMemo, task.id, guardResult.reasons)) {
+          const auditor = createRunAuditor(this.store, { runId: generateSyntheticRunId("fn4890-meta", task.id), agentId: "self-healing", taskId: task.id, phase: "auto-archive-meta-stalled-skipped" });
+          await auditor.database({
+            type: "task:auto-archive-meta-stalled-skipped",
+            target: task.id,
+            metadata: { taskId: task.id, targetTaskId, chainDepth, stalledMs: Math.max(ageMs, 0), blockedBy: guardResult.reasons },
+          });
+        }
         log.log(`[self-healing] skipped meta-stalled auto-archive for ${task.id}: ${guardResult.reasons.join(",")}`);
         continue;
       }
+      this.clearReasonMemo(this.metaStalledSkipAuditMemo, task.id);
       try {
         await this.store.logEntry(task.id, `Auto-archived meta-task (FN-4890): superseded — not spawning further meta; rely on self-heal on target ${targetTaskId}`);
         await this.archiveMetaTask(task.id);
@@ -3795,6 +3906,19 @@ export class SelfHealingManager {
       }
     }
     return archived;
+  }
+
+  /**
+   * #1401: periodic transitionPending recovery sweep. Flag-ON only — when
+   * `workflowColumns` is OFF the legacy path never writes markers, so there is
+   * nothing to recover. Delegates to the store's idempotent recovery method
+   * (a no-op when no stale markers exist), keeping capacity counts honest after
+   * a crash between the in-txn marker write and the post-commit clear.
+   */
+  async runStaleTransitionPendingSweep(): Promise<void> {
+    const settings = await this.store.getSettings();
+    if (!isWorkflowColumnsEnabled(settings)) return;
+    await this.store.recoverStaleTransitionPending();
   }
 
   async runBoardStallAutoRecoverySweep(): Promise<{ holders: string[]; recovered: number; unrecovered: boolean }> {
@@ -4450,17 +4574,18 @@ export class SelfHealingManager {
    * Backward lifecycle move gated on triple proof (FN-5335).
    * When the unproven fallback predicate fails, emits `task:finalize-no-op-review-no-action` and skips lifecycle mutation.
    *
-   * No-op when `settings.autoMerge === false` — PR-based review flow owns lifecycle until human merge.
+   * Skips tasks not eligible for auto-merge processing (global `autoMerge`
+   * off without an explicit per-task `autoMerge: true` override) — PR-based
+   * review flow owns lifecycle until human merge.
    */
   async finalizeNoOpReviewTasks(): Promise<number> {
     try {
       const settings = await this.store.getSettings();
       if (settings.globalPause || settings.enginePaused) return 0;
-      if (settings.autoMerge === false) return 0;
-
       const tasks = await this.store.listTasks({ column: "in-review", slim: true });
       const candidates = tasks.filter((t) =>
         t.column === "in-review" &&
+        allowsAutoMergeProcessing(t, settings) &&
         !t.paused &&
         !isSharedBranchGroupMemberIntegration(t) &&
         Boolean(t.worktree) &&
@@ -4526,7 +4651,8 @@ export class SelfHealingManager {
             await this.emitBackwardMoveNoAction(task, "finalize-no-op-review", "task:finalize-no-op-review-no-action", proof);
             continue;
           }
-          await this.store.moveTask(task.id, "todo", { preserveProgress: true, moveSource: "engine" });
+          // #1411: backward recovery — skip order-derived adjacency.
+          await this.store.moveTask(task.id, "todo", { preserveProgress: true, moveSource: "engine", recoveryRehome: true });
           continue;
         }
 
@@ -4576,7 +4702,8 @@ export class SelfHealingManager {
               classification: "proven-no-op",
               baseRef: classification.baseRef,
             });
-            await this.store.moveTask(task.id, "todo", { preserveProgress: true, moveSource: "engine" });
+            // #1411: backward recovery — skip order-derived adjacency.
+            await this.store.moveTask(task.id, "todo", { preserveProgress: true, moveSource: "engine", recoveryRehome: true });
             recovered++;
             continue;
           }
@@ -4642,9 +4769,11 @@ export class SelfHealingManager {
             rootDir: this.options.rootDir,
             settings,
           });
+          this.finalizeUnprovenWarned.delete(task.id);
           await this.store.updateTask(task.id, {
             mergeDetails: {
               ...(task.mergeDetails || {}),
+              integrityWarning: undefined,
               commitSha: classification.commit.sha,
               filesChanged: classification.commit.filesChanged,
               insertions: classification.commit.insertions,
@@ -4661,10 +4790,12 @@ export class SelfHealingManager {
         }
 
         if (classification.kind === "proven-no-op") {
+          this.finalizeUnprovenWarned.delete(task.id);
           await this.store.updateTask(task.id, {
             modifiedFiles: [],
             mergeDetails: {
               ...(task.mergeDetails || {}),
+              integrityWarning: undefined,
               mergeConfirmed: true,
               noOpMerge: true,
               noOpReason: `branch has zero commits ahead of ${classification.baseRef}`,
@@ -4680,10 +4811,12 @@ export class SelfHealingManager {
         }
 
         if (classification.kind === "no-changes-finalized") {
+          this.finalizeUnprovenWarned.delete(task.id);
           await this.store.updateTask(task.id, {
             modifiedFiles: [],
             mergeDetails: {
               ...(task.mergeDetails || {}),
+              integrityWarning: undefined,
               mergeConfirmed: true,
               noOpMerge: true,
               noOpReason: "verification-only finalize: no branch and no owned commits",
@@ -4724,14 +4857,14 @@ export class SelfHealingManager {
               },
             },
           });
+          await this.recordIntegrityAudit(task.id, "task:integrity-warning", {
+            reason: classification.reason,
+            modifiedFilesCount: task.modifiedFiles?.length ?? 0,
+            details: classification.details,
+          });
         } else {
           this.finalizeUnprovenWarned.add(task.id);
         }
-        await this.recordIntegrityAudit(task.id, "task:integrity-warning", {
-          reason: classification.reason,
-          modifiedFilesCount: task.modifiedFiles?.length ?? 0,
-          details: classification.details,
-        });
       }
 
       return reconciled;
@@ -4759,12 +4892,11 @@ export class SelfHealingManager {
       // "pull-request"`) — see GitHub issue #21.
       const settings = await this.store.getSettings();
       if (settings.globalPause || settings.enginePaused) return 0;
-      if (settings.autoMerge === false) return 0;
-
       const tasks = await this.store.listTasks({ column: "in-review", slim: true });
 
       const mergeable = tasks.filter((t) =>
         t.column === "in-review" &&
+        allowsAutoMergeProcessing(t, settings) &&
         !t.paused &&
         t.status !== "failed" &&
         // Exclude transient merge statuses. Active merges should be left alone;
@@ -4864,7 +4996,9 @@ export class SelfHealingManager {
    * per-task `postReviewFixCount` so a persistently-failing verifier cannot
    * ping-pong a task forever.
    *
-   * No-op when `settings.autoMerge === false` — PR-based review flow owns lifecycle until human merge.
+   * Skips tasks not eligible for auto-merge processing (global `autoMerge`
+   * off without an explicit per-task `autoMerge: true` override) — PR-based
+   * review flow owns lifecycle until human merge.
    * @returns Number of tasks sent back for fix
    */
   async recoverReviewTasksWithFailedPreMergeSteps(): Promise<number> {
@@ -4874,7 +5008,6 @@ export class SelfHealingManager {
     try {
       const settings = await this.store.getSettings();
       if (settings.globalPause || settings.enginePaused) return 0;
-      if (settings.autoMerge === false) return 0;
       const maxFixes = settings.maxPostReviewFixes ?? 1;
       if (!Number.isFinite(maxFixes) || maxFixes <= 0) return 0;
 
@@ -4883,6 +5016,7 @@ export class SelfHealingManager {
 
       const candidates = tasks.filter((task) => {
         if (task.column !== "in-review") return false;
+        if (!allowsAutoMergeProcessing(task, settings)) return false;
         if (task.paused) return false;
         // Preserve terminal/human-handoff statuses (failed, awaiting-user-review,
         // merging, etc.). Only revive tasks that are otherwise idle.
@@ -4960,13 +5094,14 @@ export class SelfHealingManager {
    * incomplete step instead of leaving the task stranded in review.
    * Backward lifecycle move gated on triple proof (FN-5335).
    * When the predicate fails, emits `task:stale-incomplete-review-no-action` and skips lifecycle mutation.
-   * No-op when `settings.autoMerge === false` — PR-based review flow owns lifecycle until human merge.
+   * Skips tasks not eligible for auto-merge processing (global `autoMerge`
+   * off without an explicit per-task `autoMerge: true` override) — PR-based
+   * review flow owns lifecycle until human merge.
    */
   async recoverStaleIncompleteReviewTasks(): Promise<number> {
     try {
       const settings = await this.store.getSettings();
       if (settings.globalPause || settings.enginePaused) return 0;
-      if (settings.autoMerge === false) return 0;
       const timeoutMs = settings.taskStuckTimeoutMs;
       if (!timeoutMs || timeoutMs <= 0) return 0;
 
@@ -4974,6 +5109,7 @@ export class SelfHealingManager {
       const tasks = await this.store.listTasks({ column: "in-review", slim: true });
       const staleIncomplete = tasks.filter((task) =>
         task.column === "in-review" &&
+        allowsAutoMergeProcessing(task, settings) &&
         !task.paused &&
         !task.status &&
         task.steps.length > 0 &&
@@ -5003,7 +5139,8 @@ export class SelfHealingManager {
             task.id,
             "Auto-recovered: in-review task still had incomplete steps — moved back to todo for retry",
           );
-          await this.store.moveTask(task.id, "todo", { preserveProgress: true });
+          // #1411: backward recovery — skip order-derived adjacency.
+          await this.store.moveTask(task.id, "todo", { preserveProgress: true, moveSource: "engine", recoveryRehome: true });
           log.log(`Recovered stale incomplete review task ${task.id}: moved back to todo`);
           recovered++;
         } catch (err: unknown) { const errorMessage = err instanceof Error ? err.message : String(err);
@@ -5022,8 +5159,9 @@ export class SelfHealingManager {
    * Final-fallback recovery for `in-review` tasks that fell through every other
    * scan and have sat untouched longer than `taskStuckTimeoutMs`.
    *
-   * When `settings.autoMerge` is disabled, this sweep is a no-op because
-   * PR-based manual review intentionally leaves tasks in `in-review`.
+   * Tasks not eligible for auto-merge processing (global `autoMerge` off
+   * without an explicit per-task `autoMerge: true` override) are skipped
+   * because PR-based manual review intentionally leaves them in `in-review`.
    *
    * The other review-recovery scans each require a specific shape (failed
    * pre-merge step, incomplete steps, mergeable + worktree present, confirmed
@@ -5044,8 +5182,10 @@ export class SelfHealingManager {
    * each kick refreshes `updatedAt`, so a task that re-enters review and gets
    * stuck again can only be kicked once per `taskStuckTimeoutMs` window.
    *
-   * When `settings.autoMerge === false`, this sweep is a no-op because those
-   * projects intentionally use PR-based/manual in-review ownership.
+   * Tasks not eligible for auto-merge processing (global `autoMerge` off
+   * without an explicit per-task `autoMerge: true` override) are skipped
+   * because those projects intentionally use PR-based/manual in-review
+   * ownership.
    *
    * @returns Number of tasks kicked back to todo
    */
@@ -5053,8 +5193,6 @@ export class SelfHealingManager {
     try {
       const settings = await this.store.getSettings();
       if (settings.globalPause || settings.enginePaused) return 0;
-      if (settings.autoMerge === false) return 0;
-
       const cycleStartMs = Date.now();
       const timeoutMs = settings.taskStuckTimeoutMs;
       if (!timeoutMs || timeoutMs <= 0) return 0;
@@ -5066,6 +5204,7 @@ export class SelfHealingManager {
 
       for (const task of tasks) {
         if (task.deletedAt) continue;
+        if (!allowsAutoMergeProcessing(task, settings)) continue;
         const signal = getInReviewStallReason(task, {
           now: cycleStartMs,
           activeMergeTaskId,
@@ -5183,14 +5322,14 @@ export class SelfHealingManager {
    * - `surfaceStalePausedReviews()` owns paused in-review tasks.
    * - `surfaceInReviewStalls()` owns reason-driven in-review stalls.
    *
-   * No-op when `settings.autoMerge === false` — PR-based review flow owns lifecycle until human merge.
+   * Skips tasks not eligible for auto-merge processing (global `autoMerge`
+   * off without an explicit per-task `autoMerge: true` override) — PR-based
+   * review flow owns lifecycle until human merge.
    */
   async surfaceInReviewStalled(): Promise<number> {
     try {
       const settings = await this.store.getSettings();
       if (settings.globalPause || settings.enginePaused) return 0;
-      if (settings.autoMerge === false) return 0;
-
       const cycleStartMs = Date.now();
       const thresholdMs = settings.inReviewStalledThresholdMs;
       if (!thresholdMs || thresholdMs <= 0) return 0;
@@ -5202,6 +5341,7 @@ export class SelfHealingManager {
 
       for (const task of tasks) {
         if (task.deletedAt) continue;
+        if (!allowsAutoMergeProcessing(task, settings)) continue;
         if (task.paused === true) continue;
         if (task.id === activeMergeTaskId || executingTaskIds.has(task.id)) continue;
 
@@ -5355,13 +5495,14 @@ export class SelfHealingManager {
    * Backward lifecycle move gated on triple proof (FN-5335).
    * When the predicate fails, emits `task:ghost-review-no-action` and skips lifecycle mutation.
    *
-   * No-op when `settings.autoMerge === false` — PR-based review flow owns lifecycle until human merge.
+   * Skips tasks not eligible for auto-merge processing (global `autoMerge`
+   * off without an explicit per-task `autoMerge: true` override) — PR-based
+   * review flow owns lifecycle until human merge.
    */
   async recoverGhostReviewTasks(): Promise<number> {
     try {
       const settings = await this.store.getSettings();
       if (settings.globalPause || settings.enginePaused) return 0;
-      if (settings.autoMerge === false) return 0;
       const timeoutMs = settings.taskStuckTimeoutMs;
       if (!timeoutMs || timeoutMs <= 0) return 0;
 
@@ -5370,6 +5511,7 @@ export class SelfHealingManager {
       const tasks = await this.store.listTasks({ column: "in-review", slim: true });
       const ghosts = tasks.filter((task) =>
         task.column === "in-review" &&
+        allowsAutoMergeProcessing(task, settings) &&
         !task.paused &&
         !executingIds.has(task.id) &&
         !(task.status && GHOST_REVIEW_PRESERVED_STATUSES.has(task.status)) &&
@@ -5402,7 +5544,8 @@ export class SelfHealingManager {
             task.id,
             "Auto-recovered: in-review task idle past stuck-task timeout — kicked back to todo",
           );
-          await this.store.moveTask(task.id, "todo", { preserveProgress: true });
+          // #1411: backward recovery — skip order-derived adjacency.
+          await this.store.moveTask(task.id, "todo", { preserveProgress: true, moveSource: "engine", recoveryRehome: true });
           log.log(`Kicked ghost review task ${task.id} back to todo`);
           recovered++;
         } catch (err: unknown) {
@@ -5431,7 +5574,9 @@ export class SelfHealingManager {
    * If no landed commit is found, it only clears the stale transient status so
    * the normal mergeable-review recovery can retry the merge.
    *
-   * No-op when `settings.autoMerge === false` — PR-based review flow owns lifecycle until human merge.
+   * Skips tasks not eligible for auto-merge processing (global `autoMerge`
+   * off without an explicit per-task `autoMerge: true` override) — PR-based
+   * review flow owns lifecycle until human merge.
    * @returns Number of tasks finalized or unblocked
    */
   /**
@@ -5452,8 +5597,9 @@ export class SelfHealingManager {
    *    parked as failed and emit `merger:transient-failure-budget-exhausted`
    *    once for diagnostic visibility.
    *
-   * No-op when `settings.autoMerge === false`, no `requeueForAutoMerge`
-   * callback is wired, or global/engine pause is active.
+   * Skips tasks not eligible for auto-merge processing (global `autoMerge`
+   * off without a per-task `autoMerge: true` override). No-op when no
+   * `requeueForAutoMerge` callback is wired or global/engine pause is active.
    *
    * @returns Number of tasks recovered
    */
@@ -5462,12 +5608,12 @@ export class SelfHealingManager {
     if (!requeue) return 0;
     try {
       const settings = await this.store.getSettings();
-      if (settings.autoMerge === false) return 0;
       if (settings.globalPause || settings.enginePaused) return 0;
 
       const slim = await this.store.listTasks({ column: "in-review", slim: true });
       const candidates = slim.filter((t) =>
         t.column === "in-review"
+        && allowsAutoMergeProcessing(t, settings)
         && t.status === "failed"
         && (t.mergeRetries ?? 0) >= MAX_AUTO_MERGE_RETRIES
         && typeof t.error === "string"
@@ -5608,13 +5754,13 @@ export class SelfHealingManager {
     try {
       const settings = await this.store.getSettings();
       if (settings.globalPause || settings.enginePaused) return 0;
-      if (settings.autoMerge === false) return 0;
       const timeoutMs = settings.taskStuckTimeoutMs;
       if (!timeoutMs || timeoutMs <= 0) return 0;
 
       const tasks = await this.store.listTasks({ column: "in-review", slim: true });
       const candidates = tasks.filter((task) =>
         task.column === "in-review" &&
+        allowsAutoMergeProcessing(task, settings) &&
         !task.paused &&
         Boolean(task.status && ACTIVE_MERGE_STATUSES.has(task.status)) &&
         this.isPastInterruptedMergeGrace(task, timeoutMs),
@@ -5922,20 +6068,21 @@ export class SelfHealingManager {
    * but a later transition failed or another process moved the task before the
    * final `in-review` → `done` update completed.
    *
-   * No-op when `settings.autoMerge === false` — PR-based review flow owns lifecycle until human merge.
+   * Skips tasks not eligible for auto-merge processing (global `autoMerge`
+   * off without an explicit per-task `autoMerge: true` override) — PR-based
+   * review flow owns lifecycle until human merge.
    * @returns Number of tasks recovered
    */
   async recoverMergedReviewTasks(): Promise<number> {
     try {
       const settings = await this.store.getSettings();
       if (settings.globalPause || settings.enginePaused) return 0;
-      if (settings.autoMerge === false) return 0;
-
       const tasks = await this.store.listTasks({ column: "in-review", slim: true });
 
       const mergedButNotDone = tasks.filter((t) =>
         !t.deletedAt &&
         t.column === "in-review" &&
+        allowsAutoMergeProcessing(t, settings) &&
         t.mergeDetails?.mergeConfirmed === true,
       );
 
@@ -6053,14 +6200,14 @@ export class SelfHealingManager {
    * When the no-landed predicate fails, emits `task:stuck-merge-deadlock-no-action` and skips lifecycle mutation.
    */
   /**
-   * No-op when `settings.autoMerge === false` — PR-based review flow owns lifecycle until human merge.
+   * Skips tasks not eligible for auto-merge processing (global `autoMerge`
+   * off without an explicit per-task `autoMerge: true` override) — PR-based
+   * review flow owns lifecycle until human merge.
    */
   async recoverStuckMergeDeadlocks(): Promise<number> {
     try {
       const settings = await this.store.getSettings();
       if (settings.globalPause || settings.enginePaused) return 0;
-      if (settings.autoMerge === false) return 0;
-
       const now = Date.now();
       const inReview = await this.store.listTasks({ column: "in-review", slim: true });
       const triage = await this.store.listTasks({ column: "triage", slim: true });
@@ -6083,6 +6230,7 @@ export class SelfHealingManager {
           (dep) => dep.column === "triage" || dep.column === "todo",
         );
         return task.column === "in-review" &&
+          allowsAutoMergeProcessing(task, settings) &&
           !task.paused &&
           task.status === "failed" &&
           (task.mergeRetries ?? 0) >= MAX_AUTO_MERGE_RETRIES &&
@@ -6244,18 +6392,19 @@ export class SelfHealingManager {
   }
 
   /**
-   * No-op when `settings.autoMerge === false` — PR-based review flow owns lifecycle until human merge.
+   * Skips tasks not eligible for auto-merge processing (global `autoMerge`
+   * off without an explicit per-task `autoMerge: true` override) — PR-based
+   * review flow owns lifecycle until human merge.
    */
   async recoverOrphanOnlyScopeViolations(): Promise<number> {
     try {
       const settings = await this.store.getSettings();
       if (settings.globalPause || settings.enginePaused) return 0;
-      if (settings.autoMerge === false) return 0;
-
       const executingIds = this.options.getExecutingTaskIds?.() ?? new Set<string>();
       const tasks = await this.store.listTasks({ column: "in-review", slim: true });
       const candidates = tasks.filter((task) =>
         task.column === "in-review" &&
+        allowsAutoMergeProcessing(task, settings) &&
         task.status === "failed" &&
         task.scopeOverride !== true &&
         task.mergeDetails?.mergeConfirmed !== true &&
@@ -6408,19 +6557,20 @@ export class SelfHealingManager {
    *
    * Idempotency: recovered tasks are moved to `done`, status/error are cleared,
    * and mergeRetries reset to 0, so subsequent sweeps will not match them.
-   * No-op when `settings.autoMerge === false` — PR-based review flow owns lifecycle until human merge.
+   * Skips tasks not eligible for auto-merge processing (global `autoMerge`
+   * off without an explicit per-task `autoMerge: true` override) — PR-based
+   * review flow owns lifecycle until human merge.
    */
   async recoverAlreadyMergedReviewTasks(): Promise<number> {
     try {
       const settings = await this.store.getSettings();
       if (settings.globalPause || settings.enginePaused) return 0;
-      if (settings.autoMerge === false) return 0;
-
       const executingIds = this.options.getExecutingTaskIds?.() ?? new Set<string>();
       const tasks = await this.store.listTasks({ column: "in-review", slim: true });
       const candidates = tasks.filter((task) =>
         !task.deletedAt &&
         task.column === "in-review" &&
+        allowsAutoMergeProcessing(task, settings) &&
         task.status === "failed" &&
         (task.mergeRetries ?? 0) >= MAX_AUTO_MERGE_RETRIES &&
         task.mergeDetails?.mergeConfirmed !== true &&
@@ -6557,19 +6707,20 @@ export class SelfHealingManager {
    * Recover completed in-review tasks wedged as failed only because a post-done
    * session continuation hit a non-continuable signature.
    *
-   * No-op when `settings.autoMerge === false` — PR-based review flow owns lifecycle until human merge.
+   * Skips tasks not eligible for auto-merge processing (global `autoMerge`
+   * off without an explicit per-task `autoMerge: true` override) — PR-based
+   * review flow owns lifecycle until human merge.
    */
   async recoverPostDoneNonContinuableWedge(): Promise<number> {
     try {
       const settings = await this.store.getSettings();
       if (settings.globalPause || settings.enginePaused) return 0;
-      if (settings.autoMerge === false) return 0;
-
       const tasks = await this.store.listTasks({ column: "in-review", slim: false });
       let recovered = 0;
 
       for (const task of tasks) {
         if (task.column !== "in-review" || task.deletedAt) continue;
+        if (!allowsAutoMergeProcessing(task, settings)) continue;
         if (task.paused || task.userPaused) continue;
         if (task.status !== "failed") continue;
         if (this.options.isTaskActive?.(task.id)) continue;
@@ -6630,18 +6781,19 @@ export class SelfHealingManager {
   }
 
   /**
-   * No-op when `settings.autoMerge === false` — PR-based review flow owns lifecycle until human merge.
+   * Skips tasks not eligible for auto-merge processing (global `autoMerge`
+   * off without an explicit per-task `autoMerge: true` override) — PR-based
+   * review flow owns lifecycle until human merge.
    */
   async recoverCompletionHandoffLimbo(): Promise<void> {
     const settings = await this.store.getSettings();
     if (settings.globalPause || settings.enginePaused) return;
-    if (settings.autoMerge === false) return;
-
     const tasks = await this.store.listTasks({ column: "in-review", slim: false });
     const now = Date.now();
 
     for (const task of tasks) {
       if (task.column !== "in-review" || task.paused) continue;
+      if (!allowsAutoMergeProcessing(task, settings)) continue;
       if (task.status != null || task.mergeDetails != null || task.review != null || task.reviewState != null) continue;
       if (this.options.isTaskActive?.(task.id)) continue;
       if (getTaskMergeBlocker(task) !== undefined) continue;
@@ -6855,28 +7007,34 @@ export class SelfHealingManager {
   }
 
   /**
-   * No-op when `settings.autoMerge === false` — PR-based review flow owns lifecycle until human merge.
+   * Skips tasks not eligible for auto-merge processing (global `autoMerge`
+   * off without an explicit per-task `autoMerge: true` override) — PR-based
+   * review flow owns lifecycle until human merge.
    */
   async recoverForeignOnlyContaminatedInReviewTasks(): Promise<number> {
     try {
       const settings = await this.store.getSettings();
       if (settings.globalPause || settings.enginePaused) return 0;
-      if (settings.autoMerge === false) return 0;
-
       const executingIds = this.options.getExecutingTaskIds?.() ?? new Set<string>();
       const inReview = await this.store.listTasks({ column: "in-review", slim: true });
       const inProgress = await this.store.listTasks({ column: "in-progress", slim: true });
       const candidates = [
         ...inReview.filter((task) =>
           task.column === "in-review" &&
+          allowsAutoMergeProcessing(task, settings) &&
           Boolean(task.branch) &&
           Boolean(task.worktree) &&
           task.mergeDetails?.mergeConfirmed !== true &&
           !task.userPaused &&
           !executingIds.has(task.id),
         ),
+        // The paused in-progress contamination branch is gated per-task too:
+        // pre-existing behavior kept this sweep fully inert in manual-review
+        // projects (mirroring the FN-5704 reclaim contract), so override-less
+        // tasks stay untouched while explicit autoMerge:true tasks recover.
         ...inProgress.filter((task) =>
           task.column === "in-progress" &&
+          allowsAutoMergeProcessing(task, settings) &&
           task.paused === true &&
           (task.pausedReason === "branch-cross-contamination" || task.pausedReason === "branch-conflict-unrecoverable") &&
           Boolean(task.branch) &&
@@ -7129,7 +7287,8 @@ export class SelfHealingManager {
               stepStatuses,
             },
           });
-          await this.store.moveTask(task.id, "todo", { preserveProgress: true });
+          // #1411: backward recovery — skip order-derived adjacency.
+          await this.store.moveTask(task.id, "todo", { preserveProgress: true, moveSource: "engine", recoveryRehome: true });
           recovered++;
         } catch (err: unknown) {
           const errorMessage = err instanceof Error ? err.message : String(err);
@@ -7666,7 +7825,8 @@ export class SelfHealingManager {
             task.id,
             "Auto-recovered no-progress no-task_done failure — clean worktree, moved back to todo",
           );
-          await this.store.moveTask(task.id, "todo");
+          // #1411: backward recovery — skip order-derived adjacency.
+          await this.store.moveTask(task.id, "todo", { moveSource: "engine", recoveryRehome: true });
           recovered++;
         } catch (err: unknown) { const errorMessage = err instanceof Error ? err.message : String(err);
           log.error(`Failed to recover no-progress no-task_done failure ${task.id}: ${errorMessage}`);
@@ -7696,18 +7856,19 @@ export class SelfHealingManager {
    * `restart-recovery-coordinator.ts`.
    * We clear stale worktree metadata and failure state, keep step progress and
    * retry counters, then requeue to todo for a clean retry.
-   * No-op when `settings.autoMerge === false` — PR-based review flow owns lifecycle until human merge.
+   * Skips tasks not eligible for auto-merge processing (global `autoMerge`
+   * off without an explicit per-task `autoMerge: true` override) — PR-based
+   * review flow owns lifecycle until human merge.
    */
   async recoverMissingWorktreeReviewFailures(): Promise<number> {
     try {
       const settings = await this.store.getSettings();
       if (settings.globalPause || settings.enginePaused) return 0;
-      if (settings.autoMerge === false) return 0;
-
       const tasks = await this.store.listTasks({ column: "in-review", slim: true });
       const candidates = tasks.filter((task) =>
-        isRecoverableMissingWorktreeReviewFailureWithProgress(task)
-        || isRecoverableMissingWorktreeReviewFailureNoProgress(task),
+        allowsAutoMergeProcessing(task, settings)
+        && (isRecoverableMissingWorktreeReviewFailureWithProgress(task)
+          || isRecoverableMissingWorktreeReviewFailureNoProgress(task)),
       );
 
       if (candidates.length === 0) return 0;
@@ -7779,19 +7940,20 @@ export class SelfHealingManager {
    * - `recoverNoProgressNoTaskDoneFailures`: `in-progress` with zero progress → clean requeue.
    * - This one: `in-review` with partial progress → bounded requeue preserving work.
    *
-   * No-op when `settings.autoMerge === false` — PR-based review flow owns lifecycle until human merge.
+   * Skips tasks not eligible for auto-merge processing (global `autoMerge`
+   * off without an explicit per-task `autoMerge: true` override) — PR-based
+   * review flow owns lifecycle until human merge.
    * @returns Number of tasks requeued for retry
    */
   async recoverPartialProgressNoTaskDoneFailures(): Promise<number> {
     try {
       const settings = await this.store.getSettings();
       if (settings.globalPause || settings.enginePaused) return 0;
-      if (settings.autoMerge === false) return 0;
-
       const tasks = await this.store.listTasks({ column: "in-review", slim: true });
 
       const candidates = tasks.filter((task) =>
         task.column === "in-review" &&
+        allowsAutoMergeProcessing(task, settings) &&
         task.status === "failed" &&
         isNoTaskDoneFailure(task) &&
         !task.paused &&
@@ -7831,7 +7993,8 @@ export class SelfHealingManager {
             task.id,
             `Auto-retry ${nextCount}/${MAX_TASK_DONE_RETRIES}: agent finished without fn_task_done — requeuing to todo to resume partial work`,
           );
-          await this.store.moveTask(task.id, "todo", { preserveProgress: true });
+          // #1411: backward recovery — skip order-derived adjacency.
+          await this.store.moveTask(task.id, "todo", { preserveProgress: true, moveSource: "engine", recoveryRehome: true });
           recovered++;
         } catch (err: unknown) {
           const errorMessage = err instanceof Error ? err.message : String(err);

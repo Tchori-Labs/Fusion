@@ -36,14 +36,16 @@ describe("CLI package.json publishing config", () => {
   const pkg = loadPackageJson("cli");
   const prepackScript = loadCliPrepackScript();
 
-  it('has "bin" field with fn pointing to ./dist/bin.js', () => {
+  it('has "bin" field with fn/fusion pointing to committed launcher', () => {
     expect(pkg.bin).toBeDefined();
-    expect(pkg.bin.fn).toBe("./dist/bin.js");
+    expect(pkg.bin.fn).toBe("./bin.mjs");
+    expect(pkg.bin.fusion).toBe("./bin.mjs");
   });
 
-  it('has "files" array with refined globs for dist output', () => {
+  it('has "files" array with committed launcher and refined globs for dist output', () => {
     expect(pkg.files).toBeDefined();
     expect(Array.isArray(pkg.files)).toBe(true);
+    expect(pkg.files).toContain("bin.mjs");
     expect(pkg.files).toContain("dist/**/*.js");
     expect(pkg.files).toContain("dist/**/*.d.ts");
     expect(pkg.files).toContain("dist/**/*.d.ts.map");
@@ -274,12 +276,18 @@ describe("Workspace bootstrap script contract", () => {
     const defaultTest = dashboardPkg.scripts?.test;
     const defaultAppQuality = dashboardPkg.scripts?.["test:quality:app"];
     const defaultApiQuality = dashboardPkg.scripts?.["test:quality:api"];
+    const apiCurated = dashboardPkg.scripts?.["test:quality:api:curated"];
     const deepTest = dashboardPkg.scripts?.["test:deep"];
 
     expect(defaultTest).toBe("pnpm run test:quality:app && pnpm run test:quality:api");
     expect(defaultAppQuality).toContain("test:quality:app:foundation-api");
     expect(defaultAppQuality).toContain("test:quality:app:settings");
-    expect(hasProjectArg(defaultApiQuality, "dashboard-api-quality")).toBe(true);
+    // The api lane chains curated + backfill sub-lanes; the curated sub-lane
+    // carries the explicit quality project, and the backfill lane is the
+    // curated-gate completeness net (broad glob minus curated minus skip-list).
+    expect(defaultApiQuality).toContain("test:quality:api:curated");
+    expect(defaultApiQuality).toContain("test:quality:api:backfill");
+    expect(hasProjectArg(apiCurated, "dashboard-api-quality")).toBe(true);
     expect(hasProjectArg(defaultTest, "dashboard-app")).toBe(false);
     expect(hasProjectArg(defaultTest, "dashboard-api")).toBe(false);
 

@@ -14,6 +14,7 @@
 import { EventEmitter } from "node:events";
 import type { Database } from "./db.js";
 import { fromJson, toJson, toJsonNullable } from "./db.js";
+import type { Goal, GoalStatus } from "./goal-types.js";
 import type {
   Mission,
   MissionBranchStrategy,
@@ -41,6 +42,7 @@ import type {
   SlicePlanState,
   MissionContractAssertion,
   FeatureAssertionLink,
+  MissionGoalLink,
   FixFeatureCreatedPayload,
   MilestoneValidationRollup,
   ContractAssertionCreateInput,
@@ -119,6 +121,10 @@ export interface MissionSummary {
   totalFeatures: number;
   /** Number of features with status "done" */
   completedFeatures: number;
+  /** Number of goals linked to the mission */
+  linkedGoalCount: number;
+  /** Unfiltered total number of persisted mission lifecycle events */
+  eventCount: number;
   /** Computed progress percentage (0–100), based on features or milestones */
   progressPercent: number;
 }
@@ -167,6 +173,10 @@ export interface MissionStoreEvents {
   "mission:updated": [Mission];
   /** Emitted when a mission is deleted */
   "mission:deleted": [string];
+  /** Emitted when a goal is linked to a mission */
+  "mission:goal-linked": [MissionGoalLink];
+  /** Emitted when a goal is unlinked from a mission */
+  "mission:goal-unlinked": [MissionGoalLink];
   /** Emitted when a milestone is created */
   "milestone:created": [Milestone];
   /** Emitted when a milestone is updated */
@@ -245,6 +255,22 @@ interface MilestoneRow {
   verification: string | null;
   acceptanceCriteria: string | null;
   validationState: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Database row shape for the mission_contract_assertions table. */
+interface MissionGoalRow {
+  missionId: string;
+  goalId: string;
+  createdAt: string;
+}
+
+interface GoalRow {
+  id: string;
+  title: string;
+  description: string | null;
+  status: GoalStatus;
   createdAt: string;
   updatedAt: string;
 }
@@ -437,6 +463,37 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     };
+  }
+
+  /**
+   * Convert a database row to a MissionGoalLink object.
+   */
+  private rowToMissionGoalLink(row: MissionGoalRow): MissionGoalLink {
+    return {
+      missionId: row.missionId,
+      goalId: row.goalId,
+      createdAt: row.createdAt,
+    };
+  }
+
+  private rowToGoal(row: GoalRow): Goal {
+    return {
+      id: row.id,
+      title: row.title,
+      description: row.description ?? undefined,
+      status: row.status,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    };
+  }
+
+  private listGoalsByIds(goalIds: string[]): Goal[] {
+    return goalIds
+      .map((goalId) => this.db
+        .prepare("SELECT id, title, description, status, createdAt, updatedAt FROM goals WHERE id = ?")
+        .get(goalId) as GoalRow | undefined)
+      .filter((row): row is GoalRow => Boolean(row))
+      .map((row) => this.rowToGoal(row));
   }
 
   /**
@@ -655,6 +712,8 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
     const mission = this.getMission(id);
     if (!mission) return undefined;
 
+    const linkedGoals = this.listGoalsByIds(this.listGoalIdsForMission(id));
+
     const milestones = this.listMilestones(id);
     const milestonesWithSlices = milestones.map((milestone) => {
       const slices = this.listSlices(milestone.id);
@@ -668,8 +727,15 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
       };
     });
 
+    const eventCountRow = this.db
+      .prepare("SELECT COUNT(*) AS count FROM mission_events WHERE missionId = ?")
+      .get(id) as { count?: number | bigint } | undefined;
+    const eventCount = Number(eventCountRow?.count ?? 0);
+
     return {
       ...mission,
+      linkedGoals,
+      eventCount,
       milestones: milestonesWithSlices,
     };
   }
@@ -713,6 +779,16 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
       }
     }
 
+    const linkedGoalRow = this.db
+      .prepare("SELECT COUNT(*) AS count FROM mission_goals WHERE missionId = ?")
+      .get(missionId) as { count?: number | bigint } | undefined;
+    const linkedGoalCount = Number(linkedGoalRow?.count ?? 0);
+
+    const eventCountRow = this.db
+      .prepare("SELECT COUNT(*) AS count FROM mission_events WHERE missionId = ?")
+      .get(missionId) as { count?: number | bigint } | undefined;
+    const eventCount = Number(eventCountRow?.count ?? 0);
+
     let progressPercent = 0;
     if (totalFeatures > 0) {
       progressPercent = Math.round((completedFeatures / totalFeatures) * 100);
@@ -725,6 +801,8 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
       completedMilestones,
       totalFeatures,
       completedFeatures,
+      linkedGoalCount,
+      eventCount,
       progressPercent,
     };
   }
@@ -761,7 +839,23 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
     ).all() as unknown as FeatureRow[];
     const allFeatures = featureRows.map((row) => this.rowToFeature(row));
 
-    // 5. Group in-memory: slices by milestoneId, features by sliceId
+    // 5. Batch query linked goal counts
+    const linkedGoalRows = this.db.prepare(
+      "SELECT missionId, COUNT(*) AS count FROM mission_goals GROUP BY missionId"
+    ).all() as Array<{ missionId: string; count?: number | bigint }>;
+    const linkedGoalCountByMissionId = new Map(
+      linkedGoalRows.map((row) => [row.missionId, Number(row.count ?? 0)]),
+    );
+
+    // 6. Batch query mission event counts
+    const eventCountRows = this.db.prepare(
+      "SELECT missionId, COUNT(*) AS count FROM mission_events GROUP BY missionId"
+    ).all() as Array<{ missionId: string; count?: number | bigint }>;
+    const eventCountByMissionId = new Map(
+      eventCountRows.map((row) => [row.missionId, Number(row.count ?? 0)]),
+    );
+
+    // 7. Group in-memory: slices by milestoneId, features by sliceId
     const slicesByMilestoneId = new Map<string, Slice[]>();
     for (const slice of allSlices) {
       const list = slicesByMilestoneId.get(slice.milestoneId) || [];
@@ -776,7 +870,7 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
       featuresBySliceId.set(feature.sliceId, list);
     }
 
-    // 6. Group milestones by missionId
+    // 8. Group milestones by missionId
     const milestonesByMissionId = new Map<string, Milestone[]>();
     for (const milestone of allMilestones) {
       const list = milestonesByMissionId.get(milestone.missionId) || [];
@@ -784,7 +878,7 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
       milestonesByMissionId.set(milestone.missionId, list);
     }
 
-    // 7. Compute summary for each mission using grouped data
+    // 9. Compute summary for each mission using grouped data
     return missions.map((mission) => {
       const milestones = milestonesByMissionId.get(mission.id) || [];
       const totalMilestones = milestones.length;
@@ -802,6 +896,9 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
         }
       }
 
+      const linkedGoalCount = linkedGoalCountByMissionId.get(mission.id) ?? 0;
+      const eventCount = eventCountByMissionId.get(mission.id) ?? 0;
+
       let progressPercent = 0;
       if (totalFeatures > 0) {
         progressPercent = Math.round((completedFeatures / totalFeatures) * 100);
@@ -816,6 +913,8 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
           completedMilestones,
           totalFeatures,
           completedFeatures,
+          linkedGoalCount,
+          eventCount,
           progressPercent,
         },
       };
@@ -1231,6 +1330,133 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
    */
   updateMissionInterviewState(id: string, state: InterviewState): Mission {
     return this.updateMission(id, { interviewState: state });
+  }
+
+  linkGoal(missionId: string, goalId: string): MissionGoalLink {
+    const result = this.db.transactionImmediate(() => {
+      const missionExists = this.db
+        .prepare("SELECT id FROM missions WHERE id = ?")
+        .get(missionId) as { id: string } | undefined;
+      if (!missionExists) {
+        throw new Error(`Mission ${missionId} not found`);
+      }
+
+      const goalExists = this.db
+        .prepare("SELECT id FROM goals WHERE id = ?")
+        .get(goalId) as { id: string } | undefined;
+      if (!goalExists) {
+        throw new Error(`Goal ${goalId} not found`);
+      }
+
+      const existing = this.db
+        .prepare("SELECT missionId, goalId, createdAt FROM mission_goals WHERE missionId = ? AND goalId = ?")
+        .get(missionId, goalId) as MissionGoalRow | undefined;
+      if (existing) {
+        return { link: this.rowToMissionGoalLink(existing), changed: false };
+      }
+
+      const createdAt = new Date().toISOString();
+      this.db
+        .prepare("INSERT OR IGNORE INTO mission_goals (missionId, goalId, createdAt) VALUES (?, ?, ?)")
+        .run(missionId, goalId, createdAt);
+
+      const row = this.db
+        .prepare("SELECT missionId, goalId, createdAt FROM mission_goals WHERE missionId = ? AND goalId = ?")
+        .get(missionId, goalId) as MissionGoalRow | undefined;
+      if (!row) {
+        throw new Error(`Failed to link mission ${missionId} to goal ${goalId}`);
+      }
+
+      return { link: this.rowToMissionGoalLink(row), changed: true };
+    });
+
+    if (result.changed) {
+      this.db.bumpLastModified();
+      this.emit("mission:goal-linked", result.link);
+    }
+
+    return result.link;
+  }
+
+  unlinkGoal(missionId: string, goalId: string): boolean {
+    const deleted = this.db.transactionImmediate(() => {
+      const row = this.db
+        .prepare("SELECT missionId, goalId, createdAt FROM mission_goals WHERE missionId = ? AND goalId = ?")
+        .get(missionId, goalId) as MissionGoalRow | undefined;
+      if (!row) {
+        return undefined;
+      }
+
+      const result = this.db
+        .prepare("DELETE FROM mission_goals WHERE missionId = ? AND goalId = ?")
+        .run(missionId, goalId);
+      if (result.changes < 1) {
+        return undefined;
+      }
+
+      return this.rowToMissionGoalLink(row);
+    });
+
+    if (!deleted) {
+      return false;
+    }
+
+    this.db.bumpLastModified();
+    this.emit("mission:goal-unlinked", deleted);
+    return true;
+  }
+
+  listGoalIdsForMission(missionId: string): string[] {
+    const rows = this.db
+      .prepare("SELECT goalId FROM mission_goals WHERE missionId = ? ORDER BY createdAt ASC, goalId ASC")
+      .all(missionId) as Array<{ goalId: string }>;
+    return rows.map((row) => row.goalId);
+  }
+
+  listMissionIdsForGoal(goalId: string): string[] {
+    const rows = this.db
+      .prepare("SELECT missionId FROM mission_goals WHERE goalId = ? ORDER BY createdAt ASC, missionId ASC")
+      .all(goalId) as Array<{ missionId: string }>;
+    return rows.map((row) => row.missionId);
+  }
+
+  /**
+   * Resolve task → goal provenance by deriving the owning mission from mission linkage.
+   * Goal IDs are never duplicated onto the task row; provenance is always recovered from mission links.
+   */
+  listGoalIdsForTask(taskId: string): string[] {
+    const feature = this.getFeatureByTaskId(taskId);
+    const missionIdFromFeature = feature
+      ? (() => {
+          const slice = this.getSlice(feature.sliceId);
+          if (!slice) {
+            return undefined;
+          }
+          const milestone = this.getMilestone(slice.milestoneId);
+          return milestone?.missionId;
+        })()
+      : undefined;
+
+    const missionId = missionIdFromFeature ?? (() => {
+      const row = this.db
+        .prepare('SELECT missionId FROM tasks WHERE id = ? AND "deletedAt" IS NULL')
+        .get(taskId) as { missionId?: string | null } | undefined;
+      return row?.missionId ?? undefined;
+    })();
+
+    if (!missionId) {
+      return [];
+    }
+
+    return this.listGoalIdsForMission(missionId);
+  }
+
+  /**
+   * Resolve task → goal provenance to full Goal records derived from the owning mission.
+   * Goal rows are read on demand so archived goals remain visible without storing duplicate task-level goal data.
+   */
+  listGoalsForTask(taskId: string): Goal[] {
+    return this.listGoalsByIds(this.listGoalIdsForTask(taskId));
   }
 
   // ── Milestone Operations ───────────────────────────────────────────
@@ -2057,6 +2283,16 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
     }
   }
 
+  ensureFeatureAssertionLinked(featureId: string): MissionContractAssertion[] {
+    const feature = this.getFeature(featureId);
+    if (!feature) {
+      throw new Error(`Feature ${featureId} not found`);
+    }
+
+    this.ensureFeatureAssertion(feature);
+    return this.listAssertionsForFeature(featureId);
+  }
+
   /**
    * Idempotently seed authored contract assertions for specific features.
    *
@@ -2619,6 +2855,97 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
       "SELECT * FROM mission_validator_runs WHERE featureId = ? ORDER BY startedAt DESC"
     ).all(featureId);
     return (rows as unknown as ValidatorRunRow[]).map((row) => this.rowToValidatorRun(row));
+  }
+
+  /**
+   * List validator runs that are still marked running even though their startedAt is older
+   * than the supplied age threshold.
+   */
+  listStaleRunningValidatorRuns(maxAgeMs: number, now = Date.now()): MissionValidatorRun[] {
+    const cutoff = new Date(now - maxAgeMs).toISOString();
+    const rows = this.db.prepare(
+      "SELECT * FROM mission_validator_runs WHERE status = 'running' AND startedAt < ? ORDER BY startedAt ASC"
+    ).all(cutoff);
+    return (rows as unknown as ValidatorRunRow[]).map((row) => this.rowToValidatorRun(row));
+  }
+
+  /**
+   * Reap a stale validator run whose owning execution no longer exists.
+   *
+   * Intentionally does not delegate to completeValidatorRun(): the generic error path keeps
+   * the feature in loopState='validating', but a stale-owner recovery must move live features
+   * back to loopState='needs_fix' so the mission loop can retry validation later.
+   *
+   * The feature's lastValidatorRunId is intentionally left pointing at this now-terminal run so
+   * readers can resolve it and observe the authoritative terminal status instead of a dangling gap.
+   */
+  reapValidatorRun(runId: string, reason: string): MissionValidatorRun {
+    const run = this.getValidatorRun(runId);
+    if (!run) {
+      throw new Error(`Validator run ${runId} not found`);
+    }
+
+    if (run.status !== "running") {
+      return run;
+    }
+
+    const feature = this.getFeature(run.featureId);
+    if (!feature) {
+      throw new Error(`Feature ${run.featureId} not found`);
+    }
+
+    const slice = this.getSlice(feature.sliceId);
+    if (!slice) {
+      throw new Error(`Slice ${feature.sliceId} not found`);
+    }
+
+    const milestone = this.getMilestone(slice.milestoneId);
+    if (!milestone) {
+      throw new Error(`Milestone ${slice.milestoneId} not found`);
+    }
+
+    const mission = this.getMission(milestone.missionId);
+    if (!mission) {
+      throw new Error(`Mission ${milestone.missionId} not found`);
+    }
+
+    const now = new Date().toISOString();
+    const completedAt = now;
+    const startedAtMs = new Date(run.startedAt).getTime();
+    const completedAtMs = new Date(completedAt).getTime();
+    const durationMs = Math.max(0, completedAtMs - startedAtMs);
+    const shouldUpdateFeature = mission.status !== "archived" && mission.status !== "complete" && feature.status !== "done";
+
+    this.db.transaction(() => {
+      this.db.prepare(`
+        UPDATE mission_validator_runs SET
+          status = ?,
+          summary = ?,
+          completedAt = ?,
+          updatedAt = ?
+        WHERE id = ?
+      `).run(
+        "error",
+        reason,
+        completedAt,
+        now,
+        runId,
+      );
+
+      if (shouldUpdateFeature) {
+        this.updateFeature(run.featureId, {
+          loopState: "needs_fix",
+          lastValidatorStatus: "error",
+        });
+      }
+    });
+
+    this.db.bumpLastModified();
+
+    const updatedRun = this.getValidatorRun(runId)!;
+    this.emit("validator-run:completed", updatedRun, "error", durationMs);
+
+    return updatedRun;
   }
 
   /**
@@ -3528,6 +3855,12 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
         linkedTaskId = guard.existing.id;
       } else {
         let sharedBranchBaseForMission: string | undefined;
+        // Stamp the real BranchGroup id (BG-…) so listTasksByBranchGroup(group.id)
+        // resolves members. The group is only ensured (and the id set) in shared
+        // mode below. Non-shared members get NO groupId — stamping a synthetic
+        // `mission:<id>` here would let the legacy membership fallback sweep them
+        // into a shared group later created for the same mission.
+        let missionGroupId: string | undefined;
         if (missionId && resolvedAssignmentMode === "shared") {
           const settings = await this.taskStore.getSettings();
           const settingsDefaultBranch =
@@ -3536,10 +3869,11 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
               : "main";
           const settingsAutoMerge = typeof settings.autoMerge === "boolean" ? settings.autoMerge : false;
           sharedBranchBaseForMission = resolvedBranch ?? resolvedBaseBranch ?? settingsDefaultBranch;
-          this.taskStore.ensureBranchGroupForSource("mission", missionId, {
+          const group = this.taskStore.ensureBranchGroupForSource("mission", missionId, {
             branchName: sharedBranchBaseForMission,
             autoMerge: mission?.autoMerge ?? settingsAutoMerge,
           });
+          missionGroupId = group.id;
         }
 
         const taskSegment = feature.id;
@@ -3557,7 +3891,7 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
           ...(missionId
             ? {
                 branchContext: {
-                  groupId: `mission:${missionId}`,
+                  ...(missionGroupId ? { groupId: missionGroupId } : {}),
                   source: "mission" as const,
                   assignmentMode: resolvedAssignmentMode,
                   inheritedBaseBranch: resolvedBaseBranch,

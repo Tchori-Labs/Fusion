@@ -7,10 +7,15 @@ export {
   createTaskLogTool,
   createSendMessageTool,
   createReadMessagesTool,
+  createWorkflowListTool,
+  createWorkflowGetTool,
+  createWorkflowSelectTool,
   taskCreateParams,
   taskDocumentReadParams,
   taskDocumentWriteParams,
   taskLogParams,
+  workflowListParams,
+  workflowSelectParams,
   executeApprovedAgentProvisioning,
 } from "./agent-tools.js";
 export { AgentSemaphore, PRIORITY_MERGE, PRIORITY_EXECUTE, PRIORITY_SPECIFY } from "./concurrency.js";
@@ -22,11 +27,81 @@ export {
   type WorkflowGraphExecutorResult,
 } from "./workflow-graph-executor.js";
 export {
+  runSplitJoin,
+  type WorkflowBranchPersistence,
+  type WorkflowBranchProgress,
+  type WorkflowBranchRunState,
+  type WorkflowBranchSemaphore,
+} from "./workflow-graph-branches.js";
+export {
   createDefaultNodeHandlers,
   createNoopLegacySeams,
+  createParseStepsHandler,
+  createCodeNodeHandler,
+  PARSE_STEPS_DEFAULT_ARTIFACT,
+  type WorkflowCustomNodeRunner,
   type WorkflowLegacySeams,
   type WorkflowSeamName,
+  type ParseStepsHandlerDeps,
+  type CodeNodeRunner,
+  type DefaultNodeHandlerDeps,
 } from "./workflow-node-handlers.js";
+export {
+  createPrNodeHandlers,
+  createAutoMergeGateHandler,
+  buildPrNodeDeps,
+  type PrNodeDeps,
+  type PrNodeGithubOps,
+  type PrNodeStore,
+  type PrSourceDescriptor,
+  type PrCreateCallInput,
+  type PrCreateCallResult,
+  type PrMergeCallInput,
+  type PrMergeCallResult,
+  type PrRespondCallInput,
+  type PrRespondCallResult,
+  type PrRespondGithubOps,
+  buildRespondCallback,
+} from "./pr-nodes.js";
+export {
+  runPrResponseRun,
+  scanForSecrets,
+  buildPrEntityMarker,
+  parsePrEntityMarker,
+  buildResponseSystemPrompt,
+  buildResponsePrompt,
+  DEFAULT_BOT_DENYLIST,
+  DEFAULT_MAX_RESPONSE_ROUNDS,
+  PR_ENTITY_MARKER_PREFIX,
+  type PrResponseRunDeps,
+  type PrResponseRunStore,
+  type PrResponseRunResult,
+  type PrReviewThread,
+  type PrReviewComment,
+  type PrThreadVerdict,
+  type PrAgentRunResult,
+  type PrPushResult,
+  type SecretFinding,
+} from "./pr-response-run.js";
+export {
+  PrReconciler,
+  deriveTransitions,
+  type PrReconcileGithubOps,
+  type PrReconcileFetchResult,
+  type PrReconcileStore,
+  type PrReconcilerOptions,
+  type PrReconcileIntervals,
+  type PrReconcileTransition,
+  type PrReleaseByEventFn,
+  type ResolveGroupReleaseTaskFn,
+} from "./pr-reconcile.js";
+export {
+  WorkflowGraphTaskRunner,
+  type WorkflowGraphRunDisposition,
+  type WorkflowGraphRunnerStore,
+  type WorkflowGraphTaskRunResult,
+  type WorkflowGraphTaskRunnerDeps,
+} from "./workflow-graph-task-runner.js";
 export { collectTaskEvaluationEvidence } from "./evaluator-evidence.js";
 export { Scheduler, type SchedulerOptions } from "./scheduler.js";
 export { MeshLeaseManager, type MeshLeaseManagerOptions, type LeaseRecoveryContext } from "./mesh-lease-manager.js";
@@ -52,6 +127,13 @@ export {
   type AutostashHandle,
 } from "./merger.js";
 export {
+  registerMergeTraitHooks,
+  resolveMergePolicy,
+  type ResolvedMergePolicy,
+  type MergeFileScopeMode,
+  type MergeTraitStrategy,
+} from "./merge-trait.js";
+export {
   resolveIntegrationBranch,
   resolveIntegrationBranchSync,
   __resetIntegrationBranchCacheForTests,
@@ -61,10 +143,17 @@ export {
   evaluateBranchGroupPromotion,
   evaluateBranchGroupCompletion,
   promoteBranchGroup,
+  reconcileBranchGroupPr,
   type BranchGroupMergeRouting,
   type BranchGroupPromotionDecision,
   type BranchGroupCompletionStatus,
   type BranchGroupPromotionResult,
+  type PromoteBranchGroupInput,
+  type ReconcileBranchGroupPrResult,
+  type CreateGroupPrFn,
+  type SyncGroupPrFn,
+  type CloseGroupPrFn,
+  type GroupPrReconcileResult,
 } from "./group-merge-coordinator.js";
 export {
   resolveMergeIntegrationRoot,
@@ -112,12 +201,27 @@ export {
 } from "./merger-squash-audit.js";
 export { reviewStep, type ReviewType, type ReviewVerdict, type ReviewResult, type ReviewOptions } from "./reviewer.js";
 export { createFnAgent, promptWithFallback, describeModel, setHostExtensionPaths, getHostExtensionPaths, type AgentOptions, type AgentResult } from "./pi.js";
+export {
+  createInteractiveAiSessionWith,
+  parseAgentResponse as parseInteractiveAgentResponse,
+  type InteractiveAgentSession,
+  type InteractiveAgentResult,
+  type InteractiveAgentFactory,
+} from "./interactive-ai-session.js";
+export { selectPermanentAgentForTask, listEligibleExecutorAgents } from "./agent-assignment.js";
 
 // Register createFnAgent into core's loader so consumers in @fusion/core
 // (e.g. ai-summarize, memory-compaction) can resolve it without a circular
 // static import. Runs once at engine module load.
-import type { AiSessionResult, CreateAiSessionFactory, CreateAiSessionOptions } from "@fusion/core";
+import type {
+  AiSessionResult,
+  CreateAiSessionFactory,
+  CreateAiSessionOptions,
+  CreateInteractiveAiSessionFactory,
+  CreateInteractiveAiSessionOptions,
+} from "@fusion/core";
 import { createFnAgent as _createFnAgentForCore } from "./pi.js";
+import { createInteractiveAiSessionWith } from "./interactive-ai-session.js";
 
 const _createAiSessionAdapter: CreateAiSessionFactory = async (options: CreateAiSessionOptions): Promise<AiSessionResult> => {
   return _createFnAgentForCore({
@@ -129,6 +233,56 @@ const _createAiSessionAdapter: CreateAiSessionFactory = async (options: CreateAi
   });
 };
 
+// Interactive (multi-turn, await-input) adapter: builds the prompt→parse→
+// retry→pause→resume loop on top of the one-shot createFnAgent.
+const _createInteractiveAiSessionAdapter: CreateInteractiveAiSessionFactory = (
+  options: CreateInteractiveAiSessionOptions,
+) =>
+  createInteractiveAiSessionWith(
+    (opts) =>
+      _createFnAgentForCore({
+        cwd: opts.cwd,
+        systemPrompt: opts.systemPrompt,
+        tools: opts.tools,
+        defaultProvider: opts.defaultProvider,
+        defaultModelId: opts.defaultModelId,
+        // Forward skill selection so a plugin can load a specific bundled skill.
+        // `skills` (convenience) auto-builds a SkillSelectionContext; the extra
+        // discovery dirs make those skills actually visible to the loader.
+        ...(opts.requestedSkillNames?.length ? { skills: opts.requestedSkillNames } : {}),
+        ...(opts.additionalSkillPaths?.length ? { additionalSkillPaths: opts.additionalSkillPaths } : {}),
+        // Live mid-turn visibility: stream thinking/text deltas and tool
+        // start/end markers to the caller's onProgress while the pull-based
+        // nextEvent() is still pending. Callback errors must never break the
+        // agent turn.
+        ...(opts.onProgress
+          ? {
+              onThinking: (delta: string) => {
+                try {
+                  opts.onProgress!({ type: "thinking", delta });
+                } catch { /* consumer error must not break the turn */ }
+              },
+              onText: (delta: string) => {
+                try {
+                  opts.onProgress!({ type: "text", delta });
+                } catch { /* consumer error must not break the turn */ }
+              },
+              onToolStart: (name: string) => {
+                try {
+                  opts.onProgress!({ type: "tool", name, phase: "start" });
+                } catch { /* consumer error must not break the turn */ }
+              },
+              onToolEnd: (name: string, isError: boolean) => {
+                try {
+                  opts.onProgress!({ type: "tool", name, phase: "end", isError });
+                } catch { /* consumer error must not break the turn */ }
+              },
+            }
+          : {}),
+      }),
+    options,
+  );
+
 void import("@fusion/core")
   .then((core) => {
     if ("setCreateFnAgent" in core && typeof core.setCreateFnAgent === "function") {
@@ -136,6 +290,9 @@ void import("@fusion/core")
     }
     if ("setCreateAiSessionFactory" in core && typeof core.setCreateAiSessionFactory === "function") {
       core.setCreateAiSessionFactory(_createAiSessionAdapter);
+    }
+    if ("setCreateInteractiveAiSessionFactory" in core && typeof core.setCreateInteractiveAiSessionFactory === "function") {
+      core.setCreateInteractiveAiSessionFactory(_createInteractiveAiSessionAdapter);
     }
   })
   .catch(() => {
@@ -362,6 +519,47 @@ export { HeartbeatMonitor, HeartbeatTriggerScheduler, type WakeContext } from ".
 export { TokenCapDetector, type TokenCapCheckResult } from "./token-cap-detector.js";
 export { SelfHealingManager, type SelfHealingOptions, type RebindResult } from "./self-healing.js";
 export { PluginRunner, type PluginRunnerOptions } from "./plugin-runner.js";
+export {
+  registerPluginTraits,
+  degradePluginTraits,
+  unregisterPluginTraits,
+  findLivePluginTraitDependents,
+  pluginTraitToDefinition,
+  pluginTraitRegistryId,
+  evaluatePluginGate,
+  PluginTraitHasDependentsError,
+  type PluginTraitDependent,
+} from "./plugin-trait-adapter.js";
+// Step-inversion U12 (KTD-12): plugin step-parser adapter.
+export {
+  registerPluginStepParsers,
+  unregisterPluginStepParsers,
+  pluginParserRegistryId,
+  pluginParserToRegistryParser,
+  PluginParserError,
+  PLUGIN_PARSER_TIMEOUT_MS,
+  type PluginStepParserContribution,
+} from "./plugin-parser-adapter.js";
+// Step-inversion U14 (KTD-15): code-node runner + save-time validation helper.
+export {
+  runCodeNode,
+  createCodeNodeRunner,
+  compileCodeNodeSource,
+  validateCodeNodeSources,
+  buildCodeNodeTaskSubset,
+  resolveCodeNodeTimeout,
+  CodeNodeError,
+  CODE_NODE_DEFAULT_TIMEOUT_MS,
+  CODE_NODE_MAX_TIMEOUT_MS,
+  CODE_NODE_MAX_SOURCE_BYTES,
+  CODE_NODE_OUTPUT_CAP_BYTES,
+  type CodeNodeContext,
+  type CodeNodeResult,
+  type CodeNodeRunnerDeps,
+  type CodeNodeTaskSubset,
+  type CodeNodeFailureReason,
+  type RunCodeNodeOptions,
+} from "./code-node-runner.js";
 // Agent runtime abstraction
 export { type AgentRuntime, type AgentRuntimeOptions, type AgentSessionResult } from "./agent-runtime.js";
 export {
@@ -430,8 +628,33 @@ export {
 } from "./remote-access/index.js";
 export { RemoteNodeClient } from "./runtimes/remote-node-client.js";
 export { RemoteNodeRuntime, type RemoteNodeRuntimeConfig } from "./runtimes/remote-node-runtime.js";
+// Hold/release sweep + manual promote (U6/U9). Exported so the dashboard
+// promote endpoint can release a manually-held card via the same authority.
+export {
+  promoteHeldTask,
+  releaseHeldTaskByEvent,
+  runHoldReleaseSweep,
+  type HoldReleaseDeps,
+  type HoldReleaseResult,
+  type SlotReservation,
+} from "./hold-release.js";
 export { StepSessionExecutor } from "./step-session-executor.js";
 export type { StepResult, ParallelWave, StepSessionExecutorOptions } from "./step-session-executor.js";
+export {
+  runTaskStep,
+  resetStepToBaseline,
+  makeAncestryBlastRadiusGuard,
+} from "./step-runner.js";
+export type {
+  RunTaskStepDeps,
+  RunTaskStepOptions,
+  RunTaskStepResult,
+  ResetStepDeps,
+  ResetStepResult,
+  RunSingleStep,
+  SessionRef,
+  StepRunnerTask,
+} from "./step-runner.js";
 // Multi-project runtime types
 export {
   type ProjectRuntime,

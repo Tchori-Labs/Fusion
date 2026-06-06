@@ -3,15 +3,92 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile, writeFile, rename, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { existsSync, watch, type FSWatcher } from "node:fs";
-import type { Task, TaskDetail, TaskCreateInput, TaskAttachment, AgentLogEntry, BoardConfig, Column, CheckoutClaimPrecondition, MergeResult, Settings, GlobalSettings, ProjectSettings, ActivityLogEntry, ActivityEventType, TaskDocument, TaskDocumentRevision, TaskDocumentCreateInput, TaskDocumentWithTask, InboxTask, TaskLogEntry, RunMutationContext, RunAuditEvent, RunAuditEventInput, RunAuditEventFilter, ArchivedTaskEntry, ArchiveAgentLogMode, TaskPriority, SourceType, WorkflowStepTemplate, Agent, AutostashOrphanRecord, TaskCommitAssociation, TaskCommitAssociationMatchSource, TaskCommitAssociationConfidence, GithubIssueAction, MergeQueueEntry, MergeQueueEnqueueOptions, MergeQueueAcquireOptions, MergeQueueReleaseOutcome, HandoffToReviewOptions, GoalCitation, GoalCitationFilter, GoalCitationInput, GoalCitationSurface, BranchGroup, BranchGroupCreateInput, BranchGroupUpdate, MergeRequestRecord, MergeRequestState, CompletionHandoffMarker } from "./types.js";
+import type { Task, TaskDetail, TaskCreateInput, TaskAttachment, AgentLogEntry, BoardConfig, Column, ColumnId, CheckoutClaimPrecondition, MergeResult, Settings, GlobalSettings, ProjectSettings, ActivityLogEntry, ActivityEventType, TaskDocument, TaskDocumentRevision, TaskDocumentCreateInput, TaskDocumentWithTask, InboxTask, TaskLogEntry, RunMutationContext, RunAuditEvent, RunAuditEventInput, RunAuditEventFilter, ArchivedTaskEntry, ArchiveAgentLogMode, TaskPriority, SourceType, WorkflowStepTemplate, Agent, AutostashOrphanRecord, TaskCommitAssociation, TaskCommitAssociationMatchSource, TaskCommitAssociationConfidence, GithubIssueAction, MergeQueueEntry, MergeQueueEnqueueOptions, MergeQueueAcquireOptions, MergeQueueReleaseOutcome, HandoffToReviewOptions, GoalCitation, GoalCitationFilter, GoalCitationInput, GoalCitationSurface, BranchGroup, BranchGroupCreateInput, BranchGroupUpdate, TaskBranchAssignmentMode, MergeRequestRecord, MergeRequestState, CompletionHandoffMarker, PrEntity, PrEntityCreateInput, PrEntityUpdate, PrEntityState, PrThreadState, PrThreadOutcome, PrConflictState, PrChecksRollup, PrReviewDecision } from "./types.js";
 import { createActivityLogSnapshot, createRunAuditSnapshot, createTaskMetadataSnapshot, toTaskMetadataRecord, validateSnapshotEnvelope, type ActivityLogSnapshot, type RunAuditSnapshot, type TaskMetadataSnapshot } from "./shared-mesh-state.js";
-import { VALID_TRANSITIONS, DEFAULT_SETTINGS, isGlobalOnlySettingsKey, WORKFLOW_STEP_TEMPLATES, validateDocumentKey } from "./types.js";
+import { VALID_TRANSITIONS, COLUMNS, DEFAULT_SETTINGS, isGlobalOnlySettingsKey, WORKFLOW_STEP_TEMPLATES, validateDocumentKey } from "./types.js";
 import { DEFAULT_PROJECT_SETTINGS } from "./settings-schema.js";
+import { parseWorkflowIr, serializeWorkflowIr, downgradeIrToV1IfPure } from "./workflow-ir.js";
+import { isWorkflowColumnsEnabled } from "./workflow-columns-settings.js";
+import { resolveAllowedColumns, workflowHasColumn } from "./workflow-transitions.js";
+import {
+  type PluginGateVerdict,
+  findWorkflowColumn,
+  resolveColumnPluginGates,
+} from "./plugin-gate-verdict.js";
+import { getTraitRegistry, assertColumnTraitsValid } from "./trait-registry.js";
+import { resolveColumnCapacity, DEFAULT_WORKFLOW_POOL_ID } from "./workflow-capacity.js";
+import {
+  OccupiedColumnsError,
+  assertRehomeTargetValid,
+  computeRemovedOccupiedColumns,
+  computeIncompatibleFieldChanges,
+  IncompatibleFieldChangeError,
+  resolveEntryColumnId,
+  resolveSwitchReconciliation,
+  runReconciliationAbort,
+} from "./workflow-reconciliation.js";
+import {
+  type DefaultWorkflowMoveContext,
+  applyDefaultWorkflowMoveEffects,
+  evaluateMergeBlockerGuard,
+  registerDefaultWorkflowHooks,
+} from "./default-workflow-hooks.js";
+import {
+  type TransitionRejection,
+  makeTransitionRejection,
+  makeTransitionPending,
+} from "./transition-types.js";
+import {
+  writeTransitionPending,
+  clearTransitionPending,
+  readTransitionPending,
+  reconcileHooksRemaining,
+} from "./transition-pending.js";
+import { BUILTIN_CODING_WORKFLOW_IR } from "./builtin-coding-workflow-ir.js";
+import type { WorkflowIr, WorkflowIrColumn, WorkflowFieldDefinition } from "./workflow-ir-types.js";
+import {
+  validateCustomFieldPatch,
+  applyFieldDefaults,
+  reconcileFieldsOnWorkflowChange,
+  CustomFieldRejectionError,
+  type CustomFieldRejection,
+} from "./task-fields.js";
+// Side-effect import: registers the 14 built-in trait DEFINITIONS into the
+// shared trait registry on load (the flag-ON path resolves traits by id).
+import "./builtin-traits.js";
+// Step-inversion U12 (KTD-12): the legacy `parseStepsFromPrompt` path resolves
+// the `step-headings` parser through the registry (proving the registry path),
+// staying byte-identical with the direct extracted function.
+import { getStepParser } from "./step-parsers.js";
+import type {
+  WorkflowDefinition,
+  WorkflowDefinitionInput,
+  WorkflowDefinitionUpdate,
+  WorkflowNodeLayout,
+} from "./workflow-definition-types.js";
+import { compileWorkflowToSteps } from "./workflow-compiler.js";
+import { BUILTIN_WORKFLOWS, getBuiltinWorkflow, isBuiltinWorkflowId } from "./builtin-workflows.js";
+import {
+  WORKFLOW_PARITY_OBSERVED_MUTATION,
+  WORKFLOW_PARITY_DRIFT_MUTATION,
+  DUAL_ACCEPT_PARITY_MUTATIONS,
+  computeWorkflowColumnsGraduationReport,
+  type WorkflowParityDiff,
+  type WorkflowParitySummary,
+  type WorkflowColumnsGraduationReport,
+} from "./workflow-parity.js";
+
+/** Tags WorkflowStep rows materialized by compiling a workflow so they can be
+ *  filtered out of the user-facing step manager and cleaned up on re-selection. */
+const WORKFLOW_COMPILED_STEP_TEMPLATE_PREFIX = "workflow:";
 import { resolveWorktrunkSettings, validateWorktrunkSettings } from "./worktrunk-settings.js";
+import { validateLocale } from "./settings-validation.js";
 import { normalizeTaskPriority } from "./task-priority.js";
+import { validateBranchGroupBranchName, filterTasksByBranchGroup } from "./branch-assignment.js";
+import { allowsAutoMergeProcessing } from "./task-merge.js";
 import { canAgentTakeImplementationTaskForExplicitRouting } from "./agent-role-policy.js";
 import { GlobalSettingsStore } from "./global-settings.js";
-import { Database, toJson, toJsonNullable, fromJson } from "./db.js";
+import { Database, SCHEMA_VERSION, toJson, toJsonNullable, fromJson } from "./db.js";
 import { ArchiveDatabase } from "./archive-db.js";
 import { detectLegacyData, migrateFromLegacy } from "./db-migrate.js";
 import { buildSnippet, extractGoalCitations } from "./goal-citation-extractor.js";
@@ -37,6 +114,14 @@ import { getTaskAgeStalenessSignal, type TaskAgeStalenessThresholds } from "./ta
 import { ensureMemoryFileWithBackend } from "./project-memory.js";
 import { runCommandAsync } from "./run-command.js";
 import { createLogger } from "./logger.js";
+import {
+  appendAgentLogEntriesSync,
+  countAgentLogEntries,
+  pruneAgentLogFiles as pruneAgentLogFileEntries,
+  readAgentLogEntries,
+  readAgentLogEntriesByTimeRange,
+} from "./agent-log-file-store.js";
+import { truncateAgentLogDetail } from "./agent-log-constants.js";
 import { validateNodeOverrideChange } from "./node-override-guard.js";
 import { sanitizeTitle, summarizeTitle } from "./ai-summarize.js";
 import { extractTaskIdTokens, normalizeTitleForTaskId } from "./task-title-id-drift.js";
@@ -79,6 +164,7 @@ interface TaskRow {
   blockedBy: string | null;
   overlapBlockedBy: string | null;
   paused: number | null;
+  pausedReason: string | null;
   userPaused: number | null;
   baseBranch: string | null;
   executionStartBranch: string | null;
@@ -134,6 +220,7 @@ interface TaskRow {
   executionCompletedAt: string | null;
   dependencies: string | null;
   steps: string | null;
+  customFields: string | null;
   log: string | null;
   attachments: string | null;
   steeringComments: string | null;
@@ -190,14 +277,19 @@ function parseTaskBranchContextFromSourceMetadata(sourceMetadata: Record<string,
   const raw = sourceMetadata?.[TASK_BRANCH_CONTEXT_METADATA_KEY];
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
   const candidate = raw as Record<string, unknown>;
-  if (typeof candidate.groupId !== "string" || !candidate.groupId.trim()) return undefined;
+  // groupId is optional: only shared-mode members carry one. A non-shared
+  // member persists source/assignmentMode without a groupId, so a missing or
+  // empty groupId must NOT discard the whole context.
+  const groupId = typeof candidate.groupId === "string"
+    ? candidate.groupId.trim() || undefined
+    : undefined;
   if (candidate.source !== "planning" && candidate.source !== "mission" && candidate.source !== "new-task") return undefined;
   if (candidate.assignmentMode !== "shared" && candidate.assignmentMode !== "per-task-derived") return undefined;
   const inheritedBaseBranch = typeof candidate.inheritedBaseBranch === "string" && candidate.inheritedBaseBranch.trim().length > 0
     ? candidate.inheritedBaseBranch.trim()
     : undefined;
   return {
-    groupId: candidate.groupId,
+    ...(groupId ? { groupId } : {}),
     source: candidate.source,
     assignmentMode: candidate.assignmentMode,
     inheritedBaseBranch,
@@ -212,7 +304,9 @@ function withTaskBranchContextInSourceMetadata(
   return {
     ...(sourceMetadata ?? {}),
     [TASK_BRANCH_CONTEXT_METADATA_KEY]: {
-      groupId: branchContext.groupId,
+      ...(branchContext.groupId?.trim()
+        ? { groupId: branchContext.groupId.trim() }
+        : {}),
       source: branchContext.source,
       assignmentMode: branchContext.assignmentMode,
       ...(branchContext.inheritedBaseBranch ? { inheritedBaseBranch: branchContext.inheritedBaseBranch } : {}),
@@ -234,6 +328,38 @@ interface BranchGroupRow {
   createdAt: number;
   updatedAt: number;
   closedAt: number | null;
+}
+
+interface PrEntityRow {
+  id: string;
+  sourceType: "task" | "branch-group";
+  sourceId: string;
+  repo: string;
+  headBranch: string;
+  baseBranch: string | null;
+  state: PrEntityState;
+  prNumber: number | null;
+  prUrl: string | null;
+  headOid: string | null;
+  mergeable: string | null;
+  checksRollup: string | null;
+  reviewDecision: string | null;
+  autoMerge: number;
+  unverified: number;
+  failureReason: string | null;
+  responseRounds: number;
+  createdAt: number;
+  updatedAt: number;
+  closedAt: number | null;
+}
+
+interface PrThreadStateRow {
+  prEntityId: string;
+  threadId: string;
+  headOid: string;
+  outcome: PrThreadOutcome;
+  fixCommitSha: string | null;
+  updatedAt: number;
 }
 
 interface TaskCommitAssociationRow {
@@ -382,10 +508,6 @@ let taskActivityLogEntryLimit = DEFAULT_TASK_ACTIVITY_LOG_ENTRY_LIMIT;
 let taskActivityLogOutcomeLimit = DEFAULT_TASK_ACTIVITY_LOG_OUTCOME_LIMIT;
 const ARCHIVE_AGENT_LOG_SNAPSHOT_LIMIT = 25;
 const ARCHIVE_AGENT_LOG_SNIPPET_LIMIT = 160;
-const AGENT_LOG_TOOL_DETAIL_LIMIT = 4_096;
-const AGENT_LOG_TOOL_DETAIL_TRUNCATION_NOTICE =
-  "\n\n[tool output truncated to keep dashboard log views responsive]";
-const AGENT_LOG_TOOL_TYPES = new Set<AgentLogEntry["type"]>(["tool", "tool_result", "tool_error"]);
 const storeLog = createLogger("task-store");
 const coreLog = createLogger("core");
 
@@ -470,16 +592,6 @@ function truncateTaskLogOutcome(outcome: string | undefined): string | undefined
     return outcome;
   }
   return `${outcome.slice(0, taskActivityLogOutcomeLimit)}\n... outcome truncated to ${taskActivityLogOutcomeLimit} characters ...`;
-}
-
-function truncateAgentLogDetail(
-  detail: string | null | undefined,
-  type: AgentLogEntry["type"],
-): string | undefined {
-  if (detail == null) return undefined;
-  if (!AGENT_LOG_TOOL_TYPES.has(type)) return detail;
-  if (detail.length <= AGENT_LOG_TOOL_DETAIL_LIMIT) return detail;
-  return `${detail.slice(0, AGENT_LOG_TOOL_DETAIL_LIMIT)}${AGENT_LOG_TOOL_DETAIL_TRUNCATION_NOTICE}`;
 }
 
 function compactTaskActivityLog(entries: TaskLogEntry[]): TaskLogEntry[] {
@@ -625,7 +737,7 @@ function deepMergeWithNullDelete(
 
 export interface TaskStoreEvents {
   "task:created": [task: Task];
-  "task:moved": [data: { task: Task; from: Column; to: Column; source: "user" | "engine" }];
+  "task:moved": [data: { task: Task; from: ColumnId; to: ColumnId; source: "user" | "engine" | "scheduler" }];
   "task:updated": [task: Task];
   "task:deleted": [task: Task, meta?: { githubIssueAction?: GithubIssueAction }];
   "task:merged": [result: MergeResult];
@@ -731,6 +843,12 @@ const KNOWN_FILE_SCOPE_ROOT_FILES = new Set([
   "changelog",
   "agents.md",
 ]);
+
+// `parseStepHeadings` (the `### Step N:` parser, step-inversion U1) was extracted
+// into `step-parsers.ts` as the `step-headings` built-in parser (U12, KTD-12).
+// It is re-exported here for back-compat with callers/tests that import it from
+// `store.ts`. `parseStepsFromPrompt` below delegates through the registry.
+export { parseStepHeadings } from "./step-parsers.js";
 
 export function isValidFileScopeEntry(token: string): boolean {
   const trimmed = token.trim();
@@ -1015,11 +1133,33 @@ export class InvalidMergeQueueLeaseDurationError extends Error {
 export class HandoffInvariantViolationError extends Error {
   constructor(
     public readonly taskId: string,
-    public readonly fromColumn: Column,
+    public readonly fromColumn: ColumnId,
     message: string,
   ) {
     super(message);
     this.name = "HandoffInvariantViolationError";
+  }
+}
+
+/**
+ * Thrown by the flag-ON (`workflowColumns`) `moveTaskInternal` path when a move
+ * is rejected, carrying the typed {@link TransitionRejection} (KTD-3/R13). The
+ * existing callers of `moveTask` catch thrown `Error`s (e.g. the dashboard move
+ * route inspects `err.message`), so the rejection rides on an `Error` subclass
+ * — `.message` reproduces the legacy human-readable string so flag-ON callers
+ * that only read the message keep working, while `.rejection` exposes the
+ * machine-stable code/messageKey/retryable for surfaces that want it.
+ *
+ * The FLAG-OFF path still throws the bare legacy `Error` strings unchanged
+ * (zero behavior change while the flag is off — proven by the characterization
+ * suite).
+ */
+export class TransitionRejectionError extends Error {
+  readonly rejection: TransitionRejection;
+  constructor(rejection: TransitionRejection, message: string) {
+    super(message);
+    this.name = "TransitionRejectionError";
+    this.rejection = rejection;
   }
 }
 
@@ -1029,9 +1169,30 @@ interface MoveTaskOptions {
   preserveWorktree?: boolean;
   preserveStatus?: boolean;
   allocateWorktree?: (reservedNames: Set<string>) => string | null;
-  moveSource?: "user" | "engine";
+  moveSource?: "user" | "engine" | "scheduler";
   skipMergeBlocker?: boolean;
   allowDirectInReviewMove?: boolean;
+  /**
+   * KTD-9: engine/recovery moves bypass trait guards and abort-on-exit effects
+   * (the generalization of `skipMergeBlocker`). It NEVER bypasses capacity
+   * (KTD-10). Engine-internal only: HTTP move endpoints hardcode it off and must
+   * never forward a caller-supplied value (mirrors the hardcoded
+   * `moveSource: "user"` posture). When unset, the flag-ON path derives it from
+   * `moveSource === "engine"` plus `skipMergeBlocker`.
+   */
+  bypassGuards?: boolean;
+  /**
+   * U5 (R15/R20): a workflow-reconciliation re-home move (switch/edit/delete).
+   * Unlike `bypassGuards` (which skips trait guards but still enforces the
+   * column-graph adjacency, so the U4 parity matrix is unaffected), a recovery
+   * re-home must reach the new workflow's entry column from ANY current column —
+   * a card that would otherwise be stranded in a column its (new) workflow does
+   * not define. So this additionally skips the adjacency check (step 2). The
+   * structural unknown-column check (step 1) and the in-txn capacity check
+   * (KTD-10) still apply. Engine-internal only: never forwarded from an HTTP
+   * endpoint. When set, implies `bypassGuards`.
+   */
+  recoveryRehome?: boolean;
 }
 
 interface MoveTaskInternalOptions {
@@ -1044,6 +1205,12 @@ interface MoveTaskInternalOptions {
 
 export class TaskStore extends EventEmitter<TaskStoreEvents> {
   private static readonly ACTIVE_TASKS_WHERE = '"deletedAt" IS NULL';
+  /** U6: sentinel effective-workflow id for default-workflow (null-selection)
+   *  tasks, so they all share one per-column capacity pool (KTD-10). It is not a
+   *  real workflow row id (no `builtin:`/custom collision possible). Re-exposed
+   *  as a static member for internal call sites; the canonical const lives in
+   *  `workflow-capacity.ts` (`DEFAULT_WORKFLOW_POOL_ID`). */
+  private static readonly DEFAULT_WORKFLOW_POOL_ID = DEFAULT_WORKFLOW_POOL_ID;
 
   static async getOrCreateForProject(
     projectId?: string,
@@ -1110,6 +1277,15 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   private watcher: FSWatcher | null = null;
   /** In-memory cache of tasks for diffing watcher events */
   private taskCache: Map<string, Task> = new Map();
+  /**
+   * U8 (KTD-2): pre-evaluated plugin gate verdicts, keyed `taskId` → `toColumn`
+   * → recorded verdicts (one per plugin gate trait). A plugin gate is evaluated
+   * OUTSIDE the lock by the engine's trait adapter; the verdict is recorded here
+   * and re-checked cheaply in-lock at move time so plugin code never blocks or
+   * wedges the task lock. Kept in-memory (minimal/surgical per U8); the
+   * `plugin-gate-verdict.ts` seam can later back this with SQLite.
+   */
+  private pluginGateVerdicts: Map<string, Map<string, PluginGateVerdict[]>> = new Map();
   /** Paths recently written by in-process mutations (suppresses duplicate events) */
   private recentlyWritten: Set<string> = new Set();
   /** Pending debounce timers keyed by task ID */
@@ -1139,6 +1315,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   private lastTaskIdIntegrityLogSignature: string | null = null;
   /** Cached workflow steps — invalidated on create/update/delete */
   private workflowStepsCache: import("./types.js").WorkflowStep[] | null = null;
+  private workflowDefinitionsCache: WorkflowDefinition[] | null = null;
   /** Plugin-contributed workflow step templates injected by engine runtime. */
   private _pluginWorkflowStepTemplates: Array<{ pluginId: string; template: WorkflowStepTemplate }> = [];
   /** Global settings store (`~/.fusion/settings.json`) */
@@ -1189,9 +1366,9 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     taskId: string;
     timestamp: string;
     text: string;
-    type: string;
+    type: AgentLogEntry["type"];
     detail: string | null;
-    agent: string | null;
+    agent: AgentLogEntry["agent"] | null;
   }> = [];
   /** Timer for flushing the agent log buffer. */
   private agentLogFlushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1227,6 +1404,34 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       ?? (process.env.VITEST === "true" ? join(rootDir, ".fusion-global-settings") : undefined);
     this.globalSettingsDir = resolvedGlobalSettingsDir;
     this.globalSettingsStore = new GlobalSettingsStore(resolvedGlobalSettingsDir);
+  }
+
+  private emitTaskLifecycleEventSafely(
+    event: "task:created" | "task:updated",
+    args: TaskStoreEvents["task:created"] | TaskStoreEvents["task:updated"],
+  ): boolean {
+    const listeners = super.listeners(event) as Array<(...listenerArgs: typeof args) => unknown>;
+    if (listeners.length === 0) {
+      return false;
+    }
+
+    const [task] = args;
+    const taskId = task && typeof task === "object" && "id" in task ? String(task.id) : "unknown";
+
+    for (const listener of listeners) {
+      try {
+        const result = listener(...args);
+        if (result && typeof (result as PromiseLike<unknown>).then === "function") {
+          void Promise.resolve(result).catch((error) => {
+            storeLog.warn(`[${event}] listener failed for ${taskId}: ${getErrorMessage(error)}`);
+          });
+        }
+      } catch (error) {
+        storeLog.warn(`[${event}] listener failed for ${taskId}: ${getErrorMessage(error)}`);
+      }
+    }
+
+    return true;
   }
 
   /**
@@ -1342,7 +1547,14 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
 
   async init(): Promise<void> {
     await mkdir(this.tasksDir, { recursive: true });
-    
+
+    // U4: register the default-workflow trait hook implementations into the
+    // shared trait registry (the flag-ON moveTaskInternal path resolves the
+    // legacy per-column effects through these). Idempotent; built-in trait
+    // DEFINITIONS self-register on import of ./builtin-traits.js (pulled in
+    // transitively via default-workflow-hooks / trait-registry).
+    registerDefaultWorkflowHooks();
+
     // Initialize SQLite database
     if (!this._db) {
       // Startup corruption guard: before opening, detect a malformed fusion.db
@@ -1389,6 +1601,21 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       await migrateFromLegacy(this.fusionDir, this._db);
     }
     await this.migrateActiveArchivedTasksToArchiveDb();
+    await this.migrateAgentLogEntriesToFilesOnce();
+    await this.cleanupNoOpTaskMovedActivityRowsOnce();
+    // Re-run init when migrations are pending, or when the deferred
+    // agentLogEntries drop still needs to fire: migration 102 skips the
+    // destructive drop until migrateAgentLogEntriesToFilesOnce() above writes
+    // the __meta guard, but migrations 103+ bump the schema version past 102
+    // on the first pass, so the version check alone no longer triggers the
+    // second pass that performs the drop.
+    const legacyAgentLogTableRemains =
+      this.db
+        .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'agentLogEntries' LIMIT 1")
+        .get() !== undefined;
+    if (this.db.getSchemaVersion() < SCHEMA_VERSION || legacyAgentLogTableRemains) {
+      this.db.init();
+    }
     await this.importLegacyAgentLogsOnce();
     this.taskIdStateReconciled = false;
     this.reconcileDistributedTaskIdStateOnOpen();
@@ -1425,6 +1652,31 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         error: err instanceof Error ? err.message : String(err),
       });
     }
+
+    // U12: workflow-columns integrity pass. When the flag is ON, audit + re-home
+    // any task whose stored column is no longer valid in its resolved workflow
+    // (KTD-1 guarantees zero rewrites for healthy legacy rows, so this is a
+    // no-op for the common case). Idempotent; non-fatal — never blocks startup.
+    try {
+      const settings = await this.getSettingsFast();
+      if (isWorkflowColumnsEnabled(settings)) {
+        await this.runWorkflowColumnsIntegrityPass();
+        // #1401: recover any transitionPending markers stranded by a crash
+        // between the in-txn write and the post-commit clear (they otherwise
+        // permanently inflate capacity counts for their target column).
+        await this.recoverStaleTransitionPending();
+      } else {
+        // #1409: flag-OFF init — evacuate any card stuck in a non-legacy column
+        // (e.g. the flag was toggled OFF out-of-process while a card sat in a
+        // custom column) so the board stays listable and moves work.
+        await this.evacuateCustomColumnsToLegacy("flag-off-init");
+      }
+    } catch (err) {
+      storeLog.warn("workflowColumns integrity pass failed during init", {
+        phase: "init:workflow-columns-integrity",
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 
   // ── Row <-> Task Conversion ────────────────────────────────────────
@@ -1448,6 +1700,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       blockedBy: row.blockedBy || undefined,
       overlapBlockedBy: row.overlapBlockedBy || undefined,
       paused: row.paused ? true : undefined,
+      pausedReason: row.pausedReason || undefined,
       userPaused: row.userPaused ? true : undefined,
       baseBranch: row.baseBranch || undefined,
       executionStartBranch: row.executionStartBranch || undefined,
@@ -1496,6 +1749,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       executionCompletedAt: row.executionCompletedAt || undefined,
       dependencies: fromJson<string[]>(row.dependencies) || [],
       steps: fromJson<import("./types.js").TaskStep[]>(row.steps) || [],
+      customFields: fromJson<Record<string, unknown>>(row.customFields) ?? undefined,
       log: fromJson<import("./types.js").TaskLogEntry[]>(row.log) || [],
       tokenBudgetSoftAlertedAt: row.tokenBudgetSoftAlertedAt || undefined,
       tokenBudgetHardAlertedAt: row.tokenBudgetHardAlertedAt || undefined,
@@ -1643,6 +1897,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       dependencies: entry.dependencies ?? [],
       steps: entry.steps ?? [],
       currentStep: entry.currentStep ?? 0,
+      customFields: entry.customFields ?? undefined,
       size: entry.size,
       reviewLevel: entry.reviewLevel,
       prInfo: slim ? undefined : entry.prInfo,
@@ -1775,6 +2030,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       dependencies: task.dependencies,
       steps: task.steps,
       currentStep: task.currentStep,
+      customFields: task.customFields,
       size: task.size,
       reviewLevel: task.reviewLevel,
       prInfo: task.prInfo,
@@ -1983,7 +2239,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       "error", "summary", "thinkingLevel", "executionMode",
       "tokenUsageInputTokens", "tokenUsageOutputTokens", "tokenUsageCachedTokens", "tokenUsageCacheWriteTokens", "tokenUsageTotalTokens", "tokenUsageFirstUsedAt", "tokenUsageLastUsedAt", "tokenBudgetSoftAlertedAt", "tokenBudgetHardAlertedAt", "tokenBudgetOverride",
       "createdAt", "updatedAt", "columnMovedAt", "firstExecutionAt", "cumulativeActiveMs", "executionStartedAt", "executionCompletedAt",
-      "dependencies", "steps", "comments", "review", "reviewState", "workflowStepResults", "steeringComments",
+      "dependencies", "steps", "customFields", "comments", "review", "reviewState", "workflowStepResults", "steeringComments",
       "attachments", "prInfo", "prInfos", "issueInfo", "githubTracking", "sourceIssueProvider", "sourceIssueRepository", "sourceIssueExternalIssueId", "sourceIssueNumber", "sourceIssueUrl", "mergeDetails",
       "breakIntoSubtasks", "noCommitsExpected", "enabledWorkflowSteps", "modifiedFiles",
       "missionId", "sliceId", "scopeOverride", "scopeOverrideReason", "scopeAutoWiden", "assignedAgentId", "pausedByAgentId", "assigneeUserId", "nodeId", "effectiveNodeId", "effectiveNodeSource",
@@ -2032,7 +2288,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       "error", "summary", "thinkingLevel", "executionMode",
       "tokenUsageInputTokens", "tokenUsageOutputTokens", "tokenUsageCachedTokens", "tokenUsageCacheWriteTokens", "tokenUsageTotalTokens", "tokenUsageFirstUsedAt", "tokenUsageLastUsedAt", "tokenBudgetSoftAlertedAt", "tokenBudgetHardAlertedAt", "tokenBudgetOverride",
       "createdAt", "updatedAt", "columnMovedAt", "firstExecutionAt", "cumulativeActiveMs", "executionStartedAt", "executionCompletedAt",
-      "dependencies", "steps", "attachments", "steeringComments",
+      "dependencies", "steps", "customFields", "attachments", "steeringComments",
       "comments", "review", "reviewState", "workflowStepResults", "prInfo", "prInfos", "issueInfo", "githubTracking", "sourceIssueProvider", "sourceIssueRepository", "sourceIssueExternalIssueId", "sourceIssueNumber", "sourceIssueUrl", "mergeDetails",
       "breakIntoSubtasks", "noCommitsExpected", "enabledWorkflowSteps", "modifiedFiles",
       "missionId", "sliceId", "scopeOverride", "scopeOverrideReason", "scopeAutoWiden", "assignedAgentId", "pausedByAgentId", "assigneeUserId", "nodeId", "effectiveNodeId", "effectiveNodeSource",
@@ -2078,6 +2334,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       task.blockedBy ?? null,
       task.overlapBlockedBy ?? null,
       task.paused ? 1 : 0,
+      task.pausedReason ?? null,
       task.userPaused ? 1 : 0,
       task.baseBranch ?? null,
       task.branch ?? null,
@@ -2133,6 +2390,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       task.executionCompletedAt ?? null,
       toJson(task.dependencies || []),
       toJson(task.steps || []),
+      toJson(task.customFields ?? {}),
       toJson(task.log || []),
       toJson(task.attachments || []),
       toJson(task.steeringComments || []),
@@ -2194,13 +2452,13 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     this.db.prepare(`
       INSERT INTO tasks (
         id, lineageId, title, description, priority, "column", status, size, reviewLevel, currentStep,
-        worktree, blockedBy, overlapBlockedBy, paused, userPaused, baseBranch, branch, autoMerge, executionStartBranch, baseCommitSha, modelPresetId, modelProvider,
+        worktree, blockedBy, overlapBlockedBy, paused, pausedReason, userPaused, baseBranch, branch, autoMerge, executionStartBranch, baseCommitSha, modelPresetId, modelProvider,
         modelId, validatorModelProvider, validatorModelId, planningModelProvider, planningModelId, mergeRetries,
         workflowStepRetries, stuckKillCount, resumeLimboCount, resumeLimboTipSha, resumeLimboStepSignature, postReviewFixCount, recoveryRetryCount, taskDoneRetryCount, worktreeSessionRetryCount, completionHandoffLimboRecoveryCount, verificationFailureCount, mergeConflictBounceCount, mergeAuditBounceCount, mergeTransientRetryCount, branchConflictRecoveryCount, reviewerContextRetryCount, reviewerFallbackRetryCount, nextRecoveryAt, error,
         summary, thinkingLevel, executionMode, tokenUsageInputTokens, tokenUsageOutputTokens, tokenUsageCachedTokens,
         tokenUsageCacheWriteTokens, tokenUsageTotalTokens, tokenUsageFirstUsedAt, tokenUsageLastUsedAt, tokenBudgetSoftAlertedAt, tokenBudgetHardAlertedAt, tokenBudgetOverride, createdAt, updatedAt, columnMovedAt,
         firstExecutionAt, cumulativeActiveMs, executionStartedAt, executionCompletedAt,
-        dependencies, steps, log, attachments, steeringComments,
+        dependencies, steps, customFields, log, attachments, steeringComments,
         comments, review, reviewState, workflowStepResults, prInfo, prInfos, issueInfo, githubTracking,
         sourceIssueProvider, sourceIssueRepository, sourceIssueExternalIssueId, sourceIssueNumber, sourceIssueUrl,
         mergeDetails, breakIntoSubtasks, noCommitsExpected, autoMerge, enabledWorkflowSteps, modifiedFiles, missionId, sliceId, scopeOverride, scopeOverrideReason, scopeAutoWiden, assignedAgentId, pausedByAgentId, assigneeUserId, nodeId, effectiveNodeId, effectiveNodeSource, sourceType, sourceAgentId, sourceRunId, sourceSessionId, sourceMessageId, sourceParentTaskId, sourceMetadata, checkedOutBy, checkedOutAt, checkoutNodeId, checkoutRunId, checkoutLeaseRenewedAt, checkoutLeaseEpoch, deletedAt, allowResurrection
@@ -2221,13 +2479,13 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     this.db.prepare(`
       INSERT INTO tasks (
         id, lineageId, title, description, priority, "column", status, size, reviewLevel, currentStep,
-        worktree, blockedBy, overlapBlockedBy, paused, userPaused, baseBranch, branch, autoMerge, executionStartBranch, baseCommitSha, modelPresetId, modelProvider,
+        worktree, blockedBy, overlapBlockedBy, paused, pausedReason, userPaused, baseBranch, branch, autoMerge, executionStartBranch, baseCommitSha, modelPresetId, modelProvider,
         modelId, validatorModelProvider, validatorModelId, planningModelProvider, planningModelId, mergeRetries,
         workflowStepRetries, stuckKillCount, resumeLimboCount, resumeLimboTipSha, resumeLimboStepSignature, postReviewFixCount, recoveryRetryCount, taskDoneRetryCount, worktreeSessionRetryCount, completionHandoffLimboRecoveryCount, verificationFailureCount, mergeConflictBounceCount, mergeAuditBounceCount, mergeTransientRetryCount, branchConflictRecoveryCount, reviewerContextRetryCount, reviewerFallbackRetryCount, nextRecoveryAt, error,
         summary, thinkingLevel, executionMode, tokenUsageInputTokens, tokenUsageOutputTokens, tokenUsageCachedTokens,
         tokenUsageCacheWriteTokens, tokenUsageTotalTokens, tokenUsageFirstUsedAt, tokenUsageLastUsedAt, tokenBudgetSoftAlertedAt, tokenBudgetHardAlertedAt, tokenBudgetOverride, createdAt, updatedAt, columnMovedAt,
         firstExecutionAt, cumulativeActiveMs, executionStartedAt, executionCompletedAt,
-        dependencies, steps, log, attachments, steeringComments,
+        dependencies, steps, customFields, log, attachments, steeringComments,
         comments, review, reviewState, workflowStepResults, prInfo, prInfos, issueInfo, githubTracking,
         sourceIssueProvider, sourceIssueRepository, sourceIssueExternalIssueId, sourceIssueNumber, sourceIssueUrl,
         mergeDetails, breakIntoSubtasks, noCommitsExpected, autoMerge, enabledWorkflowSteps, modifiedFiles, missionId, sliceId, scopeOverride, scopeOverrideReason, scopeAutoWiden, assignedAgentId, pausedByAgentId, assigneeUserId, nodeId, effectiveNodeId, effectiveNodeSource, sourceType, sourceAgentId, sourceRunId, sourceSessionId, sourceMessageId, sourceParentTaskId, sourceMetadata, checkedOutBy, checkedOutAt, checkoutNodeId, checkoutRunId, checkoutLeaseRenewedAt, checkoutLeaseEpoch, deletedAt, allowResurrection
@@ -2246,6 +2504,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         blockedBy = excluded.blockedBy,
         overlapBlockedBy = excluded.overlapBlockedBy,
         paused = excluded.paused,
+        pausedReason = excluded.pausedReason,
         userPaused = excluded.userPaused,
         baseBranch = excluded.baseBranch,
         branch = excluded.branch,
@@ -2301,6 +2560,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         executionCompletedAt = excluded.executionCompletedAt,
         dependencies = excluded.dependencies,
         steps = excluded.steps,
+        customFields = excluded.customFields,
         log = excluded.log,
         attachments = excluded.attachments,
         steeringComments = excluded.steeringComments,
@@ -2483,6 +2743,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
 
     const allowResurrection = existing.allowResurrection === true;
     if (input.forceResurrect === true || allowResurrection) {
+      this.purgeTaskWorkflowSelectionRows(id);
       this.db.prepare("DELETE FROM tasks WHERE id = ?").run(id);
       this.db.bumpLastModified();
       return;
@@ -2580,6 +2841,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     // Task moved
     this.on("task:moved", (data) => {
       if (this.suppressActivityLogForPollingEmit) return;
+      if (data.from === data.to) return;
       this.recordActivityFromListener(
         {
           type: "task:moved",
@@ -3178,6 +3440,20 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       const updatedMerged: Settings = { ...DEFAULT_SETTINGS, ...globalSettings, ...updatedProjectSettings } as Settings;
       this.emit("settings:updated", { settings: updatedMerged, previous: previousMerged });
 
+      // #1409: if this update flipped workflowColumns ON→OFF, evacuate any card
+      // stranded in a custom (non-legacy) column back to a legacy column so the
+      // board stays listable / movable on the legacy path.
+      if (isWorkflowColumnsEnabled(previousMerged) && !isWorkflowColumnsEnabled(updatedMerged)) {
+        try {
+          await this.evacuateCustomColumnsToLegacy("flag-toggled-off");
+        } catch (err) {
+          storeLog.warn("workflowColumns ON→OFF evacuation failed", {
+            phase: "evacuate-custom-columns",
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+
       // Bootstrap project memory file when memory is toggled on
       if (updatedMerged.memoryEnabled !== false && previousMerged.memoryEnabled === false) {
         try {
@@ -3251,6 +3527,23 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       (globalPatch as Record<string, unknown>)["experimentalFeatures"] = mergedMap;
     }
 
+    // Validate the optional UI locale at the write boundary: drop unrecognized
+    // values rather than persisting junk into settings.json. Runtime consumers
+    // also guard via isLocale, but the contract is `language?: Locale`.
+    // `null` passes through intact — GlobalSettingsStore treats null as
+    // "delete this key", which reverts the language to runtime auto-detect.
+    if ("language" in globalPatch) {
+      const rawLanguage = (globalPatch as Record<string, unknown>)["language"];
+      if (rawLanguage !== null) {
+        const validatedLanguage = validateLocale(rawLanguage);
+        if (validatedLanguage === undefined) {
+          delete (globalPatch as Record<string, unknown>)["language"];
+        } else {
+          globalPatch.language = validatedLanguage;
+        }
+      }
+    }
+
     const updatedGlobal = await this.globalSettingsStore.updateSettings(globalPatch);
     const merged: Settings = { ...DEFAULT_SETTINGS, ...updatedGlobal, ...config.settings } as Settings;
     try {
@@ -3261,6 +3554,21 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
 
     // Emit settings:updated so SSE listeners pick up the change
     this.emit("settings:updated", { settings: merged, previous });
+
+    // #1409: workflowColumns lives in experimentalFeatures (a global key), so the
+    // ON→OFF toggle flows through here. Evacuate any card stranded in a custom
+    // column when the flag flips off.
+    if (isWorkflowColumnsEnabled(previous) && !isWorkflowColumnsEnabled(merged)) {
+      try {
+        await this.evacuateCustomColumnsToLegacy("flag-toggled-off");
+      } catch (err) {
+        storeLog.warn("workflowColumns ON→OFF evacuation failed", {
+          phase: "evacuate-custom-columns",
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
     return merged;
   }
 
@@ -3693,39 +4001,77 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       ? await this.resolveEnabledWorkflowSteps(input.enabledWorkflowSteps)
       : undefined;
 
+    // When a project default workflow is configured, new tasks inherit it
+    // (compiled to steps) ahead of the legacy default-on step behavior.
+    let pendingWorkflowSelection: { workflowId: string; stepIds: string[] } | undefined;
     if (input.enabledWorkflowSteps === undefined) {
       try {
-        const allSteps = await this.listWorkflowSteps();
-        const defaultOnSteps = allSteps
-          .filter((ws) => ws.enabled && ws.defaultOn)
-          .map((ws) => ws.id);
-        if (defaultOnSteps.length > 0) {
-          resolvedWorkflowSteps = defaultOnSteps;
+        const inherited = await this.materializeDefaultWorkflowSteps();
+        if (inherited) {
+          resolvedWorkflowSteps = inherited.stepIds;
+          pendingWorkflowSelection = inherited;
         }
       } catch (err) {
-        storeLog.warn("Failed to auto-apply default workflow steps during task creation; auto-defaulting skipped", {
-          phase: "createTask:workflow-auto-default",
-          skippedAutoDefaulting: true,
+        storeLog.warn("Failed to apply default workflow during task creation; falling back to default-on steps", {
+          phase: "createTask:default-workflow",
           error: err instanceof Error ? err.message : String(err),
-          descriptionLength: input.description.length,
         });
+      }
+
+      if (resolvedWorkflowSteps === undefined) {
+        try {
+          const allSteps = await this.listWorkflowSteps();
+          const defaultOnSteps = allSteps
+            .filter((ws) => ws.enabled && ws.defaultOn)
+            .map((ws) => ws.id);
+          if (defaultOnSteps.length > 0) {
+            resolvedWorkflowSteps = defaultOnSteps;
+          }
+        } catch (err) {
+          storeLog.warn("Failed to auto-apply default workflow steps during task creation; auto-defaulting skipped", {
+            phase: "createTask:workflow-auto-default",
+            skippedAutoDefaulting: true,
+            error: err instanceof Error ? err.message : String(err),
+            descriptionLength: input.description.length,
+          });
+        }
       }
     } else if (input.enabledWorkflowSteps.length === 0) {
       resolvedWorkflowSteps = undefined;
     }
 
-    const task = await this.createTaskWithDistributedReservation(input, {
-      createTaskWithId: async (taskId) => {
-        await this.assertNoDependencyCycle(taskId, input.dependencies ?? [], "createTask");
-        return this._createTaskInternal(
-          input,
-          title,
-          resolvedWorkflowSteps,
-          taskId,
-          { invokeTaskCreatedHook: shouldInvokeTaskCreatedHook && !hasPendingSummarization },
-        );
-      },
-    });
+    let task: Task;
+    try {
+      task = await this.createTaskWithDistributedReservation(input, {
+        createTaskWithId: async (taskId) => {
+          await this.assertNoDependencyCycle(taskId, input.dependencies ?? [], "createTask");
+          return this._createTaskInternal(
+            input,
+            title,
+            resolvedWorkflowSteps,
+            taskId,
+            { invokeTaskCreatedHook: shouldInvokeTaskCreatedHook && !hasPendingSummarization },
+          );
+        },
+      });
+    } catch (err) {
+      // The task row was never created, so any default-workflow steps we
+      // materialized above would orphan with no task/selection pointing at them.
+      this.cleanupOrphanedMaterializedSteps(pendingWorkflowSelection?.stepIds);
+      throw err;
+    }
+
+    // Record the inherited workflow selection now that the task row exists.
+    if (pendingWorkflowSelection) {
+      try {
+        this.writeTaskWorkflowSelection(task.id, pendingWorkflowSelection.workflowId, pendingWorkflowSelection.stepIds);
+      } catch (err) {
+        storeLog.warn("Failed to record inherited workflow selection", {
+          taskId: task.id,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
 
     if (hasPendingSummarization && shouldInvokeTaskCreatedHook) {
       const id = task.id;
@@ -3826,33 +4172,73 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       ? await this.resolveEnabledWorkflowSteps(input.enabledWorkflowSteps)
       : undefined;
 
+    let pendingWorkflowSelection: { workflowId: string; stepIds: string[] } | undefined;
     if (input.enabledWorkflowSteps === undefined && options.applyDefaultWorkflowSteps !== false) {
+      // Mirror createTask: a configured project default workflow takes
+      // precedence over legacy default-on steps on this creation path too.
       try {
-        const allSteps = await this.listWorkflowSteps();
-        const defaultOnSteps = allSteps
-          .filter((ws) => ws.enabled && ws.defaultOn)
-          .map((ws) => ws.id);
-        if (defaultOnSteps.length > 0) {
-          resolvedWorkflowSteps = defaultOnSteps;
+        const inherited = await this.materializeDefaultWorkflowSteps();
+        if (inherited) {
+          resolvedWorkflowSteps = inherited.stepIds;
+          pendingWorkflowSelection = inherited;
         }
       } catch (err) {
-        storeLog.warn("Failed to auto-apply default workflow steps during reserved task creation; auto-defaulting skipped", {
-          phase: "createTaskWithReservedId:workflow-auto-default",
-          skippedAutoDefaulting: true,
+        storeLog.warn("Failed to apply default workflow during reserved task creation; falling back to default-on steps", {
+          phase: "createTaskWithReservedId:default-workflow",
           error: err instanceof Error ? err.message : String(err),
-          descriptionLength: input.description.length,
         });
+      }
+
+      if (resolvedWorkflowSteps === undefined) {
+        try {
+          const allSteps = await this.listWorkflowSteps();
+          const defaultOnSteps = allSteps
+            .filter((ws) => ws.enabled && ws.defaultOn)
+            .map((ws) => ws.id);
+          if (defaultOnSteps.length > 0) {
+            resolvedWorkflowSteps = defaultOnSteps;
+          }
+        } catch (err) {
+          storeLog.warn("Failed to auto-apply default workflow steps during reserved task creation; auto-defaulting skipped", {
+            phase: "createTaskWithReservedId:workflow-auto-default",
+            skippedAutoDefaulting: true,
+            error: err instanceof Error ? err.message : String(err),
+            descriptionLength: input.description.length,
+          });
+        }
       }
     } else if (Array.isArray(input.enabledWorkflowSteps) && input.enabledWorkflowSteps.length === 0) {
       resolvedWorkflowSteps = undefined;
     }
 
-    return this._createTaskInternal(input, title, resolvedWorkflowSteps, id, {
-      createdAt: options.createdAt,
-      updatedAt: options.updatedAt,
-      promptOverride: options.prompt,
-      invokeTaskCreatedHook: options.invokeTaskCreatedHook,
-    });
+    let createdTask: Task;
+    try {
+      createdTask = await this._createTaskInternal(input, title, resolvedWorkflowSteps, id, {
+        createdAt: options.createdAt,
+        updatedAt: options.updatedAt,
+        promptOverride: options.prompt,
+        invokeTaskCreatedHook: options.invokeTaskCreatedHook,
+      });
+    } catch (err) {
+      // The task row was never created, so any default-workflow steps we
+      // materialized above would orphan with no task/selection pointing at them.
+      this.cleanupOrphanedMaterializedSteps(pendingWorkflowSelection?.stepIds);
+      throw err;
+    }
+
+    // Record the inherited workflow selection now that the task row exists.
+    if (pendingWorkflowSelection) {
+      try {
+        this.writeTaskWorkflowSelection(createdTask.id, pendingWorkflowSelection.workflowId, pendingWorkflowSelection.stepIds);
+      } catch (err) {
+        storeLog.warn("Failed to record inherited workflow selection", {
+          taskId: createdTask.id,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
+    return createdTask;
   }
 
   async applyReplicatedTaskCreate(payload: MeshReplicatedTaskCreatePayload): Promise<MeshReplicatedTaskApplyResult> {
@@ -4002,7 +4388,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
 
     await this._maybeAutoArchiveSameAgentDuplicate(task, input);
 
-    this.emit("task:created", task);
+    this.emitTaskLifecycleEventSafely("task:created", [task]);
     if (options?.invokeTaskCreatedHook !== false) {
       await this.invokeTaskCreatedHook(task);
     }
@@ -4077,7 +4463,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
             id: candidate.id,
             title: candidate.title ?? "",
             description: candidate.description,
-            column: "todo" as Column,
+            column: "todo",
             createdAt: Date.parse(candidate.createdAt),
             sourceAgentId: candidate.sourceAgentId,
             sourceParentTaskId: null,
@@ -4338,6 +4724,9 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   }
 
   createBranchGroup(input: BranchGroupCreateInput): BranchGroup {
+    // Fix #11: reject injection-shaped branch names at the persistence boundary
+    // so they can never reach a downstream git/shell sink (coordinator, merger).
+    validateBranchGroupBranchName(input.branchName);
     const now = Date.now();
     const id = this.generateBranchGroupId();
     this.db.prepare(`
@@ -4387,6 +4776,17 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       return existing;
     }
 
+    // `branch_groups.branchName` is globally UNIQUE — a branch is represented by
+    // exactly one open group. If another source already owns an open group for
+    // this branch, reuse it rather than calling createBranchGroup and violating
+    // the UNIQUE constraint. Without this, two missions whose shared base resolves
+    // to the same branch (e.g. "main") collide: the throw escapes triageFeature
+    // and is swallowed by its callers, silently stranding "defined" features.
+    const existingByBranch = this.getBranchGroupByBranchName(init.branchName);
+    if (existingByBranch) {
+      return existingByBranch;
+    }
+
     return this.createBranchGroup({
       sourceType,
       sourceId,
@@ -4405,6 +4805,12 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     const current = this.getBranchGroup(id);
     if (!current) {
       throw new Error(`Branch group ${id} not found`);
+    }
+    // Fix #11: a rename must reject injection-shaped branch names at the same
+    // persistence boundary as createBranchGroup, otherwise a crafted ref could
+    // still reach the downstream git/PR flow via an update.
+    if (patch.branchName !== undefined) {
+      validateBranchGroupBranchName(patch.branchName);
     }
     const nextStatus = patch.status ?? current.status;
     const now = Date.now();
@@ -4433,7 +4839,11 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     return this.getBranchGroup(id)!;
   }
 
-  async setTaskBranchGroup(taskId: string, branchGroupId: string | null): Promise<void> {
+  async setTaskBranchGroup(
+    taskId: string,
+    branchGroupId: string | null,
+    options?: { assignmentMode?: TaskBranchAssignmentMode },
+  ): Promise<void> {
     await this.withTaskLock(taskId, async () => {
       const dir = this.taskDir(taskId);
       const task = await this.readTaskJson(dir);
@@ -4444,10 +4854,14 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         if (!group) {
           throw new Error(`Branch group ${branchGroupId} not found`);
         }
+        // Carry the group's actual assignment intent. The BranchGroup row does not
+        // persist an assignment mode, so prefer an explicit caller-provided mode,
+        // then preserve any existing branchContext.assignmentMode, and only fall
+        // back to "shared" when nothing else is known.
         branchContext = {
           groupId: group.id,
           source: group.sourceType,
-          assignmentMode: "shared",
+          assignmentMode: options?.assignmentMode ?? task.branchContext?.assignmentMode ?? "shared",
         };
       }
 
@@ -4468,9 +4882,206 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
 
   async listTasksByBranchGroup(groupId: string): Promise<Task[]> {
     const tasks = await this.listTasks({ includeArchived: false, slim: true });
-    return tasks
-      .filter((task) => task.branchContext?.groupId === groupId)
-      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    // Membership filter (incl. legacy synthetic-groupId fallback) is shared with
+    // the dashboard list route via `filterTasksByBranchGroup` so semantics can't
+    // drift between the two call sites (Fix #8/#9).
+    const group = this.getBranchGroup(groupId);
+    return filterTasksByBranchGroup(tasks, group, groupId).sort((a, b) =>
+      a.createdAt.localeCompare(b.createdAt),
+    );
+  }
+
+  // --- Unified PR entity (PR-lifecycle-as-workflow-nodes, U1) ---
+
+  private rowToPrEntity(row: PrEntityRow): PrEntity {
+    return {
+      id: row.id,
+      sourceType: row.sourceType,
+      sourceId: row.sourceId,
+      repo: row.repo,
+      headBranch: row.headBranch,
+      baseBranch: row.baseBranch ?? undefined,
+      state: row.state,
+      prNumber: row.prNumber ?? undefined,
+      prUrl: row.prUrl ?? undefined,
+      headOid: row.headOid ?? undefined,
+      mergeable: (row.mergeable as PrConflictState | null) ?? undefined,
+      checksRollup: (row.checksRollup as PrChecksRollup | null) ?? undefined,
+      reviewDecision: (row.reviewDecision as PrReviewDecision) ?? undefined,
+      autoMerge: Boolean(row.autoMerge),
+      unverified: Boolean(row.unverified),
+      failureReason: row.failureReason ?? undefined,
+      responseRounds: row.responseRounds,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+      closedAt: row.closedAt ?? undefined,
+    };
+  }
+
+  private generatePrEntityId(): string {
+    const timestamp = Date.now().toString(36).toUpperCase();
+    const random = Math.random().toString(36).slice(2, 8).toUpperCase();
+    return `PR-${timestamp}-${random}`;
+  }
+
+  getPrEntity(id: string): PrEntity | null {
+    const row = this.db.prepare(`SELECT * FROM pull_requests WHERE id = ?`).get(id) as PrEntityRow | undefined;
+    return row ? this.rowToPrEntity(row) : null;
+  }
+
+  /** The single non-terminal entity for a source, if any (matches the partial unique index). */
+  getActivePrEntityBySource(sourceType: PrEntity["sourceType"], sourceId: string): PrEntity | null {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM pull_requests
+         WHERE sourceType = ? AND sourceId = ? AND state NOT IN ('merged','closed','failed')
+         ORDER BY createdAt DESC LIMIT 1`,
+      )
+      .get(sourceType, sourceId) as PrEntityRow | undefined;
+    return row ? this.rowToPrEntity(row) : null;
+  }
+
+  /** The entity owning a concrete GitHub PR number in a repo, if any. */
+  getPrEntityByNumber(repo: string, prNumber: number): PrEntity | null {
+    const row = this.db
+      .prepare(`SELECT * FROM pull_requests WHERE repo = ? AND prNumber = ?`)
+      .get(repo, prNumber) as PrEntityRow | undefined;
+    return row ? this.rowToPrEntity(row) : null;
+  }
+
+  /**
+   * Create-or-reuse the non-terminal entity for a source. Reuse is keyed on the
+   * source identity (the open-source partial unique index), so re-entry from the
+   * pr-create node never mints a second live entity (AE6 idempotency).
+   */
+  ensurePrEntityForSource(input: PrEntityCreateInput): PrEntity {
+    const existing = this.getActivePrEntityBySource(input.sourceType, input.sourceId);
+    if (existing) return existing;
+    const id = this.generatePrEntityId();
+    const now = Date.now();
+    this.db
+      .prepare(
+        `INSERT INTO pull_requests
+           (id, sourceType, sourceId, repo, headBranch, baseBranch, state,
+            prNumber, prUrl, autoMerge, unverified, responseRounds, createdAt, updatedAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+      )
+      .run(
+        id,
+        input.sourceType,
+        input.sourceId,
+        input.repo,
+        input.headBranch,
+        input.baseBranch ?? null,
+        input.state ?? "creating",
+        input.prNumber ?? null,
+        input.prUrl ?? null,
+        input.autoMerge ? 1 : 0,
+        input.unverified ? 1 : 0,
+        now,
+        now,
+      );
+    this.db.bumpLastModified();
+    return this.getPrEntity(id)!;
+  }
+
+  updatePrEntity(id: string, patch: PrEntityUpdate): PrEntity {
+    const current = this.getPrEntity(id);
+    if (!current) throw new Error(`PR entity ${id} not found`);
+    const nextState = patch.state ?? current.state;
+    const now = Date.now();
+    const isTerminal = nextState === "merged" || nextState === "closed";
+    const nextClosedAt =
+      patch.closedAt === null
+        ? null
+        : patch.closedAt ?? (isTerminal && current.closedAt === undefined ? now : current.closedAt ?? null);
+    const orCurrent = <T>(v: T | null | undefined, cur: T | undefined): T | null =>
+      v === null ? null : v ?? cur ?? null;
+    this.db
+      .prepare(
+        `UPDATE pull_requests SET
+           state = ?, prNumber = ?, prUrl = ?, headOid = ?, mergeable = ?,
+           checksRollup = ?, reviewDecision = ?, autoMerge = ?, unverified = ?,
+           failureReason = ?, responseRounds = ?, updatedAt = ?, closedAt = ?
+         WHERE id = ?`,
+      )
+      .run(
+        nextState,
+        orCurrent(patch.prNumber, current.prNumber),
+        orCurrent(patch.prUrl, current.prUrl),
+        orCurrent(patch.headOid, current.headOid),
+        orCurrent(patch.mergeable, current.mergeable),
+        orCurrent(patch.checksRollup, current.checksRollup),
+        patch.reviewDecision === undefined ? current.reviewDecision ?? null : patch.reviewDecision,
+        patch.autoMerge === undefined ? (current.autoMerge ? 1 : 0) : patch.autoMerge ? 1 : 0,
+        patch.unverified === undefined ? (current.unverified ? 1 : 0) : patch.unverified ? 1 : 0,
+        orCurrent(patch.failureReason, current.failureReason),
+        patch.responseRounds ?? current.responseRounds,
+        now,
+        nextClosedAt,
+        id,
+      );
+    this.db.bumpLastModified();
+    return this.getPrEntity(id)!;
+  }
+
+  /** Non-terminal entities (for the reconcile poll set), oldest first. */
+  listActivePrEntities(): PrEntity[] {
+    const rows = this.db
+      .prepare(`SELECT * FROM pull_requests WHERE state NOT IN ('merged','closed','failed') ORDER BY createdAt ASC`)
+      .all() as PrEntityRow[];
+    return rows.map((r) => this.rowToPrEntity(r));
+  }
+
+  // Per-thread response state (R15) — keyed by (entity, threadId, headOid).
+
+  getPrThreadState(prEntityId: string, threadId: string, headOid: string): PrThreadState | null {
+    const row = this.db
+      .prepare(`SELECT * FROM pull_request_thread_state WHERE prEntityId = ? AND threadId = ? AND headOid = ?`)
+      .get(prEntityId, threadId, headOid) as PrThreadStateRow | undefined;
+    return row
+      ? {
+          prEntityId: row.prEntityId,
+          threadId: row.threadId,
+          headOid: row.headOid,
+          outcome: row.outcome,
+          fixCommitSha: row.fixCommitSha ?? undefined,
+          updatedAt: row.updatedAt,
+        }
+      : null;
+  }
+
+  listPrThreadStates(prEntityId: string): PrThreadState[] {
+    const rows = this.db
+      .prepare(`SELECT * FROM pull_request_thread_state WHERE prEntityId = ?`)
+      .all(prEntityId) as PrThreadStateRow[];
+    return rows.map((row) => ({
+      prEntityId: row.prEntityId,
+      threadId: row.threadId,
+      headOid: row.headOid,
+      outcome: row.outcome,
+      fixCommitSha: row.fixCommitSha ?? undefined,
+      updatedAt: row.updatedAt,
+    }));
+  }
+
+  /** Upsert a per-thread outcome. Persisted AFTER GitHub confirms (R15 commit-last). */
+  recordPrThreadOutcome(
+    prEntityId: string,
+    threadId: string,
+    headOid: string,
+    outcome: PrThreadOutcome,
+    fixCommitSha?: string,
+  ): void {
+    this.db
+      .prepare(
+        `INSERT INTO pull_request_thread_state (prEntityId, threadId, headOid, outcome, fixCommitSha, updatedAt)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT (prEntityId, threadId, headOid)
+         DO UPDATE SET outcome = excluded.outcome, fixCommitSha = excluded.fixCommitSha, updatedAt = excluded.updatedAt`,
+      )
+      .run(prEntityId, threadId, headOid, outcome, fixCommitSha ?? null, Date.now());
+    this.db.bumpLastModified();
   }
 
   recordBranchGroupMemberLanded(
@@ -4530,8 +5141,9 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
      *  from each row to make list responses cheap for board-style consumers. Detail fields default
      *  to empty arrays in the returned Task objects; use `getTask(id)` to load full data. */
     slim?: boolean;
-    /** Restrict to a single column (e.g. 'in-review' for the auto-merge sweep). */
-    column?: Column;
+    /** Restrict to a single column (e.g. 'in-review' for the auto-merge sweep).
+     *  Widened to {@link ColumnId} (#1403) so custom-column filters are accepted. */
+    column?: ColumnId;
     /** Opt-in startup-only memo for repeated slim reads during boot choreography. */
     startupMemo?: boolean;
   }): Promise<Task[]> {
@@ -4599,7 +5211,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       const task = this.rowToTask(row);
       task.inReviewStall = getInReviewStallReason(task, {
         now,
-        autoMerge: settings.autoMerge,
+        autoMerge: allowsAutoMergeProcessing(task, settings),
         engineActiveSinceMs: settings.engineActiveSinceMs,
         engineActivationGraceMs: settings.engineActivationGraceMs,
       });
@@ -4612,7 +5224,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       task.inReviewStalled = getInReviewStalledSignal(task, {
         now,
         thresholdMs: settings.inReviewStalledThresholdMs,
-        autoMerge: settings.autoMerge,
+        autoMerge: allowsAutoMergeProcessing(task, settings),
         engineActiveSinceMs: settings.engineActiveSinceMs,
         engineActivationGraceMs: settings.engineActivationGraceMs,
       });
@@ -4683,6 +5295,270 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     }
 
     return sorted.slice(offset, offset + Math.max(0, limit));
+  }
+
+  /**
+   * Residual B (U13/U9): per-branch progress snapshots for the given tasks,
+   * read from the `workflow_run_branches` table. Used to populate the optional
+   * additive `branchProgress` field on the board task payload so U9's parallel-
+   * window badge can render. Cheap and additive:
+   *   - returns an empty map immediately when the table is empty (the common
+   *     case — no fan-out runs in flight);
+   *   - one query for the whole task batch (no per-card N+1);
+   *   - returns only the LATEST run's branches per task (a card is in exactly
+   *     one parallel window at a time — KTD-11 one-card-one-position).
+   * Never throws on a missing/legacy table (additive guard).
+   */
+  getBranchProgressByTask(
+    taskIds: readonly string[],
+  ): Map<string, Array<{ branchId: string; nodeId: string; status: string }>> {
+    const result = new Map<string, Array<{ branchId: string; nodeId: string; status: string }>>();
+    if (taskIds.length === 0) return result;
+    try {
+      // Skip entirely when the table has no rows (cheap existence probe).
+      const any = this.db
+        .prepare("SELECT 1 FROM workflow_run_branches LIMIT 1")
+        .get();
+      if (!any) return result;
+
+      const placeholders = taskIds.map(() => "?").join(", ");
+      // Filter to the latest run per task entirely in SQL (#1413): the
+      // correlated subquery resolves the winning (updatedAt, runId) pair per
+      // task — MAX(updatedAt) with a deterministic MAX(runId) tie-break — and
+      // the JOIN matches both columns so only the latest run's rows are read.
+      // The runId tie-break makes ties on updatedAt deterministic instead of
+      // letting an arbitrary historical run win.
+      const rows = this.db
+        .prepare(
+          `SELECT b.taskId AS taskId, b.runId AS runId, b.branchId AS branchId,
+                  b.currentNodeId AS nodeId, b.status AS status, b.updatedAt AS updatedAt
+             FROM workflow_run_branches b
+             JOIN (
+               -- Resolve the winning run per task: the run owning the row with
+               -- the greatest updatedAt, with runId as a deterministic
+               -- tie-break when two runs share an updatedAt. Returns the whole
+               -- run's rows (all its branches), not just the single max row.
+               SELECT taskId, runId AS latestRunId
+                 FROM (
+                   SELECT taskId, runId,
+                          ROW_NUMBER() OVER (
+                            PARTITION BY taskId
+                            ORDER BY MAX(updatedAt) DESC, runId DESC
+                          ) AS rn
+                     FROM workflow_run_branches
+                    WHERE taskId IN (${placeholders})
+                    GROUP BY taskId, runId
+                 )
+                WHERE rn = 1
+             ) latest_run
+               ON latest_run.taskId = b.taskId
+              AND latest_run.latestRunId = b.runId
+            WHERE b.taskId IN (${placeholders})`,
+        )
+        .all(...taskIds, ...taskIds) as Array<{
+          taskId: string;
+          runId: string;
+          branchId: string;
+          nodeId: string;
+          status: string;
+          updatedAt: string;
+        }>;
+
+      for (const row of rows) {
+        const list = result.get(row.taskId) ?? [];
+        list.push({ branchId: row.branchId, nodeId: row.nodeId, status: row.status });
+        result.set(row.taskId, list);
+      }
+    } catch {
+      // Legacy/missing table or query failure — degrade to no branch progress.
+      return new Map();
+    }
+    return result;
+  }
+
+  /**
+   * Persist (idempotent upsert) one branch's progress for a fan-out run (#1407).
+   * Keyed by (taskId, runId, branchId) — the table PK — so re-running the same
+   * branch overwrites its single row with the latest currentNodeId/status. The
+   * executor's crash-resume reads only `status = 'completed'` rows and skips
+   * those nodes, so resume granularity is keyed by the persisted currentNodeId.
+   * Additive: silently no-ops on a legacy/missing table.
+   */
+  saveWorkflowRunBranch(state: {
+    taskId: string;
+    runId: string;
+    branchId: string;
+    currentNodeId: string;
+    status: string;
+  }): void {
+    try {
+      this.db
+        .prepare(
+          `INSERT INTO workflow_run_branches
+             (taskId, runId, branchId, currentNodeId, status, updatedAt)
+           VALUES (?, ?, ?, ?, ?, ?)
+           ON CONFLICT(taskId, runId, branchId) DO UPDATE SET
+             currentNodeId = excluded.currentNodeId,
+             status = excluded.status,
+             updatedAt = excluded.updatedAt`,
+        )
+        .run(
+          state.taskId,
+          state.runId,
+          state.branchId,
+          state.currentNodeId,
+          state.status,
+          new Date().toISOString(),
+        );
+    } catch {
+      // Legacy/missing table — persistence is additive, so degrade silently.
+    }
+  }
+
+  /** Load persisted branch states for a run (crash-resume; #1407). */
+  loadWorkflowRunBranches(
+    taskId: string,
+    runId: string,
+  ): Array<{
+    taskId: string;
+    runId: string;
+    branchId: string;
+    currentNodeId: string;
+    status: "running" | "completed" | "failed" | "aborted";
+  }> {
+    try {
+      const rows = this.db
+        .prepare(
+          `SELECT taskId, runId, branchId, currentNodeId, status
+             FROM workflow_run_branches
+            WHERE taskId = ? AND runId = ?`,
+        )
+        .all(taskId, runId) as Array<{
+          taskId: string;
+          runId: string;
+          branchId: string;
+          currentNodeId: string;
+          status: "running" | "completed" | "failed" | "aborted";
+        }>;
+      return rows;
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Prune stale branch rows for a task (#1412). Deletes every row for `taskId`
+   * whose runId differs from the supplied `keepRunId`, bounding growth across a
+   * long-lived task's repeated runs. Called on run start and run completion.
+   * Additive: silently no-ops on a legacy/missing table.
+   */
+  clearWorkflowRunBranches(taskId: string, keepRunId: string): void {
+    try {
+      this.db
+        .prepare(
+          `DELETE FROM workflow_run_branches WHERE taskId = ? AND runId != ?`,
+        )
+        .run(taskId, keepRunId);
+    } catch {
+      // Legacy/missing table — pruning is additive, so degrade silently.
+    }
+  }
+
+  /**
+   * Persist (idempotent upsert) one step instance's run-state inside a foreach
+   * region (step-inversion U4, KTD-6). Keyed by (taskId, runId, foreachNodeId,
+   * stepIndex) — the table PK — so re-writing the same instance overwrites its
+   * single row with the latest currentNodeId/status/anchors. `updatedAt` is
+   * stamped server-side. Mirrors `saveWorkflowRunBranch`: additive, silently
+   * no-ops on a legacy/missing table.
+   */
+  saveWorkflowRunStepInstance(
+    state: import("./types.js").WorkflowRunStepInstance,
+  ): void {
+    try {
+      this.db
+        .prepare(
+          `INSERT INTO workflow_run_step_instances
+             (taskId, runId, foreachNodeId, stepIndex, pinnedStepCount, currentNodeId, status, baselineSha, checkpointId, reworkCount, branchName, integratedAt, updatedAt)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(taskId, runId, foreachNodeId, stepIndex) DO UPDATE SET
+             pinnedStepCount = excluded.pinnedStepCount,
+             currentNodeId = excluded.currentNodeId,
+             status = excluded.status,
+             baselineSha = excluded.baselineSha,
+             checkpointId = excluded.checkpointId,
+             reworkCount = excluded.reworkCount,
+             branchName = excluded.branchName,
+             integratedAt = excluded.integratedAt,
+             updatedAt = excluded.updatedAt`,
+        )
+        .run(
+          state.taskId,
+          state.runId,
+          state.foreachNodeId,
+          state.stepIndex,
+          state.pinnedStepCount,
+          state.currentNodeId ?? null,
+          state.status,
+          state.baselineSha ?? null,
+          state.checkpointId ?? null,
+          state.reworkCount ?? 0,
+          state.branchName ?? null,
+          state.integratedAt ?? null,
+          new Date().toISOString(),
+        );
+    } catch {
+      // Legacy/missing table — persistence is additive, so degrade silently.
+    }
+  }
+
+  /**
+   * Load persisted step-instance run-state for a run (crash-resume; KTD-6).
+   * Ordered by stepIndex so the executor can reconstruct the instance set in
+   * step order. Additive: returns [] on a legacy/missing table.
+   */
+  loadWorkflowRunStepInstances(
+    taskId: string,
+    runId: string,
+  ): import("./types.js").WorkflowRunStepInstance[] {
+    try {
+      const rows = this.db
+        .prepare(
+          `SELECT taskId, runId, foreachNodeId, stepIndex, pinnedStepCount, currentNodeId, status, baselineSha, checkpointId, reworkCount, branchName, integratedAt, updatedAt
+             FROM workflow_run_step_instances
+            WHERE taskId = ? AND runId = ?
+            ORDER BY stepIndex ASC`,
+        )
+        .all(taskId, runId) as import("./types.js").WorkflowRunStepInstance[];
+      return rows;
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Prune step-instance rows for a task (KTD-6, #1412 pattern). When `runId` is
+   * provided, deletes every row for `taskId` whose runId differs (bounding growth
+   * across a long-lived task's repeated runs — call on run start/completion).
+   * When `runId` is omitted, deletes all rows for the task (e.g. on archive).
+   * Additive: silently no-ops on a legacy/missing table.
+   */
+  clearWorkflowRunStepInstances(taskId: string, keepRunId?: string): void {
+    try {
+      if (keepRunId === undefined) {
+        this.db
+          .prepare(`DELETE FROM workflow_run_step_instances WHERE taskId = ?`)
+          .run(taskId);
+      } else {
+        this.db
+          .prepare(
+            `DELETE FROM workflow_run_step_instances WHERE taskId = ? AND runId != ?`,
+          )
+          .run(taskId, keepRunId);
+      }
+    } catch {
+      // Legacy/missing table — pruning is additive, so degrade silently.
+    }
   }
 
   async listTasksForGithubTrackingReconcile(options?: { offset?: number; limit?: number }): Promise<{ tasks: Task[]; hasMore: boolean }> {
@@ -4855,7 +5731,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       const task = this.rowToTask(row);
       task.inReviewStall = getInReviewStallReason(task, {
         now,
-        autoMerge: settings.autoMerge,
+        autoMerge: allowsAutoMergeProcessing(task, settings),
         engineActiveSinceMs: settings.engineActiveSinceMs,
         engineActivationGraceMs: settings.engineActivationGraceMs,
       });
@@ -4868,7 +5744,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       task.inReviewStalled = getInReviewStalledSignal(task, {
         now,
         thresholdMs: settings.inReviewStalledThresholdMs,
-        autoMerge: settings.autoMerge,
+        autoMerge: allowsAutoMergeProcessing(task, settings),
         engineActiveSinceMs: settings.engineActiveSinceMs,
         engineActivationGraceMs: settings.engineActivationGraceMs,
       });
@@ -5018,7 +5894,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       const task = this.rowToTask(row);
       task.inReviewStall = getInReviewStallReason(task, {
         now,
-        autoMerge: settings.autoMerge,
+        autoMerge: allowsAutoMergeProcessing(task, settings),
         engineActiveSinceMs: settings.engineActiveSinceMs,
         engineActivationGraceMs: settings.engineActivationGraceMs,
       });
@@ -5031,7 +5907,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       task.inReviewStalled = getInReviewStalledSignal(task, {
         now,
         thresholdMs: settings.inReviewStalledThresholdMs,
-        autoMerge: settings.autoMerge,
+        autoMerge: allowsAutoMergeProcessing(task, settings),
         engineActiveSinceMs: settings.engineActiveSinceMs,
         engineActivationGraceMs: settings.engineActivationGraceMs,
       });
@@ -5296,9 +6172,12 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
 
   async moveTask(
     id: string,
-    toColumn: Column,
+    toColumn: ColumnId,
     options?: MoveTaskOptions,
   ): Promise<Task> {
+    // ColumnId admits workflow-defined custom column ids (KTD-1). Both paths
+    // runtime-validate: flag-ON against the task's resolved workflow, flag-OFF
+    // via the VALID_TRANSITIONS lookup (non-legacy ids reject as before).
     return this.withTaskLock(id, () => this.moveTaskInternal(id, toColumn, options, { fromHandoff: false }));
   }
 
@@ -5333,6 +6212,9 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         {
           ...opts.moveOptions,
           skipMergeBlocker: true,
+          // KTD-9: handoff is an engine/recovery-class move; its skipMergeBlocker
+          // maps onto bypassGuards under the flag (identical behavior both paths).
+          bypassGuards: true,
         },
         {
           fromHandoff: true,
@@ -5351,7 +6233,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
 
   private async moveTaskInternal(
     id: string,
-    toColumn: Column,
+    toColumn: ColumnId,
     options: MoveTaskOptions | undefined,
     internal: MoveTaskInternalOptions,
     currentTask?: Task,
@@ -5359,6 +6241,30 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     const dir = this.taskDir(id);
     const task = currentTask ?? await this.readTaskForMove(id);
     const moveSource = options?.moveSource ?? "engine";
+
+    // ── U4: flag-gated workflow-resolved transition path (KTD-8) ─────────────
+    // Flag OFF (default): the legacy `VALID_TRANSITIONS` / inline-side-effect
+    // path below runs byte-identical (proven by the characterization suite).
+    // Flag ON: validate against the task's resolved workflow column graph, run
+    // sync trait guards (unless bypassed), and route the legacy per-column side
+    // effects through the default-workflow trait hooks.
+    // `experimentalFeatures` is a global-scoped setting, so the project-only
+    // `getSettingsSync()` row would miss it — read merged settings (global +
+    // project) via getSettingsFast(). This is an async read taken before the
+    // lock-sensitive transaction; it does not touch the task lock.
+    const mergedSettingsForMove = await this.getSettingsFast();
+    const useWorkflow = isWorkflowColumnsEnabled(mergedSettingsForMove);
+    // bypassGuards (KTD-9): engine-sourced moves + the existing skipMergeBlocker
+    // call sites map onto it. Capacity (KTD-10) is NEVER bypassed by this — the
+    // capacity check is not a guard (U6 fills the enforcement; U4 leaves a
+    // pass-through slot). An explicit option value wins; otherwise derive it.
+    const bypassGuards =
+      options?.recoveryRehome === true ||
+      (options?.bypassGuards ??
+        (moveSource === "engine" || moveSource === "scheduler" || options?.skipMergeBlocker === true));
+    const workflowIr: WorkflowIr | undefined = useWorkflow
+      ? this.resolveTaskWorkflowIrSync(id)
+      : undefined;
 
     if (task.column === toColumn) {
       if (internal.fromHandoff && toColumn === "in-review") {
@@ -5416,19 +6322,146 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       return task;
     }
 
-    const validTargets = VALID_TRANSITIONS[task.column];
-    if (!validTargets.includes(toColumn)) {
-      throw new Error(
-        `Invalid transition: '${task.column}' → '${toColumn}'. ` +
-          `Valid targets: ${validTargets.join(", ") || "none"}`,
-      );
-    }
-
     const fromColumn = task.column;
-    if (fromColumn === "in-review" && toColumn === "done" && !options?.skipMergeBlocker) {
-      const mergeBlocker = getTaskMergeBlocker(task);
-      if (mergeBlocker) {
-        throw new Error(`Cannot move ${id} to done: ${mergeBlocker}`);
+
+    if (useWorkflow && workflowIr) {
+      // ── Flag-ON validation + sync guards (typed rejections, KTD-3/R13) ─────
+      // 1. Target column must exist in the task's workflow → unknown-column.
+      //    #1411: a recoveryRehome move to a LEGACY column (todo/archived/…) is
+      //    the engine's self-healing rescue path — those targets are guaranteed
+      //    safe landing columns even when a custom workflow never defined them.
+      //    recoveryRehome already skips adjacency (below); it must likewise skip
+      //    the unknown-column rejection for legacy recovery targets, otherwise a
+      //    custom-workflow card could never be rescued to todo/archived and would
+      //    stay stuck — the exact bug #1411 describes. Non-legacy unknown targets
+      //    still reject (a genuine programming error), and normal (non-recovery)
+      //    moves are unaffected.
+      const recoveryToLegacy =
+        options?.recoveryRehome === true && (COLUMNS as readonly string[]).includes(toColumn);
+      if (!workflowHasColumn(workflowIr, toColumn) && !recoveryToLegacy) {
+        throw new TransitionRejectionError(
+          makeTransitionRejection(
+            "unknown-column",
+            "transition.rejected.unknownColumn",
+            false,
+            `Column '${toColumn}' is not defined in this task's workflow`,
+          ),
+          `Invalid transition: '${fromColumn}' → '${toColumn}'. Unknown column for this workflow.`,
+        );
+      }
+      // 2. Column-graph adjacency. For the default workflow this reproduces
+      //    VALID_TRANSITIONS verbatim (resolveAllowedColumns); the
+      //    transition-parity suite machine-checks the equivalence. A U5 recovery
+      //    re-home (recoveryRehome) skips this so a stranded card can reach its
+      //    new workflow's entry column from any current column.
+      const allowed = resolveAllowedColumns(workflowIr, fromColumn);
+      if (options?.recoveryRehome !== true && !allowed.includes(toColumn)) {
+        throw new TransitionRejectionError(
+          makeTransitionRejection(
+            "guard-rejected",
+            "transition.rejected.invalidTransition",
+            false,
+            `Valid targets: ${allowed.join(", ") || "none"}`,
+          ),
+          `Invalid transition: '${fromColumn}' → '${toColumn}'. ` +
+            `Valid targets: ${allowed.join(", ") || "none"}`,
+        );
+      }
+      // 3. Sync trait guards (in-lock). Skipped entirely when bypassGuards
+      //    (engine/recovery moves, KTD-9). The default workflow's merge-blocker
+      //    trait reads the same getTaskMergeBlocker.
+      if (!bypassGuards) {
+        const guardReason = evaluateMergeBlockerGuard(task, fromColumn, toColumn);
+        if (guardReason) {
+          throw new TransitionRejectionError(
+            makeTransitionRejection(
+              "merge-blocked",
+              "transition.rejected.mergeBlocked",
+              true,
+              guardReason,
+            ),
+            `Cannot move ${id} to done: ${guardReason}`,
+          );
+        }
+        // 4. Plugin gate verdict re-check (U8, KTD-2). For each PLUGIN gate trait
+        //    on the target column, consume the pre-evaluated verdict (recorded by
+        //    the engine's trait adapter outside the lock). A blocking gate with
+        //    no recorded `allow` verdict fails closed (typed rejection); advisory
+        //    gates record-and-allow. Built-in gates are handled by their own
+        //    path; this guard is the plugin gate surface only.
+        const registry = getTraitRegistry();
+        const pluginGates = resolveColumnPluginGates(
+          findWorkflowColumn(workflowIr, toColumn),
+          (tid) => registry.getTrait(tid),
+        );
+        if (pluginGates.length > 0) {
+          const recorded = this.consumePluginGateVerdicts(id, toColumn);
+          const byTrait = new Map(recorded.map((v) => [v.traitId, v]));
+          for (const gate of pluginGates) {
+            if (gate.gateMode === "advisory") continue; // record-and-allow
+            // Degraded (force-disabled) plugin gate: its hook impl is gone, so
+            // the registry resolves it to a no-op + audit warning (KTD-7). A
+            // degraded gate is PASSIVE — the column never blocks the card; the
+            // registry's warning is the audit signal. Cards remain movable.
+            const resolved = registry.resolveTraitHook(gate.traitId, "gate");
+            if (resolved.warning) continue;
+            const verdict = byTrait.get(gate.traitId);
+            // Fail closed: a blocking gate with no recorded allow verdict rejects.
+            if (!verdict || !verdict.allow) {
+              const reason =
+                verdict?.detail ??
+                (verdict
+                  ? `Gate '${gate.traitId}' did not pass`
+                  : `Gate '${gate.traitId}' has not been evaluated for this move`);
+              throw new TransitionRejectionError(
+                makeTransitionRejection(
+                  "merge-blocked",
+                  "transition.rejected.gateBlocked",
+                  true,
+                  reason,
+                ),
+                `Cannot move ${id} to '${toColumn}': ${reason}`,
+              );
+            }
+          }
+        }
+      }
+    } else {
+      // ── Flag-OFF legacy path (unchanged) ───────────────────────────────────
+      // A task can sit in a custom column when the flag was toggled ON→OFF;
+      // `VALID_TRANSITIONS` only keys the legacy columns, so a missing entry
+      // degrades to the legacy "Invalid transition" error instead of a TypeError.
+      // #1409: flag-OFF evacuation. A recoveryRehome move OUT of a non-legacy
+      // (custom) column into a legacy target is the ON→OFF evacuation path —
+      // `VALID_TRANSITIONS` never keys a custom source column, so the legacy
+      // check below would strand the card forever. Allow it through (bypassing
+      // only the adjacency check; this is unreachable for normal flag-OFF moves,
+      // which never set recoveryRehome and always start from a legacy column, so
+      // characterization behavior is byte-identical).
+      const sourceIsLegacy = (COLUMNS as readonly string[]).includes(task.column);
+      const isEvacuation =
+        options?.recoveryRehome === true &&
+        !sourceIsLegacy &&
+        (COLUMNS as readonly string[]).includes(toColumn);
+      if (!isEvacuation) {
+        // Legacy flag-OFF branch (useWorkflow === false): both columns are
+        // guaranteed legacy ids here — a non-legacy `toColumn` returns `?? []`
+        // and rejects below, and flag-OFF tasks never hold custom column ids.
+        // The `as Column` is provably safe within this branch (#1403).
+        const validTargets = VALID_TRANSITIONS[task.column as Column] ?? [];
+        if (!validTargets.includes(toColumn as Column)) {
+          throw new Error(
+            `Invalid transition: '${task.column}' → '${toColumn}'. ` +
+              `Valid targets: ${validTargets.join(", ") || "none"}`,
+          );
+        }
+      }
+
+      if (fromColumn === "in-review" && toColumn === "done" && !options?.skipMergeBlocker) {
+        const mergeBlocker = getTaskMergeBlocker(task);
+        if (mergeBlocker) {
+          throw new Error(`Cannot move ${id} to done: ${mergeBlocker}`);
+        }
       }
     }
 
@@ -5442,106 +6475,153 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     task.columnMovedAt = movedAt;
     task.updatedAt = movedAt;
 
-    if (fromColumn === "in-progress" && toColumn !== "in-progress") {
-      const segmentStartMs = Date.parse(task.executionStartedAt ?? task.columnMovedAt);
-      const segmentEndMs = Date.parse(task.columnMovedAt);
-      const segmentDeltaMs =
-        Number.isFinite(segmentStartMs) && Number.isFinite(segmentEndMs)
-          ? Math.max(0, segmentEndMs - segmentStartMs)
-          : 0;
-      task.cumulativeActiveMs = Math.max(0, task.cumulativeActiveMs ?? 0) + segmentDeltaMs;
-    }
-
-    if (toColumn === "in-progress") {
-      task.cumulativeActiveMs ??= 0;
-      if (!task.firstExecutionAt) {
-        task.firstExecutionAt = task.columnMovedAt;
-      }
-      if (!task.executionStartedAt) {
-        task.executionStartedAt = task.columnMovedAt;
-      }
-      task.userPaused = undefined;
-    }
-    if (toColumn === "done" && !task.executionCompletedAt) {
-      task.executionCompletedAt = task.columnMovedAt;
-    }
-
-    if (toColumn === "done") {
-      this.clearDoneTransientFields(task);
-    }
-
-    const isReopenToTodoOrTriage =
-      (fromColumn === "in-progress" || fromColumn === "done" || fromColumn === "in-review")
-      && (toColumn === "todo" || toColumn === "triage");
-
-    if (isReopenToTodoOrTriage) {
-      if (!options?.preserveStatus) {
-        task.status = undefined;
-        task.error = undefined;
-        task.pausedReason = undefined;
-      }
-      task.blockedBy = undefined;
-      task.overlapBlockedBy = undefined;
-      task.paused = undefined;
-      task.pausedByAgentId = undefined;
-      if (moveSource === "user" && toColumn === "todo") {
-        task.userPaused = true;
-      } else {
-        task.userPaused = undefined;
-      }
-
+    if (useWorkflow) {
+      // ── Flag-ON: route the legacy per-column side effects through the
+      //    default-workflow trait hooks (timing, reset-on-entry, abort-on-exit,
+      //    merge.onEnter). "Moved, not duplicated" applies to this path; the
+      //    flag-off branch below keeps the legacy inline code verbatim. ───────
+      const ctx: DefaultWorkflowMoveContext = {
+        task,
+        fromColumn,
+        toColumn,
+        moveSource,
+        bypassGuards,
+        movedAt,
+        settings: settingsForInReview,
+        options: {
+          preserveStatus: options?.preserveStatus,
+          preserveResumeState: options?.preserveResumeState,
+          preserveProgress: options?.preserveProgress,
+          preserveWorktree: options?.preserveWorktree,
+        },
+        resetSteps: () => this.resetAllStepsToPending(task),
+      };
+      const isReopenToTodoOrTriage =
+        (fromColumn === "in-progress" || fromColumn === "done" || fromColumn === "in-review") &&
+        (toColumn === "todo" || toColumn === "triage");
       const hasNonPendingStepProgress = task.steps.some((step) => step.status !== "pending");
       const preserveStepProgress =
-        options?.preserveResumeState || (options?.preserveProgress === true && hasNonPendingStepProgress);
-
-      if (!options?.preserveWorktree) {
-        task.worktree = undefined;
+        options?.preserveResumeState ||
+        (options?.preserveProgress === true && hasNonPendingStepProgress);
+      const { warnings } = applyDefaultWorkflowMoveEffects(ctx);
+      for (const warning of warnings) {
+        storeLog.warn("Default-workflow trait hook degraded to no-op", {
+          phase: "moveTaskInternal:workflow-hooks",
+          taskId: id,
+          ...warning,
+        });
       }
-
-      if (!options?.preserveResumeState) {
-        task.executionStartedAt = undefined;
-        task.executionCompletedAt = undefined;
-      } else {
-        task.executionCompletedAt = undefined;
+      // Store-owned effects the hooks intentionally do NOT perform (filesystem /
+      // store-private): clearing done transient fields + prompt-checkbox reset.
+      if (toColumn === "done") {
+        this.clearDoneTransientFields(task);
       }
-
-      if (!preserveStepProgress) {
-        this.resetAllStepsToPending(task);
+      if (isReopenToTodoOrTriage && !preserveStepProgress) {
         await this.resetPromptCheckboxes(dir);
       }
-    }
-
-    if (toColumn === "in-review") {
-      if (task.autoMerge === undefined && settingsForInReview) {
-        task.autoMerge = settingsForInReview.autoMerge;
+    } else {
+      // ── Flag-OFF legacy inline side effects (UNCHANGED — the flag-off path) ──
+      if (fromColumn === "in-progress" && toColumn !== "in-progress") {
+        const segmentStartMs = Date.parse(task.executionStartedAt ?? task.columnMovedAt);
+        const segmentEndMs = Date.parse(task.columnMovedAt);
+        const segmentDeltaMs =
+          Number.isFinite(segmentStartMs) && Number.isFinite(segmentEndMs)
+            ? Math.max(0, segmentEndMs - segmentStartMs)
+            : 0;
+        task.cumulativeActiveMs = Math.max(0, task.cumulativeActiveMs ?? 0) + segmentDeltaMs;
       }
-      task.recoveryRetryCount = undefined;
-      task.nextRecoveryAt = undefined;
-      // Clear scheduler-side dispatch state: `queued`, `blockedBy`, and
-      // `overlapBlockedBy` are stamped while the task waits in `todo`. If
-      // they survive the transition into `in-review` they permanently block
-      // the merge gate (see getTaskMergeBlocker's BLOCKING_TASK_STATUSES).
-      if (task.status === "queued") {
-        task.status = undefined;
+
+      if (toColumn === "in-progress") {
+        task.cumulativeActiveMs ??= 0;
+        if (!task.firstExecutionAt) {
+          task.firstExecutionAt = task.columnMovedAt;
+        }
+        if (!task.executionStartedAt) {
+          task.executionStartedAt = task.columnMovedAt;
+        }
+        task.userPaused = undefined;
       }
-      task.blockedBy = undefined;
-      task.overlapBlockedBy = undefined;
-    }
+      if (toColumn === "done" && !task.executionCompletedAt) {
+        task.executionCompletedAt = task.columnMovedAt;
+      }
 
-    if (
-      (fromColumn === "in-review" && (toColumn === "todo" || toColumn === "in-progress" || toColumn === "triage"))
-      || (fromColumn === "done" && (toColumn === "todo" || toColumn === "triage"))
-    ) {
-      task.workflowStepResults = undefined;
-    }
+      if (toColumn === "done") {
+        this.clearDoneTransientFields(task);
+      }
 
-    if (fromColumn === "in-review" && (toColumn === "todo" || toColumn === "triage")) {
-      task.branch = undefined;
-      task.executionStartBranch = undefined;
-      task.baseCommitSha = undefined;
-      task.summary = undefined;
-      task.recoveryRetryCount = undefined;
-      task.nextRecoveryAt = undefined;
+      const isReopenToTodoOrTriage =
+        (fromColumn === "in-progress" || fromColumn === "done" || fromColumn === "in-review")
+        && (toColumn === "todo" || toColumn === "triage");
+
+      if (isReopenToTodoOrTriage) {
+        if (!options?.preserveStatus) {
+          task.status = undefined;
+          task.error = undefined;
+          task.pausedReason = undefined;
+        }
+        task.blockedBy = undefined;
+        task.overlapBlockedBy = undefined;
+        task.paused = undefined;
+        task.pausedByAgentId = undefined;
+        if (moveSource === "user" && toColumn === "todo") {
+          task.userPaused = true;
+        } else {
+          task.userPaused = undefined;
+        }
+
+        const hasNonPendingStepProgress = task.steps.some((step) => step.status !== "pending");
+        const preserveStepProgress =
+          options?.preserveResumeState || (options?.preserveProgress === true && hasNonPendingStepProgress);
+
+        if (!options?.preserveWorktree) {
+          task.worktree = undefined;
+        }
+
+        if (!options?.preserveResumeState) {
+          task.executionStartedAt = undefined;
+          task.executionCompletedAt = undefined;
+        } else {
+          task.executionCompletedAt = undefined;
+        }
+
+        if (!preserveStepProgress) {
+          this.resetAllStepsToPending(task);
+          await this.resetPromptCheckboxes(dir);
+        }
+      }
+
+      if (toColumn === "in-review") {
+        if (task.autoMerge === undefined && settingsForInReview) {
+          task.autoMerge = settingsForInReview.autoMerge;
+        }
+        task.recoveryRetryCount = undefined;
+        task.nextRecoveryAt = undefined;
+        // Clear scheduler-side dispatch state: `queued`, `blockedBy`, and
+        // `overlapBlockedBy` are stamped while the task waits in `todo`. If
+        // they survive the transition into `in-review` they permanently block
+        // the merge gate (see getTaskMergeBlocker's BLOCKING_TASK_STATUSES).
+        if (task.status === "queued") {
+          task.status = undefined;
+        }
+        task.blockedBy = undefined;
+        task.overlapBlockedBy = undefined;
+      }
+
+      if (
+        (fromColumn === "in-review" && (toColumn === "todo" || toColumn === "in-progress" || toColumn === "triage"))
+        || (fromColumn === "done" && (toColumn === "todo" || toColumn === "triage"))
+      ) {
+        task.workflowStepResults = undefined;
+      }
+
+      if (fromColumn === "in-review" && (toColumn === "todo" || toColumn === "triage")) {
+        task.branch = undefined;
+        task.executionStartBranch = undefined;
+        task.baseCommitSha = undefined;
+        task.summary = undefined;
+        task.recoveryRetryCount = undefined;
+        task.nextRecoveryAt = undefined;
+      }
     }
 
     if (toColumn === "in-progress" && !task.worktree && options?.allocateWorktree) {
@@ -5569,6 +6649,41 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         return;
       }
 
+      // ── U6: in-txn capacity enforcement (KTD-10) ──────────────────────────
+      // WIP limits are trait *config*; enforcement is a substrate capability
+      // that runs HERE, inside the move transaction, so two holds releasing into
+      // one slot serialize — exactly one commits, the other rejects and retries
+      // next sweep. It is NOT a guard: it runs regardless of bypassGuards /
+      // recoveryRehome / moveSource (engine/recovery/scheduler moves honor it
+      // too). Only a real column change into a capacity-bearing column is gated;
+      // same-column no-ops were returned earlier. The count is taken with the
+      // moving task EXCLUDED and the prospective slot it is about to occupy
+      // added back implicitly (it must fit alongside existing holders), so a
+      // full column (occupants == limit) rejects.
+      if (useWorkflow && workflowIr && fromColumn !== toColumn) {
+        const capacity = resolveColumnCapacity(workflowIr, toColumn, mergedSettingsForMove);
+        if (capacity.hasCapacity && Number.isFinite(capacity.limit)) {
+          const workflowId = this.resolveEffectiveWorkflowIdSync(id);
+          const occupants = this.countActiveInCapacitySlotSync({
+            targetColumn: toColumn,
+            workflowId,
+            countPending: capacity.countPending,
+            excludeTaskId: id,
+          });
+          if (occupants >= capacity.limit) {
+            throw new TransitionRejectionError(
+              makeTransitionRejection(
+                "capacity-exhausted",
+                "transition.rejected.capacityExhausted",
+                true,
+                `Column '${toColumn}' is at capacity (${occupants}/${capacity.limit})`,
+              ),
+              `Cannot move ${id} to '${toColumn}': column at capacity (${occupants}/${capacity.limit})`,
+            );
+          }
+        }
+      }
+
       this.upsertTaskWithFtsRecovery(task);
       this.insertRunAuditEventRow({
         taskId: id,
@@ -5584,6 +6699,22 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         },
       });
       this.dequeueMergeQueueOnColumnExit(id, fromColumn, toColumn, movedAt);
+
+      // U4 (flag-ON): write the crash-safe transitionPending marker in the SAME
+      // transaction as the column change (KTD-2). It records the post-commit
+      // hooks that still owe idempotent execution so a crash mid-transition is
+      // recoverable from SQLite (the authoritative store, ADR-0001). The store
+      // clears it immediately after the post-commit hook runner completes
+      // (below). For the default workflow the field effects already applied
+      // in-lock; the marker guards the post-commit completion so recovery never
+      // double-runs (idempotent) and never strands the card.
+      if (useWorkflow) {
+        writeTransitionPending(
+          this.db,
+          id,
+          makeTransitionPending(toColumn, ["default-workflow:postCommit"], Date.parse(movedAt) || Date.now()),
+        );
+      }
 
       if (toColumn === "in-review" && !internal.fromHandoff && options?.allowDirectInReviewMove !== true) {
         this.insertRunAuditEventRow({
@@ -5659,8 +6790,150 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
 
     if (this.isWatching) this.taskCache.set(id, { ...task });
 
-    this.emit("task:moved", { task, from: fromColumn, to: toColumn, source: moveSource });
+    // U4 (flag-ON): post-commit hook completion. The default-workflow field
+    // effects already ran in-lock and committed; the post-commit phase here is
+    // the fire-and-forget hook runner per KTD-2. It is idempotent and clears the
+    // transitionPending marker once done. A crash before this point leaves the
+    // marker for the recovery sweep to re-run (re-running is a no-op for the
+    // default workflow's already-committed field effects).
+    //
+    // Residual C (U8): AFTER the built-in effects, invoke registered PLUGIN
+    // onExit (from column) / onEnter (to column) trait hook impls, recording
+    // per-hook completion in the marker's hooksRemaining. A throwing plugin hook
+    // DEGRADES (audit) and never wedges the lock or strands the marker — the
+    // marker is always cleared at the end regardless of hook failures.
+    if (useWorkflow) {
+      // Plugin hooks are skipped on engine/recovery-sourced moves (KTD-9 — those
+      // bypass trait effects) and on same-column no-ops.
+      if (!bypassGuards && fromColumn !== toColumn && workflowIr) {
+        try {
+          await this.runPluginColumnTransitionHooks(id, workflowIr, fromColumn, toColumn);
+        } catch (err) {
+          // The runner itself swallows per-hook failures; this is a final guard
+          // so a runner-level fault never strands the marker.
+          storeLog.warn("Plugin column transition hook runner faulted (degraded)", {
+            phase: "moveTaskInternal:plugin-hooks",
+            taskId: id,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+      try {
+        clearTransitionPending(this.db, id);
+      } catch {
+        // Clearing is best-effort; the marker recovery sweep is the backstop.
+      }
+    }
+
+    if (fromColumn !== toColumn) {
+      this.emit("task:moved", { task, from: fromColumn, to: toColumn, source: moveSource });
+    }
     return task;
+  }
+
+  /**
+   * Residual C (U8): run registered PLUGIN onExit (from column) / onEnter (to
+   * column) trait hook impls AFTER the built-in default-workflow effects, on the
+   * post-commit path. Plugin hooks are async-only (KTD-7) and route through the
+   * registry's resolved impl (the engine wires `runCustomNode` in via the trait
+   * adapter; an unregistered/degraded hook resolves to a no-op + audit warning).
+   *
+   * Per-hook completion is recorded in the `transitionPending` marker's
+   * `hooksRemaining` so a crash mid-hook is recoverable. A hook that THROWS is
+   * audited (`plugin:trait-hook-degraded`) and treated as completed (removed
+   * from `hooksRemaining`) — a misbehaving plugin never wedges the task lock or
+   * strands the card (KTD-2 degraded-not-stranded posture). The caller clears
+   * the marker after this returns.
+   */
+  private async runPluginColumnTransitionHooks(
+    taskId: string,
+    workflowIr: WorkflowIr,
+    fromColumn: string,
+    toColumn: string,
+  ): Promise<void> {
+    const registry = getTraitRegistry();
+    // Collect (traitId, hookKind) pairs: onExit for from-column plugin traits,
+    // onEnter for to-column plugin traits. Only plugin-namespaced traits (KTD-7).
+    const pending: Array<{ traitId: string; hookKind: "onEnter" | "onExit" }> = [];
+    const fromCol = findWorkflowColumn(workflowIr, fromColumn);
+    for (const ct of fromCol?.traits ?? []) {
+      if (!ct.trait.startsWith("plugin:")) continue;
+      const def = registry.getTrait(ct.trait);
+      if (def?.hooks?.onExit) pending.push({ traitId: ct.trait, hookKind: "onExit" });
+    }
+    const toCol = findWorkflowColumn(workflowIr, toColumn);
+    for (const ct of toCol?.traits ?? []) {
+      if (!ct.trait.startsWith("plugin:")) continue;
+      const def = registry.getTrait(ct.trait);
+      if (def?.hooks?.onEnter) pending.push({ traitId: ct.trait, hookKind: "onEnter" });
+    }
+    if (pending.length === 0) return;
+
+    // Record the plugin hooks in the marker's hooksRemaining (alongside the
+    // default-workflow:postCommit marker already written in-txn) so a crash
+    // mid-hook is recoverable.
+    const hookIds = pending.map((p) => `${p.traitId}:${p.hookKind}`);
+    const startedAt = Date.now();
+    try {
+      writeTransitionPending(
+        this.db,
+        taskId,
+        makeTransitionPending(toColumn, ["default-workflow:postCommit", ...hookIds], startedAt),
+      );
+    } catch {
+      // Marker bookkeeping is best-effort; proceed to run the hooks regardless.
+    }
+
+    // Read the task once for hook context. MUST be a non-locking read — this
+    // runs inside `withTaskLock`, so `getTask` (which re-acquires the lock)
+    // would deadlock. `readTaskFromDb` is the in-lock-safe read.
+    const taskRow = this.readTaskFromDb(taskId, { includeDeleted: false });
+    const taskDetail = taskRow as unknown as TaskDetail | undefined;
+
+    const remaining = ["default-workflow:postCommit", ...hookIds];
+    for (const { traitId, hookKind } of pending) {
+      const resolved = registry.resolveTraitHook(traitId, hookKind);
+      if (resolved.warning) {
+        // Degraded (no impl / force-disabled) → passive no-op, audit the warning.
+        this.recordRunAuditEvent({
+          taskId,
+          agentId: "system",
+          runId: `plugin-trait-hook-${traitId}-${taskId}-${Date.now()}`,
+          domain: "database",
+          mutationType: "plugin:trait-hook-degraded",
+          target: taskId,
+          metadata: { traitId, hookKind, reason: "no-impl", message: resolved.warning.message },
+        });
+      } else if (resolved.impl) {
+        try {
+          await resolved.impl({ task: taskDetail, context: { fromColumn, toColumn, hookKind } });
+        } catch (err) {
+          // A throwing plugin hook DEGRADES — audited, never wedges the lock.
+          this.recordRunAuditEvent({
+            taskId,
+            agentId: "system",
+            runId: `plugin-trait-hook-${traitId}-${taskId}-${Date.now()}`,
+            domain: "database",
+            mutationType: "plugin:trait-hook-degraded",
+            target: taskId,
+            metadata: {
+              traitId,
+              hookKind,
+              reason: "threw",
+              error: err instanceof Error ? err.message : String(err),
+            },
+          });
+        }
+      }
+      // Mark this hook complete in the marker (whether it ran, degraded, or threw).
+      const idx = remaining.indexOf(`${traitId}:${hookKind}`);
+      if (idx >= 0) remaining.splice(idx, 1);
+      try {
+        writeTransitionPending(this.db, taskId, makeTransitionPending(toColumn, remaining, startedAt));
+      } catch {
+        // Best-effort progress bookkeeping; the final clear is the backstop.
+      }
+    }
   }
 
   private resetAllStepsToPending(task: Task): void {
@@ -5851,17 +7124,86 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       if (movedToTriage) {
         this.emit("task:moved", { task, from: "todo" as Column, to: "triage" as Column, source: "engine" });
       }
-      this.emit("task:updated", task);
+      this.emitTaskLifecycleEventSafely("task:updated", [task]);
       return task;
     });
   }
 
   async updateTask(
     id: string,
-    updates: { title?: string; description?: string; priority?: TaskPriority | null; prompt?: string; worktree?: string | null; status?: string | null; dependencies?: string[]; steps?: import("./types.js").TaskStep[]; currentStep?: number; blockedBy?: string | null; overlapBlockedBy?: string | null; assignedAgentId?: string | null; pausedByAgentId?: string | null; pausedReason?: string | null; tokenBudgetSoftAlertedAt?: string | null; worktrunkFallbackAlertedAt?: string | null; worktrunkFailure?: import("./types.js").Task["worktrunkFailure"] | null; tokenBudgetHardAlertedAt?: string | null; tokenBudgetOverride?: import("./types.js").TaskTokenBudgetOverride | null; dispatchStormCount?: number | null; lastDispatchAt?: string | null; assigneeUserId?: string | null; scopeOverride?: boolean | null; scopeOverrideReason?: string | null; scopeAutoWiden?: string[] | null; nodeId?: string | null; effectiveNodeId?: string | null; effectiveNodeSource?: string | null; checkedOutBy?: string | null; checkedOutAt?: string | null; checkoutNodeId?: string | null; checkoutRunId?: string | null; checkoutLeaseRenewedAt?: string | null; checkoutLeaseEpoch?: number | null; paused?: boolean; baseBranch?: string | null; autoMerge?: boolean | null; branch?: string | null; executionStartBranch?: string | null; baseCommitSha?: string | null; size?: "S" | "M" | "L"; reviewLevel?: number; executionMode?: import("./types.js").ExecutionMode | null; mergeRetries?: number; workflowStepRetries?: number; stuckKillCount?: number | null; resumeLimboCount?: number | null; resumeLimboTipSha?: string | null; resumeLimboStepSignature?: string | null; postReviewFixCount?: number | null; recoveryRetryCount?: number | null; taskDoneRetryCount?: number | null; worktreeSessionRetryCount?: number | null; completionHandoffLimboRecoveryCount?: number | null; verificationFailureCount?: number | null; mergeConflictBounceCount?: number | null; mergeAuditBounceCount?: number | null; mergeTransientRetryCount?: number | null; branchConflictRecoveryCount?: number | null; reviewerContextRetryCount?: number | null; reviewerFallbackRetryCount?: number | null; nextRecoveryAt?: string | null; enabledWorkflowSteps?: string[]; noCommitsExpected?: boolean | null; modelProvider?: string | null; modelId?: string | null; validatorModelProvider?: string | null; validatorModelId?: string | null; planningModelProvider?: string | null; planningModelId?: string | null; thinkingLevel?: string | null; error?: string | null; summary?: string | null; sessionFile?: string | null; firstExecutionAt?: string | null; cumulativeActiveMs?: number | null; executionStartedAt?: string | null; executionCompletedAt?: string | null; review?: import("./types.js").TaskReview | null; reviewState?: import("./types.js").TaskReviewState | null; workflowStepResults?: import("./types.js").WorkflowStepResult[] | null; mergeDetails?: import("./types.js").MergeDetails | null; sourceIssue?: import("./types.js").TaskSourceIssue | null; sourceMetadataPatch?: Record<string, unknown> | null; githubTracking?: import("./types.js").TaskGithubTracking | null; tokenUsage?: import("./types.js").TaskTokenUsage | null; modifiedFiles?: string[] | null; missionId?: string | null; sliceId?: string | null },
+    updates: { title?: string; description?: string; priority?: TaskPriority | null; prompt?: string; worktree?: string | null; status?: string | null; dependencies?: string[]; steps?: import("./types.js").TaskStep[]; customFields?: Record<string, unknown>; currentStep?: number; blockedBy?: string | null; overlapBlockedBy?: string | null; assignedAgentId?: string | null; pausedByAgentId?: string | null; pausedReason?: string | null; tokenBudgetSoftAlertedAt?: string | null; worktrunkFallbackAlertedAt?: string | null; worktrunkFailure?: import("./types.js").Task["worktrunkFailure"] | null; tokenBudgetHardAlertedAt?: string | null; tokenBudgetOverride?: import("./types.js").TaskTokenBudgetOverride | null; dispatchStormCount?: number | null; lastDispatchAt?: string | null; assigneeUserId?: string | null; scopeOverride?: boolean | null; scopeOverrideReason?: string | null; scopeAutoWiden?: string[] | null; nodeId?: string | null; effectiveNodeId?: string | null; effectiveNodeSource?: string | null; checkedOutBy?: string | null; checkedOutAt?: string | null; checkoutNodeId?: string | null; checkoutRunId?: string | null; checkoutLeaseRenewedAt?: string | null; checkoutLeaseEpoch?: number | null; paused?: boolean; baseBranch?: string | null; autoMerge?: boolean | null; branch?: string | null; executionStartBranch?: string | null; baseCommitSha?: string | null; size?: "S" | "M" | "L"; reviewLevel?: number; executionMode?: import("./types.js").ExecutionMode | null; mergeRetries?: number; workflowStepRetries?: number; stuckKillCount?: number | null; resumeLimboCount?: number | null; resumeLimboTipSha?: string | null; resumeLimboStepSignature?: string | null; postReviewFixCount?: number | null; recoveryRetryCount?: number | null; taskDoneRetryCount?: number | null; worktreeSessionRetryCount?: number | null; completionHandoffLimboRecoveryCount?: number | null; verificationFailureCount?: number | null; mergeConflictBounceCount?: number | null; mergeAuditBounceCount?: number | null; mergeTransientRetryCount?: number | null; branchConflictRecoveryCount?: number | null; reviewerContextRetryCount?: number | null; reviewerFallbackRetryCount?: number | null; nextRecoveryAt?: string | null; enabledWorkflowSteps?: string[]; noCommitsExpected?: boolean | null; modelProvider?: string | null; modelId?: string | null; validatorModelProvider?: string | null; validatorModelId?: string | null; planningModelProvider?: string | null; planningModelId?: string | null; thinkingLevel?: string | null; error?: string | null; summary?: string | null; sessionFile?: string | null; firstExecutionAt?: string | null; cumulativeActiveMs?: number | null; executionStartedAt?: string | null; executionCompletedAt?: string | null; review?: import("./types.js").TaskReview | null; reviewState?: import("./types.js").TaskReviewState | null; workflowStepResults?: import("./types.js").WorkflowStepResult[] | null; mergeDetails?: import("./types.js").MergeDetails | null; sourceIssue?: import("./types.js").TaskSourceIssue | null; sourceMetadataPatch?: Record<string, unknown> | null; githubTracking?: import("./types.js").TaskGithubTracking | null; tokenUsage?: import("./types.js").TaskTokenUsage | null; modifiedFiles?: string[] | null; missionId?: string | null; sliceId?: string | null },
     runContext?: RunMutationContext,
   ): Promise<Task> {
-    return this.withTaskLock(id, async () => {
+    return this.withTaskLock(id, () => this.updateTaskUnlocked(id, updates, runContext));
+  }
+
+  /**
+   * Merge a validated/normalized custom-field patch into the existing values.
+   * `null` in the patch deletes that field's value (the delete sentinel from
+   * {@link validateCustomFieldPatch}); any other value overwrites. Returns a new
+   * object (never mutates the input) so the caller assigns it onto the task.
+   */
+  private mergeCustomFieldPatch(
+    current: Record<string, unknown> | undefined,
+    patch: Record<string, unknown>,
+  ): Record<string, unknown> {
+    const next: Record<string, unknown> = { ...(current ?? {}) };
+    for (const [key, value] of Object.entries(patch)) {
+      if (value === null) {
+        delete next[key];
+      } else {
+        next[key] = value;
+      }
+    }
+    return next;
+  }
+
+  /**
+   * Single write authority for custom task fields (U11 / KTD-13).
+   *
+   * Resolves the task's workflow field definitions, validates `patch` against
+   * them via {@link validateCustomFieldPatch}, merges the normalized result into
+   * `Task.customFields` (delete-on-null), persists through the standard update
+   * path, and emits `task:updated` like every other task mutation. A workflow
+   * with no fields (e.g. the default) rejects any non-empty patch with
+   * `no-fields-defined`. Returns a typed result rather than throwing so callers
+   * (agent tools, HTTP routes) can surface the field path/code directly.
+   */
+  async updateTaskCustomFields(
+    taskId: string,
+    patch: Record<string, unknown>,
+    runContext?: RunMutationContext,
+  ): Promise<{ ok: true; task: Task } | { ok: false; rejection: CustomFieldRejection }> {
+    return this.withTaskLock(taskId, async () => {
+      const defs = this.resolveTaskCustomFieldDefsSync(taskId);
+      const result = validateCustomFieldPatch(defs, patch);
+      if (!result.ok) {
+        return { ok: false as const, rejection: result.rejection };
+      }
+      // Pass the validated PATCH through (with null delete-sentinels) — the
+      // merge-with-delete happens once, inside updateTaskUnlocked, against the
+      // freshly-read task. Pre-merging here would lose the delete semantics on
+      // the second merge.
+      const task = await this.updateTaskUnlocked(taskId, { customFields: result.normalized }, runContext);
+      return { ok: true as const, task };
+    });
+  }
+
+  /**
+   * The body of {@link updateTask} WITHOUT acquiring the per-task lock. Callers
+   * that already hold `withTaskLock(id)` — e.g. workflow-selection mutations
+   * that bundle a `task_workflow_selection`/`workflow_steps` write with the
+   * `enabledWorkflowSteps` update — invoke this directly so the whole sequence
+   * runs under a single lock acquisition. The per-task lock is non-reentrant,
+   * so calling the public `updateTask` from inside an outer `withTaskLock(id)`
+   * would deadlock; this variant exists to avoid that.
+   */
+  private async updateTaskUnlocked(
+    id: string,
+    updates: Parameters<TaskStore["updateTask"]>[1],
+    runContext?: RunMutationContext,
+  ): Promise<Task> {
+    {
       if (updates.dependencies !== undefined) {
         await this.assertNoDependencyCycle(
           id,
@@ -5955,6 +7297,19 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         }
       }
       if (updates.steps !== undefined) task.steps = updates.steps;
+      // U11/KTD-13: customFields writes are validated against the task's workflow
+      // field schema through the single authority (task-fields.ts). The patch is
+      // merged into the existing values (delete-on-null), mirroring
+      // updateTaskCustomFields. Backward-compat note: U4 round-tripped the object
+      // opaquely; the field system now enforces type/enum/unknown-id rules, so a
+      // write against a workflow with no fields (the default) is rejected with a
+      // typed CustomFieldRejectionError rather than silently persisted.
+      if (updates.customFields !== undefined) {
+        const defs = this.resolveTaskCustomFieldDefsSync(id);
+        const result = validateCustomFieldPatch(defs, updates.customFields);
+        if (!result.ok) throw new CustomFieldRejectionError(result.rejection);
+        task.customFields = this.mergeCustomFieldPatch(task.customFields, result.normalized);
+      }
       if (updates.currentStep !== undefined) task.currentStep = updates.currentStep;
       if (updates.status === null) {
         task.status = undefined;
@@ -6522,9 +7877,9 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       if (movedToTriage) {
         this.emit("task:moved", { task, from: "todo" as Column, to: "triage" as Column, source: "engine" });
       }
-      this.emit("task:updated", task);
+      this.emitTaskLifecycleEventSafely("task:updated", [task]);
       return task;
-    });
+    }
   }
 
   /**
@@ -6604,13 +7959,27 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     id: string,
     stepIndex: number,
     status: import("./types.js").StepStatus,
+    options?: { source?: "graph" },
   ): Promise<Task> {
+    // Step-inversion projection discipline (U6/KTD-7). A `source: "graph"` write
+    // is the workflow-graph executor projecting a foreach instance's lifecycle
+    // (in-progress / done / pending) onto Task.steps[] with EXPLICIT indices. Three
+    // behaviors diverge from the legacy (default) write:
+    //   (a) the out-of-order-done guard relaxes from strict index order to
+    //       DEPENDENCY order (a done write is legal when every dependsOn step —
+    //       default: the immediately-preceding step — is done/skipped, KTD-11);
+    //   (b) a guard that DOES suppress a graph write logs an audit warning loudly
+    //       (legacy stays silent — a graph suppression is a projection bug);
+    //   (c) the auto-reinit-from-PROMPT.md path is bypassed (the graph pinned the
+    //       step count at foreach expansion; re-parsing here would desync, KTD-3).
+    const graphSource = options?.source === "graph";
     return this.withTaskLock(id, async () => {
       const dir = this.taskDir(id);
       const task = await this.readTaskJson(dir);
 
-      // Auto-initialize steps from PROMPT.md if empty
-      if (task.steps.length === 0) {
+      // Auto-initialize steps from PROMPT.md if empty. Bypassed for graph-source
+      // writes (U6/KTD-3): the graph owns explicit indices pinned at expansion.
+      if (task.steps.length === 0 && !graphSource) {
         task.steps = await this.parseStepsFromPrompt(id);
       }
 
@@ -6647,22 +8016,63 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       }
 
       if (status === "done") {
-        for (let i = 0; i < stepIndex; i++) {
-          const priorStatus = task.steps[i].status;
-          if (priorStatus === "pending" || priorStatus === "in-progress") {
-            const ts = new Date().toISOString();
-            task.updatedAt = ts;
+        // The set of predecessor steps that must be done/skipped before this step
+        // may go done. Legacy: strict index order (every earlier step). Graph: the
+        // step's dependsOn list (default = the immediately-preceding step when the
+        // annotation is absent — preserving sequential behavior, KTD-11).
+        let blockingIndex = -1;
+        let blockingStatus: import("./types.js").StepStatus | undefined;
+        if (graphSource) {
+          const deps = task.steps[stepIndex]?.dependsOn;
+          const depIndices =
+            Array.isArray(deps) && deps.length > 0
+              ? deps
+              : stepIndex > 0
+              ? [stepIndex - 1]
+              : [];
+          for (const i of depIndices) {
+            const priorStatus = task.steps[i]?.status;
+            if (priorStatus === "pending" || priorStatus === "in-progress") {
+              blockingIndex = i;
+              blockingStatus = priorStatus;
+              break;
+            }
+          }
+        } else {
+          for (let i = 0; i < stepIndex; i++) {
+            const priorStatus = task.steps[i].status;
+            if (priorStatus === "pending" || priorStatus === "in-progress") {
+              blockingIndex = i;
+              blockingStatus = priorStatus;
+              break;
+            }
+          }
+        }
+        if (blockingIndex !== -1) {
+          const ts = new Date().toISOString();
+          task.updatedAt = ts;
+          const kind = graphSource ? "dependency-order" : "out-of-order";
+          task.log.push({
+            timestamp: ts,
+            action:
+              `Ignored ${kind} ${status} for step ${stepIndex} (${task.steps[stepIndex].name}) — ` +
+              `${graphSource ? "dependency" : "earlier"} step ${blockingIndex} (${task.steps[blockingIndex].name}) is still ${blockingStatus}`,
+          });
+          // Graph-source suppression is a projection bug — surface it loudly in
+          // the activity log (U6) rather than the legacy silent ignore.
+          if (graphSource) {
             task.log.push({
               timestamp: ts,
               action:
-                `Ignored out-of-order ${status} for step ${stepIndex} (${task.steps[stepIndex].name}) — ` +
-                `earlier step ${i} (${task.steps[i].name}) is still ${priorStatus}`,
+                `[integrity-warning] graph-source updateStep suppressed: step ${stepIndex} ` +
+                `(${task.steps[stepIndex].name}) → done blocked by unmet dependency ` +
+                `step ${blockingIndex} (${blockingStatus})`,
             });
-            await this.atomicWriteTaskJson(dir, task);
-            if (this.isWatching) this.taskCache.set(id, { ...task });
-            this.emit("task:updated", task);
-            return task;
           }
+          await this.atomicWriteTaskJson(dir, task);
+          if (this.isWatching) this.taskCache.set(id, { ...task });
+          this.emit("task:updated", task);
+          return task;
         }
       }
 
@@ -6773,12 +8183,12 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         if (this.isWatching) {
           this.taskCache.set(id, { ...current });
         }
-        this.emit("task:updated", current);
+        this.emitTaskLifecycleEventSafely("task:updated", [current]);
         return current;
       }
 
       const emittedTask = ({ id, log, updatedAt } as unknown) as Task;
-      this.emit("task:updated", emittedTask);
+      this.emitTaskLifecycleEventSafely("task:updated", [emittedTask]);
       return emittedTask;
     });
   }
@@ -7124,6 +8534,86 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     return rows.map((row) => this.rowToRunAuditEvent(row));
   }
 
+  /**
+   * Aggregate the dual-observe parity audit events (CU-U5) into the graduation
+   * signal: how often the interpreter's shadow observation agreed with the
+   * legacy authoritative run, and which fields drift when it doesn't.
+   */
+  getWorkflowParitySummary(options: { since?: string; limit?: number } = {}): WorkflowParitySummary {
+    const limit = options.limit ?? 1000;
+    const observed = this.getRunAuditEvents({
+      domain: "database",
+      mutationType: WORKFLOW_PARITY_OBSERVED_MUTATION as unknown as RunAuditEvent["mutationType"],
+      startTime: options.since,
+      limit,
+    });
+    const driftEvents = this.getRunAuditEvents({
+      domain: "database",
+      mutationType: WORKFLOW_PARITY_DRIFT_MUTATION as unknown as RunAuditEvent["mutationType"],
+      startTime: options.since,
+      limit,
+    });
+
+    let agreed = 0;
+    for (const event of observed) {
+      if (event.metadata?.agree === true) agreed += 1;
+    }
+
+    const driftFieldCounts: Record<string, number> = {};
+    const recentDrift: WorkflowParitySummary["recentDrift"] = [];
+    for (const event of driftEvents) {
+      const diffs = Array.isArray(event.metadata?.diffs)
+        ? (event.metadata.diffs as WorkflowParityDiff[])
+        : [];
+      for (const diff of diffs) {
+        driftFieldCounts[diff.field] = (driftFieldCounts[diff.field] ?? 0) + 1;
+      }
+      if (recentDrift.length < 20) {
+        recentDrift.push({ taskId: event.taskId ?? event.target, timestamp: event.timestamp, diffs });
+      }
+    }
+
+    return {
+      observed: observed.length,
+      agreed,
+      drift: driftEvents.length,
+      agreeRate: observed.length > 0 ? agreed / observed.length : 0,
+      driftFieldCounts,
+      recentDrift,
+    };
+  }
+
+  /**
+   * Aggregate the `workflowColumns` flag default-flip criteria (U12, KTD-8) into
+   * a single graduation report: five-invariant dual-observe parity, the default
+   * workflow's transition parity vs VALID_TRANSITIONS, and the dual-accept
+   * marker/column disagreement count (U6, FN-5719). The flip is a FIELD decision
+   * — this report is the GATE. Does NOT flip the flag; callers inspect `ready`
+   * and `blockers`.
+   */
+  computeWorkflowColumnsGraduationReport(
+    options: { since?: string; limit?: number } = {},
+  ): WorkflowColumnsGraduationReport {
+    const limit = options.limit ?? 1000;
+    const parity = this.getWorkflowParitySummary(options);
+    const dualAcceptEvents: RunAuditEvent[] = [];
+    for (const mutationType of DUAL_ACCEPT_PARITY_MUTATIONS) {
+      dualAcceptEvents.push(
+        ...this.getRunAuditEvents({
+          domain: "database",
+          mutationType: mutationType as unknown as RunAuditEvent["mutationType"],
+          startTime: options.since,
+          limit,
+        }),
+      );
+    }
+    return computeWorkflowColumnsGraduationReport({
+      parity,
+      defaultWorkflowIr: BUILTIN_CODING_WORKFLOW_IR,
+      dualAcceptEvents,
+    });
+  }
+
   enqueueMergeQueue(taskId: string, opts: MergeQueueEnqueueOptions = {}): MergeQueueEntry {
     let invalidColumn: Column | null = null;
     const entry = this.db.transactionImmediate(() => {
@@ -7224,7 +8714,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     }
   }
 
-  private dequeueMergeQueueOnColumnExit(taskId: string, previousColumn: Column, nextColumn: Column, now: string): void {
+  private dequeueMergeQueueOnColumnExit(taskId: string, previousColumn: ColumnId, nextColumn: ColumnId, now: string): void {
     if (previousColumn !== "in-review" || nextColumn === "in-review") {
       return;
     }
@@ -7514,13 +9004,19 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     if (!existsSync(promptPath)) return [];
 
     const content = await readFile(promptPath, "utf-8");
-    const steps: import("./types.js").TaskStep[] = [];
-    const stepRegex = /^###\s+Step\s+\d+[^:]*:\s*(.+)$/gm;
-    let match;
-    while ((match = stepRegex.exec(content)) !== null) {
-      steps.push({ name: match[1].trim(), status: "pending" });
+    // Step-inversion U12 (KTD-12): delegate to the registry's `step-headings`
+    // parser (resolved by id, not a direct import) so the registry path is
+    // proven and stays byte-identical to the extracted function. The parser
+    // yields `{ name, dependsOn? }`; re-apply the `pending` status here.
+    const parser = getStepParser("step-headings");
+    if (!parser) {
+      throw new Error("Step parser 'step-headings' is not registered");
     }
-    return steps;
+    return parser.parse(content).steps.map((s) =>
+      s.dependsOn
+        ? { name: s.name, status: "pending" as const, dependsOn: s.dependsOn }
+        : { name: s.name, status: "pending" as const },
+    );
   }
 
   /**
@@ -7663,11 +9159,10 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
           },
         });
         this.clearLinkedAgentTaskIds(id, deletedAt);
-        // FN-5143: clear historical agent logs for the soft-deleted task so
-        // downstream readers (evaluator evidence, self-healing diagnostics,
-        // dashboard log views, register-task-workflow-routes) observe zero logs
-        // immediately after deletedAt is set. Atomic with the deletedAt write.
-        this.db.prepare("DELETE FROM agentLogEntries WHERE taskId = ?").run(id);
+        // FN-5143: agent log reads are gated on deletedAt (see getAgentLogs /
+        // getAgentLogCount / getAgentLogsByTimeRange), so downstream readers
+        // observe zero logs immediately after deletedAt is set. The JSONL file
+        // remains on disk for forensic analysis; only the read API hides it.
         this.db.bumpLastModified();
       });
 
@@ -7706,6 +9201,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
 
   private deleteTaskById(taskId: string): void {
     this.clearLinkedAgentTaskIds(taskId);
+    this.purgeTaskWorkflowSelectionRows(taskId);
     this.db.prepare('DELETE FROM tasks WHERE id = ?').run(taskId);
     this.db.bumpLastModified();
   }
@@ -8333,6 +9829,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       this.db.transaction(() => {
         rewrittenLineageChildren = this.rewriteLineageChildrenForRemoval(id, lineageChildIds);
         this.clearLinkedAgentTaskIds(id, task.updatedAt);
+        this.purgeTaskWorkflowSelectionRows(id);
         this.db.prepare('DELETE FROM tasks WHERE id = ?').run(id);
         this.db.bumpLastModified();
       });
@@ -8608,9 +10105,12 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
             if (archivedSet.has(id)) {
               // Task moved to archive — emit task:moved (matching what
               // archiveTask emits in-process) so other subscribers can react.
-              // Activity-log listeners skip this emit; the originating
+              // Skip already-archived cache entries to avoid no-op emits.
+              // Activity-log listeners skip polling emits; the originating
               // TaskStore instance wrote the row in-process.
-              this.emit("task:moved", { task: cached, from: cached.column, to: "archived" as Column, source: "engine" });
+              if (cached.column !== "archived") {
+                this.emit("task:moved", { task: cached, from: cached.column, to: "archived" as Column, source: "engine" });
+              }
             } else {
               // Polling replicas only mirror the originating delete signal.
               // Do not record run-audit here; the writer already owns that row.
@@ -8841,7 +10341,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   }
 
   /**
-   * Insert an agent log entry into the agentLogEntries SQLite table.
+   * Buffer an agent log entry for file-backed persistence.
    * Also emits an `agent:log` event for live streaming.
    *
    * @param taskId - The task ID (e.g. "KB-001")
@@ -8911,7 +10411,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   }
 
   /**
-   * Flush all buffered agent log entries in a single transaction.
+   * Flush all buffered agent log entries to per-task JSONL files.
    * Called when the buffer is full or on a timer.
    */
   private flushAgentLogBuffer(): void {
@@ -8921,55 +10421,45 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     }
     if (this.agentLogBuffer.length === 0) return;
 
-    // Snapshot the entries to flush. New entries appended during the
-    // synchronous transaction will appear past batch.length in
-    // this.agentLogBuffer, so we splice only the flushed count.
     const batch = this.agentLogBuffer.slice();
     const flushCount = batch.length;
 
     let validEntries = batch;
-    let flushSucceeded = false;
+    const flushedEntries = new Set<typeof batch[number]>();
     try {
-      this.db.transaction(() => {
-        // Query live task IDs inside the transaction so the check is
-        // atomic with the inserts (prevents TOCTOU FK violations).
-        const liveTaskIds = new Set(
-          (this.db.prepare(`SELECT id FROM tasks WHERE ${TaskStore.ACTIVE_TASKS_WHERE}`).all() as Array<{ id: string }>).map((r) => r.id),
+      const liveTaskIds = new Set(
+        (this.db.prepare(`SELECT id FROM tasks WHERE ${TaskStore.ACTIVE_TASKS_WHERE}`).all() as Array<{ id: string }>).map((row) => row.id),
+      );
+      validEntries = batch.filter((entry) => liveTaskIds.has(entry.taskId));
+      const dropped = batch.length - validEntries.length;
+      if (dropped > 0) {
+        console.warn(
+          `[fusion] Dropped ${dropped} buffered agent log entries for deleted tasks (${this.db.path})`,
         );
-        validEntries = batch.filter((e) => liveTaskIds.has(e.taskId));
-        const dropped = batch.length - validEntries.length;
-        if (dropped > 0) {
-          console.warn(
-            `[fusion] Dropped ${dropped} buffered agent log entries for deleted tasks (${this.db.path})`,
-          );
+      }
+
+      if (validEntries.length > 0) {
+        const citationInputs: GoalCitationInput[] = [];
+        const entriesByTask = new Map<string, typeof validEntries>();
+        for (const entry of validEntries) {
+          const taskEntries = entriesByTask.get(entry.taskId);
+          if (taskEntries) {
+            taskEntries.push(entry);
+          } else {
+            entriesByTask.set(entry.taskId, [entry]);
+          }
         }
 
-        if (validEntries.length > 0) {
-          const stmt = this.db.prepare(`
-            INSERT INTO agentLogEntries (taskId, timestamp, text, type, detail, agent)
-            VALUES (?, ?, ?, ?, ?, ?)
-          `);
-          const citationInputs: GoalCitationInput[] = [];
-          for (const entry of validEntries) {
-            const insertResult = stmt.run(
-              entry.taskId,
-              entry.timestamp,
-              entry.text,
-              entry.type,
-              entry.detail,
-              entry.agent,
-            ) as { lastInsertRowid?: number | bigint };
-            const insertedId = insertResult.lastInsertRowid;
-            if (insertedId === undefined || insertedId === null) {
-              continue;
-            }
-            const sourceRef = `agentLog:${String(insertedId)}`;
+        for (const [taskId, taskEntries] of entriesByTask) {
+          const appended = appendAgentLogEntriesSync(this.taskDir(taskId), taskEntries);
+          taskEntries.forEach((entry) => flushedEntries.add(entry));
+          for (const entry of appended) {
             try {
               citationInputs.push(
                 ...this.scanAndRecordCitations(
                   entry.text,
                   "agent_log",
-                  sourceRef,
+                  entry.sourceRef,
                   entry.agent ?? "unknown",
                   entry.taskId,
                   entry.timestamp,
@@ -8979,25 +10469,22 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
               console.warn("[fusion] Failed to scan goal citations from agent_log:", err);
             }
           }
-          if (citationInputs.length > 0) {
-            try {
-              this.recordGoalCitations(citationInputs);
-            } catch (err) {
-              console.warn("[fusion] Failed to record goal citations from agent_log batch:", err);
-            }
-          }
-          this.db.bumpLastModified();
         }
-      });
-      flushSucceeded = true;
+
+        if (citationInputs.length > 0) {
+          try {
+            this.recordGoalCitations(citationInputs);
+          } catch (err) {
+            console.warn("[fusion] Failed to record goal citations from agent_log batch:", err);
+          }
+        }
+        this.db.bumpLastModified();
+      }
     } finally {
-      // Always drain the original slice from the buffer.
       this.agentLogBuffer.splice(0, flushCount);
-      // On transient failures (busy/IO), requeue valid entries for retry.
-      // Stale rows were already filtered out above.
-      if (!flushSucceeded && validEntries.length > 0) {
-        this.agentLogBuffer.unshift(...validEntries);
-        // Re-arm the flush timer so retried entries don't sit in memory forever.
+      const remainingValidEntries = validEntries.filter((entry) => !flushedEntries.has(entry));
+      if (remainingValidEntries.length > 0) {
+        this.agentLogBuffer.unshift(...remainingValidEntries);
         if (!this.agentLogFlushTimer) {
           this.agentLogFlushTimer = setTimeout(() => {
             try {
@@ -9034,50 +10521,65 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       ...entry,
       detail: truncateAgentLogDetail(entry.detail, entry.type),
     }));
-    const stmt = this.db.prepare(`
-      INSERT INTO agentLogEntries (taskId, timestamp, text, type, detail, agent)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `);
+    const liveTaskIds = new Set(
+      (this.db.prepare(`SELECT id FROM tasks WHERE ${TaskStore.ACTIVE_TASKS_WHERE}`).all() as Array<{ id: string }>).map((row) => row.id),
+    );
+    const validEntries = normalizedEntries.filter((entry) => liveTaskIds.has(entry.taskId));
+    const dropped = normalizedEntries.length - validEntries.length;
+    if (dropped > 0) {
+      console.warn(`[fusion] Dropped ${dropped} batch agent log entries for deleted tasks (${this.db.path})`);
+    }
 
-    this.db.transaction(() => {
-      const citationInputs: GoalCitationInput[] = [];
-      for (const entry of normalizedEntries) {
-        const insertResult = stmt.run(
-          entry.taskId,
+    const citationInputs: GoalCitationInput[] = [];
+    const entriesByTask = new Map<string, typeof validEntries>();
+    for (const entry of validEntries) {
+      const taskEntries = entriesByTask.get(entry.taskId);
+      if (taskEntries) {
+        taskEntries.push(entry);
+      } else {
+        entriesByTask.set(entry.taskId, [entry]);
+      }
+    }
+
+    for (const [taskId, taskEntries] of entriesByTask) {
+      const appended = appendAgentLogEntriesSync(
+        this.taskDir(taskId),
+        taskEntries.map((entry) => ({
           timestamp,
-          entry.text,
-          entry.type,
-          entry.detail ?? null,
-          entry.agent ?? null,
-        ) as { lastInsertRowid?: number | bigint };
-        const insertedId = insertResult.lastInsertRowid;
-        if (insertedId === undefined || insertedId === null) {
-          continue;
-        }
+          taskId: entry.taskId,
+          text: entry.text,
+          type: entry.type,
+          detail: entry.detail ?? null,
+          agent: entry.agent ?? null,
+        })),
+      );
+      for (const entry of appended) {
         try {
           citationInputs.push(
             ...this.scanAndRecordCitations(
               entry.text,
               "agent_log",
-              `agentLog:${String(insertedId)}`,
+              entry.sourceRef,
               entry.agent ?? "unknown",
               entry.taskId,
-              timestamp,
+              entry.timestamp,
             ),
           );
         } catch (err) {
           console.warn("[fusion] Failed to scan goal citations from agent log batch:", err);
         }
       }
-      if (citationInputs.length > 0) {
-        try {
-          this.recordGoalCitations(citationInputs);
-        } catch (err) {
-          console.warn("[fusion] Failed to record goal citations from appendAgentLogBatch:", err);
-        }
+    }
+    if (citationInputs.length > 0) {
+      try {
+        this.recordGoalCitations(citationInputs);
+      } catch (err) {
+        console.warn("[fusion] Failed to record goal citations from appendAgentLogBatch:", err);
       }
+    }
+    if (validEntries.length > 0) {
       this.db.bumpLastModified();
-    });
+    }
 
     for (const entry of normalizedEntries) {
       this.emit("agent:log", {
@@ -9089,37 +10591,6 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
         ...(entry.agent !== undefined && { agent: entry.agent }),
       });
     }
-  }
-
-  private mapAgentLogRow(row: Record<string, unknown>): AgentLogEntry {
-    const type = row.type as AgentLogEntry["type"];
-    const detail = row.detail != null ? String(row.detail) : undefined;
-    return {
-      timestamp: row.timestamp as string,
-      taskId: row.taskId as string,
-      text: row.text as string,
-      type,
-      ...(detail !== undefined && { detail }),
-      ...(row.agent != null && { agent: row.agent as AgentLogEntry["agent"] }),
-    };
-  }
-
-  private getAgentLogSelectClause(): string {
-    const escapedNotice = AGENT_LOG_TOOL_DETAIL_TRUNCATION_NOTICE.replace(/'/g, "''");
-    return `
-      taskId,
-      timestamp,
-      text,
-      type,
-      CASE
-        WHEN type IN ('tool', 'tool_result', 'tool_error')
-          AND detail IS NOT NULL
-          AND LENGTH(detail) > ${AGENT_LOG_TOOL_DETAIL_LIMIT}
-        THEN SUBSTR(detail, 1, ${AGENT_LOG_TOOL_DETAIL_LIMIT}) || '${escapedNotice}'
-        ELSE detail
-      END AS detail,
-      agent
-    `;
   }
 
   async addTaskComment(id: string, text: string, author: string): Promise<Task> {
@@ -10030,7 +11501,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   }
 
   /**
-   * Read historical agent log entries for a task from SQLite.
+   * Read historical agent log entries for a task from JSONL storage.
    * Returns entries in chronological order (oldest first).
    *
    * Tool-oriented detail payloads are clipped server-side to keep historical
@@ -10050,6 +11521,9 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   ): Promise<AgentLogEntry[]> {
     // Ensure buffered entries are visible before reading.
     this.flushAgentLogBuffer();
+    if (this.readTaskFromDb(taskId, { includeDeleted: true })?.deletedAt) {
+      return [];
+    }
     const limit = options?.limit !== undefined
       ? (Number.isFinite(options.limit) ? Math.max(0, Math.floor(options.limit)) : 0)
       : undefined;
@@ -10059,47 +11533,23 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
 
     if (limit === 0) return [];
 
-    const selectClause = this.getAgentLogSelectClause();
-
-    if (limit !== undefined) {
-      const readCount = offset > 0 ? limit + offset : limit;
-      const rows = this.db.prepare(`
-        SELECT ${selectClause} FROM agentLogEntries
-        WHERE taskId = ?
-        ORDER BY timestamp DESC, id DESC
-        LIMIT ?
-      `).all(taskId, readCount) as Array<Record<string, unknown>>;
-      const entries = rows.map((row) => this.mapAgentLogRow(row)).reverse();
-      if (offset > 0) {
-        return entries.slice(0, Math.max(0, entries.length - offset));
-      }
-      return entries;
-    }
-
-    const rows = this.db.prepare(`
-      SELECT ${selectClause} FROM agentLogEntries
-      WHERE taskId = ?
-      ORDER BY timestamp ASC, id ASC
-    `).all(taskId) as Array<Record<string, unknown>>;
-    const entries = rows.map((row) => this.mapAgentLogRow(row));
-    if (offset > 0) {
-      return entries.slice(0, Math.max(0, entries.length - offset));
-    }
-    return entries;
+    return readAgentLogEntries(this.taskDir(taskId), { limit, offset }).map(
+      ({ lineNo: _lineNo, sourceRef: _sourceRef, ...entry }) => entry,
+    );
   }
 
   /**
-   * Count total number of persisted agent log entries for a task in SQLite.
+   * Count total number of persisted agent log entries for a task in JSONL storage.
    *
    * @param taskId - The task ID (e.g. "KB-001")
    * @returns Total number of log entries
    */
   async getAgentLogCount(taskId: string): Promise<number> {
     this.flushAgentLogBuffer();
-    const row = this.db.prepare(
-      "SELECT COUNT(*) as count FROM agentLogEntries WHERE taskId = ?",
-    ).get(taskId) as { count: number } | undefined;
-    return row?.count ?? 0;
+    if (this.readTaskFromDb(taskId, { includeDeleted: true })?.deletedAt) {
+      return 0;
+    }
+    return countAgentLogEntries(this.taskDir(taskId));
   }
 
   /**
@@ -10117,14 +11567,13 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   ): Promise<AgentLogEntry[]> {
     // Ensure buffered entries are visible before reading.
     this.flushAgentLogBuffer();
+    if (this.readTaskFromDb(taskId, { includeDeleted: true })?.deletedAt) {
+      return [];
+    }
     const end = endIso ?? new Date().toISOString();
-    const selectClause = this.getAgentLogSelectClause();
-    const rows = this.db.prepare(`
-      SELECT ${selectClause} FROM agentLogEntries
-      WHERE taskId = ? AND timestamp >= ? AND timestamp <= ?
-      ORDER BY timestamp ASC, id ASC
-    `).all(taskId, startIso, end) as Array<Record<string, unknown>>;
-    return rows.map((row) => this.mapAgentLogRow(row));
+    return readAgentLogEntriesByTimeRange(this.taskDir(taskId), startIso, end).map(
+      ({ lineNo: _lineNo, sourceRef: _sourceRef, ...entry }) => entry,
+    );
   }
 
   async importLegacyAgentLogs(): Promise<number> {
@@ -10132,18 +11581,23 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
 
     const entries = await readdir(this.tasksDir, { withFileTypes: true });
     let imported = 0;
-    const insertStmt = this.db.prepare(`
-      INSERT INTO agentLogEntries (taskId, timestamp, text, type, detail, agent)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `);
 
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
-      const logPath = join(this.tasksDir, entry.name, "agent.log");
+      const taskDir = join(this.tasksDir, entry.name);
+      const logPath = join(taskDir, "agent.log");
       if (!existsSync(logPath)) continue;
 
       try {
         const content = await readFile(logPath, "utf-8");
+        const parsedEntries: Array<{
+          timestamp: string;
+          taskId: string;
+          text: string;
+          type: AgentLogEntry["type"];
+          detail?: string | null;
+          agent?: AgentLogEntry["agent"] | null;
+        }> = [];
         for (const line of content.split("\n")) {
           const trimmed = line.trim();
           if (!trimmed) continue;
@@ -10155,20 +11609,21 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
             const type = typeof parsed.type === "string" ? parsed.type : null;
             if (!timestamp || !parsedTaskId || !type) continue;
 
-            const text = typeof parsed.text === "string" ? parsed.text : "";
-            const detail = typeof parsed.detail === "string" ? parsed.detail : null;
-            const agent = typeof parsed.agent === "string" ? parsed.agent : null;
-            const normalizedDetail = truncateAgentLogDetail(
-              detail,
-              type as AgentLogEntry["type"],
-            );
-
-            insertStmt.run(parsedTaskId, timestamp, text, type, normalizedDetail ?? null, agent);
-            imported += 1;
+            parsedEntries.push({
+              timestamp,
+              taskId: parsedTaskId,
+              text: typeof parsed.text === "string" ? parsed.text : "",
+              type: type as AgentLogEntry["type"],
+              detail: typeof parsed.detail === "string" ? parsed.detail : null,
+              agent: typeof parsed.agent === "string" ? (parsed.agent as AgentLogEntry["agent"]) : null,
+            });
           } catch {
             // Skip malformed JSONL lines.
           }
         }
+
+        appendAgentLogEntriesSync(taskDir, parsedEntries);
+        imported += parsedEntries.length;
       } catch (err) {
         storeLog.warn("Skipping unreadable legacy agent.log file during import", {
           phase: "importLegacyAgentLogs:read-file",
@@ -10203,6 +11658,148 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       ON CONFLICT(key) DO UPDATE SET value = excluded.value
     `).run(migrationKey, migrationVersion);
     this.db.bumpLastModified();
+  }
+
+  /**
+   * One-time migration: copy `agentLogEntries` rows from SQLite into per-task
+   * JSONL files, then rewrite goal-citation source-refs from the old
+   * `agentLog:<rowid>` format to the new `agentLog:{taskId}:{lineNo}` format.
+   * Guarded by `__meta` so it runs exactly once.
+   */
+  private async migrateAgentLogEntriesToFilesOnce(): Promise<void> {
+    const migrationKey = "agentLogEntriesToFileMigrationVersion";
+    const migrationVersion = "1";
+    const row = this.db.prepare("SELECT value FROM __meta WHERE key = ?").get(migrationKey) as
+      | { value: string }
+      | undefined;
+
+    if (row?.value === migrationVersion) {
+      return;
+    }
+
+    // Only run if the agentLogEntries table still exists
+    const hasTable =
+      this.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'agentLogEntries' LIMIT 1").get() !==
+      undefined;
+    if (!hasTable) {
+      // Table already gone (fresh DB or already migrated) — mark done
+      this.db.prepare(`
+        INSERT INTO __meta (key, value) VALUES (?, ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+      `).run(migrationKey, migrationVersion);
+      return;
+    }
+
+    interface AgentLogRow {
+      id: number;
+      taskId: string;
+      timestamp: string;
+      text: string;
+      type: string;
+      detail: string | null;
+      agent: string | null;
+    }
+
+    // Read all rows ordered by taskId, id so each task's entries are
+    // written in their original insertion order
+    const rows = this.db
+      .prepare("SELECT id, taskId, timestamp, text, type, detail, agent FROM agentLogEntries ORDER BY taskId, id")
+      .all() as AgentLogRow[];
+
+    if (rows.length > 0) {
+      // Group rows by task
+      const entriesByTask = new Map<string, AgentLogRow[]>();
+      for (const row of rows) {
+        let taskRows = entriesByTask.get(row.taskId);
+        if (!taskRows) {
+          taskRows = [];
+          entriesByTask.set(row.taskId, taskRows);
+        }
+        taskRows.push(row);
+      }
+
+      // Write per-task JSONL files
+      const rowIdToNewRef = new Map<number, string>();
+      for (const [taskId, taskRows] of entriesByTask) {
+        const td = this.taskDir(taskId);
+        const appended = appendAgentLogEntriesSync(
+          td,
+          taskRows.map((r) => ({
+            timestamp: r.timestamp,
+            taskId: r.taskId,
+            text: r.text,
+            type: r.type as AgentLogEntry["type"],
+            detail: r.detail,
+            agent: r.agent as AgentLogEntry["agent"] | null,
+          })),
+        );
+        // Build mapping from old rowid to new sourceRef
+        for (let i = 0; i < taskRows.length; i++) {
+          rowIdToNewRef.set(taskRows[i]!.id, appended[i]!.sourceRef);
+        }
+      }
+
+      // Rewrite goal-citation source-refs that use the old agentLog:<rowid> format
+      const oldFormatRows = this.db
+        .prepare("SELECT id, sourceRef FROM goal_citations WHERE surface = 'agent_log' AND sourceRef GLOB 'agentLog:[0-9]*'")
+        .all() as Array<{ id: number; sourceRef: string }>;
+
+      const updateStmt = this.db.prepare("UPDATE goal_citations SET sourceRef = ? WHERE id = ?");
+      this.db.transaction(() => {
+        for (const citation of oldFormatRows) {
+          const oldRowId = parseInt(citation.sourceRef.replace("agentLog:", ""), 10);
+          const newRef = rowIdToNewRef.get(oldRowId);
+          if (newRef) {
+            updateStmt.run(newRef, citation.id);
+          }
+        }
+      });
+    }
+
+    // Mark migration as done
+    this.db.prepare(`
+      INSERT INTO __meta (key, value) VALUES (?, ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value
+    `).run(migrationKey, migrationVersion);
+    this.db.bumpLastModified();
+  }
+
+  private async cleanupNoOpTaskMovedActivityRowsOnce(): Promise<void> {
+    const migrationKey = "noOpTaskMovedActivityCleanupVersion";
+    const migrationVersion = "1";
+    const row = this.db.prepare("SELECT value FROM __meta WHERE key = ?").get(migrationKey) as
+      | { value: string }
+      | undefined;
+
+    if (row?.value === migrationVersion) {
+      return;
+    }
+
+    const hasTable =
+      this.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'activityLog' LIMIT 1").get() !==
+      undefined;
+    const markDone = () => {
+      this.db.prepare(`
+        INSERT INTO __meta (key, value) VALUES (?, ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+      `).run(migrationKey, migrationVersion);
+    };
+
+    if (!hasTable) {
+      markDone();
+      this.db.bumpLastModified();
+      return;
+    }
+
+    this.db.transactionImmediate(() => {
+      this.db.prepare(`
+        DELETE FROM activityLog
+        WHERE type = 'task:moved'
+          AND json_extract(metadata, '$.from') = json_extract(metadata, '$.to')
+      `).run();
+      markDone();
+      this.db.bumpLastModified();
+    });
   }
 
   // ── Archive Cleanup Methods ─────────────────────────────────────────
@@ -10251,6 +11848,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       const archivedAt = task.columnMovedAt ?? task.updatedAt ?? new Date().toISOString();
       const entry = await this.taskToArchiveEntry(task, archivedAt);
       this.archiveDb.upsert(entry);
+      this.purgeTaskWorkflowSelectionRows(task.id);
       this.db.prepare("DELETE FROM tasks WHERE id = ?").run(task.id);
       await rm(this.taskDir(task.id), { recursive: true, force: true });
       if (this.isWatching) {
@@ -10286,6 +11884,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       this.archiveDb.upsert(entry);
 
       // Remove task from tasks table
+      this.purgeTaskWorkflowSelectionRows(task.id);
       this.db.prepare('DELETE FROM tasks WHERE id = ?').run(task.id);
       this.db.bumpLastModified();
 
@@ -10329,6 +11928,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       dependencies: entry.dependencies,
       steps: entry.steps,
       currentStep: entry.currentStep,
+      customFields: entry.customFields ?? undefined,
       size: entry.size,
       reviewLevel: entry.reviewLevel,
       prInfo: entry.prInfo,
@@ -10562,7 +12162,12 @@ ${stepsSection}`;
       createdAt: string;
       updatedAt: string;
     }>;
-    const storedSteps = rows.map((row) => this.applyLegacyWorkflowStepOverrides(this.toStoredWorkflowStep(row)));
+    const storedSteps = rows
+      .map((row) => this.applyLegacyWorkflowStepOverrides(this.toStoredWorkflowStep(row)))
+      // Steps materialized by compiling a workflow are an execution detail; keep
+      // them out of the user-facing step manager listing. The executor resolves
+      // them directly via getWorkflowStep, which is unaffected by this filter.
+      .filter((step) => !step.templateId?.startsWith(WORKFLOW_COMPILED_STEP_TEMPLATE_PREFIX));
     const pluginSteps = this._pluginWorkflowStepTemplates
       .map(({ template }) => this.resolvePluginWorkflowStep(template.id))
       .filter((step): step is import("./types.js").WorkflowStep => Boolean(step));
@@ -10787,6 +12392,1246 @@ ${stepsSection}`;
     }
   }
 
+  // ── Workflow definitions (named WorkflowIr graphs) ─────────────────────
+
+  /** Allocate the next workflow-definition id (WF-001, WF-002, …) using a
+   *  monotonic counter persisted in __meta. Never reuses ids across deletes. */
+  private nextWorkflowDefinitionId(): string {
+    // Serialize the read+increment in one write transaction so two TaskStore
+    // instances cannot both observe the same counter and allocate the same
+    // WF-id (which would collide on the workflows primary key).
+    return this.db.transactionImmediate(() => {
+      const row = this.db.prepare("SELECT value FROM __meta WHERE key = 'nextWorkflowDefinitionId'").get() as
+        | { value: string }
+        | undefined;
+      const next = row ? parseInt(row.value, 10) || 1 : 1;
+      this.db
+        .prepare(
+          "INSERT INTO __meta (key, value) VALUES ('nextWorkflowDefinitionId', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        )
+        .run(String(next + 1));
+      return `WF-${String(next).padStart(3, "0")}`;
+    });
+  }
+
+  private toWorkflowDefinition(row: {
+    id: string;
+    name: string;
+    description: string;
+    ir: string;
+    layout: string;
+    createdAt: string;
+    updatedAt: string;
+  }): WorkflowDefinition {
+    return {
+      id: row.id,
+      name: row.name,
+      description: row.description,
+      ir: parseWorkflowIr(row.ir),
+      layout: this.parseWorkflowLayout(row.layout),
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    };
+  }
+
+  private parseWorkflowLayout(
+    raw: string,
+  ): Record<string, WorkflowNodeLayout> {
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        return parsed as Record<string, WorkflowNodeLayout>;
+      }
+    } catch {
+      // Corrupt layout JSON falls back to empty (auto-layout) rather than failing the read.
+    }
+    return {};
+  }
+
+  /** Server-side trait-composition validation (residual A). Throws a typed
+   *  ColumnTraitValidationError when the IR's columns have save-blocking trait
+   *  conflicts, so conflicts reject server-side and not only in the editor. A
+   *  v1 IR (no columns) is a no-op. */
+  private assertWorkflowIrTraitsValid(ir: WorkflowIr): void {
+    const columns = (ir as { columns?: WorkflowIrColumn[] }).columns;
+    if (Array.isArray(columns) && columns.length > 0) {
+      assertColumnTraitsValid(columns);
+    }
+  }
+
+  /** Create a named workflow definition. The IR is validated via parseWorkflowIr. */
+  async createWorkflowDefinition(
+    input: WorkflowDefinitionInput,
+  ): Promise<WorkflowDefinition> {
+    // Rollback compat (#1405): with the flag OFF, persist a pure-v1-equivalent
+    // graph in the v1 shape so a binary downgrade can still load the row.
+    const flagOnForCreate = await this.workflowColumnsFlagOn();
+    return this.withConfigLock(async () => {
+      const name = input.name?.trim();
+      if (!name) throw new Error("Workflow name is required");
+      // Validate the IR shape up front so we never persist a malformed graph.
+      const ir = parseWorkflowIr(input.ir);
+      // Residual A: also reject save-blocking trait composition conflicts here,
+      // not only in the editor's client-side validation.
+      this.assertWorkflowIrTraitsValid(ir);
+      const layout = input.layout ?? {};
+      const now = new Date().toISOString();
+      const id = this.nextWorkflowDefinitionId();
+      const definition: WorkflowDefinition = {
+        id,
+        name,
+        description: input.description ?? "",
+        ir,
+        layout,
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      this.db
+        .prepare(
+          `INSERT INTO workflows (id, name, description, ir, layout, createdAt, updatedAt)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          definition.id,
+          definition.name,
+          definition.description,
+          serializeWorkflowIr(
+            flagOnForCreate ? definition.ir : downgradeIrToV1IfPure(definition.ir),
+          ),
+          JSON.stringify(definition.layout),
+          definition.createdAt,
+          definition.updatedAt,
+        );
+
+      this.workflowDefinitionsCache = null;
+      this.db.bumpLastModified();
+      return definition;
+    });
+  }
+
+  /** List all workflow definitions, oldest first. Cached until a mutation. */
+  async listWorkflowDefinitions(): Promise<WorkflowDefinition[]> {
+    if (this.workflowDefinitionsCache) return this.workflowDefinitionsCache;
+    const rows = this.db.prepare("SELECT * FROM workflows ORDER BY createdAt ASC").all() as Array<{
+      id: string;
+      name: string;
+      description: string;
+      ir: string;
+      layout: string;
+      createdAt: string;
+      updatedAt: string;
+    }>;
+    // Built-in templates lead the list and cannot be edited/deleted.
+    this.workflowDefinitionsCache = [...BUILTIN_WORKFLOWS, ...rows.map((row) => this.toWorkflowDefinition(row))];
+    return this.workflowDefinitionsCache;
+  }
+
+  /** Get a single workflow definition by id, or undefined when absent. */
+  async getWorkflowDefinition(
+    id: string,
+  ): Promise<WorkflowDefinition | undefined> {
+    const builtin = getBuiltinWorkflow(id);
+    if (builtin) return builtin;
+    const row = this.db.prepare("SELECT * FROM workflows WHERE id = ?").get(id) as
+      | {
+          id: string;
+          name: string;
+          description: string;
+          ir: string;
+          layout: string;
+          createdAt: string;
+          updatedAt: string;
+        }
+      | undefined;
+    return row ? this.toWorkflowDefinition(row) : undefined;
+  }
+
+  /** Update a workflow definition. The IR (when supplied) is re-validated. */
+  async updateWorkflowDefinition(
+    id: string,
+    updates: WorkflowDefinitionUpdate,
+  ): Promise<WorkflowDefinition> {
+    if (isBuiltinWorkflowId(id)) throw new Error("Built-in workflows cannot be edited");
+    // U5 (R20): flag-ON edits that remove an occupied column block with a typed
+    // OccupiedColumnsError unless `rehomeTo` is supplied. Computed before taking
+    // the config lock (pure DB reads) so the lock body stays focused.
+    const flagOn = await this.workflowColumnsFlagOn();
+    let pendingRehome: { rehomeTo: string; occupantTaskIds: string[] } | undefined;
+    if (flagOn && updates.ir !== undefined) {
+      const existingForCheck = await this.getWorkflowDefinition(id);
+      if (!existingForCheck) throw new Error(`Workflow '${id}' not found`);
+      const nextIrForCheck = parseWorkflowIr(updates.ir);
+      const occupantsByColumn = this.occupantsByColumnForWorkflow(id, false);
+      const removed = computeRemovedOccupiedColumns(
+        existingForCheck.ir,
+        nextIrForCheck,
+        occupantsByColumn,
+      );
+      if (removed.length > 0) {
+        if (updates.rehomeTo === undefined) {
+          throw new OccupiedColumnsError(id, removed);
+        }
+        assertRehomeTargetValid(nextIrForCheck, updates.rehomeTo);
+        // Collect the occupant task ids of the removed columns to re-home AFTER
+        // the IR save commits, so the cards land in a column the new IR defines.
+        const removedSet = new Set(removed.map((r) => r.columnId));
+        const occupantTaskIds = this.listWorkflowOccupantTaskIds(id, false).filter((taskId) => {
+          const row = this.db.prepare(`SELECT "column" AS column FROM tasks WHERE id = ?`).get(taskId) as
+            | { column: string }
+            | undefined;
+          return row ? removedSet.has(row.column) : false;
+        });
+        pendingRehome = { rehomeTo: updates.rehomeTo, occupantTaskIds };
+      }
+    }
+
+    // U11/KTD-13: when the IR changes custom field types incompatibly for tasks
+    // that already hold values, block with a typed IncompatibleFieldChangeError
+    // unless `coerce` is supplied. Removed/added fields never block (removal
+    // orphans). Flag-independent: fields are orthogonal to the columns flag.
+    // Reconciliation runs per occupant task AFTER the IR save commits.
+    let pendingFieldReconcile:
+      | { oldFields: WorkflowFieldDefinition[]; newFields: WorkflowFieldDefinition[]; occupantTaskIds: string[]; coerce?: "drop" | "keep-orphaned" }
+      | undefined;
+    if (updates.ir !== undefined) {
+      const existingForFields = await this.getWorkflowDefinition(id);
+      if (!existingForFields) throw new Error(`Workflow '${id}' not found`);
+      const nextIrForFields = parseWorkflowIr(updates.ir);
+      const oldFields: WorkflowFieldDefinition[] =
+        existingForFields.ir.version === "v2" ? (existingForFields.ir.fields ?? []) : [];
+      const newFields: WorkflowFieldDefinition[] =
+        nextIrForFields.version === "v2" ? (nextIrForFields.fields ?? []) : [];
+      const fieldsChanged =
+        JSON.stringify(oldFields) !== JSON.stringify(newFields);
+      if (fieldsChanged) {
+        const occupantTaskIds = this.listWorkflowOccupantTaskIds(id, false);
+        const occupantsByField = new Map<string, number>();
+        for (const taskId of occupantTaskIds) {
+          const row = this.db.prepare("SELECT customFields FROM tasks WHERE id = ?").get(taskId) as
+            | { customFields: string | null }
+            | undefined;
+          const values = row?.customFields
+            ? (fromJson<Record<string, unknown>>(row.customFields) ?? {})
+            : {};
+          // Incompatible-change detection only blocks on occupants that already
+          // HOLD a value for a field, so count only those. Reconciliation itself
+          // must still touch every occupant so new required+default fields get
+          // backfilled onto tasks that currently have no custom field values.
+          if (Object.keys(values).length === 0) continue;
+          for (const key of Object.keys(values)) {
+            occupantsByField.set(key, (occupantsByField.get(key) ?? 0) + 1);
+          }
+        }
+        const incompatible = computeIncompatibleFieldChanges(
+          existingForFields.ir,
+          nextIrForFields,
+          occupantsByField,
+        );
+        if (incompatible.length > 0 && updates.coerce === undefined) {
+          throw new IncompatibleFieldChangeError(id, incompatible);
+        }
+        pendingFieldReconcile = {
+          oldFields,
+          newFields,
+          occupantTaskIds,
+          coerce: updates.coerce,
+        };
+      }
+    }
+    const saved = await this.withConfigLock(async () => {
+      const existing = await this.getWorkflowDefinition(id);
+      if (!existing) throw new Error(`Workflow '${id}' not found`);
+
+      const name = updates.name !== undefined ? updates.name.trim() : existing.name;
+      if (!name) throw new Error("Workflow name is required");
+      const ir = updates.ir !== undefined ? parseWorkflowIr(updates.ir) : existing.ir;
+      // Residual A: reject save-blocking trait composition conflicts server-side
+      // when the IR is being changed.
+      if (updates.ir !== undefined) this.assertWorkflowIrTraitsValid(ir);
+      const next: WorkflowDefinition = {
+        ...existing,
+        name,
+        description: updates.description !== undefined ? updates.description : existing.description,
+        ir,
+        layout: updates.layout !== undefined ? updates.layout : existing.layout,
+        updatedAt: new Date().toISOString(),
+      };
+
+      this.db
+        .prepare(
+          `UPDATE workflows SET name = ?, description = ?, ir = ?, layout = ?, updatedAt = ? WHERE id = ?`,
+        )
+        .run(
+          next.name,
+          next.description,
+          // Rollback compat (#1405): persist v1 shape when pure and flag OFF.
+          serializeWorkflowIr(flagOn ? next.ir : downgradeIrToV1IfPure(next.ir)),
+          JSON.stringify(next.layout),
+          next.updatedAt,
+          id,
+        );
+
+      this.workflowDefinitionsCache = null;
+      this.db.bumpLastModified();
+      return next;
+    });
+
+    // U5 (R20): now that the new IR is committed, re-home the occupants of the
+    // removed columns into `rehomeTo` (one audit event per card). Done outside
+    // the config lock; each rehome takes its own task lock via moveTask.
+    if (pendingRehome) {
+      for (const taskId of pendingRehome.occupantTaskIds) {
+        await this.rehomeOccupant(taskId, pendingRehome.rehomeTo, "workflow-edit-rehome", {
+          workflowId: id,
+        });
+      }
+    }
+
+    // U11/KTD-13: now that the new field schema is committed, reconcile each
+    // occupant task's stored values against it (orphan-not-delete by default;
+    // coerce:"drop" discards orphans). Each runs under its own task lock.
+    if (pendingFieldReconcile) {
+      const dropOrphans = pendingFieldReconcile.coerce === "drop";
+      for (const taskId of pendingFieldReconcile.occupantTaskIds) {
+        await this.withTaskLock(taskId, () =>
+          this.reconcileTaskCustomFieldsForSchema(
+            taskId,
+            pendingFieldReconcile!.oldFields,
+            pendingFieldReconcile!.newFields,
+            dropOrphans,
+          ),
+        );
+      }
+    }
+    return saved;
+  }
+
+  /** Delete a workflow definition, cascading to per-task selections, their
+   *  materialized step rows, and the project default. Throws when the id does
+   *  not exist. */
+  async deleteWorkflowDefinition(id: string): Promise<void> {
+    if (isBuiltinWorkflowId(id)) throw new Error("Built-in workflows cannot be deleted");
+    // U5 (R20): flag-ON, capture the occupant task ids BEFORE the cascade clears
+    // their selection rows, so we can re-home them to the DEFAULT workflow's
+    // entry column once their selection resolves back to the default (KTD-1).
+    const flagOn = await this.workflowColumnsFlagOn();
+    const occupantTaskIds = flagOn ? this.listWorkflowOccupantTaskIds(id, false) : [];
+    const deleted = this.db.prepare("DELETE FROM workflows WHERE id = ?").run(id) as { changes?: number };
+    if ((deleted.changes || 0) === 0) {
+      throw new Error(`Workflow '${id}' not found`);
+    }
+    this.workflowDefinitionsCache = null;
+
+    // Cascade: clear the project default when it pointed at this workflow.
+    try {
+      if ((await this.getDefaultWorkflowId()) === id) {
+        await this.setDefaultWorkflowId(null);
+      }
+    } catch {
+      // Best-effort: a dangling default falls back gracefully at task creation.
+    }
+
+    // Cascade: drop selections referencing this workflow, their materialized
+    // step rows, and reset the affected tasks' enabled steps.
+    const selections = this.db
+      .prepare("SELECT taskId, stepIds FROM task_workflow_selection WHERE workflowId = ?")
+      .all(id) as Array<{ taskId: string; stepIds: string }>;
+    for (const row of selections) {
+      try {
+        const stepIds = JSON.parse(row.stepIds) as unknown;
+        if (Array.isArray(stepIds)) {
+          for (const stepId of stepIds) {
+            if (typeof stepId === "string") {
+              this.db.prepare("DELETE FROM workflow_steps WHERE id = ?").run(stepId);
+            }
+          }
+        }
+      } catch {
+        // Corrupt stepIds list — still remove the selection row below.
+      }
+      this.db.prepare("DELETE FROM task_workflow_selection WHERE taskId = ?").run(row.taskId);
+      try {
+        await this.updateTask(row.taskId, { enabledWorkflowSteps: [] });
+      } catch {
+        // Task may be deleted/archived; dangling step ids resolve to undefined
+        // at execution time and are skipped.
+      }
+    }
+    if (selections.length > 0) this.workflowStepsCache = null;
+    this.db.bumpLastModified();
+
+    // U5 (R20) delete reconciliation: re-home each occupant to the default
+    // workflow's entry column. Their selection rows are already cleared above,
+    // so they now resolve to the built-in default workflow (KTD-1); the re-home
+    // move preserves task fields (preserveProgress) and emits one audit per card.
+    if (flagOn && occupantTaskIds.length > 0) {
+      const defaultEntry = resolveEntryColumnId(BUILTIN_CODING_WORKFLOW_IR);
+      if (defaultEntry) {
+        for (const taskId of occupantTaskIds) {
+          await this.rehomeOccupant(taskId, defaultEntry, "workflow-delete", { workflowId: id });
+        }
+      }
+    }
+  }
+
+  // ── U5: workflow lifecycle reconciliation (switch / edit / delete) ──────────
+  //
+  // These helpers are only consulted when the `workflowColumns` flag is ON; the
+  // flag-OFF CRUD paths above keep their exact current behavior. Re-homing moves
+  // always route through `moveTask` with `moveSource: "engine"` + `bypassGuards`
+  // (a recovery-class move, KTD-9) — never a raw column write — so capacity
+  // (KTD-10) and the single transition authority (KTD-3) are honored.
+
+  /** True when the `workflowColumns` flag is ON (merged global + project). */
+  private async workflowColumnsFlagOn(): Promise<boolean> {
+    return isWorkflowColumnsEnabled(await this.getSettingsFast());
+  }
+
+  /** The active (non-deleted) task ids currently selecting `workflowId`. A
+   *  built-in/default workflow additionally owns every task with NO selection
+   *  row (null selection resolves to the default workflow, KTD-1). */
+  private listWorkflowOccupantTaskIds(workflowId: string, includeNullSelection: boolean): string[] {
+    const ids: string[] = [];
+    const selected = this.db
+      .prepare(
+        `SELECT s.taskId AS taskId FROM task_workflow_selection s
+           JOIN tasks t ON t.id = s.taskId
+          WHERE s.workflowId = ? AND t."deletedAt" IS NULL`,
+      )
+      .all(workflowId) as Array<{ taskId: string }>;
+    for (const row of selected) ids.push(row.taskId);
+    if (includeNullSelection) {
+      const unselected = this.db
+        .prepare(
+          `SELECT t.id AS id FROM tasks t
+            WHERE t."deletedAt" IS NULL
+              AND NOT EXISTS (SELECT 1 FROM task_workflow_selection s WHERE s.taskId = t.id)`,
+        )
+        .all() as Array<{ id: string }>;
+      for (const row of unselected) ids.push(row.id);
+    }
+    return ids;
+  }
+
+  /** Map column id → occupant count for the tasks selecting `workflowId`
+   *  (plus null-selection tasks when `includeNullSelection`). */
+  private occupantsByColumnForWorkflow(
+    workflowId: string,
+    includeNullSelection: boolean,
+  ): Map<string, number> {
+    const counts = new Map<string, number>();
+    for (const taskId of this.listWorkflowOccupantTaskIds(workflowId, includeNullSelection)) {
+      const row = this.db.prepare(`SELECT "column" AS column FROM tasks WHERE id = ?`).get(taskId) as
+        | { column: string }
+        | undefined;
+      if (!row) continue;
+      counts.set(row.column, (counts.get(row.column) ?? 0) + 1);
+    }
+    return counts;
+  }
+
+  /** Re-home a single occupant to `targetColumn` via an engine-sourced,
+   *  guard-bypassing recovery move, aborting in-flight work first, and emit one
+   *  audit event. Best-effort per card: a failure is audited and skipped so one
+   *  stuck card never blocks the rest of the batch. */
+  private async rehomeOccupant(
+    taskId: string,
+    targetColumn: string,
+    reason: "workflow-switch" | "workflow-delete" | "workflow-edit-rehome",
+    metadata: Record<string, unknown>,
+  ): Promise<void> {
+    const current = this.readTaskFromDb(taskId, { includeDeleted: false });
+    if (!current) return;
+    const fromColumn = current.column;
+    if (fromColumn === targetColumn) {
+      // Already in the target column — nothing to move, but still record the
+      // reconciliation decision for audit traceability.
+      this.recordRunAuditEvent({
+        taskId,
+        agentId: "system",
+        runId: `workflow-reconcile-${reason}-${taskId}-${Date.now()}`,
+        domain: "database",
+        mutationType: "task:workflow-reconcile",
+        target: taskId,
+        metadata: { ...metadata, reason, fromColumn, toColumn: targetColumn, moved: false },
+      });
+      return;
+    }
+    const abortRan = await runReconciliationAbort({ taskId, fromColumn, reason });
+    let moved = false;
+    let error: string | undefined;
+    try {
+      // Recovery-class move: engine source + bypassGuards (KTD-9). preserveProgress
+      // keeps the task's fields intact (R20 delete semantics). Capacity (KTD-10) is
+      // NOT bypassed — a full target column rejects, which we audit and skip.
+      await this.moveTask(taskId, targetColumn, {
+        moveSource: "engine",
+        bypassGuards: true,
+        recoveryRehome: true,
+        preserveProgress: true,
+        preserveResumeState: true,
+        preserveWorktree: true,
+        allowDirectInReviewMove: true,
+      });
+      moved = true;
+    } catch (err) {
+      error = err instanceof Error ? err.message : String(err);
+    }
+    this.recordRunAuditEvent({
+      taskId,
+      agentId: "system",
+      runId: `workflow-reconcile-${reason}-${taskId}-${Date.now()}`,
+      domain: "database",
+      mutationType: "task:workflow-reconcile",
+      target: taskId,
+      metadata: { ...metadata, reason, fromColumn, toColumn: targetColumn, abortRan, moved, error },
+    });
+  }
+
+  // ── U12: workflow-columns integrity pass ──────────────────────────────────
+  //
+  // Migration rewrites ZERO task rows (KTD-1): a null selection resolves to the
+  // built-in default workflow at read time, and the default workflow's column
+  // IDs are byte-identical to the legacy enum values, so every legacy row is
+  // already valid. The only residual risk is a task whose stored column is not a
+  // valid column in its RESOLVED workflow — e.g. a custom workflow was edited to
+  // drop a column out-of-band, or a legacy row references a column the selected
+  // custom workflow never defined. The integrity pass audits those and re-homes
+  // them via the U5 reconciliation path (`recoveryRehome`, guard-bypassing,
+  // capacity-honoring), one audit event per card.
+  //
+  // Idempotent: a second run finds nothing out-of-place (the re-home lands the
+  // card in a valid column) and is a pure no-op. Tasks in complete- or
+  // archived-flagged columns are left UNTOUCHED (done/archived cards are terminal
+  // — re-homing them would corrupt the board) even if (defensively) their column
+  // were somehow not in the resolved IR; we never disturb terminal cards.
+  //
+  // Runs only when the `workflowColumns` flag is ON (flag-OFF keeps the legacy
+  // enum path, where every column is valid by construction).
+  async runWorkflowColumnsIntegrityPass(): Promise<{ scanned: number; rehomed: number; skippedTerminal: number }> {
+    let scanned = 0;
+    let rehomed = 0;
+    let skippedTerminal = 0;
+
+    const rows = this.db
+      .prepare(`SELECT id FROM tasks WHERE "deletedAt" IS NULL`)
+      .all() as Array<{ id: string }>;
+
+    const registry = getTraitRegistry();
+
+    for (const { id } of rows) {
+      scanned += 1;
+      const task = this.readTaskFromDb(id, { includeDeleted: false });
+      if (!task) continue;
+      const ir = this.resolveTaskWorkflowIrSync(id);
+      const currentColumn = task.column;
+
+      // Already valid in its resolved workflow — nothing to do (the common case;
+      // this is why the pass is idempotent and a no-op for healthy DBs).
+      if (workflowHasColumn(ir, currentColumn)) continue;
+
+      // The stored column is not in the resolved workflow. Before re-homing,
+      // never disturb a terminal card: if the column the card sits in carries a
+      // complete/archived flag in its workflow it is terminal — but since the
+      // column is NOT in the IR we cannot read its flags there. Fall back to the
+      // legacy terminal semantics (done/archived) so terminal cards are never
+      // re-homed, matching the plan's "done/archived untouched" rule.
+      const column = findWorkflowColumn(ir, currentColumn);
+      const flags = column ? registry.resolveColumnFlags(column) : undefined;
+      const isTerminal =
+        flags?.complete === true ||
+        flags?.archived === true ||
+        currentColumn === "done" ||
+        currentColumn === "archived";
+      if (isTerminal) {
+        skippedTerminal += 1;
+        continue;
+      }
+
+      const targetColumn = resolveEntryColumnId(ir);
+      if (!targetColumn) continue; // non-reconcilable IR — leave the card put.
+
+      await this.rehomeOccupant(id, targetColumn, "workflow-edit-rehome", {
+        integrityPass: true,
+        invalidColumn: currentColumn,
+      });
+      rehomed += 1;
+    }
+
+    if (rehomed > 0 || skippedTerminal > 0) {
+      storeLog.log("workflowColumns integrity pass completed", {
+        phase: "init:workflow-columns-integrity",
+        scanned,
+        rehomed,
+        skippedTerminal,
+      });
+    }
+    return { scanned, rehomed, skippedTerminal };
+  }
+
+  // ── #1401: transitionPending recovery sweep ───────────────────────────────
+  //
+  // A crash between the in-txn `transitionPending` marker write and the
+  // post-commit `clearTransitionPending` leaves the marker set forever. Because
+  // `countActiveInCapacitySlotSync` counts a pending marker as occupying a
+  // capacity slot for its `toColumn`, a stale marker permanently inflates that
+  // (workflow, column) capacity count. This sweep is the backstop the comments
+  // across store.ts / merge-trait.ts / transition-pending.ts reference: it scans
+  // every task carrying a non-null marker, reconciles `hooksRemaining` against
+  // the currently-known hook set, re-runs the surviving idempotent post-commit
+  // hooks via the same runner the live path uses, audits the recovery, and
+  // clears the marker so the reserved capacity slot is released.
+  //
+  // Idempotent: the default-workflow field effects already committed in-lock, so
+  // re-running them is a no-op, and a second sweep finds no markers. Plugin hooks
+  // are re-derived from the resolved IR (so an uninstalled-plugin hook simply
+  // drops, surfaced as an audit warning) and are expected to be idempotent per
+  // KTD-2. Runs at store init (alongside the integrity pass) and periodically
+  // from the flag-ON sweep cadence.
+  async recoverStaleTransitionPending(): Promise<{ scanned: number; recovered: number; degradedHooks: number }> {
+    let scanned = 0;
+    let recovered = 0;
+    let degradedHooks = 0;
+
+    const rows = this.db
+      .prepare(
+        `SELECT id FROM tasks WHERE transitionPending IS NOT NULL AND transitionPending != '' AND deletedAt IS NULL`,
+      )
+      .all() as Array<{ id: string }>;
+
+    // The set of hook ids the current process can still honor: the always-present
+    // default-workflow post-commit marker plus every registered plugin trait's
+    // onEnter/onExit hook. A marker entry not in this set belongs to an
+    // uninstalled plugin and is dropped (audited) rather than re-run.
+    const registry = getTraitRegistry();
+    const knownHookIds = new Set<string>(["default-workflow:postCommit"]);
+    for (const def of registry.listTraits()) {
+      if (def.hooks?.onEnter) knownHookIds.add(`${def.id}:onEnter`);
+      if (def.hooks?.onExit) knownHookIds.add(`${def.id}:onExit`);
+    }
+
+    for (const { id } of rows) {
+      scanned += 1;
+      const marker = readTransitionPending(this.db, id);
+      // null = nothing pending (corrupt/empty marker degrades to settled); we
+      // still clear the stored column so the slot is released. undefined = row
+      // vanished mid-sweep — skip.
+      if (marker === undefined) continue;
+
+      await this.withTaskLock(id, async () => {
+        // Re-read inside the lock: another path may have cleared it already.
+        const live = readTransitionPending(this.db, id);
+        if (live == null) {
+          // Corrupt/empty marker — clear the stored value defensively so it stops
+          // counting against capacity, then move on.
+          if (live === null) {
+            try {
+              clearTransitionPending(this.db, id);
+            } catch {
+              // best-effort
+            }
+          }
+          return;
+        }
+
+        const { hooksRemaining, warnings } = reconcileHooksRemaining(live.hooksRemaining, knownHookIds);
+        degradedHooks += warnings.length;
+
+        // Re-run the surviving idempotent post-commit hooks. The default-workflow
+        // field effects already committed in-lock pre-crash, so the only work that
+        // can still be owed is the plugin trait hook runner, which re-derives its
+        // pending set from the resolved IR and is idempotent (KTD-2). We invoke it
+        // only when a plugin hook entry survived (a marker carrying just
+        // `default-workflow:postCommit` needs no re-run — just a clear).
+        const hasSurvivingPluginHook = hooksRemaining.some((h) => h !== "default-workflow:postCommit");
+        if (hasSurvivingPluginHook) {
+          const task = this.readTaskFromDb(id, { includeDeleted: false });
+          if (task) {
+            const ir = this.resolveTaskWorkflowIrSync(id);
+            // fromColumn is unknown post-crash; the marker only records toColumn.
+            // The hook runner keys onEnter off toColumn (and onExit off fromColumn);
+            // re-running onEnter for the destination is the recoverable, idempotent
+            // half. Use the task's current column as fromColumn (it committed to
+            // toColumn at marker-write time, so current == toColumn and onExit is a
+            // no-op, which is correct — we never re-fire an exit we may have run).
+            try {
+              await this.runPluginColumnTransitionHooks(id, ir, task.column, live.toColumn);
+            } catch (err) {
+              storeLog.warn("transitionPending recovery: hook re-run faulted (degraded)", {
+                phase: "recover-stale-transition-pending",
+                taskId: id,
+                error: err instanceof Error ? err.message : String(err),
+              });
+            }
+          }
+        }
+
+        for (const warning of warnings) {
+          storeLog.warn(warning, {
+            phase: "recover-stale-transition-pending",
+            taskId: id,
+          });
+        }
+
+        // Clear the marker — releases the reserved capacity slot.
+        try {
+          clearTransitionPending(this.db, id);
+        } catch {
+          // best-effort; a later sweep retries.
+        }
+
+        this.recordRunAuditEvent({
+          taskId: id,
+          agentId: "system",
+          runId: `transition-pending-recovery-${id}-${Date.now()}`,
+          domain: "database",
+          mutationType: "task:transition-pending-recovered",
+          target: id,
+          metadata: {
+            toColumn: live.toColumn,
+            hooksReran: hooksRemaining,
+            droppedHooks: warnings.length,
+            startedAt: live.startedAt,
+          },
+        });
+        recovered += 1;
+      });
+    }
+
+    if (recovered > 0 || degradedHooks > 0) {
+      storeLog.log("transitionPending recovery sweep completed", {
+        phase: "recover-stale-transition-pending",
+        scanned,
+        recovered,
+        degradedHooks,
+      });
+    }
+    return { scanned, recovered, degradedHooks };
+  }
+
+  // ── #1409: flag ON→OFF evacuation ─────────────────────────────────────────
+  //
+  // When `workflowColumns` is disabled (or at flag-OFF store init), the board
+  // reverts to the legacy enum/`VALID_TRANSITIONS` path, where only the legacy
+  // {@link COLUMNS} are valid. Any card sitting in a CUSTOM (non-legacy) column
+  // would be stuck: it can't be listed/moved through the legacy path. This pass
+  // detects those cards and re-homes each to the nearest legacy column — the
+  // default workflow's entry column (`todo`) — via the existing recovery-rehome
+  // path (engine source + bypassGuards + recoveryRehome, capacity-honoring),
+  // auditing one event per card. Terminal cards (done/archived) are left put.
+  //
+  // Idempotent: a second run finds every card in a legacy column and is a no-op.
+  async evacuateCustomColumnsToLegacy(
+    trigger: "flag-off-init" | "flag-toggled-off",
+  ): Promise<{ scanned: number; evacuated: number }> {
+    let scanned = 0;
+    let evacuated = 0;
+
+    const legacyColumns = new Set<string>(COLUMNS);
+    // Nearest legacy landing column: the default workflow's entry column
+    // (triage). Falls back to "triage" defensively if the IR can't be resolved.
+    const targetColumn = resolveEntryColumnId(BUILTIN_CODING_WORKFLOW_IR) ?? "triage";
+
+    const rows = this.db
+      .prepare(`SELECT id, "column" AS col FROM tasks WHERE deletedAt IS NULL`)
+      .all() as Array<{ id: string; col: string }>;
+
+    for (const { id, col } of rows) {
+      scanned += 1;
+      // Already in a legacy column (the common case) — nothing to evacuate.
+      if (legacyColumns.has(col)) continue;
+      // Never disturb terminal cards (legacy terminal semantics — these column
+      // ids are never legacy here, but guard defensively for parity with the
+      // integrity pass).
+      if (col === "done" || col === "archived") continue;
+
+      await this.rehomeOccupant(id, targetColumn, "workflow-edit-rehome", {
+        evacuation: true,
+        trigger,
+        invalidColumn: col,
+      });
+      evacuated += 1;
+    }
+
+    if (evacuated > 0) {
+      storeLog.log("workflowColumns ON→OFF evacuation completed", {
+        phase: "evacuate-custom-columns",
+        trigger,
+        scanned,
+        evacuated,
+      });
+    }
+    return { scanned, evacuated };
+  }
+
+  // ── Workflow selection (resolves a workflow to enabledWorkflowSteps) ────
+  //
+  // Selection never touches the engine's scheduler/executor/merger. It compiles
+  // a workflow into WorkflowStep rows and writes their ids into the task's
+  // existing `enabledWorkflowSteps`, which the executor already consumes.
+
+  /** The configured project-default workflow id, or undefined when unset. */
+  async getDefaultWorkflowId(): Promise<string | undefined> {
+    const settings = await this.getSettingsFast();
+    const id = (settings as { defaultWorkflowId?: string }).defaultWorkflowId;
+    return id && id.trim() ? id : undefined;
+  }
+
+  /** Set (or clear, with null) the project-default workflow. */
+  async setDefaultWorkflowId(workflowId: string | null): Promise<void> {
+    if (workflowId) {
+      const exists = await this.getWorkflowDefinition(workflowId);
+      if (!exists) throw new Error(`Workflow '${workflowId}' not found`);
+    }
+    // null is updateSettings' explicit-delete sentinel for project keys.
+    await this.updateSettings({ defaultWorkflowId: workflowId } as unknown as Partial<Settings>);
+  }
+
+  /** Whether a raw workflow CLI command has been approved (trust-on-first-use).
+   *  Comparison is on the exact trimmed command string. */
+  async isWorkflowCliCommandApproved(command: string): Promise<boolean> {
+    const trimmed = command.trim();
+    if (!trimmed) return false;
+    const settings = await this.getSettings();
+    const approved = (settings as { approvedWorkflowCliCommands?: string[] }).approvedWorkflowCliCommands;
+    return Array.isArray(approved) && approved.includes(trimmed);
+  }
+
+  /** Record approval for a raw workflow CLI command. Idempotent. */
+  async approveWorkflowCliCommand(command: string): Promise<void> {
+    const trimmed = command.trim();
+    if (!trimmed) throw new Error("CLI command is required");
+    const settings = await this.getSettings();
+    const approved = (settings as { approvedWorkflowCliCommands?: string[] }).approvedWorkflowCliCommands ?? [];
+    if (approved.includes(trimmed)) return;
+    await this.updateSettings({
+      approvedWorkflowCliCommands: [...approved, trimmed],
+    } as unknown as Partial<Settings>);
+  }
+
+  /** Read the workflow currently selected for a task, if any. */
+  /**
+   * Synchronously resolve the parsed WorkflowIr that governs a task's columns
+   * (U4, flag-ON path). Resolution order:
+   *   1. the task's workflow selection (side table) → that workflow's IR;
+   *   2. null/missing selection → the built-in default workflow IR (KTD-1).
+   * Built-in workflow IRs are resolved from the parsed module constant; custom
+   * workflows are read + parsed from the `workflows` row. Pure DB read, safe to
+   * call inside `withTaskLock` (no further locks taken). A parse failure or
+   * missing custom row falls back to the default workflow so a move is never
+   * stranded by a corrupt definition (degraded, not crashed).
+   */
+  /**
+   * U8 (KTD-2): record a pre-evaluated plugin gate verdict for a move into
+   * `toColumn`. Called by the engine's plugin trait adapter AFTER it evaluated
+   * the gate (prompt/script) outside the task lock. The flag-ON guard site in
+   * `moveTaskInternal` re-checks the recorded verdict in-lock. Verdicts are
+   * consumed (cleared) by `consumePluginGateVerdicts` once read so a stale
+   * verdict can't silently re-authorize a later move.
+   */
+  recordPluginGateVerdict(
+    taskId: string,
+    toColumn: string,
+    verdict: Omit<PluginGateVerdict, "recordedAt"> & { recordedAt?: number },
+  ): void {
+    let byColumn = this.pluginGateVerdicts.get(taskId);
+    if (!byColumn) {
+      byColumn = new Map();
+      this.pluginGateVerdicts.set(taskId, byColumn);
+    }
+    const list = byColumn.get(toColumn) ?? [];
+    // Replace any prior verdict for the same trait (latest evaluation wins).
+    const filtered = list.filter((v) => v.traitId !== verdict.traitId);
+    filtered.push({ ...verdict, recordedAt: verdict.recordedAt ?? Date.now() });
+    byColumn.set(toColumn, filtered);
+  }
+
+  /**
+   * U8: read AND clear the recorded plugin gate verdicts for a (task, column).
+   * Returns the recorded verdicts (possibly empty). Consuming clears them so the
+   * verdict authorizes exactly one move attempt.
+   */
+  consumePluginGateVerdicts(taskId: string, toColumn: string): PluginGateVerdict[] {
+    const byColumn = this.pluginGateVerdicts.get(taskId);
+    if (!byColumn) return [];
+    const list = byColumn.get(toColumn) ?? [];
+    byColumn.delete(toColumn);
+    if (byColumn.size === 0) this.pluginGateVerdicts.delete(taskId);
+    return list;
+  }
+
+  /**
+   * Resolve the custom-field definitions (KTD-13) governing a task, via its
+   * workflow selection. v1 IR and the default workflow declare none → `[]`.
+   * Pure DB read, safe inside transactions.
+   */
+  private resolveTaskCustomFieldDefsSync(taskId: string): WorkflowFieldDefinition[] {
+    const ir = this.resolveTaskWorkflowIrSync(taskId);
+    return ir.version === "v2" ? (ir.fields ?? []) : [];
+  }
+
+  private resolveTaskWorkflowIrSync(taskId: string): WorkflowIr {
+    const selection = this.getTaskWorkflowSelection(taskId);
+    const workflowId = selection?.workflowId;
+    if (!workflowId) return BUILTIN_CODING_WORKFLOW_IR;
+    if (isBuiltinWorkflowId(workflowId)) {
+      const builtin = getBuiltinWorkflow(workflowId);
+      return builtin?.ir ?? BUILTIN_CODING_WORKFLOW_IR;
+    }
+    try {
+      const row = this.db
+        .prepare("SELECT ir FROM workflows WHERE id = ?")
+        .get(workflowId) as { ir: string } | undefined;
+      if (!row) return BUILTIN_CODING_WORKFLOW_IR;
+      return parseWorkflowIr(row.ir);
+    } catch {
+      return BUILTIN_CODING_WORKFLOW_IR;
+    }
+  }
+
+  /**
+   * U6 (KTD-10): the *effective workflow id* used to scope the per-(workflow,
+   * column) capacity count. A task with no selection (or a missing/empty
+   * selection row) resolves to the built-in default workflow, represented by a
+   * stable sentinel so all default-workflow tasks share one capacity pool. A
+   * selected workflow id (builtin or custom) is its own pool. Pure DB read; safe
+   * inside the move transaction.
+   */
+  private resolveEffectiveWorkflowIdSync(taskId: string): string {
+    const selection = this.getTaskWorkflowSelection(taskId);
+    return selection?.workflowId ?? TaskStore.DEFAULT_WORKFLOW_POOL_ID;
+  }
+
+  /**
+   * U6 (KTD-10): count cards currently occupying a (workflow, column) capacity
+   * slot, for the in-txn capacity check. Runs INSIDE `moveTaskInternal`'s
+   * transaction. A slot is held by a card that:
+   *   - has committed its column to `targetColumn` (the steady-state holders), OR
+   *   - (when `countPending`) has a `transitionPending` marker targeting
+   *     `targetColumn` — it reserved the slot at commit time even though its
+   *     post-commit hooks haven't finished yet.
+   * The moving task itself (`excludeTaskId`) is excluded so a same-column no-op
+   * or re-entry never counts itself. Only the candidates in the SAME effective
+   * workflow as the mover count (capacity is per-(workflow, column)). Soft-deleted
+   * tasks never hold a slot.
+   */
+  private countActiveInCapacitySlotSync(params: {
+    targetColumn: string;
+    workflowId: string;
+    countPending: boolean;
+    excludeTaskId: string;
+  }): number {
+    const { targetColumn, workflowId, countPending, excludeTaskId } = params;
+    // Candidate rows: in the column now, or (optionally) mid-transition into it.
+    // LEFT JOIN the selection row so we can scope by effective workflow id in JS.
+    const rows = this.db
+      .prepare(
+        `SELECT t.id AS id, t."column" AS col, t.transitionPending AS tp, s.workflowId AS wid
+         FROM tasks t
+         LEFT JOIN task_workflow_selection s ON s.taskId = t.id
+         WHERE t.deletedAt IS NULL
+           AND t.id != ?
+           AND (t."column" = ? OR (t.transitionPending IS NOT NULL AND t.transitionPending != ''))`,
+      )
+      .all(excludeTaskId, targetColumn) as Array<{
+        id: string;
+        col: string;
+        tp: string | null;
+        wid: string | null;
+      }>;
+
+    let count = 0;
+    for (const row of rows) {
+      const effectiveWorkflowId = row.wid ?? TaskStore.DEFAULT_WORKFLOW_POOL_ID;
+      if (effectiveWorkflowId !== workflowId) continue;
+
+      if (row.col === targetColumn) {
+        count += 1;
+        continue;
+      }
+      // Not committed into the column — only counts if it has reserved the slot
+      // via a transitionPending marker targeting this column AND countPending.
+      if (!countPending || !row.tp) continue;
+      let toColumn: string | undefined;
+      try {
+        const parsed = JSON.parse(row.tp) as { toColumn?: unknown };
+        if (typeof parsed.toColumn === "string") toColumn = parsed.toColumn;
+      } catch {
+        // Corrupt marker — treat as not holding this slot.
+      }
+      if (toColumn === targetColumn) count += 1;
+    }
+    return count;
+  }
+
+  getTaskWorkflowSelection(taskId: string): { workflowId: string; stepIds: string[] } | undefined {
+    const row = this.db
+      .prepare("SELECT workflowId, stepIds FROM task_workflow_selection WHERE taskId = ?")
+      .get(taskId) as { workflowId: string; stepIds: string } | undefined;
+    if (!row) return undefined;
+    let stepIds: string[] = [];
+    try {
+      const parsed = JSON.parse(row.stepIds) as unknown;
+      if (Array.isArray(parsed)) stepIds = parsed.filter((s): s is string => typeof s === "string");
+    } catch {
+      // Corrupt list falls back to empty.
+    }
+    return { workflowId: row.workflowId, stepIds };
+  }
+
+  private writeTaskWorkflowSelection(taskId: string, workflowId: string, stepIds: string[]): void {
+    this.db
+      .prepare(
+        `INSERT INTO task_workflow_selection (taskId, workflowId, stepIds, updatedAt)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(taskId) DO UPDATE SET
+           workflowId = excluded.workflowId,
+           stepIds = excluded.stepIds,
+           updatedAt = excluded.updatedAt`,
+      )
+      .run(taskId, workflowId, JSON.stringify(stepIds), new Date().toISOString());
+  }
+
+  /** Delete the WorkflowStep rows previously materialized for a task's selection
+   *  and remove the selection record. Best-effort; safe to call when unset. */
+  private removeMaterializedSelection(taskId: string): void {
+    const existing = this.getTaskWorkflowSelection(taskId);
+    if (existing) {
+      for (const stepId of existing.stepIds) {
+        this.db.prepare("DELETE FROM workflow_steps WHERE id = ?").run(stepId);
+      }
+      this.workflowStepsCache = null;
+    }
+    this.db.prepare("DELETE FROM task_workflow_selection WHERE taskId = ?").run(taskId);
+  }
+
+  /** Purge a task's workflow selection and its materialized WorkflowStep rows
+   *  when the task row itself is being physically removed. `task_workflow_selection`
+   *  has no FK to `tasks(id)` (SQLite can't add one to an existing table without a
+   *  rebuild), so deletion must be mirrored here to avoid orphaned selection rows
+   *  and unreclaimable compiled steps. Best-effort and synchronous: unlike
+   *  clearTaskWorkflowSelection it does not touch enabledWorkflowSteps, since the
+   *  owning task row no longer exists. */
+  private purgeTaskWorkflowSelectionRows(taskId: string): void {
+    const row = this.db
+      .prepare("SELECT stepIds FROM task_workflow_selection WHERE taskId = ?")
+      .get(taskId) as { stepIds: string } | undefined;
+    if (!row) return;
+    try {
+      const parsed = JSON.parse(row.stepIds) as unknown;
+      if (Array.isArray(parsed)) {
+        for (const stepId of parsed) {
+          if (typeof stepId === "string") {
+            this.db.prepare("DELETE FROM workflow_steps WHERE id = ?").run(stepId);
+          }
+        }
+      }
+    } catch {
+      // Corrupt stepIds list — still remove the selection row below.
+    }
+    this.db.prepare("DELETE FROM task_workflow_selection WHERE taskId = ?").run(taskId);
+    this.workflowStepsCache = null;
+  }
+
+  /** Delete a set of freshly materialized WorkflowStep rows that were never
+   *  successfully attached to a task/selection (e.g. the owning task create
+   *  failed). Best-effort; tolerates already-removed ids. */
+  private cleanupOrphanedMaterializedSteps(stepIds: string[] | undefined): void {
+    if (!stepIds || stepIds.length === 0) return;
+    for (const stepId of stepIds) {
+      try {
+        this.db.prepare("DELETE FROM workflow_steps WHERE id = ?").run(stepId);
+      } catch {
+        // Best-effort cleanup.
+      }
+    }
+    this.workflowStepsCache = null;
+  }
+
+  /** Persist pre-compiled workflow steps as fresh WorkflowStep rows and return
+   *  their ids in execution order. Steps are tagged so they stay out of the
+   *  step manager. Compile via compileWorkflowToSteps before calling. */
+  private async materializeWorkflowSteps(
+    workflowId: string,
+    inputs: import("./types.js").WorkflowStepInput[],
+  ): Promise<string[]> {
+    const ids: string[] = [];
+    for (const input of inputs) {
+      const step = await this.createWorkflowStep({
+        ...input,
+        templateId: `${WORKFLOW_COMPILED_STEP_TEMPLATE_PREFIX}${workflowId}`,
+        enabled: true,
+      });
+      ids.push(step.id);
+    }
+    return ids;
+  }
+
+  /** Resolve the project-default workflow into materialized step ids, or null
+   *  when no default is set / it is missing / it does not compile. */
+  private async materializeDefaultWorkflowSteps(): Promise<{ workflowId: string; stepIds: string[] } | undefined> {
+    const workflowId = await this.getDefaultWorkflowId();
+    if (!workflowId) return undefined;
+    const def = await this.getWorkflowDefinition(workflowId);
+    if (!def) return undefined;
+    // Compile (and validate) before creating any rows so a non-compilable
+    // default falls back cleanly with nothing written.
+    const inputs = compileWorkflowToSteps(def.ir);
+    const stepIds = await this.materializeWorkflowSteps(workflowId, inputs);
+    return { workflowId, stepIds };
+  }
+
+  /**
+   * Select a workflow for a task: compile it, materialize its steps, and write
+   * their ids into the task's enabledWorkflowSteps. Replaces any prior selection
+   * (no orphaned steps). Throws WorkflowCompileError for non-linear graphs
+   * before any state is written.
+   */
+  async selectTaskWorkflow(taskId: string, workflowId: string): Promise<string[]> {
+    // Hold the task lock across the whole sequence (materialize → owner write →
+    // prior-step cleanup) so it can't interleave with a concurrent select/clear
+    // or executor updateTask on the same task. updateTaskUnlocked is used inside
+    // because the per-task lock is non-reentrant.
+    return this.withTaskLock(taskId, async () => {
+      const def = await this.getWorkflowDefinition(workflowId);
+      if (!def) throw new Error(`Workflow '${workflowId}' not found`);
+      // Compile once up front: a non-linear graph aborts before any mutation.
+      const inputs = compileWorkflowToSteps(def.ir);
+
+      // Materialize the new steps and point the task at them BEFORE deleting the
+      // prior selection's rows, so a mid-flight failure never leaves the task
+      // referencing already-deleted step ids.
+      const priorSelection = this.getTaskWorkflowSelection(taskId);
+      // U11/KTD-13: capture the OLD field schema (from the prior selection's IR)
+      // before the selection row flips, so we can reconcile existing field values
+      // against the NEW workflow's schema below.
+      const oldFieldDefs = this.resolveTaskCustomFieldDefsSync(taskId);
+      const newFieldDefs: WorkflowFieldDefinition[] =
+        def.ir.version === "v2" ? (def.ir.fields ?? []) : [];
+      const ids = await this.materializeWorkflowSteps(workflowId, inputs);
+      try {
+        await this.updateTaskUnlocked(taskId, { enabledWorkflowSteps: ids });
+        this.writeTaskWorkflowSelection(taskId, workflowId, ids);
+      } catch (err) {
+        // The owner write (updateTask / selection upsert) failed, so the steps we
+        // just materialized would orphan with no selection row pointing at them.
+        // Delete them before propagating; the prior selection is left untouched.
+        for (const stepId of ids) {
+          try {
+            this.db.prepare("DELETE FROM workflow_steps WHERE id = ?").run(stepId);
+          } catch {
+            // Best-effort cleanup; surface the original error below.
+          }
+        }
+        this.workflowStepsCache = null;
+        throw err;
+      }
+
+      if (priorSelection) {
+        for (const stepId of priorSelection.stepIds) {
+          this.db.prepare("DELETE FROM workflow_steps WHERE id = ?").run(stepId);
+        }
+        this.workflowStepsCache = null;
+      }
+
+      // U11/KTD-13: reconcile custom field values against the NEW workflow's
+      // schema. Same-id, type-compatible values are kept; incompatible/removed
+      // ids are orphaned — but RETAINED in storage (orphan-not-delete) so a later
+      // switch back, or the orphaned-fields disclosure, can still surface them.
+      // Then fill defaults for the new workflow's required+default fields that
+      // are absent. The merged object is written DIRECTLY (bypassing the
+      // validating patch path) because orphaned ids are by definition unknown to
+      // the new schema and would otherwise be rejected.
+      await this.reconcileTaskCustomFieldsForSchema(taskId, oldFieldDefs, newFieldDefs);
+
+      return ids;
+    });
+  }
+
+  /**
+   * U11/KTD-13: reconcile a task's stored custom field values when its governing
+   * field schema changes (workflow switch or definition edit). Values are
+   * partitioned by {@link reconcileFieldsOnWorkflowChange}; orphans are retained
+   * (never destroyed). Required+default fields absent from the result are filled.
+   * Writes the merged values directly onto task.json — orphaned ids are unknown
+   * to the new schema, so this deliberately bypasses the validating patch path.
+   * Assumes the caller already holds the per-task lock.
+   */
+  private async reconcileTaskCustomFieldsForSchema(
+    taskId: string,
+    oldFieldDefs: WorkflowFieldDefinition[],
+    newFieldDefs: WorkflowFieldDefinition[],
+    dropOrphans = false,
+  ): Promise<void> {
+    const dir = this.taskDir(taskId);
+    const task = await this.readTaskJson(dir);
+    const current = task.customFields ?? {};
+    const { kept, orphaned } = reconcileFieldsOnWorkflowChange(oldFieldDefs, newFieldDefs, current);
+    // Default (keep-orphaned): storage keeps everything (kept ∪ orphaned).
+    // coerce:"drop" discards the orphaned values entirely.
+    const base = dropOrphans ? { ...kept } : { ...kept, ...orphaned };
+    const reconciled = applyFieldDefaults(newFieldDefs, base);
+    // Skip the write when nothing changed (no defaults added, same keys/values).
+    const unchanged =
+      Object.keys(reconciled).length === Object.keys(current).length &&
+      Object.entries(reconciled).every(([k, v]) => current[k] === v);
+    if (unchanged) return;
+    task.customFields = reconciled;
+    task.updatedAt = new Date().toISOString();
+    await this.atomicWriteTaskJson(dir, task);
+    if (this.isWatching) this.taskCache.set(taskId, { ...task });
+    this.emitTaskLifecycleEventSafely("task:updated", [task]);
+  }
+
+  /**
+   * U5 (R20) workflow switch: select a workflow for a task and, when the
+   * `workflowColumns` flag is ON, reconcile the card's board column against the
+   * NEW workflow. Same-id column preserves position; otherwise the card re-homes
+   * to the new workflow's entry (intake-flagged, else first) column, aborting
+   * in-flight processing first (KTD-9). Returns the materialized step ids plus
+   * the switch outcome so the dashboard can surface the re-home.
+   *
+   * Reconciliation runs AFTER `selectTaskWorkflow` releases the per-task lock
+   * (moveTask takes its own lock; the per-task lock is non-reentrant).
+   */
+  async selectTaskWorkflowAndReconcile(
+    taskId: string,
+    workflowId: string,
+  ): Promise<{
+    enabledWorkflowSteps: string[];
+    reconciliation?: { preserved: boolean; fromColumn: string; toColumn: string };
+  }> {
+    const enabledWorkflowSteps = await this.selectTaskWorkflow(taskId, workflowId);
+    if (!(await this.workflowColumnsFlagOn())) {
+      return { enabledWorkflowSteps };
+    }
+    const newIr = this.resolveTaskWorkflowIrSync(taskId);
+    const current = this.readTaskFromDb(taskId, { includeDeleted: false });
+    if (!current) return { enabledWorkflowSteps };
+    const fromColumn = current.column;
+    const decision = resolveSwitchReconciliation(newIr, fromColumn);
+    if (!decision.preserved && decision.targetColumn !== fromColumn) {
+      await this.rehomeOccupant(taskId, decision.targetColumn, "workflow-switch", { workflowId });
+    }
+    return {
+      enabledWorkflowSteps,
+      reconciliation: {
+        preserved: decision.preserved,
+        fromColumn,
+        toColumn: decision.targetColumn,
+      },
+    };
+  }
+
+  /** Clear a task's workflow selection and its enabled steps. */
+  async clearTaskWorkflowSelection(taskId: string): Promise<void> {
+    await this.withTaskLock(taskId, async () => {
+      this.removeMaterializedSelection(taskId);
+      await this.updateTaskUnlocked(taskId, { enabledWorkflowSteps: [] });
+    });
+  }
+
   /**
    * Close the database connection and clean up resources.
    * Call this when the store is no longer needed (e.g., short-lived per-request stores).
@@ -10845,6 +13690,27 @@ ${stepsSection}`;
    */
   pruneOperationalLogs(retentionMs: number): { deletedByTable: Record<string, number>; deletedTotal: number } {
     return this.db.pruneOperationalLogs(retentionMs);
+  }
+
+  /**
+   * Prune per-task JSONL agent log files by removing entries older than the
+   * configured retention window. Only prunes files for soft-deleted or archived
+   * tasks (avoids removing logs for still-active tasks). Returns zeroed counts
+   * when retention is disabled (`<= 0`).
+   */
+  pruneAgentLogFiles(retentionDays: number): { prunedFiles: number; prunedEntries: number; freedBytes: number } {
+    if (!Number.isFinite(retentionDays) || retentionDays <= 0) {
+      return { prunedFiles: 0, prunedEntries: 0, freedBytes: 0 };
+    }
+    // Only prune JSONL files for tasks that are no longer active (soft-deleted or archived)
+    const inactiveTaskIds = new Set(
+      (
+        this.db
+          .prepare(`SELECT id FROM tasks WHERE deletedAt IS NOT NULL OR "column" = 'archived'`)
+          .all() as Array<{ id: string }>
+      ).map((row) => row.id),
+    );
+    return pruneAgentLogFileEntries(this.tasksDir, retentionDays, inactiveTaskIds);
   }
 
   getRootDir(): string {

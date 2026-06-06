@@ -848,6 +848,244 @@ describe("useQuickChat", () => {
     expect(localStorage.getItem(getChatPendingMessageKey("session-existing"))).toBeNull();
   });
 
+  it("preserves queued quick-chat messages across switchSession and restores them when returning", async () => {
+    const sessionA = {
+      ...makeSession({ id: "session-a", agentId: "agent-001" }),
+      isGenerating: true,
+      inFlightGeneration: {
+        streamingText: "partial",
+        streamingThinking: "",
+        toolCalls: [],
+      },
+    };
+    const sessionB = makeSession({ id: "session-b", agentId: "agent-002" });
+
+    mockFetchResumeChatSession
+      .mockResolvedValueOnce({ session: sessionA })
+      .mockResolvedValueOnce({ session: sessionB })
+      .mockResolvedValueOnce({ session: sessionA });
+    mockFetchChatMessages.mockResolvedValue({ messages: [] });
+    mockAttachChatStream.mockReturnValue({ close: vi.fn(), isConnected: () => true });
+
+    const { result } = renderHook(() => useQuickChat("proj-123"));
+
+    await act(async () => {
+      await result.current.switchSession("agent-001");
+    });
+
+    await waitFor(() => {
+      expect(result.current.activeSession?.id).toBe("session-a");
+      expect(result.current.isStreaming).toBe(true);
+    });
+
+    act(() => {
+      void result.current.sendMessage("Queued follow-up");
+    });
+
+    await waitFor(() => {
+      expect(result.current.pendingMessage).toBe("Queued follow-up");
+      expect(localStorage.getItem(getChatPendingMessageKey("session-a"))).toBe("Queued follow-up");
+    });
+
+    await act(async () => {
+      await result.current.switchSession("agent-002");
+    });
+
+    await waitFor(() => {
+      expect(result.current.activeSession?.id).toBe("session-b");
+      expect(result.current.pendingMessage).toBe("");
+      expect(result.current.isStreaming).toBe(false);
+    });
+
+    expect(localStorage.getItem(getChatPendingMessageKey("session-a"))).toBe("Queued follow-up");
+
+    await act(async () => {
+      await result.current.switchSession("agent-001");
+    });
+
+    await waitFor(() => {
+      expect(result.current.activeSession?.id).toBe("session-a");
+      expect(result.current.pendingMessage).toBe("Queued follow-up");
+      expect(result.current.isStreaming).toBe(true);
+    });
+  });
+
+  it("preserves queued quick-chat messages across selectSession and restores them when reselecting", async () => {
+    const sessionA = {
+      ...makeSession({ id: "session-a", agentId: "agent-001" }),
+      isGenerating: true,
+      inFlightGeneration: {
+        streamingText: "partial",
+        streamingThinking: "",
+        toolCalls: [],
+      },
+    };
+    const sessionB = makeSession({ id: "session-b", agentId: "agent-002" });
+
+    mockFetchChatSession
+      .mockResolvedValueOnce({ session: sessionA })
+      .mockResolvedValueOnce({ session: sessionB })
+      .mockResolvedValueOnce({ session: sessionA });
+    mockFetchChatMessages.mockResolvedValue({ messages: [] });
+    mockAttachChatStream.mockReturnValue({ close: vi.fn(), isConnected: () => true });
+
+    const { result } = renderHook(() => useQuickChat("proj-123"));
+
+    await act(async () => {
+      await result.current.selectSession(sessionA);
+    });
+
+    await waitFor(() => {
+      expect(result.current.activeSession?.id).toBe("session-a");
+      expect(result.current.isStreaming).toBe(true);
+    });
+
+    act(() => {
+      void result.current.sendMessage("Queued follow-up");
+    });
+
+    await waitFor(() => {
+      expect(result.current.pendingMessage).toBe("Queued follow-up");
+      expect(localStorage.getItem(getChatPendingMessageKey("session-a"))).toBe("Queued follow-up");
+    });
+
+    await act(async () => {
+      await result.current.selectSession(sessionB);
+    });
+
+    await waitFor(() => {
+      expect(result.current.activeSession?.id).toBe("session-b");
+      expect(result.current.pendingMessage).toBe("");
+      expect(result.current.isStreaming).toBe(false);
+    });
+
+    expect(localStorage.getItem(getChatPendingMessageKey("session-a"))).toBe("Queued follow-up");
+
+    await act(async () => {
+      await result.current.selectSession(sessionA);
+    });
+
+    await waitFor(() => {
+      expect(result.current.activeSession?.id).toBe("session-a");
+      expect(result.current.pendingMessage).toBe("Queued follow-up");
+      expect(result.current.isStreaming).toBe(true);
+    });
+  });
+
+  it("does not flush a restored queued message while the server still reports an in-flight generation", async () => {
+    // Mirrors the useChat FN-5852 regression: the locally-held session has a
+    // stale falsy isGenerating, but the server is still generating. The
+    // restored queued message must wait for the authoritative fetch instead
+    // of flushing immediately (which would abort the live generation).
+    const staleSessionA = makeSession({ id: "session-a", agentId: "agent-001" });
+    mockFetchChatMessages.mockResolvedValue({ messages: [] });
+    mockFetchChatSession.mockResolvedValue({
+      session: {
+        ...staleSessionA,
+        isGenerating: true,
+        inFlightGeneration: {
+          streamingText: "partial",
+          streamingThinking: "",
+          toolCalls: [],
+        },
+      },
+    });
+
+    const attachHandlers: Array<Parameters<typeof mockAttachChatStream>[1]> = [];
+    mockAttachChatStream.mockImplementation((_sessionId, nextHandlers) => {
+      attachHandlers.push(nextHandlers);
+      return { close: vi.fn(), isConnected: () => true };
+    });
+
+    localStorage.setItem(getChatPendingMessageKey("session-a")!, "Queued follow-up");
+
+    const { result } = renderHook(() => useQuickChat("proj-123"));
+
+    await act(async () => {
+      await result.current.selectSession(staleSessionA);
+    });
+
+    await waitFor(() => {
+      expect(result.current.pendingMessage).toBe("Queued follow-up");
+      expect(result.current.isStreaming).toBe(true);
+    });
+
+    expect(mockStreamChatResponse).not.toHaveBeenCalled();
+    expect(localStorage.getItem(getChatPendingMessageKey("session-a"))).toBe("Queued follow-up");
+
+    // The hook attached to the in-flight generation rather than flushing.
+    expect(mockAttachChatStream).toHaveBeenCalledTimes(1);
+    expect(attachHandlers.length).toBeGreaterThan(0);
+
+    // Once the attached generation completes, the queued message flushes.
+    act(() => {
+      attachHandlers[0]?.onDone?.({ messageId: "msg-001" });
+    });
+
+    await waitFor(() => {
+      expect(mockStreamChatResponse).toHaveBeenCalledTimes(1);
+      expect(mockStreamChatResponse.mock.calls[0]?.[0]).toBe("session-a");
+      expect(mockStreamChatResponse.mock.calls[0]?.[1]).toBe("Queued follow-up");
+      expect(result.current.pendingMessage).toBe("");
+      expect(localStorage.getItem(getChatPendingMessageKey("session-a"))).toBeNull();
+    });
+  });
+
+  it("does not let the session-activation auto-flush send a restored queue while server validation is pending", async () => {
+    // The restore effect's fetchChatSession check takes one network RTT in
+    // production. The session-activation auto-flush effect runs in the same
+    // commit that restores pendingMessageRef, so without the pre-session
+    // gate it would send the restored queue before the check resolves and
+    // re-open the stale-isGenerating loss path (FN-5852).
+    const staleSessionA = makeSession({ id: "session-a", agentId: "agent-001" });
+    mockFetchChatMessages.mockResolvedValue({ messages: [] });
+    // Server check never resolves within the test — simulates in-flight RTT.
+    mockFetchChatSession.mockReturnValue(new Promise(() => {}) as never);
+
+    localStorage.setItem(getChatPendingMessageKey("session-a")!, "Queued follow-up");
+
+    const { result } = renderHook(() => useQuickChat("proj-123"));
+
+    await act(async () => {
+      await result.current.selectSession(staleSessionA);
+    });
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    });
+
+    // The restored queue is intact and nothing was sent.
+    expect(result.current.pendingMessage).toBe("Queued follow-up");
+    expect(mockStreamChatResponse).not.toHaveBeenCalled();
+    expect(localStorage.getItem(getChatPendingMessageKey("session-a"))).toBe("Queued follow-up");
+  });
+
+  it("pre-session queueing does not write a null localStorage key", async () => {
+    const session = makeSession({ id: "session-pre", agentId: "agent-001" });
+    mockFetchResumeChatSession.mockResolvedValueOnce({ session });
+    mockFetchChatMessages.mockResolvedValue({ messages: [] });
+
+    const { result } = renderHook(() => useQuickChat("proj-123"));
+
+    let sendPromise!: Promise<void>;
+    await act(async () => {
+      sendPromise = result.current.sendMessage("Hello before session ready");
+    });
+
+    expect(localStorage.getItem(getChatPendingMessageKey("session-pre"))).toBeNull();
+    expect(localStorage.getItem("fusion:chat-pending:null")).toBeNull();
+    expect(localStorage.getItem("fusion:chat-pending:undefined")).toBeNull();
+
+    await act(async () => {
+      await result.current.switchSession("agent-001");
+    });
+
+    await expect(sendPromise).resolves.toBeUndefined();
+    expect(localStorage.getItem(getChatPendingMessageKey("session-pre"))).toBeNull();
+    expect(localStorage.getItem("fusion:chat-pending:null")).toBeNull();
+    expect(localStorage.getItem("fusion:chat-pending:undefined")).toBeNull();
+  });
+
   it("sending during streaming queues message without warning toast", async () => {
     const existingSession = makeSession({ id: "session-existing", agentId: "agent-001" });
     const addToast = vi.fn();

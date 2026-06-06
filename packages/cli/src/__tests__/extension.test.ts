@@ -1132,12 +1132,27 @@ describe.skipIf(!SHOULD_RUN_LEGACY_EXTENSION_INTEGRATION)("fn pi extension (lega
   });
 
   describe("fn_mission_show", () => {
-    it("returns mission with hierarchy", async () => {
-      // Create mission
+    it("returns mission with hierarchy and linked goals", async () => {
       const createTool = api.tools.get("fn_mission_create")!;
+      const goalTool = api.tools.get("fn_goal_create")!;
+      const linkTool = api.tools.get("fn_mission_link_goal")!;
       const created = await createTool.execute(
         "c1",
         { title: "Test Mission" },
+        undefined,
+        undefined,
+        makeCtx(tmpDir),
+      );
+      const goal = await goalTool.execute(
+        "g1",
+        { title: "Connect mission work to goals" },
+        undefined,
+        undefined,
+        makeCtx(tmpDir),
+      );
+      await linkTool.execute(
+        "link-1",
+        { missionId: created.details.missionId, goalId: goal.details.goalId },
         undefined,
         undefined,
         makeCtx(tmpDir),
@@ -1154,6 +1169,11 @@ describe.skipIf(!SHOULD_RUN_LEGACY_EXTENSION_INTEGRATION)("fn pi extension (lega
 
       expect(result.details.mission).toBeDefined();
       expect(result.content[0].text).toContain("Test Mission");
+      expect(result.content[0].text).toContain("Linked Goals:");
+      expect(result.content[0].text).toContain(`- ${goal.details.goalId}: Connect mission work to goals`);
+      expect(result.details.mission.linkedGoals).toEqual([
+        expect.objectContaining({ id: goal.details.goalId, title: "Connect mission work to goals" }),
+      ]);
     });
 
     it("renders acceptanceCriteria / verification for milestones, slices, and features", async () => {
@@ -1210,6 +1230,30 @@ describe.skipIf(!SHOULD_RUN_LEGACY_EXTENSION_INTEGRATION)("fn pi extension (lega
 
       expect(result.content[0].text).toContain("… (truncated,");
       expect(result.details.mission.milestones[0].acceptanceCriteria).toBe(longValue);
+    });
+
+    it("renders an empty linked goals state when no goals are linked", async () => {
+      const createTool = api.tools.get("fn_mission_create")!;
+      const created = await createTool.execute(
+        "c1",
+        { title: "Mission Without Goals" },
+        undefined,
+        undefined,
+        makeCtx(tmpDir),
+      );
+
+      const showTool = api.tools.get("fn_mission_show")!;
+      const result = await showTool.execute(
+        "call-1",
+        { id: created.details.missionId },
+        undefined,
+        undefined,
+        makeCtx(tmpDir),
+      );
+
+      expect(result.content[0].text).toContain("Linked Goals:");
+      expect(result.content[0].text).toContain("No linked goals.");
+      expect(result.details.mission.linkedGoals).toEqual([]);
     });
 
     it("returns error when mission not found", async () => {
@@ -2557,6 +2601,51 @@ describe("fn pi extension (runnable structured-output regression slice)", () => 
       expect(task.retrySummary?.total ?? 0).toBe(0);
     };
 
+    it("clears the deadlock auto-pause for execution-failed in-review retries", async () => {
+      const store = new TaskStore(tmpDir);
+      await store.init();
+
+      const task = await store.createTask({
+        title: "deadlock-paused execution-failed task",
+        description: "test",
+        column: "todo",
+      });
+      await store.updateTask(task.id, {
+        steps: [
+          { name: "Step 0", status: "done" },
+          { name: "Step 1", status: "in-progress" },
+          { name: "Step 2", status: "pending" },
+        ],
+      });
+      await store.moveTask(task.id, "in-progress");
+      await store.moveTask(task.id, "in-review");
+      await store.updateTask(task.id, {
+        status: "failed",
+        error: "executor stalled after deadlock pause",
+        paused: true,
+        pausedReason: "in-review-stall-deadlock",
+        mergeRetries: 0,
+        nextRecoveryAt: new Date(Date.now() + 60_000).toISOString(),
+        ...nonZeroRetryCounters,
+      });
+
+      const retryTool = api.tools.get("fn_task_retry")!;
+      const result = await retryTool.execute("retry-deadlock-exec", { id: task.id }, undefined, undefined, makeCtx(tmpDir));
+
+      expect(result.isError).toBeFalsy();
+      expect(result.details.newColumn).toBe("todo");
+
+      const updated = await store.getTask(task.id);
+      expect(updated?.column).toBe("todo");
+      expect(updated?.status).toBeFalsy();
+      expect(updated?.error).toBeFalsy();
+      expect(updated?.paused).toBeUndefined();
+      expect(updated?.pausedReason).toBeUndefined();
+      expect(updated?.steps[1].status).toBe("in-progress");
+      expectRetryCountersReset(updated);
+      expect(updated?.mergeRetries).toBe(0);
+    });
+
     it("moves execution-failed in-review task (incomplete steps) to todo preserving progress", async () => {
       const store = new TaskStore(tmpDir);
       await store.init();
@@ -2624,6 +2713,87 @@ describe("fn pi extension (runnable structured-output regression slice)", () => 
       expect(updated?.status).toBeFalsy();
       expect(updated?.error).toBeFalsy();
       expect(updated?.steps).toEqual([]);
+      expect(updated?.mergeRetries).toBe(0);
+    });
+
+    it("clears the deadlock auto-pause for merge-failed in-review retries", async () => {
+      const store = new TaskStore(tmpDir);
+      await store.init();
+
+      const task = await store.createTask({
+        title: "deadlock-paused merge-failed task",
+        description: "test",
+        column: "todo",
+      });
+      await store.updateTask(task.id, {
+        steps: [
+          { name: "Step 0", status: "done" },
+          { name: "Step 1", status: "done" },
+        ],
+      });
+      await store.moveTask(task.id, "in-progress");
+      await store.moveTask(task.id, "in-review");
+      await store.updateTask(task.id, {
+        status: "failed",
+        error: "merge deadlock",
+        paused: true,
+        pausedReason: "in-review-stall-deadlock",
+        mergeRetries: 3,
+        nextRecoveryAt: new Date(Date.now() + 60_000).toISOString(),
+        ...nonZeroRetryCounters,
+      });
+
+      const retryTool = api.tools.get("fn_task_retry")!;
+      const result = await retryTool.execute("retry-deadlock-merge", { id: task.id }, undefined, undefined, makeCtx(tmpDir));
+
+      expect(result.isError).toBeFalsy();
+      expect(result.details.newColumn).toBe("in-review");
+
+      const updated = await store.getTask(task.id);
+      expect(updated?.column).toBe("in-review");
+      expect(updated?.status).toBeFalsy();
+      expect(updated?.error).toBeFalsy();
+      expect(updated?.paused).toBeUndefined();
+      expect(updated?.pausedReason).toBeUndefined();
+      expectRetryCountersReset(updated);
+      expect(updated?.mergeRetries).toBe(0);
+    });
+
+    it("does not clear manual pauses for merge-failed in-review retries", async () => {
+      const store = new TaskStore(tmpDir);
+      await store.init();
+
+      const task = await store.createTask({
+        title: "user-paused merge-failed task",
+        description: "test",
+        column: "todo",
+      });
+      await store.updateTask(task.id, {
+        steps: [
+          { name: "Step 0", status: "done" },
+          { name: "Step 1", status: "done" },
+        ],
+      });
+      await store.moveTask(task.id, "in-progress");
+      await store.moveTask(task.id, "in-review");
+      await store.updateTask(task.id, {
+        status: "failed",
+        error: "merge deadlock",
+        paused: true,
+        pausedReason: "manual",
+        mergeRetries: 3,
+      });
+
+      const retryTool = api.tools.get("fn_task_retry")!;
+      const result = await retryTool.execute("retry-user-paused-merge", { id: task.id }, undefined, undefined, makeCtx(tmpDir));
+
+      expect(result.isError).toBeFalsy();
+      expect(result.details.newColumn).toBe("in-review");
+
+      const updated = await store.getTask(task.id);
+      expect(updated?.paused).toBe(true);
+      expect(updated?.pausedReason).toBe("manual");
+      expect(updated?.status).toBeFalsy();
       expect(updated?.mergeRetries).toBe(0);
     });
 

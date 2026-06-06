@@ -124,6 +124,10 @@ export default defineConfig({
   resolve: {
     alias: {
       "@fusion/core": resolve(__dirname, "../core/src/types.ts"),
+      "@fusion/dashboard/app/components/TaskCard": resolve(__dirname, "app/components/TaskCard.tsx"),
+      "@fusion/dashboard/app/plugins/types": resolve(__dirname, "app/plugins/types.ts"),
+      "@fusion/dashboard/app/utils/projectStorage": resolve(__dirname, "app/utils/projectStorage.ts"),
+      "@fusion/dashboard/app/utils/taskStuck": resolve(__dirname, "app/utils/taskStuck.ts"),
       "@fusion-plugin-examples/dependency-graph/dashboard-view": resolve(
         __dirname,
         "../../plugins/fusion-plugin-dependency-graph/src/dashboard-view.tsx",
@@ -166,6 +170,18 @@ export default defineConfig({
 
           if (id.includes("/node_modules/@codemirror/")) {
             return "vendor-codemirror";
+          }
+
+          if (
+            id.includes("/node_modules/i18next/") ||
+            id.includes("/node_modules/react-i18next/") ||
+            id.includes("/node_modules/i18next-browser-languagedetector/") ||
+            id.includes("/node_modules/i18next-resources-to-backend/")
+          ) {
+            return "vendor-i18n";
+          }
+          if (id.includes("/node_modules/@xyflow/")) {
+            return "vendor-reactflow";
           }
 
           return undefined;

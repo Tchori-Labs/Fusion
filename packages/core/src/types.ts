@@ -15,15 +15,51 @@ export type { CapacityRiskSignal } from "./capacity.js";
 export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high"] as const;
 export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
 
+/**
+ * The legacy default-workflow column set. Under
+ * `experimentalFeatures.workflowColumns` a task's valid columns are resolved
+ * from its workflow definition (the default workflow's column IDs are
+ * byte-identical to these — KTD-1). New flag-aware code should prefer the
+ * workflow-resolved path (`resolveAllowedColumns` / `workflowHasColumn` in
+ * `workflow-transitions.ts`) and trait-flag predicates over string equality;
+ * this enum remains the canonical id set for the built-in default workflow.
+ */
 export const COLUMNS = ["triage", "todo", "in-progress", "in-review", "done", "archived"] as const;
+/**
+ * The closed legacy column union — still the correct type for default-workflow
+ * column ids and the flag-OFF path. Movement entry points accept the wider
+ * {@link ColumnId}; flag-ON code validates ids against the task's resolved
+ * workflow at runtime.
+ */
 export type Column = (typeof COLUMNS)[number];
+
+/**
+ * Column identifier accepted at task-movement entry points (KTD-1).
+ * Equals the legacy `Column` union for autocomplete purposes, but admits
+ * workflow-defined custom column ids; flag-ON paths validate the id against
+ * the task's resolved workflow at runtime, flag-OFF paths reject non-legacy
+ * ids exactly as before.
+ */
+export type ColumnId = Column | (string & {});
 
 export const DEFAULT_COLUMN: Column = "triage";
 
+/**
+ * Tests membership against the closed legacy column enum. Note: under the
+ * workflowColumns flag, column validity is workflow-scoped — flag-aware code
+ * should use `workflowHasColumn(ir, columnId)` (`workflow-transitions.ts`);
+ * this remains correct for the flag-OFF path and default-workflow ids.
+ */
 export function isColumn(value: unknown): value is Column {
   return typeof value === "string" && (COLUMNS as readonly string[]).includes(value);
 }
 
+/**
+ * @deprecated (workflowColumns, U12) Coerces an arbitrary value to a legacy
+ * column, DISCARDING workflow-defined custom column ids — lossy under the
+ * flag. Resolve and validate against the task's workflow instead. Retained
+ * for the legacy flag-OFF path while the flag exists.
+ */
 export function normalizeColumn(value: unknown, fallback: Column = DEFAULT_COLUMN): Column {
   return isColumn(value) ? value : fallback;
 }
@@ -206,6 +242,24 @@ export const COLOR_THEMES = [
   "sepia",
 ] as const;
 export type ColorTheme = (typeof COLOR_THEMES)[number];
+
+/** UI locales supported across the dashboard and terminal UI. `en` is the
+ *  source-of-truth language and the fallback for all others. Adding a locale
+ *  here (plus translated catalogs) is the only code change a new language
+ *  needs — see `@fusion/i18n`. zh-CN and zh-TW are independent catalogs and
+ *  are never auto-converted between scripts. */
+export const SUPPORTED_LOCALES = ["en", "zh-CN", "zh-TW", "fr", "es", "ko"] as const;
+export type Locale = (typeof SUPPORTED_LOCALES)[number];
+/** Source-of-truth language and the fallback for all locales. */
+export const DEFAULT_LOCALE: Locale = "en";
+
+/** Narrow an arbitrary value to a supported `Locale`. */
+export function isLocale(value: unknown): value is Locale {
+  return (
+    typeof value === "string" &&
+    (SUPPORTED_LOCALES as readonly string[]).includes(value)
+  );
+}
 
 export type PrStatus = "open" | "closed" | "merged" | "draft";
 export type MergeStrategy = "direct" | "pull-request";
@@ -627,6 +681,59 @@ export interface WorkflowStepResult {
   completedAt?: string;
 }
 
+/**
+ * Lifecycle status of one persisted step instance (step-inversion U4, KTD-6).
+ * - `pending` — expanded but not yet started.
+ * - `in-progress` — actively executing inside its foreach sub-walk.
+ * - `awaiting-integration` — work complete on a parallel-mode branch, waiting
+ *   for the ordered integration stage (KTD-11; unused at concurrency 1).
+ * - `completed` — terminal success (integrated in parallel mode).
+ * - `failed` — terminal failure.
+ */
+export type WorkflowRunStepInstanceStatus =
+  | "pending"
+  | "in-progress"
+  | "awaiting-integration"
+  | "completed"
+  | "failed";
+
+/**
+ * Persisted run-state for one expanded step instance inside a foreach region
+ * (step-inversion U4, KTD-6). One row per `(taskId, runId, foreachNodeId,
+ * stepIndex)`; mirrors the `workflow_run_branches` posture. Resume reconstructs
+ * the instance set from `pinnedStepCount` + per-instance `currentNodeId` /
+ * `reworkCount`. `baselineSha` / `checkpointId` are the RETHINK reset anchors
+ * (previously in-memory, lost on restart). `branchName` / `integratedAt` and the
+ * `awaiting-integration` status serve parallel mode (KTD-11); null/unused at
+ * concurrency 1. This is the core row shape; the engine-side instance model is
+ * separate and engine-owned.
+ */
+export interface WorkflowRunStepInstance {
+  taskId: string;
+  runId: string;
+  /** Node id of the foreach region that expanded this instance. */
+  foreachNodeId: string;
+  /** Zero-based index of the step this instance runs. */
+  stepIndex: number;
+  /** Step count pinned at expansion; resume fails on mismatch with live steps[]. */
+  pinnedStepCount: number;
+  /** Current sub-walk node id for the in-flight instance; null when not started. */
+  currentNodeId?: string | null;
+  status: WorkflowRunStepInstanceStatus;
+  /** Git sha the RETHINK reset rewinds to; null when no baseline captured. */
+  baselineSha?: string | null;
+  /** Session checkpoint to rewind to on RETHINK; null when none captured. */
+  checkpointId?: string | null;
+  /** Number of rework cycles consumed against the rework budget. */
+  reworkCount: number;
+  /** Per-instance branch name in worktree-isolation mode (KTD-11); null otherwise. */
+  branchName?: string | null;
+  /** ISO-8601 timestamp the instance branch was integrated (KTD-11); null otherwise. */
+  integratedAt?: string | null;
+  /** ISO-8601 timestamp of the last write to this row. */
+  updatedAt: string;
+}
+
 /** A built-in workflow step template for one-click creation. */
 export interface WorkflowStepTemplate {
   /** Unique template identifier (e.g., "documentation-review") */
@@ -1007,6 +1114,11 @@ export type StepStatus = "pending" | "in-progress" | "done" | "skipped";
 export interface TaskStep {
   name: string;
   status: StepStatus;
+  /** Step-inversion (KTD-11): 0-indexed indices of steps this step depends on,
+   *  parsed from the PROMPT.md `### Step N (depends: 1,2): Title` annotation
+   *  (1-indexed step numbers in the doc → 0-indexed indices here). Absent for
+   *  unannotated steps. */
+  dependsOn?: number[];
 }
 
 /** Correlation metadata linking a task mutation to the agent run that caused it. */
@@ -1686,7 +1798,14 @@ export type TaskBranchGroupSource = "planning" | "mission" | "new-task";
 export type TaskBranchAssignmentMode = "shared" | "per-task-derived";
 
 export interface TaskBranchContext {
-  groupId: string;
+  /**
+   * The owning BranchGroup id (`BG-…`). Only set for shared-mode members that
+   * were actually assigned to an ensured branch group. Non-shared members
+   * (per-task-derived) carry branch context (source/assignmentMode) without a
+   * groupId so they are never swept into a shared group by the legacy
+   * synthetic-groupId membership fallback (see filterTasksByBranchGroup).
+   */
+  groupId?: string;
   source: TaskBranchGroupSource;
   assignmentMode: TaskBranchAssignmentMode;
   inheritedBaseBranch?: string;
@@ -1737,6 +1856,116 @@ export interface BranchGroupUpdate {
   closedAt?: number | null;
 }
 
+// --- Unified PR entity (feat: PR lifecycle as workflow nodes, U1) ---
+//
+// The single first-class record of a pull request fusion manages, regardless
+// of how the work landed (a lone task or a shared branch group). Its lifecycle
+// is driven by the pr-create / pr-respond / pr-merge workflow nodes; the only
+// writers of the GitHub-mirror fields are the pr-create node (on a confirmed
+// create) and the reconcile (R4: never persist state GitHub has not
+// corroborated).
+
+/** What a PR entity is attached to. */
+export type PrEntitySourceType = "task" | "branch-group";
+
+/**
+ * Lifecycle state. Non-terminal: creating, open, responding. Terminal: merged,
+ * closed. failed is a recorded, retryable creation failure (R4).
+ */
+export type PrEntityState =
+  | "creating"
+  | "open"
+  | "responding"
+  | "merged"
+  | "closed"
+  | "failed";
+
+/** GitHub review decision mirror (matches PrInfo.lastReviewDecision shape). */
+export type PrReviewDecision =
+  | "APPROVED"
+  | "CHANGES_REQUESTED"
+  | "REVIEW_REQUIRED"
+  | null;
+
+/** Aggregate CI rollup mirror (matches PrInfo.checkRollup shape). */
+export type PrChecksRollup = "success" | "failure" | "pending" | "none";
+
+export interface PrEntity {
+  id: string;
+  sourceType: PrEntitySourceType;
+  /** Task id or branch-group id, depending on sourceType. */
+  sourceId: string;
+  repo: string;
+  headBranch: string;
+  baseBranch?: string;
+  state: PrEntityState;
+  /** GitHub-mirror fields — only the create node and reconcile write these. */
+  prNumber?: number;
+  prUrl?: string;
+  headOid?: string;
+  mergeable?: PrConflictState;
+  checksRollup?: PrChecksRollup;
+  reviewDecision?: PrReviewDecision;
+  /** Whether auto-merge is opted in for this entity (R10). */
+  autoMerge: boolean;
+  /**
+   * Imported-from-legacy state that GitHub has not yet corroborated. While true
+   * the entity is a hard gate: excluded from auto-merge + response dispatch and
+   * never advanced on stale state (R19). Cleared on first successful reconcile.
+   */
+  unverified: boolean;
+  /** Classified failure reason when state === "failed" (R4, AE3). */
+  failureReason?: string;
+  /** Rework-cycle counter backing the R8 iteration cap (survives restart). */
+  responseRounds: number;
+  createdAt: number;
+  updatedAt: number;
+  closedAt?: number;
+}
+
+export interface PrEntityCreateInput {
+  sourceType: PrEntitySourceType;
+  sourceId: string;
+  repo: string;
+  headBranch: string;
+  baseBranch?: string;
+  state?: PrEntityState;
+  autoMerge?: boolean;
+  unverified?: boolean;
+  prNumber?: number;
+  prUrl?: string;
+}
+
+export interface PrEntityUpdate {
+  state?: PrEntityState;
+  prNumber?: number | null;
+  prUrl?: string | null;
+  headOid?: string | null;
+  mergeable?: PrConflictState | null;
+  checksRollup?: PrChecksRollup | null;
+  reviewDecision?: PrReviewDecision;
+  autoMerge?: boolean;
+  unverified?: boolean;
+  failureReason?: string | null;
+  responseRounds?: number;
+  closedAt?: number | null;
+}
+
+/** Per-thread response outcome, keyed by thread id + head OID (R15). */
+export type PrThreadOutcome = "fixed" | "disagreed" | "pending";
+
+export interface PrThreadState {
+  prEntityId: string;
+  /** GitHub review-thread node id. */
+  threadId: string;
+  /** Head OID the outcome was produced against (idempotency key with threadId). */
+  headOid: string;
+  outcome: PrThreadOutcome;
+  /** Commit SHA embedded in the agent's reply marker, when a fix was pushed. */
+  fixCommitSha?: string;
+  updatedAt: number;
+}
+
 export interface Task {
   id: string;
   /** Immutable lineage identity used for durable commit/task attribution. */
@@ -1748,7 +1977,9 @@ export interface Task {
    * tasks are hydrated from persistence.
    */
   priority?: TaskPriority;
-  column: Column;
+  /** The task's current column id. Widened to {@link ColumnId} so workflow-defined
+   *  custom columns are representable; flag-OFF paths only ever store legacy ids. */
+  column: ColumnId;
   dependencies: string[];
   /** User-requested hint for triage: prefer splitting into child tasks when appropriate. */
   breakIntoSubtasks?: boolean;
@@ -1757,6 +1988,14 @@ export interface Task {
   worktree?: string;
   steps: TaskStep[];
   currentStep: number;
+  /**
+   * Workflow-defined custom task field values (KTD-13), keyed by field id.
+   * Persisted as the `tasks.customFields` JSON column. Treated as opaque by
+   * the core row⇄Task mapping and `updateTask`; the validation/write authority
+   * (type/enum/render checks against the workflow's field schema) lands in a
+   * later unit. Absent on legacy tasks.
+   */
+  customFields?: Record<string, unknown>;
   status?: string;
   /** ID of the in-progress task whose file scope overlaps with this task,
    *  causing the scheduler to defer it. Set when the scheduler queues
@@ -2145,7 +2384,9 @@ export interface TaskCreateInput {
    * Optional task importance level. Omitted values default to `normal`.
    */
   priority?: TaskPriority;
-  column?: Column;
+  /** Initial column id. Widened to {@link ColumnId} (#1403) so a custom-column
+   *  task can be replicated/created; flag-OFF creation only ever uses legacy ids. */
+  column?: ColumnId;
   dependencies?: string[];
   breakIntoSubtasks?: boolean;
   /** When true, this task is expected to complete without creating git commits. */
@@ -2437,6 +2678,10 @@ export interface GlobalSettings {
   colorTheme?: ColorTheme;
   /** Dashboard font size scale percentage. Bounded to 85-125. Default: 100. */
   dashboardFontScalePct?: number;
+  /** Active UI locale (e.g. `"en"`, `"zh-CN"`, `"fr"`). One of `SUPPORTED_LOCALES`.
+   *  When unset, each surface resolves the locale at runtime (browser/env
+   *  detection) and falls back to `DEFAULT_LOCALE` ("en"). */
+  language?: Locale;
   /** Default AI model provider name (e.g. `"anthropic"`, `"openai"`).
    *  Must be set together with `defaultModelId`. When both are undefined,
    *  the engine uses pi's automatic model resolution. */
@@ -2889,6 +3134,13 @@ export interface ProjectSettings {
   /** Tracks why globalPause was activated. "rate-limit" for automatic pauses,
    *  "manual" for user-initiated. Cleared on unpause. */
   globalPauseReason?: string;
+  /** Default custom workflow (WF-…) applied to newly created tasks when the
+   *  caller does not specify enabledWorkflowSteps. Overridable per task. */
+  defaultWorkflowId?: string;
+  /** Raw CLI commands a user has explicitly approved for workflow CLI nodes
+   *  (trust-on-first-use). A node's command must appear here before it runs;
+   *  named scripts (settings.scripts) never require approval. */
+  approvedWorkflowCliCommands?: string[];
   /** Engine pause (soft pause): when true, the scheduler and triage
    *  processor stop dispatching **new** work (scheduling, triage
    *  specification, and auto-merge), but currently running agent sessions
@@ -3697,10 +3949,19 @@ export interface ProjectSettings {
    *  Allowed values: 0 (off, default) or one of 7 | 14 | 30 | 60 | 90. Uses messages.updatedAt inactivity age. */
   mailAutoCleanupDays?: number;
   /** Number of days to retain append-only operational-log rows (activityLog,
-   *  agentLogEntries, runAuditEvents, agentHeartbeats) before periodic maintenance
-   *  prunes them. These tables are the main driver of unbounded database growth.
-   *  Default: 30. Set 0 to disable pruning. Uses each row's `timestamp` column. */
+   *  runAuditEvents, agentHeartbeats, terminal agentRuns by `endedAt`, and
+   *  agentConfigRevisions by `createdAt`) before periodic maintenance prunes
+   *  them. In-flight agentRuns (`endedAt IS NULL`) and the most-recent config
+   *  revision per agent are always preserved. Agent logs are now stored in
+   *  per-task JSONL files — see agentLogFileRetentionDays. Default: 30. Set 0
+   *  to disable pruning. */
   operationalLogRetentionDays?: number;
+  /** Number of days to retain per-task agent-log JSONL files for soft-deleted
+   *  and archived tasks. Only affects tasks that are no longer active. Entries
+   *  older than this window are removed from the JSONL file during periodic
+   *  maintenance. Default: 0 (disabled). Set to a positive integer (e.g. 90)
+   *  to enable pruning. */
+  agentLogFileRetentionDays?: number;
   /** Number of most-recent chat-room messages kept verbatim in the responder transcript.
    *  Older messages are compacted into a summary block. Default: 12. */
   chatRoomRecentVerbatimMessages?: number;
@@ -3905,6 +4166,15 @@ export const COLUMN_DESCRIPTIONS: Record<Column, string> = {
   archived: "Completed and archived",
 };
 
+/**
+ * @deprecated (workflowColumns, U12) The hardcoded legacy transition graph.
+ * Under `experimentalFeatures.workflowColumns`, transition validity is resolved
+ * from the task's workflow column graph (`resolveAllowedColumns` in
+ * `workflow-transitions.ts`) plus trait guards in `moveTaskInternal` — this
+ * constant is now only the flag-OFF authority and the parity oracle the default
+ * workflow is machine-checked against (transition-parity suite). Retained while
+ * the flag exists; do NOT remove until graduation + legacy-path deletion.
+ */
 export const VALID_TRANSITIONS: Record<Column, Column[]> = {
   // FN-4892: intake-side heuristics may cold-archive tasks before execution starts.
   triage: ["todo", "archived"],
@@ -3938,6 +4208,8 @@ export interface ArchivedTaskEntry {
   dependencies: string[];
   steps: TaskStep[];
   currentStep: number;
+  /** Workflow-defined custom task field values (KTD-13) frozen at archive time. */
+  customFields?: Record<string, unknown>;
   size?: "S" | "M" | "L";
   reviewLevel?: number;
   /** Execution mode for task implementation at time of archival.

@@ -14,7 +14,9 @@
 
 import { Router, type Request, type Response, type NextFunction } from "express";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { TaskStore, resolvePlanningSettingsModel } from "@fusion/core";
+import { TaskStore, resolvePlanningSettingsModel, AgentStore } from "@fusion/core";
+import type { Goal } from "@fusion/core";
+import { listEligibleExecutorAgents } from "@fusion/engine";
 import { getOrCreateProjectStore } from "./project-store-resolver.js";
 import type {
   Mission,
@@ -82,6 +84,10 @@ function validateAssertionId(id: string): boolean {
   // Assertion IDs follow format: CA-{base36timestamp}-{random}
   // e.g., CA-A3B7CD-E9F2
   return /^CA-[A-Z0-9]+-[A-Z0-9]+$/i.test(id);
+}
+
+function validateGoalId(id: string): boolean {
+  return /^G-[A-Z0-9]+(?:-[A-Z0-9]+)*$/i.test(id);
 }
 
 function validateTitle(title: unknown): string {
@@ -181,6 +187,27 @@ function validateOrderedIds(body: unknown): string[] {
   return orderedIds;
 }
 
+function validateOptionalGoalIds(goalIds: unknown): string[] {
+  if (!Array.isArray(goalIds)) {
+    throw badRequest("goalIds must be an array");
+  }
+  if (!goalIds.every((goalId) => typeof goalId === "string")) {
+    throw badRequest("goalIds must be an array of strings");
+  }
+  if (!goalIds.every((goalId) => validateGoalId(goalId))) {
+    throw badRequest("goalIds must contain valid goal IDs");
+  }
+  return goalIds;
+}
+
+function validateGoalIdsBody(body: unknown): string[] {
+  if (!body || typeof body !== "object") {
+    throw badRequest("Request body must contain goalIds array");
+  }
+  const { goalIds } = body as Record<string, unknown>;
+  return validateOptionalGoalIds(goalIds);
+}
+
 type TypedRequest = Request<Record<string, string>>;
 
 function catchTypedHandler(fn: (req: TypedRequest, res: Response, next: NextFunction) => Promise<void>) {
@@ -254,7 +281,7 @@ export function createMissionRouter(
   engineManager?: import("@fusion/engine").ProjectEngineManager,
 ): Router {
   const router = Router();
-  const requestContext = new AsyncLocalStorage<ReturnType<TaskStore["getMissionStore"]>>();
+  const requestContext = new AsyncLocalStorage<TaskStore>();
 
   function getProjectIdFromRequest(req: Request): string | undefined {
     if (typeof req.query.projectId === "string" && req.query.projectId.trim()) {
@@ -266,12 +293,82 @@ export function createMissionRouter(
     return undefined;
   }
 
+  function getScopedStore(): TaskStore {
+    return requestContext.getStore() ?? store;
+  }
+
   function getScopedMissionStore() {
-    const missionStore = requestContext.getStore();
-    if (!missionStore) {
-      return store.getMissionStore();
+    return getScopedStore().getMissionStore();
+  }
+
+  function getScopedGoalStore() {
+    return getScopedStore().getGoalStore();
+  }
+
+  function requireMission(missionId: string) {
+    if (!validateMissionId(missionId)) {
+      throw badRequest("Invalid mission ID format");
     }
-    return missionStore;
+
+    const mission = missionStore.getMission(missionId);
+    if (!mission) {
+      throw notFound("Mission not found");
+    }
+
+    return mission;
+  }
+
+  function requireGoal(goalId: string): Goal {
+    if (!validateGoalId(goalId)) {
+      throw badRequest("Invalid goal ID format");
+    }
+
+    const goal = getScopedGoalStore().getGoal(goalId);
+    if (!goal) {
+      throw notFound("Goal not found");
+    }
+
+    return goal;
+  }
+
+  function requireLinkableGoal(goalId: string): Goal {
+    const goal = requireGoal(goalId);
+    if (goal.status === "archived") {
+      throw badRequest("Cannot link an archived goal", { code: "GOAL_ARCHIVED", goalId });
+    }
+    return goal;
+  }
+
+  function listLinkedGoalsForMission(missionId: string): Goal[] {
+    requireMission(missionId);
+    const goalStore = getScopedGoalStore();
+    return missionStore
+      .listGoalIdsForMission(missionId)
+      .map((goalId) => goalStore.getGoal(goalId))
+      .filter((goal): goal is Goal => Boolean(goal));
+  }
+
+  function setLinkedGoalsForMission(missionId: string, goalIds: string[]): Goal[] {
+    requireMission(missionId);
+    const uniqueGoalIds = Array.from(new Set(goalIds));
+    uniqueGoalIds.forEach((goalId) => requireLinkableGoal(goalId));
+
+    const existingGoalIds = new Set(missionStore.listGoalIdsForMission(missionId));
+    const nextGoalIds = new Set(uniqueGoalIds);
+
+    for (const goalId of existingGoalIds) {
+      if (!nextGoalIds.has(goalId)) {
+        missionStore.unlinkGoal(missionId, goalId);
+      }
+    }
+
+    for (const goalId of uniqueGoalIds) {
+      if (!existingGoalIds.has(goalId)) {
+        missionStore.linkGoal(missionId, goalId);
+      }
+    }
+
+    return listLinkedGoalsForMission(missionId);
   }
 
   const missionStore = new Proxy({} as ReturnType<TaskStore["getMissionStore"]>, {
@@ -286,7 +383,7 @@ export function createMissionRouter(
     try {
       const projectId = getProjectIdFromRequest(req);
       const scopedStore = projectId ? await getOrCreateProjectStore(projectId) : store;
-      requestContext.run(scopedStore.getMissionStore(), next);
+      requestContext.run(scopedStore, next);
     } catch (error) {
       next(error);
     }
@@ -332,10 +429,11 @@ export function createMissionRouter(
   router.post(
     "/",
     catchTypedHandler(async (req, res) => {
-      const { title, description, autoAdvance, baseBranch, branchStrategy } = req.body;
+      const { title, description, autoAdvance, baseBranch, branchStrategy, goalIds } = req.body;
 
       const validatedTitle = validateTitle(title);
       const validatedDescription = validateDescription(description);
+      const validatedGoalIds = goalIds === undefined ? undefined : validateOptionalGoalIds(goalIds);
 
       const input: MissionCreateInput = {
         title: validatedTitle,
@@ -350,13 +448,20 @@ export function createMissionRouter(
       if (autoAdvance !== undefined) {
         updates.autoAdvance = validateBoolean(autoAdvance, "autoAdvance");
       }
-      if (Object.keys(updates).length > 0) {
-        const updatedMission = missionStore.updateMission(mission.id, updates);
-        res.status(201).json(updatedMission);
-        return;
-      }
+      const updatedMission = Object.keys(updates).length > 0
+        ? missionStore.updateMission(mission.id, updates)
+        : mission;
 
-      res.status(201).json(mission);
+      // Mission creation and mission↔goal linking are separate store operations today,
+      // so creation may succeed even when a later goal validation/linking step fails.
+      const linkedGoals = validatedGoalIds === undefined
+        ? listLinkedGoalsForMission(mission.id)
+        : setLinkedGoalsForMission(mission.id, validatedGoalIds);
+
+      res.status(201).json({
+        ...updatedMission,
+        linkedGoals,
+      });
     })
   );
 
@@ -895,7 +1000,67 @@ export function createMissionRouter(
         throw notFound("Mission not found");
       }
 
-      res.json(mission);
+      res.json({
+        ...mission,
+        linkedGoals: mission.linkedGoals ?? [],
+      });
+    })
+  );
+
+  /**
+   * GET /api/missions/:missionId/goals
+   * List linked goals for a mission.
+   */
+  router.get(
+    "/:missionId/goals",
+    catchTypedHandler(async (req, res) => {
+      const { missionId } = req.params;
+      const goals = listLinkedGoalsForMission(missionId);
+      res.json({ goals });
+    })
+  );
+
+  /**
+   * PUT /api/missions/:missionId/goals
+   * Replace the full linked-goal set for a mission.
+   */
+  router.put(
+    "/:missionId/goals",
+    catchTypedHandler(async (req, res) => {
+      const { missionId } = req.params;
+      const goalIds = validateGoalIdsBody(req.body);
+      const goals = setLinkedGoalsForMission(missionId, goalIds);
+      res.json({ goals });
+    })
+  );
+
+  /**
+   * POST /api/missions/:missionId/goals/:goalId
+   * Link a single goal to a mission.
+   */
+  router.post(
+    "/:missionId/goals/:goalId",
+    catchTypedHandler(async (req, res) => {
+      const { missionId, goalId } = req.params;
+      requireMission(missionId);
+      const goal = requireLinkableGoal(goalId);
+      missionStore.linkGoal(missionId, goalId);
+      res.json({ goal, goals: listLinkedGoalsForMission(missionId) });
+    })
+  );
+
+  /**
+   * DELETE /api/missions/:missionId/goals/:goalId
+   * Unlink a single goal from a mission.
+   */
+  router.delete(
+    "/:missionId/goals/:goalId",
+    catchTypedHandler(async (req, res) => {
+      const { missionId, goalId } = req.params;
+      requireMission(missionId);
+      requireGoal(goalId);
+      missionStore.unlinkGoal(missionId, goalId);
+      res.json({ removed: true, goals: listLinkedGoalsForMission(missionId) });
     })
   );
 
@@ -936,13 +1101,15 @@ export function createMissionRouter(
     "/:missionId",
     catchTypedHandler(async (req, res) => {
       const { missionId } = req.params;
-      const { title, description, status, autoAdvance, autopilotEnabled, baseBranch, branchStrategy } = req.body;
+      const { title, description, status, autoAdvance, autopilotEnabled, baseBranch, branchStrategy, goalIds } = req.body;
 
       if (!validateMissionId(missionId)) {
         throw badRequest("Invalid mission ID format");
       }
 
       const updates: Partial<Mission> = {};
+      const validatedGoalIds = goalIds === undefined ? undefined : validateOptionalGoalIds(goalIds);
+      validatedGoalIds?.forEach((goalId) => requireLinkableGoal(goalId));
 
       if (title !== undefined) {
         updates.title = validateTitle(title);
@@ -966,17 +1133,25 @@ export function createMissionRouter(
         updates.branchStrategy = validateMissionBranchStrategy(branchStrategy);
       }
 
-      if (Object.keys(updates).length === 0) {
+      if (Object.keys(updates).length === 0 && validatedGoalIds === undefined) {
         throw badRequest("No valid fields to update");
       }
 
       try {
         const existingMission = missionStore.getMission(missionId);
-        const mission = missionStore.updateMission(missionId, updates);
+        const mission = Object.keys(updates).length > 0
+          ? missionStore.updateMission(missionId, updates)
+          : requireMission(missionId);
         if (missionAutopilot && updates.autopilotEnabled === true && existingMission?.autopilotEnabled !== true) {
           missionAutopilot.watchMission(missionId);
         }
-        res.json(mission);
+        const linkedGoals = validatedGoalIds === undefined
+          ? listLinkedGoalsForMission(missionId)
+          : setLinkedGoalsForMission(missionId, validatedGoalIds);
+        res.json({
+          ...mission,
+          linkedGoals,
+        });
       } catch (err: unknown) {
         const errMsg = err instanceof Error ? err.message : String(err);
         if (errMsg.includes("not found")) {
@@ -2852,6 +3027,29 @@ export function createMissionRouter(
       const nextSlice = missionStore.findNextPendingSlice(missionId);
       if (!nextSlice) {
         throw badRequest("No pending slices found");
+      }
+
+      // Preflight: when ephemeral agents are disabled, mission tasks can only be
+      // run by a permanent executor agent. Catalog-imported "company" agents land
+      // with role "custom" and are never auto-assigned, so without an executor the
+      // mission's tasks silently queue forever with no error surfaced (issue #1261).
+      // Block the start with an actionable message instead of stalling invisibly.
+      // Mirrors the scheduler's dispatch gate (ephemeralAgentsEnabled===false +
+      // selectPermanentAgentForTask returns null → task queued); both go through
+      // listEligibleExecutorAgents so the preflight can't drift from dispatch.
+      const scopedStore = getScopedStore();
+      const startSettings = await scopedStore.getSettings();
+      if (startSettings.ephemeralAgentsEnabled === false) {
+        const agentStore = new AgentStore({ rootDir: scopedStore.getFusionDir() });
+        await agentStore.init();
+        const executors = await listEligibleExecutorAgents(agentStore);
+        if (executors.length === 0) {
+          throw badRequest(
+            "Cannot start mission: ephemeral agents are disabled and no executor agent is available to run its tasks. "
+              + "Imported catalog (\"company\") agents have role \"custom\" and are not auto-assigned mission work. "
+              + "Assign at least one agent the \"executor\" role, or re-enable ephemeral agents in settings.",
+          );
+        }
       }
 
       // Enable autopilot (and autoAdvance for backward compat) so the mission

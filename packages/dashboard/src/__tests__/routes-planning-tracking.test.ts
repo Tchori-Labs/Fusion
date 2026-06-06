@@ -1,6 +1,6 @@
 // @vitest-environment node
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
 import express from "express";
 import { setTaskCreatedHook, type Task, type TaskStore } from "@fusion/core";
 import { registerPlanningSubtaskRoutes } from "../routes/register-planning-subtask-routes.js";
@@ -26,6 +26,7 @@ const sessions = new Map<string, PlanningSession>();
 vi.mock("../planning.js", () => ({
   getSession: (id: string) => sessions.get(id),
   getSummary: (id: string) => sessions.get(id)?.summary,
+  releaseSession: vi.fn(),
   cleanupSession: vi.fn(),
   formatInterviewQA: vi.fn(() => ""),
   mergePlanningSubtaskDrafts: vi.fn((_sessionId: string, subtasks: unknown[]) => subtasks),
@@ -41,14 +42,58 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
+/**
+ * Deterministic replacement for `vi.waitFor(() => expect(spy).toHaveBeenCalledTimes(n))`.
+ *
+ * The routes under test dispatch GitHub-issue creation on a fire-and-forget
+ * background promise chain (getSettings → maybeCreateTrackingIssue → createIssue
+ * / logger.warn), several `await`s deep. Polling for the call with `vi.waitFor`
+ * raced that chain under shard CPU contention (failed in-shard once, passed
+ * isolated). Instead we make the observable function itself signal: each
+ * invocation resolves the next pending deferred, so the test awaits exactly
+ * until the background work reaches the function — no timer, no timeout, no
+ * poll. The assertion (call count / argument shape) is unchanged and still bites.
+ */
+function signalOnCall<A extends unknown[], R>(impl: (...args: A) => R) {
+  let pending = deferred<void>();
+  const calls: A[] = [];
+  const wrapped = (...args: A): R => {
+    calls.push(args);
+    const toResolve = pending;
+    pending = deferred<void>();
+    toResolve.resolve();
+    return impl(...args);
+  };
+  // Resolves once the wrapped fn has been called at least `n` times.
+  const calledTimes = async (n: number): Promise<void> => {
+    while (calls.length < n) {
+      await pending.promise;
+    }
+  };
+  // Resolves once some invocation's args satisfy the predicate.
+  const calledMatching = async (predicate: (args: A) => boolean): Promise<void> => {
+    let seen = 0;
+    for (;;) {
+      while (seen < calls.length) {
+        if (predicate(calls[seen]!)) return;
+        seen += 1;
+      }
+      await pending.promise;
+    }
+  };
+  return { wrapped, calledTimes, calledMatching, get calls() { return calls; } };
+}
+
 describe("planning routes github tracking background dispatch", () => {
   let app: express.Express;
-  let createIssueSpy: ReturnType<typeof vi.spyOn>;
+  let createIssueSpy: MockInstance<typeof GitHubClient.prototype.createIssue>;
   let planningWarn: ReturnType<typeof vi.fn>;
+  let warnSignal: ReturnType<typeof signalOnCall<unknown[], void>>;
 
   beforeEach(() => {
     sessions.clear();
-    planningWarn = vi.fn();
+    warnSignal = signalOnCall<unknown[], void>(() => undefined);
+    planningWarn = vi.fn(warnSignal.wrapped);
 
     let idCounter = 1;
     const createdTasks = new Map<string, Record<string, unknown>>();
@@ -133,7 +178,8 @@ describe("planning routes github tracking background dispatch", () => {
 
   it("POST /planning/create-task returns before createIssue resolves", async () => {
     const issueDeferred = deferred<{ number: number; htmlUrl: string; createdAt: string }>();
-    createIssueSpy.mockReturnValue(issueDeferred.promise as never);
+    const createIssue = signalOnCall(() => issueDeferred.promise as never);
+    createIssueSpy.mockImplementation(createIssue.wrapped);
 
     sessions.set("plan-1", {
       summary: {
@@ -158,9 +204,8 @@ describe("planning routes github tracking background dispatch", () => {
 
     const response = await responsePromise;
     expect(response.status).toBe(201);
-    await vi.waitFor(() => {
-      expect(createIssueSpy).toHaveBeenCalledTimes(1);
-    });
+    await createIssue.calledTimes(1);
+    expect(createIssueSpy).toHaveBeenCalledTimes(1);
 
     issueDeferred.resolve({
       number: 1,
@@ -168,9 +213,9 @@ describe("planning routes github tracking background dispatch", () => {
       createdAt: new Date().toISOString(),
     });
 
-    await vi.waitFor(() => {
-      expect(createIssueSpy).toHaveBeenCalledTimes(1);
-    });
+    // No further dispatch should occur after the single createIssue resolves.
+    await Promise.resolve();
+    expect(createIssueSpy).toHaveBeenCalledTimes(1);
   });
 
   it("POST /planning/create-task still returns 201 when createIssue rejects", async () => {
@@ -198,14 +243,49 @@ describe("planning routes github tracking background dispatch", () => {
     );
 
     expect(response.status).toBe(201);
-    await vi.waitFor(() => {
-      expect(planningWarn).toHaveBeenCalled();
+    await warnSignal.calledMatching(
+      (args) => typeof args[0] === "string" && args[0].includes("[github-tracking] Failed to create issue"),
+    );
+    expect(planningWarn).toHaveBeenCalledWith(expect.stringContaining("[github-tracking] Failed to create issue"));
+  });
+
+  it("POST /planning/create-task still returns 201 when createIssue throws synchronously", async () => {
+    createIssueSpy.mockImplementation(() => {
+      throw new Error("sync github crash");
     });
+
+    sessions.set("plan-2-sync", {
+      summary: {
+        title: "Planned task 2",
+        description: "Planned task description 2",
+        suggestedSize: "M",
+        priority: "normal",
+        suggestedDependencies: [],
+        keyDeliverables: [],
+      },
+      initialPlan: "initial",
+      history: [],
+    });
+
+    const response = await performRequest(
+      app,
+      "POST",
+      "/planning/create-task",
+      JSON.stringify({ sessionId: "plan-2-sync" }),
+      { "content-type": "application/json" },
+    );
+
+    expect(response.status).toBe(201);
+    await warnSignal.calledMatching(
+      (args) => typeof args[0] === "string" && args[0].includes("[github-tracking] Failed to create issue"),
+    );
+    expect(planningWarn).toHaveBeenCalledWith(expect.stringContaining("[github-tracking] Failed to create issue"));
   });
 
   it("POST /planning/create-tasks dispatches one createIssue per task without blocking", async () => {
     const issueDeferred = deferred<{ number: number; htmlUrl: string; createdAt: string }>();
-    createIssueSpy.mockReturnValue(issueDeferred.promise as never);
+    const createIssue = signalOnCall(() => issueDeferred.promise as never);
+    createIssueSpy.mockImplementation(createIssue.wrapped);
 
     sessions.set("plan-3", {
       summary: {
@@ -235,9 +315,8 @@ describe("planning routes github tracking background dispatch", () => {
     );
 
     expect(response.status).toBe(201);
-    await vi.waitFor(() => {
-      expect(createIssueSpy).toHaveBeenCalledTimes(2);
-    });
+    await createIssue.calledTimes(2);
+    expect(createIssueSpy).toHaveBeenCalledTimes(2);
 
     issueDeferred.resolve({
       number: 2,
@@ -245,8 +324,84 @@ describe("planning routes github tracking background dispatch", () => {
       createdAt: new Date().toISOString(),
     });
 
-    await vi.waitFor(() => {
-      expect(createIssueSpy).toHaveBeenCalledTimes(2);
+    // No third dispatch after the two issues resolve.
+    await Promise.resolve();
+    expect(createIssueSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("POST /planning/create-tasks still returns 201 when createIssue rejects asynchronously", async () => {
+    createIssueSpy.mockRejectedValue(new Error("github down"));
+
+    sessions.set("plan-3-reject", {
+      summary: {
+        title: "Plan",
+        description: "Plan",
+        suggestedSize: "M",
+        priority: "normal",
+        suggestedDependencies: [],
+        keyDeliverables: [],
+      },
+      initialPlan: "initial",
+      history: [],
     });
+
+    const response = await performRequest(
+      app,
+      "POST",
+      "/planning/create-tasks",
+      JSON.stringify({
+        planningSessionId: "plan-3-reject",
+        subtasks: [
+          { id: "tmp-1", title: "Subtask 1", description: "D1" },
+          { id: "tmp-2", title: "Subtask 2", description: "D2" },
+        ],
+      }),
+      { "content-type": "application/json" },
+    );
+
+    expect(response.status).toBe(201);
+    await warnSignal.calledMatching(
+      (args) => typeof args[0] === "string" && args[0].includes("[github-tracking] Failed to create issue"),
+    );
+    expect(planningWarn).toHaveBeenCalledWith(expect.stringContaining("[github-tracking] Failed to create issue"));
+  });
+
+  it("POST /planning/create-tasks still returns 201 when createIssue throws synchronously", async () => {
+    createIssueSpy.mockImplementation(() => {
+      throw new Error("sync github crash");
+    });
+
+    sessions.set("plan-3-sync", {
+      summary: {
+        title: "Plan",
+        description: "Plan",
+        suggestedSize: "M",
+        priority: "normal",
+        suggestedDependencies: [],
+        keyDeliverables: [],
+      },
+      initialPlan: "initial",
+      history: [],
+    });
+
+    const response = await performRequest(
+      app,
+      "POST",
+      "/planning/create-tasks",
+      JSON.stringify({
+        planningSessionId: "plan-3-sync",
+        subtasks: [
+          { id: "tmp-1", title: "Subtask 1", description: "D1" },
+          { id: "tmp-2", title: "Subtask 2", description: "D2" },
+        ],
+      }),
+      { "content-type": "application/json" },
+    );
+
+    expect(response.status).toBe(201);
+    await warnSignal.calledMatching(
+      (args) => typeof args[0] === "string" && args[0].includes("[github-tracking] Failed to create issue"),
+    );
+    expect(planningWarn).toHaveBeenCalledWith(expect.stringContaining("[github-tracking] Failed to create issue"));
   });
 });

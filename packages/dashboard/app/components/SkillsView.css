@@ -116,6 +116,7 @@
 
 /* Toggle switch */
 .skills-view-item-toggle {
+  position: relative;
   display: flex;
   align-items: center;
   cursor: pointer;
@@ -197,6 +198,18 @@
 .skills-view-card:hover {
   background: var(--card-hover);
   border-color: var(--text-muted);
+}
+
+.skills-view-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-sm);
+}
+
+.skills-view-card-install {
+  align-self: flex-start;
+  flex-shrink: 0;
 }
 
 .skills-view-card-title {
@@ -410,14 +423,19 @@
     grid-template-columns: 1fr;
   }
 
-  .skills-view-item {
-    padding: var(--space-md);
-    min-height: calc(var(--space-lg) + var(--space-md) + var(--space-xs));
+  .skills-view-card-header {
     flex-wrap: wrap;
   }
 
+  .skills-view-item {
+    padding: var(--space-md);
+    min-height: calc(var(--space-lg) + var(--space-md) + var(--space-xs));
+    flex-wrap: nowrap;
+  }
+
   .skills-view-item-info {
-    width: 100%;
+    flex: 1 1 auto;
+    width: auto;
   }
 
   .skills-view-item-toggle {

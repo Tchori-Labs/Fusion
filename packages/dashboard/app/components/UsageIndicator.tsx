@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import type { CSSProperties, DragEvent } from "react";
 import { X, RefreshCw, Activity, TrendingUp, CheckCircle, AlertTriangle, Eye, GripVertical, ChevronUp, ChevronDown } from "lucide-react";
 import type { ProviderUsage, UsageWindow } from "../api";
@@ -162,22 +163,65 @@ function setProviderOrder(names: string[], projectId: string | undefined): void 
   setScopedItem(PROVIDER_ORDER_KEY, JSON.stringify(names), projectId);
 }
 
+const WINDOW_IDENTITY_DELIMITER = "::";
+
+function getWindowIdentity(windowLabel: string, windowIndex: number): string {
+  return `${windowIndex}${WINDOW_IDENTITY_DELIMITER}${windowLabel}`;
+}
+
+function matchesHiddenWindowEntry(
+  persistedEntry: string,
+  windowLabel: string,
+  windowIndex: number
+): boolean {
+  return (
+    persistedEntry === getWindowIdentity(windowLabel, windowIndex) ||
+    persistedEntry === windowLabel
+  );
+}
+
 function isWindowHidden(
   providerName: string,
   windowLabel: string,
+  windowIndex: number,
   hidden: Record<string, string[]>
 ): boolean {
-  return hidden[providerName]?.includes(windowLabel) ?? false;
+  return (hidden[providerName] ?? []).some((persistedEntry) =>
+    matchesHiddenWindowEntry(persistedEntry, windowLabel, windowIndex)
+  );
 }
 
 function getRenderedHiddenWindowCount(
   providerName: string,
-  windows: UsageWindow[],
+  windows: UsageWindow[] | undefined,
   hidden: Record<string, string[]>
 ): number {
-  return windows.reduce((count, window) => {
-    return count + (isWindowHidden(providerName, window.label, hidden) ? 1 : 0);
+  return (windows ?? []).reduce((count, window, windowIndex) => {
+    return count + (isWindowHidden(providerName, window.label, windowIndex, hidden) ? 1 : 0);
   }, 0);
+}
+
+function getRestorableHiddenWindowCount(
+  providerName: string,
+  windows: UsageWindow[] | undefined,
+  hidden: Record<string, string[]>
+): number {
+  const liveWindows = windows ?? [];
+  const renderedHiddenCount = getRenderedHiddenWindowCount(providerName, liveWindows, hidden);
+  const persistedHiddenEntries = hidden[providerName] ?? [];
+
+  if (persistedHiddenEntries.length === 0) {
+    return renderedHiddenCount;
+  }
+
+  const orphanedHiddenCount = persistedHiddenEntries.reduce((count, persistedEntry) => {
+    const matchesLiveWindow = liveWindows.some((window, windowIndex) =>
+      matchesHiddenWindowEntry(persistedEntry, window.label, windowIndex)
+    );
+    return count + (matchesLiveWindow ? 0 : 1);
+  }, 0);
+
+  return renderedHiddenCount + orphanedHiddenCount;
 }
 
 interface UsageWindowRowProps {
@@ -191,6 +235,7 @@ interface UsageWindowRowProps {
  * Single usage window row with progress bar
  */
 function UsageWindowRow({ window, viewMode, isHidden, onToggleHidden }: UsageWindowRowProps) {
+  const { t } = useTranslation("app");
   const colorClass = getUsageColorClass(window.percentUsed);
   const isRemainingMode = viewMode === 'remaining';
 
@@ -198,11 +243,11 @@ function UsageWindowRow({ window, viewMode, isHidden, onToggleHidden }: UsageWin
   // Round percentages for cleaner display
   const displayPercent = Math.round(isRemainingMode ? window.percentLeft : window.percentUsed);
   const headerText = isRemainingMode
-    ? `${Math.round(window.percentLeft)}% remaining`
-    : `${Math.round(window.percentUsed)}% used`;
+    ? t("usage.percentRemaining", "{{percent}}% remaining", { percent: Math.round(window.percentLeft) })
+    : t("usage.percentUsed", "{{percent}}% used", { percent: Math.round(window.percentUsed) });
   const footerText = isRemainingMode
-    ? `${Math.round(window.percentUsed)}% used`
-    : `${Math.round(window.percentLeft)}% left`;
+    ? t("usage.percentUsed", "{{percent}}% used", { percent: Math.round(window.percentUsed) })
+    : t("usage.percentLeft", "{{percent}}% left", { percent: Math.round(window.percentLeft) });
 
   // If resetText is null but resetAt exists, generate relative text from resetAt as a fallback
   let displayResetText = window.resetText;
@@ -213,14 +258,14 @@ function UsageWindowRow({ window, viewMode, isHidden, onToggleHidden }: UsageWin
       const days = Math.floor(hours / 24);
       const remHours = hours % 24;
       if (days > 0 && remHours > 0) {
-        displayResetText = `resets in ${days}d ${remHours}h`;
+        displayResetText = t("usage.resetsInDaysHours", "resets in {{days}}d {{hours}}h", { days, hours: remHours });
       } else if (days > 0) {
-        displayResetText = `resets in ${days}d`;
+        displayResetText = t("usage.resetsInDays", "resets in {{days}}d", { days });
       } else if (hours > 0) {
-        displayResetText = `resets in ${hours}h`;
+        displayResetText = t("usage.resetsInHours", "resets in {{hours}}h", { hours });
       } else {
         const mins = Math.floor(msLeft / (60 * 1000));
-        displayResetText = `resets in ${mins}m`;
+        displayResetText = t("usage.resetsInMinutes", "resets in {{mins}}m", { mins });
       }
     }
   }
@@ -251,7 +296,7 @@ function UsageWindowRow({ window, viewMode, isHidden, onToggleHidden }: UsageWin
               type="button"
               className="btn-icon usage-window-hide-btn"
               onClick={onToggleHidden}
-              aria-label={`Hide ${window.label}`}
+              aria-label={t("usage.hideWindow", "Hide {{label}}", { label: window.label })}
               data-testid="usage-window-hide-btn"
             >
               <Eye size={14} />
@@ -329,7 +374,7 @@ interface ProviderCardProps {
   provider: ProviderUsage;
   viewMode: 'used' | 'remaining';
   hiddenWindows: Record<string, string[]>;
-  onToggleWindow: (providerName: string, windowLabel: string) => void;
+  onToggleWindow: (providerName: string, windowLabel: string, windowIndex: number) => void;
   onShowAllHidden: (providerName: string) => void;
   isDragging: boolean;
   isDragOver: boolean;
@@ -414,7 +459,9 @@ function ProviderCard({
   onMoveUp,
   onMoveDown,
 }: ProviderCardProps) {
-  const hiddenCount = getRenderedHiddenWindowCount(provider.name, provider.windows, hiddenWindows);
+  const { t } = useTranslation("app");
+  const providerWindows = provider.windows ?? [];
+  const hiddenCount = getRestorableHiddenWindowCount(provider.name, providerWindows, hiddenWindows);
   const getStatusBadge = () => {
     switch (provider.status) {
       case "ok":
@@ -422,14 +469,14 @@ function ProviderCard({
       case "error":
         return (
           <span className="usage-status-badge usage-status-badge--error">
-            Error
+            {t("usage.statusError", "Error")}
           </span>
         );
       case "no-auth":
       default:
         return (
           <span className="usage-status-badge usage-status-badge--not-configured">
-            Not configured
+            {t("usage.statusNotConfigured", "Not configured")}
           </span>
         );
     }
@@ -460,19 +507,19 @@ function ProviderCard({
               onClick={() => onShowAllHidden(provider.name)}
               data-testid="usage-show-hidden-btn"
             >
-              Show hidden ({hiddenCount})
+              {t("usage.showHidden", "Show hidden ({{count}})", { count: hiddenCount })}
             </button>
           )}
         </div>
         <div className="usage-provider-actions">
           {isTouchReorderMode && (
-            <div className="usage-provider-reorder-controls" role="group" aria-label={`Reorder ${provider.name}`}>
+            <div className="usage-provider-reorder-controls" role="group" aria-label={t("usage.reorderProvider", "Reorder {{provider}}", { provider: provider.name })}>
               <button
                 className="btn-icon usage-provider-reorder-btn"
                 type="button"
                 onClick={onMoveUp}
                 disabled={!canMoveUp}
-                aria-label={`Move ${provider.name} up`}
+                aria-label={t("usage.moveProviderUp", "Move {{provider}} up", { provider: provider.name })}
               >
                 <ChevronUp size={14} />
               </button>
@@ -481,7 +528,7 @@ function ProviderCard({
                 type="button"
                 onClick={onMoveDown}
                 disabled={!canMoveDown}
-                aria-label={`Move ${provider.name} down`}
+                aria-label={t("usage.moveProviderDown", "Move {{provider}} down", { provider: provider.name })}
               >
                 <ChevronDown size={14} />
               </button>
@@ -506,10 +553,10 @@ function ProviderCard({
         </div>
       )}
 
-      {provider.windows.length > 0 ? (
+      {providerWindows.length > 0 ? (
         <div className="usage-provider-windows">
-          {provider.windows.map((window, index) => {
-            const hidden = isWindowHidden(provider.name, window.label, hiddenWindows);
+          {providerWindows.map((window, index) => {
+            const hidden = isWindowHidden(provider.name, window.label, index, hiddenWindows);
 
             return (
               <UsageWindowRow
@@ -517,13 +564,13 @@ function ProviderCard({
                 window={window}
                 viewMode={viewMode}
                 isHidden={hidden}
-                onToggleHidden={() => onToggleWindow(provider.name, window.label)}
+                onToggleHidden={() => onToggleWindow(provider.name, window.label, index)}
               />
             );
           })}
         </div>
       ) : provider.status === "ok" ? (
-        <div className="usage-provider-empty">No usage data available</div>
+        <div className="usage-provider-empty">{t("usage.noDataAvailable", "No usage data available")}</div>
       ) : null}
     </div>
   );
@@ -558,6 +605,7 @@ function UsageSkeleton() {
  * reset timers, and pace indicators.
  */
 export function UsageIndicator({ isOpen, onClose, projectId, anchorRect }: UsageIndicatorProps) {
+  const { t } = useTranslation("app");
   const { providers, loading, error, lastUpdated, hasFetched, refresh } = useUsageData({
     autoRefresh: isOpen, // Only poll when modal is open
   });
@@ -674,10 +722,15 @@ export function UsageIndicator({ isOpen, onClose, projectId, anchorRect }: Usage
     setHiddenWindows(hiddenWindows, projectId);
   }, [hiddenWindows, projectId]);
 
-  const handleToggleWindow = useCallback((providerName: string, windowLabel: string) => {
+  const handleToggleWindow = useCallback((providerName: string, windowLabel: string, windowIndex: number) => {
     setHiddenWindowsState((previous) => {
-      if (isWindowHidden(providerName, windowLabel, previous)) {
-        const remaining = (previous[providerName] ?? []).filter((label) => label !== windowLabel);
+      const windowIdentity = getWindowIdentity(windowLabel, windowIndex);
+      const providerHiddenWindows = previous[providerName] ?? [];
+
+      if (isWindowHidden(providerName, windowLabel, windowIndex, previous)) {
+        const remaining = providerHiddenWindows.filter(
+          (persistedEntry) => !matchesHiddenWindowEntry(persistedEntry, windowLabel, windowIndex)
+        );
         if (remaining.length === 0) {
           const { [providerName]: _removed, ...rest } = previous;
           return rest;
@@ -691,7 +744,7 @@ export function UsageIndicator({ isOpen, onClose, projectId, anchorRect }: Usage
 
       return {
         ...previous,
-        [providerName]: [...(previous[providerName] ?? []), windowLabel],
+        [providerName]: [...providerHiddenWindows, windowIdentity],
       };
     });
   }, []);
@@ -875,17 +928,17 @@ export function UsageIndicator({ isOpen, onClose, projectId, anchorRect }: Usage
         <div className="modal-header">
           <div className="usage-header">
             <Activity size={18} className="usage-header-icon" />
-            <h3>Usage</h3>
+            <h3>{t("usage.title", "Usage")}</h3>
           </div>
           <div className="usage-header-actions">
-            <div className="usage-view-toggle" role="group" aria-label="Usage view mode">
+            <div className="usage-view-toggle" role="group" aria-label={t("usage.viewModeLabel", "Usage view mode")}>
               <button
                 className={`usage-view-toggle-btn ${viewMode === 'used' ? 'active' : ''}`}
                 onClick={() => handleViewModeChange('used')}
                 aria-pressed={viewMode === 'used'}
                 data-testid="usage-view-toggle-used"
               >
-                Used
+                {t("usage.viewModeUsed", "Used")}
               </button>
               <button
                 className={`usage-view-toggle-btn ${viewMode === 'remaining' ? 'active' : ''}`}
@@ -893,13 +946,13 @@ export function UsageIndicator({ isOpen, onClose, projectId, anchorRect }: Usage
                 aria-pressed={viewMode === 'remaining'}
                 data-testid="usage-view-toggle-remaining"
               >
-                Remaining
+                {t("usage.viewModeRemaining", "Remaining")}
               </button>
             </div>
             <button
               className="modal-close"
               onClick={onClose}
-              aria-label="Close usage modal"
+              aria-label={t("actions.closeModal", "Close usage modal")}
               data-testid="usage-modal-close"
             >
               <X size={20} />
@@ -912,17 +965,17 @@ export function UsageIndicator({ isOpen, onClose, projectId, anchorRect }: Usage
             <UsageSkeleton />
           ) : error && providers.length === 0 ? (
             <div className="usage-error">
-              <p>Failed to load usage data</p>
+              <p>{t("usage.failedToLoad", "Failed to load usage data")}</p>
               <p className="usage-error-message">{error}</p>
               <button className="btn btn-sm" onClick={handleRefresh}>
-                Retry
+                {t("actions.retry", "Retry")}
               </button>
             </div>
           ) : providers.length === 0 ? (
             <div className="usage-empty">
-              <p>No AI providers configured</p>
+              <p>{t("usage.noProvidersConfigured", "No AI providers configured")}</p>
               <p className="usage-empty-hint">
-                Configure authentication in Settings to see usage data.
+                {t("usage.configureAuthHint", "Configure authentication in Settings to see usage data.")}
               </p>
             </div>
           ) : (
@@ -963,7 +1016,7 @@ export function UsageIndicator({ isOpen, onClose, projectId, anchorRect }: Usage
           <div className="modal-actions-left usage-actions-left">
             <div className="usage-last-updated">
               {lastUpdated && (
-                <span>Last updated: {lastUpdated.toLocaleTimeString()}</span>
+                <span>{t("usage.lastUpdated", "Last updated: {{time}}", { time: lastUpdated.toLocaleTimeString() })}</span>
               )}
             </div>
           </div>
@@ -975,10 +1028,10 @@ export function UsageIndicator({ isOpen, onClose, projectId, anchorRect }: Usage
               data-testid="usage-refresh-btn"
             >
               <RefreshCw size={14} className={isRefreshing ? "spin" : ""} style={{ marginRight: 6 }} />
-              Refresh
+              {t("actions.refresh", "Refresh")}
             </button>
             <button className="btn btn-primary btn-sm" onClick={onClose}>
-              Close
+              {t("actions.close", "Close")}
             </button>
           </div>
         </div>

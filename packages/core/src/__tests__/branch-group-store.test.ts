@@ -67,6 +67,34 @@ describe("TaskStore branch groups", () => {
     expect(second.autoMerge).toBe(true);
   });
 
+  it("reuses an existing open group with the same branchName across sources instead of throwing", () => {
+    // Regression: branch_groups.branchName is globally UNIQUE. When one mission
+    // already owns an open group for a shared base branch, a second source whose
+    // triage resolves to the same branch must reuse that group rather than crash
+    // on the UNIQUE constraint. (Mission triage discards the result and only needs
+    // it not to throw; a thrown error there silently strands "defined" features.)
+    const owner = store.createBranchGroup({ sourceType: "mission", sourceId: "M-OWNER", branchName: "main" });
+
+    let reusedByMission!: ReturnType<typeof store.ensureBranchGroupForSource>;
+    expect(() => {
+      reusedByMission = store.ensureBranchGroupForSource("mission", "M-OTHER", {
+        branchName: "main",
+        autoMerge: true,
+      });
+    }).not.toThrow();
+    expect(reusedByMission.id).toBe(owner.id);
+
+    // Invariant holds across the other source types that share this helper.
+    const reusedByNewTask = store.ensureBranchGroupForSource("new-task", "shared/main", { branchName: "main" });
+    expect(reusedByNewTask.id).toBe(owner.id);
+
+    const reusedByPlanning = store.ensureBranchGroupForSource("planning", "PS-main", { branchName: "main" });
+    expect(reusedByPlanning.id).toBe(owner.id);
+
+    // No duplicate rows were created for the shared branch.
+    expect(store.listBranchGroups().filter((g) => g.branchName === "main")).toHaveLength(1);
+  });
+
   it("supports new-task branch group sources and round-trips through lookups", () => {
     const group = store.ensureBranchGroupForSource("new-task", "shared/onboarding", {
       branchName: "shared/onboarding",
@@ -82,6 +110,33 @@ describe("TaskStore branch groups", () => {
     expect(() =>
       store.createBranchGroup({ sourceType: "planning", sourceId: "PS-1", branchName: "fn/shared" })
     ).toThrow();
+  });
+
+  it("rejects injection-shaped branch names at createBranchGroup (Fix #11)", () => {
+    for (const bad of ["$(touch /tmp/x)", "`cmd`", "feature; rm -rf /", "has space", "a|b"]) {
+      expect(() =>
+        store.createBranchGroup({ sourceType: "planning", sourceId: `bad-${bad}`, branchName: bad }),
+      ).toThrow(/Invalid branch group branch name/);
+    }
+    // ensureBranchGroupForSource shares the createBranchGroup path → also rejected.
+    expect(() =>
+      store.ensureBranchGroupForSource("planning", "PS-inj", { branchName: "$(evil)", autoMerge: false }),
+    ).toThrow(/Invalid branch group branch name/);
+    // Legitimate names still pass.
+    expect(store.createBranchGroup({ sourceType: "planning", sourceId: "PS-good", branchName: "feature/auth-shared" }).branchName).toBe("feature/auth-shared");
+  });
+
+  it("rejects injection-shaped branch names on updateBranchGroup rename (Fix #11)", () => {
+    const group = store.createBranchGroup({ sourceType: "planning", sourceId: "PS-rename", branchName: "feature/safe" });
+    for (const bad of ["$(touch /tmp/x)", "`cmd`", "feature; rm -rf /", "has space", "a|b"]) {
+      expect(() => store.updateBranchGroup(group.id, { branchName: bad })).toThrow(
+        /Invalid branch group branch name/,
+      );
+    }
+    // The original branch name is left intact after a rejected rename.
+    expect(store.getBranchGroup(group.id)?.branchName).toBe("feature/safe");
+    // A legitimate rename still succeeds.
+    expect(store.updateBranchGroup(group.id, { branchName: "feature/renamed" }).branchName).toBe("feature/renamed");
   });
 
   it("finds open branch groups by branch name and ignores closed groups", () => {
@@ -177,6 +232,64 @@ describe("TaskStore branch groups", () => {
     });
     expect(landed.worktreePath).toBe("/tmp/fusion/grouped");
     expect(landed.status).toBe("open");
+  });
+
+  it("returns [] for an empty branch group rather than throwing", async () => {
+    const group = store.createBranchGroup({ sourceType: "planning", sourceId: "PS-empty", branchName: "fn/empty" });
+    await expect(store.listTasksByBranchGroup(group.id)).resolves.toEqual([]);
+    await expect(store.listTasksByBranchGroup("BG-does-not-exist")).resolves.toEqual([]);
+  });
+
+  it("enumerates legacy rows stamped with the synthetic groupId via the read-side fallback", async () => {
+    // Simulate a pre-fix planning group whose members were stamped with `planning:<sourceId>`.
+    const group = store.createBranchGroup({ sourceType: "planning", sourceId: "PS-legacy", branchName: "fn/legacy" });
+    const legacyTask = await store.createTask({
+      description: "legacy member",
+      branchContext: { groupId: "planning:PS-legacy", source: "planning", assignmentMode: "shared" },
+    });
+    const newTask = await store.createTask({
+      description: "new member",
+      branchContext: { groupId: group.id, source: "planning", assignmentMode: "shared" },
+    });
+
+    const members = await store.listTasksByBranchGroup(group.id);
+    expect(members.map((task) => task.id).sort()).toEqual([legacyTask.id, newTask.id].sort());
+  });
+
+  it("enumerates legacy mission rows via the synthetic fallback", async () => {
+    const group = store.createBranchGroup({ sourceType: "mission", sourceId: "M-legacy", branchName: "fn/mission-legacy" });
+    const legacyTask = await store.createTask({
+      description: "legacy mission member",
+      branchContext: { groupId: "mission:M-legacy", source: "mission", assignmentMode: "shared" },
+    });
+
+    const members = await store.listTasksByBranchGroup(group.id);
+    expect(members.map((task) => task.id)).toEqual([legacyTask.id]);
+  });
+
+  it("does not overwrite a per-task-derived assignmentMode to shared on setTaskBranchGroup", async () => {
+    const group = store.createBranchGroup({ sourceType: "planning", sourceId: "PS-perTask", branchName: "fn/per-task" });
+    const task = await store.createTask({
+      description: "per-task-derived member",
+      branchContext: { groupId: "old", source: "planning", assignmentMode: "per-task-derived" },
+    });
+
+    await store.setTaskBranchGroup(task.id, group.id);
+    const linked = await store.getTask(task.id);
+    expect(linked.branchContext).toEqual({
+      groupId: group.id,
+      source: "planning",
+      assignmentMode: "per-task-derived",
+    });
+  });
+
+  it("honors an explicit assignmentMode option on setTaskBranchGroup", async () => {
+    const group = store.createBranchGroup({ sourceType: "mission", sourceId: "M-explicit", branchName: "fn/explicit" });
+    const task = await store.createTask({ description: "explicit mode" });
+
+    await store.setTaskBranchGroup(task.id, group.id, { assignmentMode: "per-task-derived" });
+    const linked = await store.getTask(task.id);
+    expect(linked.branchContext?.assignmentMode).toBe("per-task-derived");
   });
 
   it("preserves autoMerge + branchContext in slim list/search/modifiedSince and archived slim", async () => {

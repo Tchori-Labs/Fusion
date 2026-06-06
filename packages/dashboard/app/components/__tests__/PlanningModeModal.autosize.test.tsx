@@ -28,6 +28,16 @@ import {
   mockModels,
 } from "./PlanningModeModal.test-helpers";
 
+const mockAddToast = vi.fn();
+
+vi.mock("../../hooks/useToast", () => ({
+  useToast: () => ({
+    addToast: mockAddToast,
+    removeToast: vi.fn(),
+    toasts: [],
+  }),
+}));
+
 vi.mock("../../hooks/useNavigationHistory", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../hooks/useNavigationHistory")>();
   return {
@@ -92,6 +102,7 @@ describe("PlanningModeModal autosize", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockAddToast.mockReset();
     mockConfirm.mockResolvedValue(true);
     mockStartPlanningStreaming.mockResolvedValue({ sessionId: "session-123" });
     mockCreatePlanningDraft.mockResolvedValue({ sessionId: "draft-123", title: "New planning session" });

@@ -1,4 +1,4 @@
-import { type MilestoneStatus, type SliceStatus, type FeatureStatus } from "@fusion/core";
+import { type Goal, type MilestoneStatus, type SliceStatus, type FeatureStatus } from "@fusion/core";
 import { createInterface } from "node:readline/promises";
 import { getStore } from "../project-resolver.js";
 
@@ -32,6 +32,14 @@ const FEATURE_STATUS_LABELS: Record<FeatureStatus, string> = {
   done: "Done",
   blocked: "Blocked",
 };
+
+function resolveLinkedGoals(store: Awaited<ReturnType<typeof getStore>>, missionId: string): Array<Goal | { id: string; missing: true }> {
+  const goalStore = store.getGoalStore();
+  return store
+    .getMissionStore()
+    .listGoalIdsForMission(missionId)
+    .map((goalId) => goalStore.getGoal(goalId) ?? { id: goalId, missing: true as const });
+}
 
 async function promptForTitleAndDescription(
   titleArg: string | undefined,
@@ -67,14 +75,30 @@ async function promptForTitleAndDescription(
  * Create a new mission with optional title and description.
  * If arguments are omitted, prompts interactively.
  */
+function requireCliLinkableGoal(store: Awaited<ReturnType<typeof getStore>>, goalId: string): Goal {
+  const goal = store.getGoalStore().getGoal(goalId);
+  if (!goal) {
+    console.error(`✗ Goal ${goalId} not found`);
+    process.exit(1);
+  }
+  if (goal.status === "archived") {
+    console.error(`✗ Goal ${goalId} is archived and cannot be linked`);
+    process.exit(1);
+  }
+  return goal;
+}
+
 export async function runMissionCreate(
   titleArg?: string,
   descriptionArg?: string,
   projectName?: string,
   baseBranch?: string,
+  goalIds?: string[],
 ) {
   const store = await getStore({ project: projectName });
   const missionStore = store.getMissionStore();
+  const uniqueGoalIds = Array.from(new Set(goalIds ?? []));
+  const linkableGoals = uniqueGoalIds.map((goalId) => requireCliLinkableGoal(store, goalId));
 
   const { title, description } = titleArg
     ? { title: titleArg.trim(), description: descriptionArg?.trim() || undefined }
@@ -90,11 +114,18 @@ export async function runMissionCreate(
     baseBranch: baseBranch?.trim() || undefined,
   });
 
+  for (const goal of linkableGoals) {
+    missionStore.linkGoal(mission.id, goal.id);
+  }
+
   console.log();
   console.log(`  ✓ Created ${mission.id}: ${mission.title}`);
   console.log(`    Status: ${MISSION_STATUS_LABELS[mission.status]}`);
   if (mission.description) {
     console.log(`    Description: ${mission.description.slice(0, 80)}${mission.description.length > 80 ? "…" : ""}`);
+  }
+  if (linkableGoals.length > 0) {
+    console.log(`    Linked goals: ${linkableGoals.length}`);
   }
   console.log();
 }
@@ -438,6 +469,94 @@ export async function runFeatureAdd(
   console.log(`    Status: ${FEATURE_STATUS_LABELS[feature.status]}`);
   if (feature.acceptanceCriteria) {
     console.log(`    Acceptance: ${feature.acceptanceCriteria.slice(0, 60)}${feature.acceptanceCriteria.length > 60 ? "…" : ""}`);
+  }
+  console.log();
+}
+
+export async function runMissionLinkGoal(missionId: string, goalId: string, projectName?: string) {
+  if (!missionId || !goalId) {
+    console.error("Usage: fn mission link-goal <mission-id> <goal-id>");
+    process.exit(1);
+  }
+
+  const store = await getStore({ project: projectName });
+  const missionStore = store.getMissionStore();
+
+  if (!missionStore.getMission(missionId)) {
+    console.error(`✗ Mission ${missionId} not found`);
+    process.exit(1);
+  }
+
+  const goal = requireCliLinkableGoal(store, goalId);
+
+  missionStore.linkGoal(missionId, goalId);
+
+  console.log();
+  console.log(`  ✓ Linked ${goal.id}: ${goal.title} → ${missionId}`);
+  console.log(`    Linked goals: ${missionStore.listGoalIdsForMission(missionId).length}`);
+  console.log();
+}
+
+export async function runMissionUnlinkGoal(missionId: string, goalId: string, projectName?: string) {
+  if (!missionId || !goalId) {
+    console.error("Usage: fn mission unlink-goal <mission-id> <goal-id>");
+    process.exit(1);
+  }
+
+  const store = await getStore({ project: projectName });
+  const missionStore = store.getMissionStore();
+
+  if (!missionStore.getMission(missionId)) {
+    console.error(`✗ Mission ${missionId} not found`);
+    process.exit(1);
+  }
+
+  const goal = store.getGoalStore().getGoal(goalId);
+  if (!goal) {
+    console.error(`✗ Goal ${goalId} not found`);
+    process.exit(1);
+  }
+
+  missionStore.unlinkGoal(missionId, goalId);
+
+  console.log();
+  console.log(`  ✓ Unlinked ${goal.id}: ${goal.title} from ${missionId}`);
+  console.log(`    Linked goals: ${missionStore.listGoalIdsForMission(missionId).length}`);
+  console.log();
+}
+
+export async function runMissionGoals(missionId: string, projectName?: string) {
+  if (!missionId) {
+    console.error("Usage: fn mission goals <mission-id>");
+    process.exit(1);
+  }
+
+  const store = await getStore({ project: projectName });
+  const missionStore = store.getMissionStore();
+  const mission = missionStore.getMission(missionId);
+
+  if (!mission) {
+    console.error(`✗ Mission ${missionId} not found`);
+    process.exit(1);
+  }
+
+  const linkedGoals = resolveLinkedGoals(store, missionId);
+
+  console.log();
+  console.log(`  Linked goals for ${mission.id}: ${mission.title}`);
+  if (linkedGoals.length === 0) {
+    console.log("    No linked goals.");
+    console.log();
+    process.exit(0);
+  }
+
+  for (const goal of linkedGoals) {
+    if ("missing" in goal) {
+      console.log(`    - ${goal.id} [missing]`);
+      continue;
+    }
+    const description = goal.description ? ` — ${goal.description}` : "";
+    console.log(`    - ${goal.id} [${goal.status}] ${goal.title}${description}`);
   }
   console.log();
 }

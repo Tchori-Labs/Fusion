@@ -181,55 +181,6 @@ describe("reliability interactions: FN-5153 soft-delete end-to-end", () => {
     expect(executeSpy).toHaveBeenCalledTimes(1);
   });
 
-  it.skip("FN-5142 — abort in-flight executor session on task:deleted", async () => {
-    // Owning FN: FN-5142.
-    // Assertion blueprint: register a fake active executor session for the task,
-    // emit/store-delete `task:deleted`, then assert `session.abort()` and
-    // `session.dispose()` were called and the executor's active-session map entry
-    // was cleared exactly once.
-    // Narrow owning test file: packages/engine/src/__tests__/executor-soft-delete-abort.test.ts
-  });
-
-  it.skip("FN-5142 — abort active merge on task:deleted", async () => {
-    // Owning FN: FN-5142.
-    // Assertion blueprint: seed active merge state plus a mergeAbortController,
-    // emit/store-delete `task:deleted`, then assert controller.abort(), queue
-    // removal, and active merge state cleanup for the deleted task.
-    // Narrow owning test file: packages/engine/src/__tests__/project-engine-soft-delete-merge-abort.test.ts
-  });
-
-  it.skip("FN-5142 — abort triage session on task:deleted", async () => {
-    // Owning FN: FN-5142.
-    // Assertion blueprint: register an active triage session/subagent for the
-    // task, emit/store-delete `task:deleted`, then assert the triage session and
-    // subagent are aborted/disposed and the task is not re-polled.
-    // Narrow owning test file: packages/engine/src/__tests__/triage-soft-delete-abort.test.ts
-  });
-
-  it.skip("FN-5143 — agent log rows cleared on task:deleted", async () => {
-    // Owning FN: FN-5143.
-    // Assertion blueprint: create agent log rows for the target task, soft-delete
-    // it, then assert persisted `agentLogEntries` count is 0 for that task and
-    // `store.getAgentLogs(taskId)` returns an empty array.
-    // Narrow owning test file: packages/core/src/__tests__/soft-delete-agent-logs.test.ts
-  });
-
-  it.skip("FN-5140 — documents excluded from live readers", async () => {
-    // Owning FN: FN-5140.
-    // Assertion blueprint: create task documents, soft-delete the parent task,
-    // then assert `getAllDocuments()` excludes it, `getTaskDocuments(taskId)` is
-    // `[]`, and `getTaskDocument(taskId, key)` / revisions return null-or-empty.
-    // Narrow owning test files: packages/core/src/__tests__/task-documents.test.ts and packages/dashboard/src/__tests__/routes-tasks.test.ts
-  });
-
-  it.skip("FN-5139 — TaskHasLineageChildrenError surfaces as 409 with lineageChildIds", async () => {
-    // Owning FN: FN-5139.
-    // Assertion blueprint: delete a task with live lineage children through the
-    // route layer, assert HTTP 409 plus `{ code: "TASK_HAS_LINEAGE_CHILDREN",
-    // taskId, lineageChildIds }`, then cover the confirm-retry UI path.
-    // Narrow owning test files: packages/dashboard/src/__tests__/routes-tasks-ops.test.ts and dashboard delete-flow UI tests listed in FN-5139.
-  });
-
   it("keeps re-delete idempotent and deleted IDs reserved", async () => {
     const store = createEventedSoftDeleteStore();
     const task = await store.createTask({ column: "todo", title: "Original" });

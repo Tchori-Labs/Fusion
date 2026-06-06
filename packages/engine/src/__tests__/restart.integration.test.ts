@@ -235,6 +235,12 @@ vi.mock("@earendil-works/pi-ai", () => ({
     Array: (schema: unknown, opts?: unknown) => ({ type: "array", items: schema, ...((opts as object) ?? {}) }),
     Union: (schemas: unknown[], opts?: unknown) => ({ anyOf: schemas, ...((opts as object) ?? {}) }),
     Literal: (value: unknown) => ({ const: value }),
+    Unknown: (opts?: unknown) => ({ ...((opts as object) ?? {}) }),
+    Record: (_key: unknown, value: unknown, opts?: unknown) => ({
+      type: "object",
+      additionalProperties: value,
+      ...((opts as object) ?? {}),
+    }),
   },
 }));
 vi.mock("@earendil-works/pi-coding-agent", () => {
@@ -256,7 +262,7 @@ import { WorktreePool, scanIdleWorktrees, cleanupOrphanedWorktrees } from "../wo
 import { createFnAgent } from "../pi.js";
 import { execSync } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
-import type { Task, TaskDetail, TaskStep, Column, Settings, StepStatus } from "@fusion/core";
+import type { Task, TaskDetail, TaskStep, Column, ColumnId, Settings, StepStatus } from "@fusion/core";
 
 const mockedCreateFnAgent = vi.mocked(createFnAgent);
 const mockedExecSync = vi.mocked(execSync);
@@ -320,7 +326,7 @@ function createMockStore(overrides: Record<string, any> = {}) {
   return store;
 }
 
-function makeTask(id: string, column: Column, overrides: Partial<Task> = {}): Task {
+function makeTask(id: string, column: ColumnId, overrides: Partial<Task> = {}): Task {
   return {
     id,
     title: `Task ${id}`,
@@ -336,7 +342,7 @@ function makeTask(id: string, column: Column, overrides: Partial<Task> = {}): Ta
   };
 }
 
-function makeTaskDetail(id: string, column: Column, overrides: Partial<TaskDetail> = {}): TaskDetail {
+function makeTaskDetail(id: string, column: ColumnId, overrides: Partial<TaskDetail> = {}): TaskDetail {
   return {
     ...makeTask(id, column, overrides),
     prompt: overrides.prompt ?? "# test\n## Steps\n### Step 0: Preflight\n- [ ] check\n## Review Level: 0",
@@ -1298,9 +1304,35 @@ describe("Crash scenario edge cases", () => {
 
   it("concurrent resumeOrphaned() calls don't double-execute the same task", async () => {
     const store = createMockStore();
-    const task = makeTask("FN-092", "in-progress");
+    const rootDir = "/private/tmp/test";
+    const worktreePath = `${rootDir}/.worktrees/swift-falcon`;
+    const task = makeTask("FN-092", "in-progress", {
+      worktree: worktreePath,
+      branch: "fusion/fn-092",
+    });
     store.listTasks.mockResolvedValue([task]);
-    store.getTask.mockResolvedValue(makeTaskDetail("FN-092", "in-progress"));
+    store.getTask.mockResolvedValue(makeTaskDetail("FN-092", "in-progress", {
+      worktree: worktreePath,
+      branch: "fusion/fn-092",
+    }));
+    mockedExecSync.mockImplementation(((cmd: unknown) => {
+      if (String(cmd) === "git rev-parse --is-inside-work-tree") {
+        return "true\n" as any;
+      }
+      if (String(cmd) === "git worktree list --porcelain") {
+        return [
+          `worktree ${rootDir}`,
+          "HEAD abc123",
+          "branch refs/heads/main",
+          "",
+          `worktree ${worktreePath}`,
+          "HEAD def456",
+          "branch refs/heads/fusion/fn-092",
+          "",
+        ].join("\n") as any;
+      }
+      return Buffer.from("");
+    }) as any);
 
     let resolvePrompt: (() => void) | undefined;
     mockedCreateFnAgent.mockResolvedValue({
@@ -1310,7 +1342,7 @@ describe("Crash scenario edge cases", () => {
       },
     } as any);
 
-    const executor = new TaskExecutor(store, "/tmp/test");
+    const executor = new TaskExecutor(store, rootDir);
 
     // First call starts execution
     const first = executor.resumeOrphaned();

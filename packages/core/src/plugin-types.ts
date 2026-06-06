@@ -13,7 +13,7 @@
 
 import type { Database } from "./db.js";
 import type { TaskStore } from "./store.js";
-import type { Task, WorkflowStepMode, WorkflowStepToolMode } from "./types.js";
+import type { PlanningQuestion, Task, WorkflowStepMode, WorkflowStepToolMode } from "./types.js";
 
 const SLUG_PATTERN = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/;
 const PROMPT_CONTRIBUTION_SURFACES = ["executor-system", "executor-task", "triage", "reviewer", "heartbeat"] as const;
@@ -49,6 +49,8 @@ export interface PluginManifest {
   skills?: Array<{ skillId: string; name: string }>;
   /** Optional workflow step metadata used for discovery UIs. */
   workflowSteps?: Array<{ stepId: string; name: string }>;
+  /** Optional trait metadata used for discovery UIs (U8). */
+  traits?: Array<{ traitId: string; name: string }>;
   /** Prompt surfaces this plugin contributes to. */
   promptSurfaces?: PluginPromptSurface[];
   /** Setup metadata for plugin-managed binaries/runtimes. */
@@ -121,6 +123,134 @@ export interface AiSessionResult {
  */
 export type CreateAiSessionFactory = (options: CreateAiSessionOptions) => Promise<AiSessionResult>;
 
+// ── Interactive AI Sessions ───────────────────────────────────────────
+//
+// A generic interactive (multi-turn, await-input) AI session capability.
+// Unlike the one-shot `createAiSession` above, an interactive session can
+// pause mid-agent-turn on a structured question and resume when the caller
+// supplies an answer. The host (engine) builds the prompt → parse → retry →
+// pause → resume loop; the caller drives it by pulling events.
+//
+// The protocol is deliberately generic: the caller supplies a `systemPrompt`
+// that instructs the agent to emit the JSON question/complete contract
+// (the same shape used by `PlanningResponse`). The seam hardcodes no
+// application-specific (e.g. compound-engineering) prompts or concepts.
+
+/**
+ * Options for creating an interactive AI session.
+ * Mirrors {@link CreateAiSessionOptions}; the caller-supplied `systemPrompt`
+ * is responsible for instructing the agent to emit the question/complete
+ * JSON protocol that the seam parses.
+ */
+export interface CreateInteractiveAiSessionOptions {
+  /** Working directory for the agent session */
+  cwd: string;
+  /** System prompt for the agent (must instruct it to emit the JSON protocol) */
+  systemPrompt: string;
+  /** Tool mode: "coding" for full tools, "readonly" for read-only */
+  tools?: "coding" | "readonly";
+  /** Default model provider (e.g., "anthropic") */
+  defaultProvider?: string;
+  /** Default model ID within the provider */
+  defaultModelId?: string;
+  /**
+   * Skill names the session should load (matched against discovered skills).
+   * Lets a plugin point a session at a specific bundled skill rather than
+   * relying on cwd-only discovery. Forwarded to the engine's skill selection.
+   */
+  requestedSkillNames?: string[];
+  /**
+   * Extra directories to scan for skills (each holding `<id>/SKILL.md`), in
+   * addition to the default cwd/agent-dir roots. A plugin that installs its
+   * skills to a plugin-local directory passes that directory here so its
+   * `requestedSkillNames` are actually discoverable in the live session.
+   */
+  additionalSkillPaths?: string[];
+  /**
+   * Live progress callback, invoked WHILE a turn runs (the pull-based
+   * `nextEvent()` only resolves once the turn settles). Receives streaming
+   * thinking/text deltas and tool start/end markers so a caller can surface
+   * the agent's work in real time. Optional; ignored by factories that cannot
+   * stream. Must not throw — implementations should swallow callback errors.
+   */
+  onProgress?: (event: InteractiveAiSessionProgressEvent) => void;
+}
+
+/**
+ * A live progress event emitted mid-turn via
+ * {@link CreateInteractiveAiSessionOptions.onProgress}.
+ *
+ * - `thinking` / `text`: an incremental output DELTA (not a snapshot) — the
+ *   consumer accumulates.
+ * - `tool`: a discrete tool execution start/end marker.
+ */
+export type InteractiveAiSessionProgressEvent =
+  | { type: "thinking"; delta: string }
+  | { type: "text"; delta: string }
+  | { type: "tool"; name: string; phase: "start" | "end"; isError?: boolean };
+
+/**
+ * A single event pulled from an interactive AI session.
+ *
+ * Discriminated union on `type`:
+ * - `thinking` / `text`: incremental agent output (data is a string).
+ * - `question`: the agent paused awaiting structured input; the session is
+ *   now in awaiting-input until {@link InteractiveAiSession.answer} is called.
+ *   `data` is a {@link PlanningQuestion} (reused for protocol parity).
+ * - `complete`: the agent finished; `data` is the final payload (shape is
+ *   defined by the caller's protocol — opaque to the seam).
+ * - `error`: an agent/session/parse error; `data` carries a human-readable
+ *   message and optional error detail. The caller is never left hanging.
+ */
+export type InteractiveAiSessionEvent =
+  | { type: "thinking"; data: string }
+  | { type: "text"; data: string }
+  | { type: "question"; data: PlanningQuestion }
+  | { type: "complete"; data: unknown }
+  | { type: "error"; data: { message: string; cause?: unknown } };
+
+/**
+ * An interactive, multi-turn AI session.
+ *
+ * Event delivery is **pull-based**: the caller awaits {@link nextEvent} to get
+ * the next event. `nextEvent()` resolves once the session has produced an
+ * event for the most recent `prompt`/`answer`. A `question` event leaves the
+ * session in awaiting-input; the caller must call {@link answer} (not
+ * {@link prompt}) to resume. After a `complete` or `error` event the session
+ * is terminal and `nextEvent()` will keep returning that terminal event.
+ *
+ * (Pull-based `nextEvent()` is chosen over an async iterator because it is the
+ * simpler shape to drive deterministically from a route/test: each turn is one
+ * `prompt`/`answer` followed by one awaited `nextEvent`.)
+ */
+export interface InteractiveAiSession {
+  /** Send a free-text turn to the agent (the opening turn, or follow-up text). */
+  prompt(text: string): Promise<void>;
+  /** Pull the next event produced by the most recent prompt/answer. */
+  nextEvent(): Promise<InteractiveAiSessionEvent>;
+  /** Answer the currently-awaiting question, resuming the agent. */
+  answer(questionId: string, response: unknown): Promise<void>;
+  /** Release the underlying agent/session handles. Safe to call repeatedly. */
+  dispose(): void;
+}
+
+/**
+ * Result returned from creating an interactive AI session.
+ */
+export interface CreateInteractiveAiSessionResult {
+  /** The interactive session handle. */
+  session: InteractiveAiSession;
+  /** Path to persisted session file, if any. */
+  sessionFile?: string;
+}
+
+/**
+ * Engine-injected factory for plugin interactive AI sessions.
+ */
+export type CreateInteractiveAiSessionFactory = (
+  options: CreateInteractiveAiSessionOptions,
+) => Promise<CreateInteractiveAiSessionResult>;
+
 /**
  * Context object passed to plugins at runtime.
  * Contains task store access, settings, logging, and event emission.
@@ -137,6 +267,12 @@ export interface PluginContext {
   emitEvent: (event: string, data: unknown) => void;
   /** Engine-injected AI session factory (undefined when engine is not loaded) */
   createAiSession?: CreateAiSessionFactory;
+  /**
+   * Engine-injected interactive (multi-turn, await-input) AI session factory.
+   * Undefined when the engine is not loaded or on non-route contexts (parity
+   * with `createAiSession`).
+   */
+  createInteractiveAiSession?: CreateInteractiveAiSessionFactory;
   /** Optional host capability to resolve a project-scoped TaskStore by projectId. */
   resolveProjectTaskStore?: (projectId: string) => Promise<TaskStore>;
 }
@@ -559,6 +695,212 @@ export interface PluginWorkflowStepContribution {
 }
 
 /**
+ * Plugin-contributed trait (U8, R6/R22, KTD-7).
+ *
+ * Plugins declare traits in their manifest the way they declare workflow steps.
+ * A trait carries declarative flags + an optional config schema + async-only
+ * hook descriptors. The contract is a VERSIONED hook-descriptor schema
+ * (`schemaVersion`) so the built-in trait vocabulary can grow additively (new
+ * flags, hook points, config fields) without breaking published plugin traits.
+ *
+ * Restricted (built-in-only) capabilities a plugin trait may NOT declare (R22,
+ * KTD-2/KTD-7), rejected at validation:
+ *   - the `complete` / `archived` flags (silently satisfying dependencies /
+ *     hiding cards is a scheduling-poison surface);
+ *   - a sync `guard` hook (sync guards run in-lock and must be fast/pure — a
+ *     plugin hook there could wedge the task lock).
+ *
+ * Plugin traits get ASYNC hook points only: `gate`, `onEnter`, `onExit`,
+ * `releaseCondition`. Each hook descriptor mirrors PluginWorkflowStepContribution's
+ * declarative shape (mode + prompt/scriptName) so the existing prompt-session /
+ * script / verdict machinery executes them; gates additionally carry `gateMode`.
+ */
+export interface PluginTraitHookDescriptor {
+  /** How the hook runs: a model prompt or a named project script. */
+  mode: "prompt" | "script";
+  /** Prompt text used when `mode === "prompt"`. */
+  prompt?: string;
+  /** Named project script used when `mode === "script"`. */
+  scriptName?: string;
+  /**
+   * Gate semantics (gate hook only): `blocking` fails closed (a non-pass
+   * verdict rejects the move); `advisory` records the verdict and allows the
+   * move. Ignored for non-gate hooks. Defaults to `blocking` for gate hooks.
+   */
+  gateMode?: "blocking" | "advisory";
+}
+
+/**
+ * The declarative flag subset a plugin trait may declare. Restricted flags
+ * (`complete`, `archived`) are intentionally absent from this type AND rejected
+ * at validation — declaring them is a contribution error, not silently ignored.
+ */
+export interface PluginTraitFlags {
+  countsTowardWip?: boolean;
+  hiddenFromBoard?: boolean;
+  abortOnExit?: boolean;
+  humanReview?: boolean;
+  intake?: boolean;
+  hold?: boolean;
+  mergeOrchestration?: boolean;
+  mergeBlocker?: boolean;
+  resetOnEntry?: boolean;
+  timing?: boolean;
+  stallDetection?: boolean;
+  notify?: boolean;
+  gate?: boolean;
+}
+
+export interface PluginTraitContribution {
+  /** Unique trait identifier within the plugin namespace (kebab-case). The
+   *  registry-facing id is namespaced as `plugin:<pluginId>:<traitId>`. */
+  traitId: string;
+  /** Human-readable trait name. */
+  name: string;
+  /** Short description for UI. */
+  description?: string;
+  /** Versioned hook-descriptor schema. Currently `1`. Required so the
+   *  vocabulary can extend additively without breaking published traits. */
+  schemaVersion: 1;
+  /** Declarative flags (restricted flags rejected at validation, R22). */
+  flags?: PluginTraitFlags;
+  /** Optional declarative config schema fields (shape mirrors TraitConfigField). */
+  configSchema?: {
+    fields: Array<{
+      key: string;
+      type: "string" | "number" | "boolean" | "enum" | "object" | "array";
+      required?: boolean;
+      enumValues?: readonly string[];
+      description?: string;
+    }>;
+  };
+  /** Async-only hook descriptors (R22). A `guard` key is NOT permitted and is
+   *  rejected at validation. */
+  hooks?: {
+    gate?: PluginTraitHookDescriptor;
+    onEnter?: PluginTraitHookDescriptor;
+    onExit?: PluginTraitHookDescriptor;
+    releaseCondition?: PluginTraitHookDescriptor;
+  };
+}
+
+/** The restricted flag keys a plugin trait may not declare (R22, KTD-7). */
+export const PLUGIN_TRAIT_RESTRICTED_FLAGS = ["complete", "archived"] as const;
+
+/** The async-only hook points a plugin trait may declare (R22). The sync
+ *  `guard` hook point is built-in-only and rejected at validation. */
+export const PLUGIN_TRAIT_ALLOWED_HOOK_POINTS = [
+  "gate",
+  "onEnter",
+  "onExit",
+  "releaseCondition",
+] as const;
+
+/** The current plugin trait hook-descriptor schema version. */
+export const PLUGIN_TRAIT_SCHEMA_VERSION = 1 as const;
+
+/**
+ * Validate one plugin trait contribution. Returns a list of human-readable
+ * error strings (empty = valid). Mirrors the validation posture of
+ * `validatePluginManifest`'s `workflowSteps` block: structural checks plus the
+ * R22 restricted-capability checks (sync `guard` key, restricted flags) and the
+ * required versioned `schemaVersion`.
+ */
+export function validatePluginTraitContribution(
+  trait: unknown,
+  index = 0,
+): string[] {
+  const errors: string[] = [];
+  const prefix = `traits[${index}]`;
+  if (!trait || typeof trait !== "object" || Array.isArray(trait)) {
+    return [`${prefix} must be an object`];
+  }
+  const t = trait as Record<string, unknown>;
+
+  if (!t.traitId || typeof t.traitId !== "string" || t.traitId.trim() === "") {
+    errors.push(`${prefix}.traitId is required and must be a non-empty string`);
+  } else if (!SLUG_PATTERN.test(t.traitId)) {
+    errors.push(
+      `${prefix}.traitId must be a valid slug (lowercase, alphanumeric, hyphens only, cannot start or end with hyphen)`,
+    );
+  }
+
+  if (!t.name || typeof t.name !== "string" || t.name.trim() === "") {
+    errors.push(`${prefix}.name is required and must be a non-empty string`);
+  }
+
+  // schemaVersion is required and must be the supported version (versioned
+  // hook-descriptor extension contract).
+  if (t.schemaVersion === undefined) {
+    errors.push(`${prefix}.schemaVersion is required (versioned hook-descriptor schema)`);
+  } else if (t.schemaVersion !== PLUGIN_TRAIT_SCHEMA_VERSION) {
+    errors.push(
+      `${prefix}.schemaVersion must be ${PLUGIN_TRAIT_SCHEMA_VERSION}; got ${String(t.schemaVersion)}`,
+    );
+  }
+
+  // Restricted flags (R22): a plugin trait must not declare complete/archived.
+  if (t.flags !== undefined) {
+    if (typeof t.flags !== "object" || t.flags === null || Array.isArray(t.flags)) {
+      errors.push(`${prefix}.flags must be an object`);
+    } else {
+      const flags = t.flags as Record<string, unknown>;
+      for (const restricted of PLUGIN_TRAIT_RESTRICTED_FLAGS) {
+        if (flags[restricted]) {
+          errors.push(
+            `${prefix}.flags.${restricted} is a restricted (built-in-only) flag and may not be declared by a plugin trait`,
+          );
+        }
+      }
+    }
+  }
+
+  // Hooks: async-only. A sync `guard` key is rejected (R22, KTD-2).
+  if (t.hooks !== undefined) {
+    if (typeof t.hooks !== "object" || t.hooks === null || Array.isArray(t.hooks)) {
+      errors.push(`${prefix}.hooks must be an object`);
+    } else {
+      const hooks = t.hooks as Record<string, unknown>;
+      if ("guard" in hooks) {
+        errors.push(
+          `${prefix}.hooks.guard is a sync (built-in-only) hook point and may not be declared by a plugin trait`,
+        );
+      }
+      for (const [hookKind, descriptor] of Object.entries(hooks)) {
+        if (hookKind === "guard") continue; // already reported
+        if (!(PLUGIN_TRAIT_ALLOWED_HOOK_POINTS as readonly string[]).includes(hookKind)) {
+          errors.push(
+            `${prefix}.hooks.${hookKind} is not a recognized async hook point (allowed: ${PLUGIN_TRAIT_ALLOWED_HOOK_POINTS.join(", ")})`,
+          );
+          continue;
+        }
+        if (!descriptor || typeof descriptor !== "object") {
+          errors.push(`${prefix}.hooks.${hookKind} must be an object`);
+          continue;
+        }
+        const d = descriptor as Record<string, unknown>;
+        if (d.mode !== "prompt" && d.mode !== "script") {
+          errors.push(`${prefix}.hooks.${hookKind}.mode must be one of: prompt, script`);
+        }
+        if (d.mode === "script" && (typeof d.scriptName !== "string" || d.scriptName.trim() === "")) {
+          errors.push(`${prefix}.hooks.${hookKind}.scriptName is required when mode is "script"`);
+        }
+        if (
+          hookKind === "gate" &&
+          d.gateMode !== undefined &&
+          d.gateMode !== "blocking" &&
+          d.gateMode !== "advisory"
+        ) {
+          errors.push(`${prefix}.hooks.gate.gateMode must be one of: blocking, advisory`);
+        }
+      }
+    }
+  }
+
+  return errors;
+}
+
+/**
  * Prompt injection surfaces for plugin-contributed instructions.
  * - executor-system: Appended to executor agent system prompt
  * - executor-task: Injected into per-task execution context
@@ -695,6 +1037,8 @@ export interface FusionPlugin {
   skills?: PluginSkillContribution[];
   /** Plugin-contributed workflow step templates. */
   workflowSteps?: PluginWorkflowStepContribution[];
+  /** Plugin-contributed column traits (U8). */
+  traits?: PluginTraitContribution[];
   /** Plugin-contributed prompt injections. */
   promptContributions?: PluginPromptContributions;
   /** Plugin-managed setup metadata and lifecycle hooks. */
@@ -885,6 +1229,38 @@ export function validatePluginManifest(manifest: unknown): { valid: boolean; err
         }
         if (stepMeta.mode !== undefined && (typeof stepMeta.mode !== "string" || !["prompt", "script"].includes(stepMeta.mode))) {
           errors.push(`workflowSteps[${index}].mode must be one of: prompt, script`);
+        }
+      }
+    }
+  }
+
+  // Optional: plugin trait contributions (U8). Full contribution shapes (with
+  // hooks/flags) validate via validatePluginTraitContribution; the discovery
+  // metadata form (`{ traitId, name }`) validates structurally here.
+  if (m.traits !== undefined) {
+    if (!Array.isArray(m.traits)) {
+      errors.push("traits must be an array");
+    } else {
+      for (const [index, trait] of m.traits.entries()) {
+        if (!trait || typeof trait !== "object") {
+          errors.push(`traits[${index}] must be an object`);
+          continue;
+        }
+        const traitMeta = trait as Record<string, unknown>;
+        // A full contribution carries schemaVersion/flags/hooks — validate it
+        // fully. The discovery-metadata form (just traitId + name) is validated
+        // structurally.
+        if (traitMeta.schemaVersion !== undefined || traitMeta.hooks !== undefined || traitMeta.flags !== undefined) {
+          errors.push(...validatePluginTraitContribution(traitMeta, index));
+          continue;
+        }
+        if (!traitMeta.traitId || typeof traitMeta.traitId !== "string" || traitMeta.traitId.trim() === "") {
+          errors.push(`traits[${index}].traitId is required and must be a non-empty string`);
+        } else if (!SLUG_PATTERN.test(traitMeta.traitId)) {
+          errors.push(`traits[${index}].traitId must be a valid slug (lowercase, alphanumeric, hyphens only, cannot start or end with hyphen)`);
+        }
+        if (!traitMeta.name || typeof traitMeta.name !== "string" || traitMeta.name.trim() === "") {
+          errors.push(`traits[${index}].name is required and must be a non-empty string`);
         }
       }
     }

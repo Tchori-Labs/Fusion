@@ -1,4 +1,5 @@
 import { useCallback, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { Task, TaskDetail } from "@fusion/core";
 import type { SectionId } from "../components/SettingsModal";
 import type { ToastType } from "./useToast";
@@ -53,6 +54,7 @@ export interface ModalManager {
   activityLogOpen: boolean;
   gitManagerOpen: boolean;
   workflowStepsOpen: boolean;
+  workflowEditorOpen: boolean;
   agentsOpen: boolean;
   scriptsOpen: boolean;
   setupWizardOpen: boolean;
@@ -117,6 +119,8 @@ export interface ModalManager {
 
   openWorkflowSteps: () => void;
   closeWorkflowSteps: () => void;
+  openWorkflowEditor: () => void;
+  closeWorkflowEditor: () => void;
 
   openAgents: () => void;
   closeAgents: () => void;
@@ -143,6 +147,7 @@ export interface ModalManager {
  * and cross-modal transitions (for example, script runner -> terminal handoff).
  */
 export function useModalManager(options: UseModalManagerOptions): ModalManager {
+  const { t } = useTranslation("app");
   const { planningSessions } = options;
 
   const [newTaskModalOpen, setNewTaskModalOpen] = useState(false);
@@ -173,6 +178,7 @@ export function useModalManager(options: UseModalManagerOptions): ModalManager {
   const [activityLogOpen, setActivityLogOpen] = useState(false);
   const [gitManagerOpen, setGitManagerOpen] = useState(false);
   const [workflowStepsOpen, setWorkflowStepsOpen] = useState(false);
+  const [workflowEditorOpen, setWorkflowEditorOpen] = useState(false);
   const [agentsOpen, setAgentsOpen] = useState(false);
   const [scriptsOpen, setScriptsOpen] = useState(false);
   const [setupWizardOpen, setSetupWizardOpen] = useState(false);
@@ -191,6 +197,7 @@ export function useModalManager(options: UseModalManagerOptions): ModalManager {
       activityLogOpen ||
       gitManagerOpen ||
       workflowStepsOpen ||
+      workflowEditorOpen ||
       scriptsOpen ||
       agentsOpen ||
       usageOpen ||
@@ -340,6 +347,8 @@ export function useModalManager(options: UseModalManagerOptions): ModalManager {
 
   const openWorkflowSteps = useCallback(() => setWorkflowStepsOpen(true), []);
   const closeWorkflowSteps = useCallback(() => setWorkflowStepsOpen(false), []);
+  const openWorkflowEditor = useCallback(() => setWorkflowEditorOpen(true), []);
+  const closeWorkflowEditor = useCallback(() => setWorkflowEditorOpen(false), []);
 
   const openAgents = useCallback(() => setAgentsOpen(true), []);
   const closeAgents = useCallback(() => setAgentsOpen(false), []);
@@ -359,24 +368,24 @@ export function useModalManager(options: UseModalManagerOptions): ModalManager {
   const closeModelOnboarding = useCallback(() => setModelOnboardingOpen(false), []);
 
   const onPlanningTaskCreated = useCallback((task: Task, addToast: (message: string, type?: ToastType) => void) => {
-    addToast(`Created ${task.id} from planning mode`, "success");
+    addToast(t("modalManager.createdFromPlanning", "Created {{id}} from planning mode", { id: task.id }), "success");
     setIsPlanningOpen(false);
     setPlanningInitialPlan(null);
-  }, []);
+  }, [t]);
 
   const onPlanningTasksCreated = useCallback((tasks: Task[], addToast: (message: string, type?: ToastType) => void) => {
     const ids = tasks.map((task) => task.id).join(", ");
-    addToast(`Created ${ids} from planning mode`, "success");
+    addToast(t("modalManager.createdMultipleFromPlanning", "Created {{ids}} from planning mode", { ids }), "success");
     setIsPlanningOpen(false);
     setPlanningInitialPlan(null);
-  }, []);
+  }, [t]);
 
   const onSubtaskTasksCreated = useCallback((tasks: Task[], addToast: (message: string, type?: ToastType) => void) => {
     const ids = tasks.map((task) => task.id).join(", ");
-    addToast(`Created ${ids} from subtask breakdown`, "success");
+    addToast(t("modalManager.createdFromSubtask", "Created {{ids}} from subtask breakdown", { ids }), "success");
     setIsSubtaskOpen(false);
     setSubtaskInitialDescription(null);
-  }, []);
+  }, [t]);
 
   return {
     newTaskModalOpen,
@@ -406,6 +415,7 @@ export function useModalManager(options: UseModalManagerOptions): ModalManager {
     activityLogOpen,
     gitManagerOpen,
     workflowStepsOpen,
+    workflowEditorOpen,
     agentsOpen,
     scriptsOpen,
     setupWizardOpen,
@@ -450,6 +460,8 @@ export function useModalManager(options: UseModalManagerOptions): ModalManager {
     closeGitManager,
     openWorkflowSteps,
     closeWorkflowSteps,
+    openWorkflowEditor,
+    closeWorkflowEditor,
     openAgents,
     closeAgents,
     openScripts,

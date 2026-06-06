@@ -6,6 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { TEST_MODE_RESOLVED } from "@fusion/core";
 import type {
   Mission,
   Milestone,
@@ -44,6 +45,19 @@ vi.mock("../logger.js", () => ({
   })),
 }));
 
+vi.mock("../agent-session-helpers.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../agent-session-helpers.js")>();
+  return {
+    ...actual,
+    createResolvedAgentSession: vi.fn(async () => ({
+      session: mockSessionHolder.session as any,
+      sessionFile: undefined,
+      runtimeId: "test-runtime",
+      wasConfigured: true,
+    })),
+  };
+});
+
 // Helper to reset mock session state
 function resetMockSession() {
   mockSessionHolder.session.state.messages = [];
@@ -51,6 +65,7 @@ function resetMockSession() {
 }
 
 // Import AFTER vi.mock so the mock is applied
+import { createResolvedAgentSession } from "../agent-session-helpers.js";
 import { MissionExecutionLoop, loopLog } from "../mission-execution-loop.js";
 
 // ── Mock Factories ──────────────────────────────────────────────────────────
@@ -189,6 +204,16 @@ function createMockMissionStore() {
       return updated;
     }),
     listAssertionsForFeature: vi.fn((featureId: string) => assertionsByFeature.get(featureId) ?? []),
+    ensureFeatureAssertionLinked: vi.fn((featureId: string) => {
+      const feature = features.get(featureId);
+      if (!feature) {
+        throw new Error(`Feature ${featureId} not found`);
+      }
+      if ((assertionsByFeature.get(featureId) ?? []).length === 0) {
+        store._addFeatureWithManagedAssertion(feature);
+      }
+      return assertionsByFeature.get(featureId) ?? [];
+    }),
     getAssertionsForFeature: vi.fn((featureId: string) => assertionsByFeature.get(featureId) ?? []),
     getSlice: vi.fn((id: string) => {
       // Return a mock slice with milestoneId for the hierarchy
@@ -205,9 +230,43 @@ function createMockMissionStore() {
       validatorRuns.set(run.id, run);
       return run;
     }),
+    listStaleRunningValidatorRuns: vi.fn((_maxAgeMs: number) => [...validatorRuns.values()].filter((run) => run.status === "running")),
+    reapValidatorRun: vi.fn((id: string, reason: string) => {
+      const run = validatorRuns.get(id);
+      if (!run) {
+        throw new Error(`Validator run ${id} not found`);
+      }
+      if (run.status !== "running") {
+        return run;
+      }
+      const updated = {
+        ...run,
+        status: "error" as const,
+        summary: reason,
+        completedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      validatorRuns.set(id, updated);
+
+      const feature = features.get(run.featureId);
+      if (feature) {
+        features.set(run.featureId, {
+          ...feature,
+          loopState: "needs_fix",
+          lastValidatorStatus: "error",
+          updatedAt: new Date().toISOString(),
+        });
+      }
+
+      return updated;
+    }),
+    getValidatorRun: vi.fn((id: string) => validatorRuns.get(id)),
     completeValidatorRun: vi.fn((id: string, status: MissionValidatorRun["status"], summary?: string) => {
       const run = validatorRuns.get(id);
       if (!run) throw new Error(`Validator run ${id} not found`);
+      if (run.status !== "running") {
+        throw new Error(`Validator run ${id} is not in 'running' status`);
+      }
       const updated = {
         ...run,
         status,
@@ -327,7 +386,19 @@ function createMockMissionStore() {
 }
 
 function createMockTaskStore() {
-  const tasks = new Map<string, { id: string; title?: string; description?: string; log?: Array<{ action?: string }>; column?: string; missionId?: string; sliceId?: string; status?: string }>();
+  const tasks = new Map<string, {
+    id: string;
+    title?: string;
+    description?: string;
+    log?: Array<{ action?: string }>;
+    column?: string;
+    missionId?: string;
+    sliceId?: string;
+    status?: string;
+    assignedAgentId?: string;
+    validatorModelProvider?: string;
+    validatorModelId?: string;
+  }>();
 
   const store = {
     getTask: vi.fn(async (id: string) => tasks.get(id)),
@@ -343,10 +414,23 @@ function createMockTaskStore() {
       missionStaleThresholdMs: 600_000,
       missionMaxTaskRetries: 3,
     }),
+    recordRunAuditEvent: vi.fn(),
     on: vi.fn(),
     off: vi.fn(),
 
-    _setTask: (t: { id: string; title?: string; description?: string; log?: Array<{ action?: string }>; column?: string; missionId?: string; sliceId?: string; status?: string }) => tasks.set(t.id, t),
+    _setTask: (t: {
+      id: string;
+      title?: string;
+      description?: string;
+      log?: Array<{ action?: string }>;
+      column?: string;
+      missionId?: string;
+      sliceId?: string;
+      status?: string;
+      assignedAgentId?: string;
+      validatorModelProvider?: string;
+      validatorModelId?: string;
+    }) => tasks.set(t.id, t),
     _clear: () => tasks.clear(),
   };
 
@@ -391,11 +475,23 @@ describe("MissionExecutionLoop", () => {
   let loop: MissionExecutionLoop;
   let missionStore: ReturnType<typeof createMockMissionStore>;
   let taskStore: ReturnType<typeof createMockTaskStore>;
+  let agentStore: { getAgent: ReturnType<typeof vi.fn> };
 
   beforeEach(() => {
     vi.useFakeTimers();
     missionStore = createMockMissionStore();
     taskStore = createMockTaskStore();
+    agentStore = {
+      getAgent: vi.fn(),
+    };
+
+    vi.mocked(createResolvedAgentSession).mockReset();
+    vi.mocked(createResolvedAgentSession).mockResolvedValue({
+      session: mockSessionHolder.session as any,
+      sessionFile: undefined,
+      runtimeId: "test-runtime",
+      wasConfigured: true,
+    });
 
     const mission = createMockMission();
     missionStore._setMission(mission);
@@ -457,6 +553,208 @@ describe("MissionExecutionLoop", () => {
 
       loop.stop(); // Should not throw
       expect(loop.isRunning()).toBe(false);
+    });
+  });
+
+  describe("recoverActiveMissions stranded done features", () => {
+    function wireHierarchy(slice: Slice, features: MissionFeature[]) {
+      missionStore.getMissionWithHierarchy = vi.fn((id: string) => {
+        const mission = missionStore.getMission(id);
+        if (!mission) return undefined;
+        return {
+          ...mission,
+          milestones: [
+            {
+              ...createMockMilestone({ missionId: id }),
+              slices: [{ ...slice, features }],
+            },
+          ],
+        };
+      }) as any;
+    }
+
+    it("re-validates a done feature stranded in 'implementing' with no linked task", async () => {
+      // Regression: a feature marked "done" whose loopState never left
+      // "implementing" (and which was never validated and has no board task)
+      // can never validate on its own — the prior recovery loop only re-drove
+      // implementing features that still had a taskId. The slice-completion
+      // gate then refuses to count it, wedging the whole mission. Recovery
+      // must re-drive validation so the slice can eventually complete.
+      const mission = createMockMission({ id: "M-STRAND", status: "active" });
+      missionStore._setMission(mission);
+
+      const slice = createMockSlice({ id: "SL-STRAND", milestoneId: "MS-001", status: "active" });
+      const orphan = createMockFeature({
+        id: "F-STRAND",
+        sliceId: "SL-STRAND",
+        status: "done",
+        loopState: "implementing",
+        lastValidatorStatus: undefined,
+        taskId: undefined,
+      });
+      (missionStore as any)._addFeatureWithManagedAssertion(orphan);
+      wireHierarchy(slice, [missionStore.getFeature("F-STRAND") as MissionFeature]);
+
+      loop = new MissionExecutionLoop({
+        taskStore: taskStore as any,
+        missionStore: missionStore as any,
+        rootDir: "/tmp",
+      });
+      loop.start();
+
+      const result = await loop.recoverActiveMissions();
+
+      expect(missionStore.startValidatorRun).toHaveBeenCalledWith("F-STRAND", "task_completion");
+      expect(result.recoveredCount).toBeGreaterThanOrEqual(1);
+    });
+
+    it("leaves an already-validated done feature untouched", async () => {
+      const mission = createMockMission({ id: "M-OK", status: "active" });
+      missionStore._setMission(mission);
+
+      const slice = createMockSlice({ id: "SL-OK", milestoneId: "MS-001", status: "active" });
+      const validated = createMockFeature({
+        id: "F-OK",
+        sliceId: "SL-OK",
+        status: "done",
+        loopState: "passed",
+        lastValidatorStatus: "passed",
+        taskId: undefined,
+      });
+      (missionStore as any)._addFeatureWithManagedAssertion(validated);
+      wireHierarchy(slice, [missionStore.getFeature("F-OK") as MissionFeature]);
+
+      loop = new MissionExecutionLoop({
+        taskStore: taskStore as any,
+        missionStore: missionStore as any,
+        rootDir: "/tmp",
+      });
+      loop.start();
+
+      await loop.recoverActiveMissions();
+
+      expect(missionStore.startValidatorRun).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("reapStaleValidatorRuns", () => {
+    it("reaps stale runs across trigger types and records audit metadata", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-06-01T12:00:00.000Z"));
+
+      const mission = createMockMission({ id: "M-001" });
+      missionStore._setMission(mission);
+      const featureManual = createMockFeature({ id: "F-manual", taskId: "FN-manual", loopState: "validating" });
+      const featureAuto = createMockFeature({ id: "F-auto", taskId: "FN-auto", loopState: "validating" });
+      missionStore._setFeature(featureManual);
+      missionStore._setFeature(featureAuto);
+      missionStore.getMilestone = vi.fn(() => createMockMilestone({ id: "MS-001", missionId: mission.id }));
+      missionStore.listStaleRunningValidatorRuns = vi.fn(() => [
+        createMockValidatorRun({ id: "VR-manual", featureId: featureManual.id, triggerType: "manual", startedAt: "2026-06-01T11:40:00.000Z" }),
+        createMockValidatorRun({ id: "VR-auto", featureId: featureAuto.id, triggerType: "auto", startedAt: "2026-06-01T11:50:00.000Z" }),
+      ]);
+      missionStore.reapValidatorRun = vi.fn((id: string, reason: string) => ({
+        ...createMockValidatorRun({
+          id,
+          featureId: id === "VR-manual" ? featureManual.id : featureAuto.id,
+          triggerType: id === "VR-manual" ? "manual" : "auto",
+          startedAt: id === "VR-manual" ? "2026-06-01T11:40:00.000Z" : "2026-06-01T11:50:00.000Z",
+        }),
+        status: "error",
+        summary: reason,
+        completedAt: "2026-06-01T12:00:00.000Z",
+        updatedAt: "2026-06-01T12:00:00.000Z",
+      }));
+
+      loop = new MissionExecutionLoop({
+        taskStore: taskStore as any,
+        missionStore: missionStore as any,
+        rootDir: "/tmp",
+      });
+
+      const result = await loop.reapStaleValidatorRuns(15 * 60 * 1000);
+
+      expect(result).toEqual({ reapedCount: 2 });
+      expect(missionStore.reapValidatorRun).toHaveBeenCalledTimes(2);
+      expect(taskStore.recordRunAuditEvent).toHaveBeenNthCalledWith(1, expect.objectContaining({
+        agentId: "store",
+        runId: "validator-run-reaper",
+        domain: "database",
+        mutationType: "mission:validator-run-reaped",
+        target: "VR-manual",
+        metadata: expect.objectContaining({
+          runId: "VR-manual",
+          featureId: featureManual.id,
+          missionId: mission.id,
+          triggerType: "manual",
+          elapsedMs: 20 * 60 * 1000,
+        }),
+      }));
+      expect(taskStore.recordRunAuditEvent).toHaveBeenNthCalledWith(2, expect.objectContaining({
+        target: "VR-auto",
+        metadata: expect.objectContaining({
+          runId: "VR-auto",
+          featureId: featureAuto.id,
+          missionId: mission.id,
+          triggerType: "auto",
+          elapsedMs: 10 * 60 * 1000,
+        }),
+      }));
+    });
+
+    it("skips stale runs still actively owned in-process", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-06-01T12:00:00.000Z"));
+
+      const feature = createMockFeature({ id: "F-live", taskId: "FN-live", loopState: "implementing" });
+      missionStore._setFeature(feature);
+      missionStore.listStaleRunningValidatorRuns = vi.fn(() => [
+        createMockValidatorRun({ id: "VR-live", featureId: feature.id, startedAt: "2026-06-01T11:30:00.000Z" }),
+      ]);
+
+      loop = new MissionExecutionLoop({
+        taskStore: taskStore as any,
+        missionStore: missionStore as any,
+        rootDir: "/tmp",
+      });
+      (loop as any).activeValidations.add(feature.id);
+
+      const reaped = await loop.reapStaleValidatorRuns(15 * 60 * 1000);
+
+      expect(reaped).toEqual({ reapedCount: 0 });
+      expect(missionStore.reapValidatorRun).not.toHaveBeenCalled();
+      expect(taskStore.recordRunAuditEvent).not.toHaveBeenCalled();
+    });
+
+    it("isolates per-run reap failures", async () => {
+      missionStore.listStaleRunningValidatorRuns = vi.fn(() => [
+        createMockValidatorRun({ id: "VR-bad", featureId: "F-bad" }),
+        createMockValidatorRun({ id: "VR-good", featureId: "F-good" }),
+      ]);
+      missionStore.reapValidatorRun = vi.fn((id: string) => {
+        if (id === "VR-bad") {
+          throw new Error("boom");
+        }
+        return {
+          ...createMockValidatorRun({ id, featureId: "F-good" }),
+          status: "error",
+          summary: "reaped",
+          completedAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+      });
+
+      loop = new MissionExecutionLoop({
+        taskStore: taskStore as any,
+        missionStore: missionStore as any,
+        rootDir: "/tmp",
+      });
+
+      const result = await loop.reapStaleValidatorRuns(15 * 60 * 1000);
+
+      expect(result).toEqual({ reapedCount: 1 });
+      expect(missionStore.reapValidatorRun).toHaveBeenCalledTimes(2);
+      expect(taskStore.recordRunAuditEvent).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -524,12 +822,54 @@ describe("MissionExecutionLoop", () => {
       );
     });
 
-    it("should auto-pass if feature has no linked assertions", async () => {
-      const feature = createMockFeature({ loopState: "implementing", taskId: "FN-001" });
+    it("requeues needs_fix features back through validation", async () => {
+      const assertions = makeAssertions(1);
+      const response = JSON.stringify({
+        status: "pass",
+        assertions: [{ assertionId: "CA-1", passed: true, message: "OK" }],
+        summary: "Recovered validation passed",
+      });
+
+      mockSessionHolder.session.state.messages = [
+        { role: "user", content: "Validate this" },
+        { role: "assistant", content: response },
+      ];
+
+      const feature = createMockFeature({ loopState: "needs_fix", taskId: "FN-NEEDS-FIX" });
+      missionStore._setFeature(feature);
+      missionStore.getFeatureByTaskId = vi.fn().mockReturnValue(feature);
+      missionStore.listAssertionsForFeature = vi.fn().mockReturnValue(assertions);
+      taskStore._setTask({ id: "FN-NEEDS-FIX", title: "Test", description: "Implementation", log: [], column: "done" });
+
+      loop = new MissionExecutionLoop({
+        taskStore: taskStore as any,
+        missionStore: missionStore as any,
+        rootDir: "/tmp",
+      });
+      loop.start();
+
+      await loop.processTaskOutcome("FN-NEEDS-FIX");
+
+      expect(missionStore.transitionLoopState).toHaveBeenCalledWith("F-001", "implementing");
+      expect(missionStore.startValidatorRun).toHaveBeenCalled();
+      expect(missionStore.completeValidatorRun).toHaveBeenCalledWith(expect.any(String), "passed", "Recovered validation passed");
+    });
+
+    it("lazy-ensures a managed assertion and routes zero-assertion features through validation", async () => {
+      const feature = createMockFeature({
+        id: "F-001",
+        loopState: "implementing",
+        taskId: "FN-001",
+        title: "Feature from prose",
+        acceptanceCriteria: "Feature must validate through AI",
+      });
       missionStore._setFeature(feature);
       taskStore._setTask({ id: "FN-001", title: "Test", description: "Test task", log: [] });
       missionStore.getFeatureByTaskId = vi.fn().mockReturnValue(feature);
-      missionStore.listAssertionsForFeature = vi.fn().mockReturnValue([]);
+      missionStore.listAssertionsForFeature = vi
+        .fn()
+        .mockReturnValueOnce([])
+        .mockImplementation((featureId: string) => (missionStore as any).getAssertionsForFeature(featureId));
 
       loop = new MissionExecutionLoop({
         taskStore: taskStore as any,
@@ -537,41 +877,39 @@ describe("MissionExecutionLoop", () => {
         rootDir: "/tmp",
       });
       const emitSpy = vi.spyOn(loop, "emit");
+      vi.spyOn(loop as any, "runValidation").mockResolvedValue({ status: "pass", summary: "ok" });
       loop.start();
 
       await loop.processTaskOutcome("FN-001");
 
-      // When there are no assertions, we skip starting a validator run
-      expect(missionStore.startValidatorRun).not.toHaveBeenCalled();
-      // But the passed event should be emitted
+      expect(missionStore.ensureFeatureAssertionLinked).toHaveBeenCalledWith("F-001");
+      expect(missionStore.startValidatorRun).toHaveBeenCalledWith("F-001", "task_completion");
       expect(emitSpy).toHaveBeenCalledWith(
         "validation:passed",
         expect.objectContaining({ featureId: "F-001" }),
       );
-      expect(missionStore.updateFeature).toHaveBeenCalledWith(
-        "F-001",
-        expect.objectContaining({ loopState: "passed", lastValidatorStatus: "passed" }),
+      const noAssertionEvents = missionStore.logMissionEvent.mock.calls.filter(
+        ([, , , payload]) => payload?.code === "validation_auto_passed_no_assertions",
       );
-      expect(missionStore.logMissionEvent).toHaveBeenCalledWith(
-        expect.any(String),
-        "warning",
-        expect.stringContaining("auto-passed"),
-        expect.objectContaining({
-          code: "validation_auto_passed_no_assertions",
-          featureId: "F-001",
-          reason: "No assertions linked",
-          taskId: "FN-001",
-        }),
-      );
+      expect(noAssertionEvents).toHaveLength(0);
       expectNoValidationBoardTaskMutation(taskStore);
     });
 
-    it("emits no-assertions auto-pass event exactly once across re-entry", async () => {
-      const feature = createMockFeature({ loopState: "implementing", taskId: "FN-001" });
+    it("does not emit auto-pass evidence across re-entry after lazy assertion ensure", async () => {
+      const feature = createMockFeature({
+        id: "F-001",
+        loopState: "implementing",
+        taskId: "FN-001",
+        title: "Feature from prose",
+        acceptanceCriteria: "Feature must validate through AI",
+      });
       missionStore._setFeature(feature);
       taskStore._setTask({ id: "FN-001", title: "Test", description: "Test task", log: [] });
       missionStore.getFeatureByTaskId = vi.fn().mockReturnValue(feature);
-      missionStore.listAssertionsForFeature = vi.fn().mockReturnValue([]);
+      missionStore.listAssertionsForFeature = vi
+        .fn()
+        .mockReturnValueOnce([])
+        .mockImplementation((featureId: string) => (missionStore as any).getAssertionsForFeature(featureId));
 
       loop = new MissionExecutionLoop({
         taskStore: taskStore as any,
@@ -583,10 +921,11 @@ describe("MissionExecutionLoop", () => {
       await loop.processTaskOutcome("FN-001");
       await loop.processTaskOutcome("FN-001");
 
+      expect(missionStore.ensureFeatureAssertionLinked).toHaveBeenCalledTimes(1);
       const noAssertionEvents = missionStore.logMissionEvent.mock.calls.filter(
         ([, , , payload]) => payload?.code === "validation_auto_passed_no_assertions",
       );
-      expect(noAssertionEvents).toHaveLength(1);
+      expect(noAssertionEvents).toHaveLength(0);
     });
 
     it("uses validator path for later-added feature with managed assertion", async () => {
@@ -612,6 +951,44 @@ describe("MissionExecutionLoop", () => {
 
       expect(missionStore.listAssertionsForFeature).toHaveBeenCalledWith("F-LATER");
       expect(missionStore.startValidatorRun).toHaveBeenCalledWith("F-LATER", "task_completion");
+    });
+
+    it("threads milestone acceptance criteria into validator prompts", () => {
+      const feature = createMockFeature({
+        id: "F-MILESTONE",
+        title: "Feature under milestone",
+        acceptanceCriteria: "Feature criteria",
+      });
+      const milestone = createMockMilestone({
+        id: "MS-MILESTONE",
+        acceptanceCriteria: "Milestone pass bar text",
+      });
+      const assertions = [
+        {
+          id: "CA-1",
+          milestoneId: milestone.id,
+          title: "Managed assertion",
+          assertion: "Feature criteria",
+          status: "pending" as const,
+          orderIndex: 0,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+      ];
+
+      loop = new MissionExecutionLoop({
+        taskStore: taskStore as any,
+        missionStore: missionStore as any,
+        rootDir: "/tmp",
+      });
+
+      const prompt = (loop as any).buildValidationPrompt(feature, assertions, milestone);
+      const systemPrompt = (loop as any).buildValidationSystemPrompt(feature, assertions, "Task context", milestone);
+
+      expect(prompt).toContain("Milestone pass bar text");
+      expect(prompt).toContain("must also be satisfied for this feature to pass");
+      expect(systemPrompt).toContain("Milestone pass bar text");
+      expect(systemPrompt).toContain("validator-executed requirements");
     });
 
     it("does NOT create a board task for single-feature validation", async () => {
@@ -713,6 +1090,154 @@ describe("MissionExecutionLoop", () => {
         "F-001",
         "task_completion",
       );
+    });
+
+    it("threads configured validator/default model settings into mission validation sessions", async () => {
+      const feature = createMockFeature({ loopState: "implementing", taskId: "FN-MODEL-SETTINGS", status: "in-progress" });
+      missionStore._setFeature(feature);
+      missionStore.getFeatureByTaskId = vi.fn().mockReturnValue(feature);
+      missionStore.listAssertionsForFeature = vi.fn().mockReturnValue(makeAssertions(1));
+      taskStore._setTask({
+        id: "FN-MODEL-SETTINGS",
+        title: "Validation model settings",
+        description: "Implementation",
+        log: [],
+        validatorModelProvider: "task-validator",
+        validatorModelId: "task-validator-model",
+      });
+      vi.mocked(taskStore.getSettings).mockResolvedValue({
+        missionStaleThresholdMs: 600_000,
+        missionMaxTaskRetries: 3,
+        validatorProvider: "project-validator",
+        validatorModelId: "project-validator-model",
+        defaultProviderOverride: "project-default-override",
+        defaultModelIdOverride: "project-default-override-model",
+        defaultProvider: "project-default",
+        defaultModelId: "project-default-model",
+        fallbackProvider: "fallback-provider",
+        fallbackModelId: "fallback-model",
+      });
+      mockSessionHolder.session.state.messages = [
+        { role: "assistant", content: JSON.stringify({ status: "pass", assertions: [{ assertionId: "CA-1", passed: true }], summary: "all good" }) },
+      ];
+
+      loop = new MissionExecutionLoop({
+        taskStore: taskStore as any,
+        missionStore: missionStore as any,
+        rootDir: "/tmp",
+      });
+      loop.start();
+
+      await loop.processTaskOutcome("FN-MODEL-SETTINGS");
+
+      expect(createResolvedAgentSession).toHaveBeenCalledWith(expect.objectContaining({
+        sessionPurpose: "validation",
+        defaultProvider: "task-validator",
+        defaultModelId: "task-validator-model",
+        fallbackProvider: "fallback-provider",
+        fallbackModelId: "fallback-model",
+        settings: expect.objectContaining({
+          validatorProvider: "project-validator",
+          validatorModelId: "project-validator-model",
+          defaultProvider: "project-default",
+          defaultModelId: "project-default-model",
+        }),
+      }));
+    });
+
+    it("uses assigned agent runtime model ahead of task/settings for mission validation", async () => {
+      const feature = createMockFeature({ loopState: "implementing", taskId: "FN-MODEL-AGENT", status: "in-progress" });
+      missionStore._setFeature(feature);
+      missionStore.getFeatureByTaskId = vi.fn().mockReturnValue(feature);
+      missionStore.listAssertionsForFeature = vi.fn().mockReturnValue(makeAssertions(1));
+      taskStore._setTask({
+        id: "FN-MODEL-AGENT",
+        title: "Validation model agent",
+        description: "Implementation",
+        log: [],
+        assignedAgentId: "agent-1",
+        validatorModelProvider: "task-validator",
+        validatorModelId: "task-validator-model",
+      });
+      agentStore.getAgent.mockResolvedValue({
+        id: "agent-1",
+        runtimeConfig: { model: "agent-provider/agent-model" },
+      });
+      vi.mocked(taskStore.getSettings).mockResolvedValue({
+        missionStaleThresholdMs: 600_000,
+        missionMaxTaskRetries: 3,
+        validatorProvider: "project-validator",
+        validatorModelId: "project-validator-model",
+      });
+      mockSessionHolder.session.state.messages = [
+        { role: "assistant", content: JSON.stringify({ status: "pass", assertions: [{ assertionId: "CA-1", passed: true }], summary: "all good" }) },
+      ];
+
+      loop = new MissionExecutionLoop({
+        taskStore: taskStore as any,
+        missionStore: missionStore as any,
+        rootDir: "/tmp",
+        agentStore: agentStore as any,
+      });
+      loop.start();
+
+      await loop.processTaskOutcome("FN-MODEL-AGENT");
+
+      expect(createResolvedAgentSession).toHaveBeenCalledWith(expect.objectContaining({
+        sessionPurpose: "validation",
+        defaultProvider: "agent-provider",
+        defaultModelId: "agent-model",
+      }));
+    });
+
+    it("forces mock/scripted validator lane when test mode is active", async () => {
+      const feature = createMockFeature({ loopState: "implementing", taskId: "FN-MODEL-TESTMODE", status: "in-progress" });
+      missionStore._setFeature(feature);
+      missionStore.getFeatureByTaskId = vi.fn().mockReturnValue(feature);
+      missionStore.listAssertionsForFeature = vi.fn().mockReturnValue(makeAssertions(1));
+      taskStore._setTask({
+        id: "FN-MODEL-TESTMODE",
+        title: "Validation model test mode",
+        description: "Implementation",
+        log: [],
+        assignedAgentId: "agent-1",
+        validatorModelProvider: "task-validator",
+        validatorModelId: "task-validator-model",
+      });
+      agentStore.getAgent.mockResolvedValue({
+        id: "agent-1",
+        runtimeConfig: { model: "agent-provider/agent-model" },
+      });
+      vi.mocked(taskStore.getSettings).mockResolvedValue({
+        missionStaleThresholdMs: 600_000,
+        missionMaxTaskRetries: 3,
+        testMode: true,
+        validatorProvider: "project-validator",
+        validatorModelId: "project-validator-model",
+        fallbackProvider: "fallback-provider",
+        fallbackModelId: "fallback-model",
+      });
+      mockSessionHolder.session.state.messages = [
+        { role: "assistant", content: JSON.stringify({ status: "pass", assertions: [{ assertionId: "CA-1", passed: true }], summary: "all good" }) },
+      ];
+
+      loop = new MissionExecutionLoop({
+        taskStore: taskStore as any,
+        missionStore: missionStore as any,
+        rootDir: "/tmp",
+        agentStore: agentStore as any,
+      });
+      loop.start();
+
+      await loop.processTaskOutcome("FN-MODEL-TESTMODE");
+
+      expect(createResolvedAgentSession).toHaveBeenCalledWith(expect.objectContaining({
+        sessionPurpose: "validation",
+        defaultProvider: TEST_MODE_RESOLVED.provider,
+        defaultModelId: TEST_MODE_RESOLVED.modelId,
+        fallbackProvider: "fallback-provider",
+        fallbackModelId: "fallback-model",
+      }));
     });
 
     it("runs linked assertions and marks completion only when validation passes", async () => {
@@ -1076,7 +1601,7 @@ describe("MissionExecutionLoop", () => {
       });
       missionStore._setFeature(feature);
       missionStore.getFeatureByTaskId = vi.fn().mockReturnValue(feature);
-      missionStore.listAssertionsForFeature = vi.fn().mockReturnValue([]); // No assertions = auto-pass
+      missionStore.listAssertionsForFeature = vi.fn().mockReturnValue([]);
       taskStore._setTask({ id: "FN-001", title: "Test", description: "Test", log: [] });
 
       const notifySpy = vi.fn();
@@ -1089,12 +1614,13 @@ describe("MissionExecutionLoop", () => {
         },
       });
       const emitSpy = vi.spyOn(loop, "emit");
+      vi.spyOn(loop as any, "runValidation").mockResolvedValue({ status: "pass", summary: "ok" });
       loop.start();
 
       await loop.processTaskOutcome("FN-001");
 
-      // No validator run started (no assertions)
-      expect(missionStore.startValidatorRun).not.toHaveBeenCalled();
+      expect(missionStore.ensureFeatureAssertionLinked).toHaveBeenCalledWith("F-001");
+      expect(missionStore.startValidatorRun).toHaveBeenCalledWith("F-001", "task_completion");
 
       // validation:passed event emitted
       expect(emitSpy).toHaveBeenCalledWith(
@@ -1104,6 +1630,49 @@ describe("MissionExecutionLoop", () => {
 
       // Autopilot notified
       expect(notifySpy).toHaveBeenCalledWith("F-001", "passed");
+    });
+
+    it("skips completion when the validator run was reaped mid-flight", async () => {
+      const assertions = makeAssertions(1);
+      const response = JSON.stringify({
+        status: "pass",
+        assertions: [{ assertionId: "CA-1", passed: true, message: "OK" }],
+        summary: "All assertions passed",
+      });
+
+      mockSessionHolder.session.state.messages = [
+        { role: "user", content: "Validate this" },
+        { role: "assistant", content: response },
+      ];
+
+      const feature = createMockFeature({ loopState: "implementing", taskId: "FN-REAPED", id: "F-REAPED" });
+      missionStore._setFeature(feature);
+      missionStore.getFeatureByTaskId = vi.fn().mockReturnValue(feature);
+      missionStore.listAssertionsForFeature = vi.fn().mockReturnValue(assertions);
+      taskStore._setTask({ id: "FN-REAPED", title: "Test", description: "Implementation", log: [] });
+
+      const originalStartValidatorRun = missionStore.startValidatorRun;
+      missionStore.startValidatorRun = vi.fn((featureId: string, triggerType?: string, taskId?: string) => {
+        const run = originalStartValidatorRun(featureId, triggerType, taskId);
+        missionStore.reapValidatorRun(run.id, "stale");
+        return run;
+      });
+
+      loop = new MissionExecutionLoop({
+        taskStore: taskStore as any,
+        missionStore: missionStore as any,
+        rootDir: "/tmp",
+      });
+      const emitSpy = vi.spyOn(loop, "emit");
+      loop.start();
+
+      await expect(loop.processTaskOutcome("FN-REAPED")).resolves.not.toThrow();
+
+      expect(missionStore.completeValidatorRun).not.toHaveBeenCalledWith(expect.any(String), "passed", expect.any(String));
+      expect(emitSpy).toHaveBeenCalledWith(
+        "validation:passed",
+        expect.objectContaining({ featureId: "F-REAPED" }),
+      );
     });
   });
 
@@ -1329,6 +1898,55 @@ describe("MissionExecutionLoop", () => {
   // ── handleValidationError ───────────────────────────────────────────────
 
   describe("handleValidationError", () => {
+    it("surfaces validation session creation failures as mission errors", async () => {
+      const assertions = makeAssertions(1);
+      const feature = createMockFeature({
+        loopState: "implementing",
+        taskId: "FN-SESSION-ERROR",
+        id: "F-001",
+      });
+      missionStore._setFeature(feature);
+      missionStore.getFeatureByTaskId = vi.fn().mockReturnValue(feature);
+      missionStore.listAssertionsForFeature = vi.fn().mockReturnValue(assertions);
+      taskStore._setTask({ id: "FN-SESSION-ERROR", title: "Test", description: "Implementation", log: [] });
+      vi.mocked(createResolvedAgentSession).mockRejectedValueOnce(new Error("401 insufficient credits"));
+
+      loop = new MissionExecutionLoop({
+        taskStore: taskStore as any,
+        missionStore: missionStore as any,
+        rootDir: "/tmp",
+      });
+      const emitSpy = vi.spyOn(loop, "emit");
+      loop.start();
+
+      await loop.processTaskOutcome("FN-SESSION-ERROR");
+
+      expect(missionStore.completeValidatorRun).toHaveBeenCalledWith(
+        expect.any(String),
+        "error",
+        "Validation failed due to error: 401 insufficient credits",
+      );
+      expect(missionStore.createGeneratedFixFeature).not.toHaveBeenCalled();
+      expect(emitSpy).toHaveBeenCalledWith(
+        "validation:error",
+        expect.objectContaining({
+          featureId: "F-001",
+          error: "Validation failed due to error: 401 insufficient credits",
+        }),
+      );
+      expect(missionStore.logMissionEvent).toHaveBeenCalledWith(
+        expect.any(String),
+        "error",
+        expect.stringContaining("Validation error"),
+        expect.objectContaining({
+          code: "validation_error",
+          featureId: "F-001",
+          error: "Validation failed due to error: 401 insufficient credits",
+        }),
+      );
+      expectNoValidationBoardTaskMutation(taskStore);
+    });
+
     it("emits validation:error without mutating any board task", async () => {
       const assertions = makeAssertions(1);
       const feature = createMockFeature({

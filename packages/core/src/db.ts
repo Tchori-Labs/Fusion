@@ -149,7 +149,9 @@ export function probeFts5(db: DatabaseSync): boolean {
 
 // ── Schema Definition ────────────────────────────────────────────────
 
-const SCHEMA_VERSION = 100;
+const SCHEMA_VERSION = 109;
+
+export { SCHEMA_VERSION };
 
 function normalizeTaskComments(
   steeringComments: SteeringComment[] | undefined,
@@ -320,7 +322,9 @@ CREATE TABLE IF NOT EXISTS tasks (
   checkoutLeaseRenewedAt TEXT,
   checkoutLeaseEpoch INTEGER DEFAULT 0,
   deletedAt TEXT,
-  allowResurrection INTEGER DEFAULT 0
+  allowResurrection INTEGER DEFAULT 0,
+  transitionPending TEXT,
+  customFields TEXT DEFAULT '{}'
 );
 
 -- Config table (single row with project settings)
@@ -382,6 +386,29 @@ CREATE TABLE IF NOT EXISTS workflow_steps (
   modelProvider TEXT,
   modelId TEXT,
   createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL
+);
+
+-- Named workflow definitions authored as WorkflowIr graphs (+ editor layout).
+-- The ir and layout columns are JSON-encoded TEXT; ir is validated via
+-- parseWorkflowIr before persistence at the store layer.
+CREATE TABLE IF NOT EXISTS workflows (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  ir TEXT NOT NULL,
+  layout TEXT NOT NULL DEFAULT '{}',
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idxWorkflowsCreatedAt ON workflows(createdAt);
+
+-- Per-task selected workflow. stepIds holds the WorkflowStep ids materialized
+-- by compiling the workflow, so re-selection can clean them up (no orphans).
+CREATE TABLE IF NOT EXISTS task_workflow_selection (
+  taskId TEXT PRIMARY KEY,
+  workflowId TEXT NOT NULL,
+  stepIds TEXT NOT NULL DEFAULT '[]',
   updatedAt TEXT NOT NULL
 );
 
@@ -483,19 +510,6 @@ CREATE TABLE IF NOT EXISTS agentRuns (
 CREATE INDEX IF NOT EXISTS idxAgentRunsAgentIdStartedAt ON agentRuns(agentId, startedAt);
 CREATE INDEX IF NOT EXISTS idxAgentRunsStatus ON agentRuns(status);
 
-CREATE TABLE IF NOT EXISTS agentLogEntries (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  taskId TEXT NOT NULL,
-  timestamp TEXT NOT NULL,
-  text TEXT NOT NULL,
-  type TEXT NOT NULL,
-  detail TEXT,
-  agent TEXT,
-  FOREIGN KEY (taskId) REFERENCES tasks(id) ON DELETE CASCADE
-);
-CREATE INDEX IF NOT EXISTS idxAgentLogEntriesTaskIdTimestamp ON agentLogEntries(taskId, timestamp);
-CREATE INDEX IF NOT EXISTS idxAgentLogEntriesTaskIdType ON agentLogEntries(taskId, type);
-
 CREATE TABLE IF NOT EXISTS agentTaskSessions (
   agentId TEXT NOT NULL,
   taskId TEXT NOT NULL,
@@ -561,6 +575,46 @@ CREATE TABLE IF NOT EXISTS completion_handoff_markers (
   source TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_completion_handoff_markers_acceptedAt ON completion_handoff_markers(acceptedAt);
+
+-- Per-branch run state for concurrent workflow fan-out/join (U13, KTD-11/R21).
+-- Reconstructible per ADR-0001: a crashed parallel run resumes each branch from
+-- its persisted node; completed branches are not re-run. Additive-only.
+CREATE TABLE IF NOT EXISTS workflow_run_branches (
+  taskId TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  runId TEXT NOT NULL,
+  branchId TEXT NOT NULL,
+  currentNodeId TEXT NOT NULL,
+  status TEXT NOT NULL,
+  updatedAt TEXT NOT NULL,
+  PRIMARY KEY (taskId, runId, branchId)
+);
+CREATE INDEX IF NOT EXISTS idx_workflow_run_branches_task_run ON workflow_run_branches(taskId, runId);
+
+-- Per-step-instance run state for the step-inversion foreach region (step-inversion
+-- U4, KTD-6). One row per expanded step instance inside a foreach region; resume
+-- reconstructs the instance set from pinnedStepCount + persisted currentNodeId/
+-- reworkCount without re-running completed instances. baselineSha/checkpointId
+-- persist the RETHINK reset anchors (previously in-memory, lost on restart).
+-- branchName/integratedAt and the "awaiting-integration" status serve parallel
+-- mode (KTD-11) and are null/unused at concurrency 1. Additive-only, reconstructible.
+-- status ∈ "pending" | "in-progress" | "awaiting-integration" | "completed" | "failed".
+CREATE TABLE IF NOT EXISTS workflow_run_step_instances (
+  taskId TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  runId TEXT NOT NULL,
+  foreachNodeId TEXT NOT NULL,
+  stepIndex INTEGER NOT NULL,
+  pinnedStepCount INTEGER NOT NULL,
+  currentNodeId TEXT,
+  status TEXT NOT NULL,
+  baselineSha TEXT,
+  checkpointId TEXT,
+  reworkCount INTEGER NOT NULL DEFAULT 0,
+  branchName TEXT,
+  integratedAt TEXT,
+  updatedAt TEXT NOT NULL,
+  PRIMARY KEY (taskId, runId, foreachNodeId, stepIndex)
+);
+CREATE INDEX IF NOT EXISTS idx_workflow_run_step_instances_task_run ON workflow_run_step_instances(taskId, runId);
 
 -- Task documents (key-value store per task with revision tracking)
 CREATE TABLE IF NOT EXISTS task_documents (
@@ -803,6 +857,57 @@ CREATE TABLE IF NOT EXISTS branch_groups (
 CREATE INDEX IF NOT EXISTS idxBranchGroupsSource ON branch_groups(sourceType, sourceId);
 CREATE INDEX IF NOT EXISTS idxBranchGroupsBranchName ON branch_groups(branchName);
 
+-- Unified PR entity (PR-lifecycle-as-workflow-nodes, U1). One row per managed
+-- pull request; sourceType+sourceId link to a task or branch_group. GitHub-mirror
+-- columns are written only by the pr-create node and the reconcile (R4).
+CREATE TABLE IF NOT EXISTS pull_requests (
+  id TEXT PRIMARY KEY,
+  sourceType TEXT NOT NULL CHECK (sourceType IN ('task','branch-group')),
+  sourceId TEXT NOT NULL,
+  repo TEXT NOT NULL,
+  headBranch TEXT NOT NULL,
+  baseBranch TEXT,
+  state TEXT NOT NULL DEFAULT 'creating'
+    CHECK (state IN ('creating','open','responding','merged','closed','failed')),
+  prNumber INTEGER,
+  prUrl TEXT,
+  headOid TEXT,
+  mergeable TEXT,
+  checksRollup TEXT,
+  reviewDecision TEXT,
+  autoMerge INTEGER NOT NULL DEFAULT 0,
+  unverified INTEGER NOT NULL DEFAULT 0,
+  failureReason TEXT,
+  responseRounds INTEGER NOT NULL DEFAULT 0,
+  createdAt INTEGER NOT NULL,
+  updatedAt INTEGER NOT NULL,
+  closedAt INTEGER
+);
+-- Three uniqueness dimensions, each scoped so terminal rows accumulate as history
+-- and reopen/recreate-after-close is permitted (idempotency must cover every
+-- dimension — branch-group name-collision learning).
+CREATE UNIQUE INDEX IF NOT EXISTS idxPullRequestsOpenSource
+  ON pull_requests(sourceType, sourceId)
+  WHERE state NOT IN ('merged','closed','failed');
+CREATE UNIQUE INDEX IF NOT EXISTS idxPullRequestsOpenBranch
+  ON pull_requests(repo, headBranch)
+  WHERE state NOT IN ('merged','closed','failed');
+CREATE UNIQUE INDEX IF NOT EXISTS idxPullRequestsNumber
+  ON pull_requests(repo, prNumber)
+  WHERE prNumber IS NOT NULL;
+
+-- Per-thread response state (R15). Child of pull_requests; keyed by thread id +
+-- head OID so restart never duplicates a fix or silently skips feedback.
+CREATE TABLE IF NOT EXISTS pull_request_thread_state (
+  prEntityId TEXT NOT NULL REFERENCES pull_requests(id) ON DELETE CASCADE,
+  threadId TEXT NOT NULL,
+  headOid TEXT NOT NULL,
+  outcome TEXT NOT NULL CHECK (outcome IN ('fixed','disagreed','pending')),
+  fixCommitSha TEXT,
+  updatedAt INTEGER NOT NULL,
+  PRIMARY KEY (prEntityId, threadId, headOid)
+);
+
 -- Goals table (strategic intent across mission timelines)
 CREATE TABLE IF NOT EXISTS goals (
   id TEXT PRIMARY KEY,
@@ -813,6 +918,16 @@ CREATE TABLE IF NOT EXISTS goals (
   updatedAt TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idxGoalsStatus ON goals(status);
+
+CREATE TABLE IF NOT EXISTS mission_goals (
+  missionId TEXT NOT NULL,
+  goalId TEXT NOT NULL,
+  createdAt TEXT NOT NULL,
+  PRIMARY KEY (missionId, goalId),
+  FOREIGN KEY (missionId) REFERENCES missions(id) ON DELETE CASCADE,
+  FOREIGN KEY (goalId) REFERENCES goals(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idxMissionGoalsGoalId ON mission_goals(goalId);
 
 CREATE TABLE IF NOT EXISTS goal_citations (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1306,6 +1421,18 @@ export const MIGRATION_ONLY_TABLE_SCHEMAS: Record<string, Record<string, string>
     senderAgentId: "TEXT",
     mentions: "TEXT",
     createdAt: "TEXT NOT NULL",
+  },
+  // agentLogEntries is created by migration 40 for legacy DBs and dropped by
+  // migration 102. Included here so the architecture-schema-compat test
+  // recognizes it as a covered migration-only table.
+  agentLogEntries: {
+    id: "INTEGER PRIMARY KEY AUTOINCREMENT",
+    taskId: "TEXT NOT NULL",
+    timestamp: "TEXT NOT NULL",
+    text: "TEXT NOT NULL",
+    type: "TEXT NOT NULL",
+    detail: "TEXT",
+    agent: "TEXT",
   },
 };
 
@@ -1804,7 +1931,6 @@ export class Database {
    */
   private static readonly OPERATIONAL_LOG_TABLES = [
     "activityLog",
-    "agentLogEntries",
     "runAuditEvents",
     "agentHeartbeats",
   ] as const;
@@ -1823,18 +1949,61 @@ export class Database {
 
     const cutoffIso = new Date(Date.now() - retentionMs).toISOString();
     let deletedTotal = 0;
+    const recordChanges = (table: string, result: { changes: number | bigint }) => {
+      const changes = typeof result.changes === "bigint" ? Number(result.changes) : result.changes;
+      deletedByTable[table] = changes;
+      deletedTotal += changes;
+    };
 
     for (const table of Database.OPERATIONAL_LOG_TABLES) {
       if (!this.tableExists(table)) continue;
       try {
-        const result = this.db
-          .prepare(`DELETE FROM "${table}" WHERE timestamp < ?`)
-          .run(cutoffIso);
-        const changes = typeof result.changes === "bigint" ? Number(result.changes) : result.changes;
-        deletedByTable[table] = changes;
-        deletedTotal += changes;
+        recordChanges(
+          table,
+          this.db.prepare(`DELETE FROM "${table}" WHERE timestamp < ?`).run(cutoffIso),
+        );
       } catch (error) {
         console.warn(`[fusion:db] Failed to prune operational log table ${table}`, error);
+      }
+    }
+
+    if (this.tableExists("agentRuns")) {
+      try {
+        recordChanges(
+          "agentRuns",
+          this.db
+            .prepare("DELETE FROM agentRuns WHERE endedAt IS NOT NULL AND endedAt < ?")
+            .run(cutoffIso),
+        );
+      } catch (error) {
+        console.warn("[fusion:db] Failed to prune operational log table agentRuns", error);
+      }
+    }
+
+    if (this.tableExists("agentConfigRevisions")) {
+      try {
+        recordChanges(
+          "agentConfigRevisions",
+          this.db
+            .prepare(
+              `DELETE FROM agentConfigRevisions
+               WHERE createdAt < ?
+                 AND id NOT IN (
+                   SELECT id FROM (
+                     SELECT id,
+                            ROW_NUMBER() OVER (
+                              PARTITION BY agentId
+                              ORDER BY createdAt DESC, rowid DESC
+                            ) AS rn
+                     FROM agentConfigRevisions
+                   ) ranked
+                   WHERE rn = 1
+                 )`,
+            )
+            .run(cutoffIso),
+        );
+      } catch (error) {
+        console.warn("[fusion:db] Failed to prune operational log table agentConfigRevisions", error);
       }
     }
 
@@ -1896,8 +2065,12 @@ export class Database {
   /**
    * Run incremental schema migrations based on the stored schema version.
    *
-   * Each migration block is guarded by a version check and runs inside a
-   * transaction so that a failed migration leaves the database unchanged.
+   * Each migration block is guarded by a version check. NOTE: migration bodies
+   * are NOT transactional — SQLite ALTER cannot run in a transaction, so
+   * `applyMigration` runs the body directly and only bumps the version on
+   * success. A crash mid-body re-runs the ENTIRE body at next boot, so every
+   * migration body must be fully re-runnable (IF NOT EXISTS DDL, INSERT OR
+   * IGNORE / ON CONFLICT for data copies).
    * New migrations should be added as `if (version < N)` blocks before
    * the final version bump, and SCHEMA_VERSION should be incremented to N.
    *
@@ -1993,6 +2166,28 @@ export class Database {
       this.addColumnIfMissing("tasks", "userPaused", "INTEGER DEFAULT 0");
       this.addColumnIfMissing("tasks", "pausedReason", "TEXT");
       this.addColumnIfMissing("tasks", "scopeAutoWiden", "TEXT DEFAULT '[]'");
+    }
+
+    // Deferred agentLogEntries drop (companion to migration 102): when the
+    // legacy table still had rows on the first init pass, the destructive drop
+    // was deferred until TaskStore copies the rows to JSONL and writes the
+    // __meta guard, then re-runs init(). Migrations 103+ bump the schema
+    // version past 102 on that first pass, so the re-run can no longer reach
+    // the version-gated 102 block — finish the drop here, version-independent
+    // (and before the early return below, which fires once the version is
+    // current).
+    if (this.hasTable("agentLogEntries")) {
+      const agentLogMigrationComplete = this.getMetaValue("agentLogEntriesToFileMigrationVersion") === "1";
+      const legacyAgentLogTableIsEmpty =
+        (this.db.prepare("SELECT COUNT(*) as count FROM agentLogEntries").get() as { count: number }).count === 0;
+      const hasLegacyAgentLogCitations = this.hasTable("goal_citations")
+        ? (this.db.prepare(
+            "SELECT 1 FROM goal_citations WHERE surface = 'agent_log' AND sourceRef GLOB 'agentLog:[0-9]*' LIMIT 1",
+          ).get() ?? undefined) !== undefined
+        : false;
+      if (agentLogMigrationComplete || (legacyAgentLogTableIsEmpty && !hasLegacyAgentLogCitations)) {
+        this.db.exec(`DROP TABLE IF EXISTS agentLogEntries`);
+      }
     }
 
     if (version >= SCHEMA_VERSION) return;
@@ -3987,6 +4182,276 @@ export class Database {
       });
     }
 
+    if (version < 101) {
+      this.applyMigration(101, () => {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS mission_goals (
+            missionId TEXT NOT NULL,
+            goalId TEXT NOT NULL,
+            createdAt TEXT NOT NULL,
+            PRIMARY KEY (missionId, goalId),
+            FOREIGN KEY (missionId) REFERENCES missions(id) ON DELETE CASCADE,
+            FOREIGN KEY (goalId) REFERENCES goals(id) ON DELETE CASCADE
+          )
+        `);
+        this.db.exec(`
+          CREATE INDEX IF NOT EXISTS idxMissionGoalsGoalId
+            ON mission_goals(goalId)
+        `);
+      });
+    }
+
+    // Migration 102: Drop agentLogEntries after store-level migration has
+    // copied legacy rows into per-task JSONL files. Database.init() runs before
+    // TaskStore.init(), so we must defer the destructive drop until the store
+    // writes the migration guard into __meta and re-runs init().
+    if (version < 102) {
+      const agentLogMigrationComplete = this.getMetaValue("agentLogEntriesToFileMigrationVersion") === "1";
+      const hasLegacyAgentLogTable = this.hasTable("agentLogEntries");
+      const legacyAgentLogTableIsEmpty = hasLegacyAgentLogTable
+        ? ((this.db.prepare("SELECT COUNT(*) as count FROM agentLogEntries").get() as { count: number }).count === 0)
+        : true;
+      const hasLegacyAgentLogCitations =
+        (this.db.prepare(
+          "SELECT 1 FROM goal_citations WHERE surface = 'agent_log' AND sourceRef GLOB 'agentLog:[0-9]*' LIMIT 1",
+        ).get() ?? undefined) !== undefined;
+      if (!hasLegacyAgentLogTable || agentLogMigrationComplete || (legacyAgentLogTableIsEmpty && !hasLegacyAgentLogCitations)) {
+        this.applyMigration(102, () => {
+          this.db.exec(`DROP TABLE IF EXISTS agentLogEntries`);
+        });
+      }
+    }
+
+    // Migration 103: Named workflow definitions (WorkflowIr graphs + layout).
+    if (version < 103) {
+      this.applyMigration(103, () => {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS workflows (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            description TEXT NOT NULL DEFAULT '',
+            ir TEXT NOT NULL,
+            layout TEXT NOT NULL DEFAULT '{}',
+            createdAt TEXT NOT NULL,
+            updatedAt TEXT NOT NULL
+          );
+          CREATE INDEX IF NOT EXISTS idxWorkflowsCreatedAt ON workflows(createdAt);
+        `);
+      });
+    }
+
+    // Migration 104: Per-task selected workflow (resolves to enabledWorkflowSteps).
+    if (version < 104) {
+      this.applyMigration(104, () => {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS task_workflow_selection (
+            taskId TEXT PRIMARY KEY,
+            workflowId TEXT NOT NULL,
+            stepIds TEXT NOT NULL DEFAULT '[]',
+            updatedAt TEXT NOT NULL
+          )
+        `);
+      });
+    }
+
+    // Migration 105: task_workflow_selection has no FK to tasks(id) (SQLite can't
+    // add one to an existing table without a rebuild), so physical task deletes
+    // before this version could leave orphaned selection rows and unreclaimable
+    // compiled workflow_steps. Drop any already-orphaned rows and their steps.
+    if (version < 105) {
+      this.applyMigration(105, () => {
+        // Delete the compiled steps referenced by orphaned selections first, then
+        // the orphaned selection rows themselves. json_each expands the stepIds
+        // JSON array; the WHERE guards against malformed (non-array) stepIds.
+        this.db.exec(`
+          DELETE FROM workflow_steps WHERE id IN (
+            SELECT je.value
+            FROM task_workflow_selection sel
+            JOIN json_each(sel.stepIds) je
+            WHERE json_valid(sel.stepIds)
+              AND json_type(sel.stepIds) = 'array'
+              AND sel.taskId NOT IN (SELECT id FROM tasks)
+          );
+          DELETE FROM task_workflow_selection
+          WHERE taskId NOT IN (SELECT id FROM tasks);
+        `);
+      });
+    }
+
+    // Migration 106: Crash-safe transition marker (workflow-columns U3). Stores
+    // JSON {toColumn, hooksRemaining, startedAt} written in the same txn as a
+    // column change; recovery re-runs the remaining idempotent post-commit hooks
+    // and clears it. Additive-only, nullable, no backfill — existing rows have
+    // no in-flight transition.
+    if (version < 106) {
+      this.applyMigration(106, () => {
+        this.addColumnIfMissing("tasks", "transitionPending", "TEXT");
+      });
+    }
+
+    // Migration 107: Per-branch run state for concurrent workflow fan-out/join
+    // (workflow-columns U13, KTD-11/R21). Stores {taskId, runId, branchId,
+    // currentNodeId, status} so a crashed parallel run resumes each branch from
+    // its persisted node without re-running completed branches. Additive-only,
+    // idempotent (table-exists guard); no backfill.
+    if (version < 107) {
+      this.applyMigration(107, () => {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS workflow_run_branches (
+            taskId TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+            runId TEXT NOT NULL,
+            branchId TEXT NOT NULL,
+            currentNodeId TEXT NOT NULL,
+            status TEXT NOT NULL,
+            updatedAt TEXT NOT NULL,
+            PRIMARY KEY (taskId, runId, branchId)
+          );
+          CREATE INDEX IF NOT EXISTS idx_workflow_run_branches_task_run ON workflow_run_branches(taskId, runId);
+        `);
+      });
+    }
+
+    // Migration 108: Step-inversion persistence (step-inversion U4, KTD-6/KTD-13).
+    // Adds workflow_run_step_instances — one row per expanded step instance inside a
+    // foreach region — so a crashed/restarted run reconstructs the instance set from
+    // pinnedStepCount + persisted currentNodeId/reworkCount, and the RETHINK reset
+    // anchors (baselineSha/checkpointId) survive restart (previously in-memory Maps).
+    // branchName/integratedAt + "awaiting-integration" status serve parallel mode
+    // (KTD-11; null/unused at concurrency 1). Also adds tasks.customFields (KTD-13),
+    // the JSON store for workflow-defined custom task field values. Additive-only,
+    // idempotent (table-exists / addColumnIfMissing guards); no backfill.
+    // status ∈ "pending" | "in-progress" | "awaiting-integration" | "completed" | "failed".
+    if (version < 108) {
+      this.applyMigration(108, () => {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS workflow_run_step_instances (
+            taskId TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+            runId TEXT NOT NULL,
+            foreachNodeId TEXT NOT NULL,
+            stepIndex INTEGER NOT NULL,
+            pinnedStepCount INTEGER NOT NULL,
+            currentNodeId TEXT,
+            status TEXT NOT NULL,
+            baselineSha TEXT,
+            checkpointId TEXT,
+            reworkCount INTEGER NOT NULL DEFAULT 0,
+            branchName TEXT,
+            integratedAt TEXT,
+            updatedAt TEXT NOT NULL,
+            PRIMARY KEY (taskId, runId, foreachNodeId, stepIndex)
+          );
+          CREATE INDEX IF NOT EXISTS idx_workflow_run_step_instances_task_run ON workflow_run_step_instances(taskId, runId);
+        `);
+        this.addColumnIfMissing("tasks", "customFields", "TEXT DEFAULT '{}'");
+      });
+    }
+
+    // Migration 109: Unified PR entity (PR-lifecycle-as-workflow-nodes, U1).
+    // Adds pull_requests + pull_request_thread_state and copies legacy
+    // branch_groups PR fields into entities flagged unverified (R19) — that
+    // legacy state may be fiction (prState:"open" was once written without a
+    // real PR), so it is imported untrusted and reconciled on first poll.
+    //
+    // applyMigration is NOT transactional (ALTER cannot run in a txn here): the
+    // version only bumps after the whole body succeeds, so a crash mid-body
+    // re-runs the entire body at next boot. Every statement below is therefore
+    // re-runnable — IF NOT EXISTS DDL and INSERT OR IGNORE keyed on the same
+    // columns as the partial unique indexes.
+    if (version < 109) {
+      this.applyMigration(109, () => {
+        this.ensurePullRequestsSchemaCompatibility();
+        const now = Date.now();
+        // Copy legacy branch-group PRs (only groups that claim an open/merged PR)
+        // into entities. INSERT OR IGNORE makes the copy idempotent across a
+        // re-run after a partial migration: rows that already landed collide on
+        // the open-source / open-branch / number indexes and are skipped.
+        this.db
+          .prepare(
+            `INSERT OR IGNORE INTO pull_requests
+               (id, sourceType, sourceId, repo, headBranch, baseBranch, state,
+                prNumber, prUrl, autoMerge, unverified, responseRounds,
+                createdAt, updatedAt)
+             SELECT
+               'pr-bg-' || bg.id,
+               'branch-group',
+               bg.id,
+               '',
+               bg.branchName,
+               NULL,
+               CASE bg.prState
+                 WHEN 'open' THEN 'open'
+                 WHEN 'merged' THEN 'merged'
+                 WHEN 'closed' THEN 'closed'
+                 ELSE 'open'
+               END,
+               bg.prNumber,
+               bg.prUrl,
+               bg.autoMerge,
+               1,
+               0,
+               ?,
+               ?
+             FROM branch_groups bg
+             WHERE bg.prState IN ('open','merged','closed') AND bg.prNumber IS NOT NULL`,
+          )
+          .run(now, now);
+      });
+    }
+
+  }
+
+  /**
+   * Idempotent schema reconciliation for the PR-entity tables. ensureSchema-
+   * Compatibility adds missing *columns* but never indexes, so the partial
+   * unique indexes must be (re)created here as well as in SCHEMA_SQL and the
+   * v109 migration block — a fresh-from-SCHEMA_SQL DB and a migrated DB must
+   * converge on identical constraints. Mirrors ensureEvalTaskResultsSchema-
+   * Compatibility.
+   */
+  private ensurePullRequestsSchemaCompatibility(): void {
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS pull_requests (
+        id TEXT PRIMARY KEY,
+        sourceType TEXT NOT NULL CHECK (sourceType IN ('task','branch-group')),
+        sourceId TEXT NOT NULL,
+        repo TEXT NOT NULL,
+        headBranch TEXT NOT NULL,
+        baseBranch TEXT,
+        state TEXT NOT NULL DEFAULT 'creating'
+          CHECK (state IN ('creating','open','responding','merged','closed','failed')),
+        prNumber INTEGER,
+        prUrl TEXT,
+        headOid TEXT,
+        mergeable TEXT,
+        checksRollup TEXT,
+        reviewDecision TEXT,
+        autoMerge INTEGER NOT NULL DEFAULT 0,
+        unverified INTEGER NOT NULL DEFAULT 0,
+        failureReason TEXT,
+        responseRounds INTEGER NOT NULL DEFAULT 0,
+        createdAt INTEGER NOT NULL,
+        updatedAt INTEGER NOT NULL,
+        closedAt INTEGER
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idxPullRequestsOpenSource
+        ON pull_requests(sourceType, sourceId)
+        WHERE state NOT IN ('merged','closed','failed');
+      CREATE UNIQUE INDEX IF NOT EXISTS idxPullRequestsOpenBranch
+        ON pull_requests(repo, headBranch)
+        WHERE state NOT IN ('merged','closed','failed');
+      CREATE UNIQUE INDEX IF NOT EXISTS idxPullRequestsNumber
+        ON pull_requests(repo, prNumber)
+        WHERE prNumber IS NOT NULL;
+      CREATE TABLE IF NOT EXISTS pull_request_thread_state (
+        prEntityId TEXT NOT NULL REFERENCES pull_requests(id) ON DELETE CASCADE,
+        threadId TEXT NOT NULL,
+        headOid TEXT NOT NULL,
+        outcome TEXT NOT NULL CHECK (outcome IN ('fixed','disagreed','pending')),
+        fixCommitSha TEXT,
+        updatedAt INTEGER NOT NULL,
+        PRIMARY KEY (prEntityId, threadId, headOid)
+      );
+    `);
   }
 
   /**

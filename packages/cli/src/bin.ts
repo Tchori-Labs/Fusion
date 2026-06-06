@@ -124,9 +124,10 @@ async function loadCommandHandlers() {
   const { runSettingsExport } = await import("./commands/settings-export.js");
   const { runSettingsImport } = await import("./commands/settings-import.js");
   const { runGitStatus, runGitFetch, runGitPull, runGitPush } = await import("./commands/git.js");
+  const { runBranchGroupList, runBranchGroupShow, runBranchGroupPromote, runBranchGroupAbandon } = await import("./commands/branch-group.js");
   const { runBackupCreate, runBackupList, runBackupRestore, runBackupCleanup } = await import("./commands/backup.js");
   const { runMemoryBackupCreate, runMemoryBackupList, runMemoryBackupRestore } = await import("./commands/memory-backup.js");
-  const { runMissionCreate, runMissionList, runMissionShow, runMissionDelete, runMissionActivateSlice } = await import("./commands/mission.js");
+  const { runMissionCreate, runMissionList, runMissionShow, runMissionDelete, runMissionActivateSlice, runMissionLinkGoal, runMissionUnlinkGoal, runMissionGoals } = await import("./commands/mission.js");
   const { runGoalsList, runGoalsCreate, runGoalsArchive, runGoalsCitations } = await import("./commands/goals.js");
   const { runProjectList, runProjectAdd, runProjectRemove, runProjectShow, runProjectInfo, runProjectSetDefault, runProjectDetect } = await import("./commands/project.js");
   const { runNodeList, runNodeConnect, runNodeDisconnect, runNodeShow, runNodeHealth, runMeshStatus } = await import("./commands/node.js");
@@ -184,6 +185,10 @@ async function loadCommandHandlers() {
     runGitFetch,
     runGitPull,
     runGitPush,
+    runBranchGroupList,
+    runBranchGroupShow,
+    runBranchGroupPromote,
+    runBranchGroupAbandon,
     runBackupCreate,
     runBackupList,
     runBackupRestore,
@@ -196,6 +201,9 @@ async function loadCommandHandlers() {
     runMissionShow,
     runMissionDelete,
     runMissionActivateSlice,
+    runMissionLinkGoal,
+    runMissionUnlinkGoal,
+    runMissionGoals,
     runGoalsList,
     runGoalsCreate,
     runGoalsArchive,
@@ -319,9 +327,15 @@ PR:
                                       Cancel an active cited-research run
   fn research retry <run-id> [--json]
                                       Retry a failed/cancelled cited-research run
-  fn mission create [title] [desc]    Create a new mission
+  fn mission create [title] [desc] [--goal <id>] [--base-branch <branch>]
+                                      Create a new mission (repeat --goal to link goals)
   fn mission list | ls                List missions
   fn mission show | info <id>         Show mission details
+  fn mission goals <id>               List linked goals for a mission
+  fn mission link-goal <mission-id> <goal-id>
+                                      Link a goal to a mission
+  fn mission unlink-goal <mission-id> <goal-id>
+                                      Unlink a goal from a mission
   fn mission delete <id> [--force]    Delete a mission
   fn mission activate-slice <id>      Mark a slice active
   fn goals list [--status STATE]      List goals (default: active)
@@ -357,6 +371,12 @@ PR:
   fn git push                Push current branch
   fn git pull                Pull current branch
   fn git fetch [remote]      Fetch from remote (default: origin)
+  fn branch-group list       List branch groups with completion + PR state
+  fn branch-group show <id>  Show a branch group's members and completion gate
+  fn branch-group promote <id>
+                             Promote a complete group (opens/links the single managed PR)
+  fn branch-group abandon <id>
+                             Abandon a group (best-effort closes the managed PR)
   fn agent stop <id>                Stop a running agent (pause execution)
   fn agent start <id>               Start a stopped agent (resume execution)
   fn agent import <path> [--dry-run] [--skip-existing]
@@ -412,6 +432,7 @@ Options:
   --interactive              Interactive mode (port selection for dashboard, issue selection for import)
   --paused                   Start with engine paused (automation disabled)
   --dev                      Start dashboard only (no AI engine)
+  --lang <locale>            Terminal-UI locale for this run (en, zh-CN, zh-TW, fr, es, ko); the browser dashboard resolves its own language
   --attach <file>            Attach file(s) on task create (repeatable)
   --depends <id>             Declare dependency on task create (repeatable)
   --no-dedup                 Bypass deterministic duplicate guard on task create
@@ -476,6 +497,22 @@ function getFlagValue(args: string[], flag: string): string | undefined {
   }
 
   return value;
+}
+
+function getRepeatedFlagValues(args: string[], flag: string): string[] {
+  const values: string[] = [];
+  for (let index = 0; index < args.length; index++) {
+    if (args[index] !== flag) {
+      continue;
+    }
+    const value = args[index + 1];
+    if (!value || value.startsWith("-")) {
+      continue;
+    }
+    values.push(value);
+    index += 1;
+  }
+  return values;
 }
 
 function getFlagValueNumber(args: string[], flag: string): number | undefined {
@@ -615,6 +652,10 @@ async function main() {
     runGitFetch,
     runGitPull,
     runGitPush,
+    runBranchGroupList,
+    runBranchGroupShow,
+    runBranchGroupPromote,
+    runBranchGroupAbandon,
     runBackupCreate,
     runBackupList,
     runBackupRestore,
@@ -627,6 +668,9 @@ async function main() {
     runMissionShow,
     runMissionDelete,
     runMissionActivateSlice,
+    runMissionLinkGoal,
+    runMissionUnlinkGoal,
+    runMissionGoals,
     runGoalsList,
     runGoalsCreate,
     runGoalsArchive,
@@ -722,7 +766,18 @@ async function main() {
         const noAuth = args.includes("--no-auth");
         const dashTokenIdx = args.indexOf("--token");
         const token = dashTokenIdx !== -1 && dashTokenIdx + 1 < args.length ? args[dashTokenIdx + 1] : undefined;
-        await runDashboard(port, { paused, dev, interactive, host, noAuth, token });
+        const dashLangIdx = args.indexOf("--lang");
+        const lang = dashLangIdx !== -1 && dashLangIdx + 1 < args.length ? args[dashLangIdx + 1] : undefined;
+        if (lang !== undefined) {
+          // Fail loudly on a bad explicit flag instead of silently falling back
+          // to setting/env resolution inside the TUI.
+          const { isLocale, SUPPORTED_LOCALES } = await import("@fusion/core");
+          if (!isLocale(lang)) {
+            console.error(`Invalid --lang "${lang}". Supported: ${SUPPORTED_LOCALES.join(", ")}`);
+            process.exit(1);
+          }
+        }
+        await runDashboard(port, { paused, dev, interactive, host, noAuth, token, lang });
         break;
       }
 
@@ -1350,10 +1405,13 @@ async function main() {
           case "create": {
             const createArgs = args.slice(2);
             let baseBranch: string | undefined;
+            const goalIds = getRepeatedFlagValues(createArgs, "--goal");
             const positional: string[] = [];
             for (let i = 0; i < createArgs.length; i++) {
               if (createArgs[i] === "--base-branch" && i + 1 < createArgs.length) {
                 baseBranch = createArgs[i + 1];
+                i++;
+              } else if (createArgs[i] === "--goal" && i + 1 < createArgs.length) {
                 i++;
               } else {
                 positional.push(createArgs[i]);
@@ -1361,7 +1419,7 @@ async function main() {
             }
             const title = positional[0];
             const description = positional.length > 1 ? positional.slice(1).join(" ") : undefined;
-            await runMissionCreate(title, description, projectName, baseBranch);
+            await runMissionCreate(title, description, projectName, baseBranch, goalIds);
             break;
           }
           case "list":
@@ -1374,6 +1432,23 @@ async function main() {
           case "info": {
             const id = args[2];
             await runMissionShow(id, projectName);
+            break;
+          }
+          case "goals": {
+            const id = args[2];
+            await runMissionGoals(id, projectName);
+            break;
+          }
+          case "link-goal": {
+            const missionId = args[2];
+            const goalId = args[3];
+            await runMissionLinkGoal(missionId, goalId, projectName);
+            break;
+          }
+          case "unlink-goal": {
+            const missionId = args[2];
+            const goalId = args[3];
+            await runMissionUnlinkGoal(missionId, goalId, projectName);
             break;
           }
           case "delete": {
@@ -1389,7 +1464,7 @@ async function main() {
           }
           default:
             console.error(`Unknown subcommand: mission ${subcommand || ""}`);
-            console.log("Try: fn mission create | list | show | delete | activate-slice");
+            console.log("Try: fn mission create | list | show | goals | link-goal | unlink-goal | delete | activate-slice");
             process.exit(1);
         }
         break;
@@ -1521,6 +1596,49 @@ async function main() {
           default:
             console.error(`Unknown subcommand: git ${subcommand || ""}`);
             console.log("Try: fn git status | fetch | pull | push");
+            process.exit(1);
+        }
+        break;
+      }
+
+      case "branch-group":
+      case "bg": {
+        const subcommand = args[1];
+        switch (subcommand) {
+          case "list":
+          case "ls":
+            await runBranchGroupList(projectName);
+            break;
+          case "show": {
+            const id = args[2];
+            if (!id) {
+              console.error("Usage: fn branch-group show <group-id>");
+              process.exit(1);
+            }
+            await runBranchGroupShow(id, projectName);
+            break;
+          }
+          case "promote": {
+            const id = args[2];
+            if (!id) {
+              console.error("Usage: fn branch-group promote <group-id>");
+              process.exit(1);
+            }
+            await runBranchGroupPromote(id, projectName);
+            break;
+          }
+          case "abandon": {
+            const id = args[2];
+            if (!id) {
+              console.error("Usage: fn branch-group abandon <group-id>");
+              process.exit(1);
+            }
+            await runBranchGroupAbandon(id, projectName);
+            break;
+          }
+          default:
+            console.error(`Unknown subcommand: branch-group ${subcommand || ""}`);
+            console.log("Try: fn branch-group list | show <id> | promote <id> | abandon <id>");
             process.exit(1);
         }
         break;

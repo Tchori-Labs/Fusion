@@ -79,6 +79,10 @@ import type {
   TaskIdIntegrityReport,
   BranchGroup,
   BranchGroupPrState,
+  WorkflowFieldDefinition,
+  WorkflowFieldType,
+  WorkflowFieldOption,
+  WorkflowFieldRender,
 } from "@fusion/core";
 import type { PlanningQuestion, PlanningSummary } from "@fusion/core";
 import type { GithubIssueAction, ScheduledTask, ScheduledTaskCreateInput, ScheduledTaskUpdateInput, AutomationRunResult, Routine, RoutineCreateInput, RoutineUpdateInput, RoutineExecutionResult } from "@fusion/core";
@@ -533,6 +537,81 @@ export function moveTask(
   });
 }
 
+/** Resolved trait flags for a board column (subset the client cares about). */
+export interface BoardWorkflowColumnFlags {
+  countsTowardWip?: boolean;
+  complete?: boolean;
+  archived?: boolean;
+  hiddenFromBoard?: boolean;
+  hold?: boolean;
+  intake?: boolean;
+  mergeBlocker?: boolean;
+  humanReview?: boolean;
+  [key: string]: boolean | undefined;
+}
+
+export interface BoardWorkflowColumn {
+  id: string;
+  name: string;
+  flags: BoardWorkflowColumnFlags;
+}
+
+// WorkflowFieldDefinition, WorkflowFieldType, WorkflowFieldOption, WorkflowFieldRender
+// are re-exported from @fusion/core above (KTD-13/14).
+export type { WorkflowFieldDefinition, WorkflowFieldType, WorkflowFieldOption, WorkflowFieldRender };
+
+export interface BoardWorkflowDefinition {
+  id: string;
+  name: string;
+  columns: BoardWorkflowColumn[];
+  /** Custom field definitions declared by this workflow (U13/KTD-14). Absent on
+   *  workflows with no fields, or from older servers. */
+  fields?: WorkflowFieldDefinition[];
+}
+
+export interface BoardWorkflowsPayload {
+  flagEnabled: boolean;
+  defaultWorkflowId: string;
+  workflows: BoardWorkflowDefinition[];
+  taskWorkflowIds: Record<string, string>;
+}
+
+/** A typed custom-field rejection surfaced by the PATCH endpoint (KTD-13). */
+export interface CustomFieldRejection {
+  code: "no-fields-defined" | "unknown-field" | "type-mismatch" | "enum-violation";
+  fieldId: string;
+  detail: string;
+}
+
+/**
+ * Patch a task's custom field values (U13/KTD-14). The server validates the
+ * patch against the task's workflow field schema and returns the updated task;
+ * a validation failure surfaces as a 400 carrying `{ fieldId, code, detail }`.
+ * A `null` value for a field deletes it.
+ */
+export function updateTaskCustomFields(
+  id: string,
+  customFields: Record<string, unknown>,
+  projectId?: string,
+): Promise<Task> {
+  return api<Task>(withProjectId(`/tasks/${id}/custom-fields`, projectId), {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ customFields }),
+  });
+}
+
+/** Fetch the multi-lane board metadata (U9). When the flag is OFF the server
+ *  returns `{ flagEnabled: false }` and the board renders its legacy form. */
+export function fetchBoardWorkflows(projectId?: string): Promise<BoardWorkflowsPayload> {
+  return api<BoardWorkflowsPayload>(withProjectId("/tasks/board-workflows", projectId));
+}
+
+/** Manually promote a held card out of its hold column (U9). */
+export function promoteTask(id: string, projectId?: string): Promise<Task> {
+  return api<Task>(withProjectId(`/tasks/${id}/promote`, projectId), { method: "POST" });
+}
+
 /**
  * Soft-deletes a task by setting `deletedAt` server-side while preserving the row/artifacts,
  * and keeping the task ID reserved.
@@ -613,6 +692,13 @@ export function apiAssignTaskBranchGroup(
 
 export function apiPromoteBranchGroup(id: string, projectId?: string): Promise<PromoteBranchGroupResult> {
   return api<PromoteBranchGroupResult>(withProjectId(`/branch-groups/${id}/promote`, projectId), {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
+export function apiAbandonBranchGroup(id: string, projectId?: string): Promise<{ groupId: string; group: BranchGroupSummary }> {
+  return api<{ groupId: string; group: BranchGroupSummary }>(withProjectId(`/branch-groups/${id}/abandon`, projectId), {
     method: "POST",
     body: JSON.stringify({}),
   });
@@ -2416,6 +2502,29 @@ export interface PrPreflightResponse {
   changedFiles: PrPreflightChangedFile[];
 }
 
+export interface ResolvePrConflictsResult {
+  resolved: boolean;
+  pushed: boolean;
+  conflictedFiles: string[];
+  message: string;
+}
+
+export interface ResolvePrConflictsResponse {
+  result: ResolvePrConflictsResult;
+  preflight: PrPreflightResponse;
+}
+
+export interface PushPrBranchResult {
+  pushed: boolean;
+  head: string;
+  message: string;
+}
+
+export interface PushPrBranchResponse {
+  result: PushPrBranchResult;
+  preflight: PrPreflightResponse;
+}
+
 export interface PrOptionsUser {
   login: string;
   name?: string;
@@ -2454,6 +2563,22 @@ export function generatePrMetadata(id: string, projectId?: string): Promise<PrMe
 export function fetchPrPreflight(id: string, projectId?: string, base?: string): Promise<PrPreflightResponse> {
   const baseParam = base ? `?base=${encodeURIComponent(base)}` : "";
   return api<PrPreflightResponse>(withProjectId(`/tasks/${id}/pr/preflight${baseParam}`, projectId));
+}
+
+/** Ask Fusion to resolve Create-PR merge conflicts for a task branch */
+export function resolvePrConflicts(id: string, base?: string, projectId?: string): Promise<ResolvePrConflictsResponse> {
+  return api<ResolvePrConflictsResponse>(withProjectId(`/tasks/${id}/pr/resolve-conflicts`, projectId), {
+    method: "POST",
+    ...(base ? { body: JSON.stringify({ base }) } : {}),
+  });
+}
+
+/** Push the Create-PR task branch to origin and refresh preflight state */
+export function pushPrBranch(id: string, base?: string, projectId?: string): Promise<PushPrBranchResponse> {
+  return api<PushPrBranchResponse>(withProjectId(`/tasks/${id}/pr/push-branch`, projectId), {
+    method: "POST",
+    ...(base ? { body: JSON.stringify({ base }) } : {}),
+  });
 }
 
 /** Fetch PR creation options (branches/reviewers/assignees/labels) for a task */
@@ -4897,6 +5022,156 @@ export function fetchWorkflowResults(taskId: string, projectId?: string): Promis
   return api<WorkflowStepResult[]>(withProjectId(`/tasks/${encodeURIComponent(taskId)}/workflow-results`, projectId));
 }
 
+// ── Workflow definitions (graph-authored custom workflows) ───────────────
+
+export type {
+  WorkflowDefinition,
+  WorkflowDefinitionInput,
+  WorkflowDefinitionUpdate,
+  WorkflowIr,
+} from "@fusion/core";
+
+/** List all workflow definitions for the project. */
+export function fetchWorkflows(projectId?: string): Promise<import("@fusion/core").WorkflowDefinition[]> {
+  const path = withProjectId("/workflows", projectId);
+  return dedupe(path, () => api<import("@fusion/core").WorkflowDefinition[]>(path));
+}
+
+/** A trait catalog entry as returned by GET /api/traits (U10). Mirrors the
+ *  registry's TraitDefinition projection (flags + hook descriptors + schema). */
+export interface TraitCatalogEntry {
+  id: string;
+  name: string;
+  description?: string;
+  builtin: boolean;
+  flags: import("@fusion/core").TraitFlags;
+  hooks?: import("@fusion/core").TraitHookDescriptors;
+  configSchema?: import("@fusion/core").TraitConfigSchema;
+}
+
+/** Fetch the trait catalog (built-ins + registered plugin traits) for the
+ *  workflow editor's trait picker. Registry-backed, read-only, session-scoped. */
+export function fetchTraits(projectId?: string): Promise<TraitCatalogEntry[]> {
+  const path = withProjectId("/traits", projectId);
+  return dedupe(path, () =>
+    api<{ traits: TraitCatalogEntry[] }>(path).then((res) => res.traits),
+  );
+}
+
+/** Fetch the step-parser id catalog (built-ins + registered plugin parsers) for
+ *  the parse-steps node inspector (KTD-12). Registry-backed, read-only,
+ *  session-scoped. Mirrors fetchTraits. */
+export function fetchStepParsers(projectId?: string): Promise<string[]> {
+  const path = withProjectId("/step-parsers", projectId);
+  return dedupe(path, () =>
+    api<{ parsers: Array<{ id: string }> }>(path).then((res) => res.parsers.map((p) => p.id)),
+  );
+}
+
+/** Fetch a single workflow definition. */
+export function fetchWorkflow(id: string, projectId?: string): Promise<import("@fusion/core").WorkflowDefinition> {
+  return api<import("@fusion/core").WorkflowDefinition>(withProjectId(`/workflows/${encodeURIComponent(id)}`, projectId));
+}
+
+/** Create a workflow definition. */
+export function createWorkflow(
+  input: import("@fusion/core").WorkflowDefinitionInput,
+  projectId?: string,
+): Promise<import("@fusion/core").WorkflowDefinition> {
+  return api<import("@fusion/core").WorkflowDefinition>(withProjectId("/workflows", projectId), {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+/** Update a workflow definition (partial). */
+export function updateWorkflow(
+  id: string,
+  updates: import("@fusion/core").WorkflowDefinitionUpdate,
+  projectId?: string,
+): Promise<import("@fusion/core").WorkflowDefinition> {
+  return api<import("@fusion/core").WorkflowDefinition>(withProjectId(`/workflows/${encodeURIComponent(id)}`, projectId), {
+    method: "PATCH",
+    body: JSON.stringify(updates),
+  });
+}
+
+/** Delete a workflow definition. */
+export function deleteWorkflow(id: string, projectId?: string): Promise<void> {
+  return api<void>(withProjectId(`/workflows/${encodeURIComponent(id)}`, projectId), { method: "DELETE" });
+}
+
+/** Preview the compiled steps for a workflow. Rejects (422) for non-linear graphs. */
+export function compileWorkflow(id: string, projectId?: string): Promise<{ steps: WorkflowStepInput[] }> {
+  return api<{ steps: WorkflowStepInput[] }>(withProjectId(`/workflows/${encodeURIComponent(id)}/compile`, projectId), {
+    method: "POST",
+  });
+}
+
+/** Read the workflow currently selected for a task. */
+export function fetchTaskWorkflow(taskId: string, projectId?: string): Promise<{ workflowId: string | null }> {
+  return api<{ workflowId: string | null }>(
+    withProjectId(`/tasks/${encodeURIComponent(taskId)}/workflow`, projectId),
+  );
+}
+
+/** Select (or clear, with null) a workflow for a task. Returns the resulting
+ *  enabled step ids so callers can reflect the change without a refetch. */
+export function selectTaskWorkflow(
+  taskId: string,
+  workflowId: string | null,
+  projectId?: string,
+): Promise<{
+  workflowId: string | null;
+  enabledWorkflowSteps: string[];
+  // U5 (R20): present (flag ON) when the switch re-homed the card; `preserved`
+  // false means the card moved columns and the board needs a refresh.
+  reconciliation?: { preserved: boolean; fromColumn: string; toColumn: string };
+}> {
+  return api<{
+    workflowId: string | null;
+    enabledWorkflowSteps: string[];
+    reconciliation?: { preserved: boolean; fromColumn: string; toColumn: string };
+  }>(
+    withProjectId(`/tasks/${encodeURIComponent(taskId)}/workflow`, projectId),
+    {
+      method: "PUT",
+      body: JSON.stringify({ workflowId }),
+    },
+  );
+}
+
+/** Approve the raw CLI command a task is paused on, and resume it. */
+export function approveTaskWorkflowCli(taskId: string, projectId?: string): Promise<{ approved: string }> {
+  return api<{ approved: string }>(withProjectId(`/tasks/${encodeURIComponent(taskId)}/workflow/approve-cli`, projectId), {
+    method: "POST",
+  });
+}
+
+/** Submit the user's answer to an await-input node and resume the task. */
+export function submitTaskWorkflowInput(taskId: string, text: string, projectId?: string): Promise<{ ok: true }> {
+  return api<{ ok: true }>(withProjectId(`/tasks/${encodeURIComponent(taskId)}/workflow/input`, projectId), {
+    method: "POST",
+    body: JSON.stringify({ text }),
+  });
+}
+
+/** Read the project default workflow. */
+export function fetchProjectDefaultWorkflow(projectId?: string): Promise<{ workflowId: string | null }> {
+  return api<{ workflowId: string | null }>(withProjectId("/project/default-workflow", projectId));
+}
+
+/** Set (or clear, with null) the project default workflow. */
+export function setProjectDefaultWorkflow(
+  workflowId: string | null,
+  projectId?: string,
+): Promise<{ workflowId: string | null }> {
+  return api<{ workflowId: string | null }>(withProjectId("/project/default-workflow", projectId), {
+    method: "PUT",
+    body: JSON.stringify({ workflowId }),
+  });
+}
+
 // ── Workflow Step Templates ──────────────────────────────────────────────
 
 /** Re-export WorkflowStepTemplate type from core */
@@ -6919,6 +7194,8 @@ export interface MissionSummary {
   completedMilestones: number;
   totalFeatures: number;
   completedFeatures: number;
+  linkedGoalCount: number;
+  eventCount: number;
   progressPercent: number;
 }
 
@@ -6978,6 +7255,8 @@ export interface SliceWithFeatures extends Slice {
 
 /** Full mission hierarchy */
 export interface MissionWithHierarchy extends Mission {
+  /** Unfiltered total of all mission lifecycle events, matching MissionSummary.eventCount and getMissionEvents total with no eventType filter */
+  eventCount?: number;
   milestones: MilestoneWithSlices[];
 }
 
@@ -8226,10 +8505,49 @@ export function forceAcquireSessionLock(sessionId: string, tabId: string): Promi
 }
 
 export async function deleteAiSession(id: string): Promise<void> {
-  await fetch(buildApiUrl(`/ai-sessions/${encodeURIComponent(id)}`), {
+  const url = buildApiUrl(`/ai-sessions/${encodeURIComponent(id)}`);
+  const res = await fetch(url, {
     method: "DELETE",
     headers: withTokenHeader(),
   });
+
+  if (res.ok || res.status === 404) {
+    return;
+  }
+
+  const contentType = res.headers.get("content-type") ?? "";
+  const bodyText = await res.text();
+  const isJson = contentType.includes("application/json");
+  const isHtml = contentType.includes("text/html") || looksLikeHtml(bodyText);
+
+  if (isHtml) {
+    throw new Error(
+      `API returned HTML instead of JSON for ${url}. ` +
+      `The endpoint may not be properly configured. (${res.status} ${res.statusText})`
+    );
+  }
+
+  if (!isJson) {
+    const preview = bodyText.length > 160 ? `${bodyText.slice(0, 160)}...` : bodyText;
+    throw new Error(
+      `API returned ${contentType || "an unknown content type"} instead of JSON for ${url}. ` +
+      `(${res.status} ${res.statusText})${preview ? ` Response: ${preview}` : ""}`
+    );
+  }
+
+  let data: unknown;
+  try {
+    data = bodyText ? JSON.parse(bodyText) : null;
+  } catch {
+    throw new Error(`API returned invalid JSON for ${url}. (${res.status} ${res.statusText})`);
+  }
+
+  const payload = data as { error?: string; details?: Record<string, unknown> } | null;
+  throw new ApiRequestError(
+    payload?.error || `Request failed for ${url}: ${res.status} ${res.statusText}`,
+    res.status,
+    payload?.details,
+  );
 }
 
 export function pingSession(sessionId: string, projectId?: string): Promise<{ ok: boolean }> {
@@ -8737,6 +9055,18 @@ export async function toggleExecutionSkill(
   return api<ToggleSkillResult>(withProjectId("/skills/execution", projectId), {
     method: "PATCH",
     body: JSON.stringify({ skillId, enabled }),
+  });
+}
+
+/** Install a catalog skill from skills.sh */
+export async function installSkill(
+  source: string,
+  skill: string | undefined,
+  projectId?: string,
+): Promise<{ success: true }> {
+  return api<{ success: true }>(withProjectId("/skills/install", projectId), {
+    method: "POST",
+    body: JSON.stringify({ source, skill }),
   });
 }
 

@@ -1,9 +1,22 @@
 import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
+import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { computeMaxWorkers } from "../core/src/__test-utils__/vitest-workers";
 
 const maxWorkers = computeMaxWorkers({ defaultCap: 3 });
+
+// Curated-gate skip-list (plan U2 / R7). Files listed here run in NO project on
+// purpose (pre-existing failures discovered when the curated-gate hole was
+// closed). The skip-list is the single source of truth shared with
+// scripts/check-test-inventory.mjs's --dashboard-curated guard. Express the
+// dashboard-relative globs so the backfill projects can exclude them.
+const curatedSkipList: { entries: { file: string; reason: string }[] } = JSON.parse(
+  readFileSync(resolve(__dirname, "../../scripts/lib/dashboard-curated-skiplist.json"), "utf8"),
+);
+const skipListDashboardGlobs = curatedSkipList.entries
+  .map((entry) => entry.file.replace(/^packages\/dashboard\//, ""))
+  .filter((file) => file.length > 0);
 
 const qualityAppFoundationApiTests = [
   // API-client regressions are numerous but lightweight; keep them in their
@@ -24,6 +37,7 @@ const qualityAppFoundationUiTests = [
   "app/__tests__/activity-log-mobile-layout.test.ts",
   "app/__tests__/agent-css-classes.test.ts",
   "app/__tests__/agent-runs-ui.test.ts",
+  "app/__tests__/animation-duration-tokens.css.test.ts",
   "app/__tests__/auth.test.ts",
   "app/__tests__/board-mobile-corner-rendering.test.ts",
   "app/__tests__/board-tablet-overflow.test.ts",
@@ -93,6 +107,7 @@ const qualityAppComponentTests = [
   "App",
   "AuthTokenRecoveryDialog",
   "Board",
+  "Board.canDropTask",
   "board-mobile",
   "board-mobile-view-switch",
   "BranchGroupCard",
@@ -108,6 +123,7 @@ const qualityAppComponentTests = [
   "Column",
   "ConfirmDialog",
   "ConversationHistory",
+  "DataBoundary",
   "DashboardLoader",
   "DevServerView.mobile",
   "DirectoryPicker",
@@ -119,6 +135,7 @@ const qualityAppComponentTests = [
   "GitHubBadge",
   "GroupTaskModal",
   "InlineCreateCard",
+  "Lane",
   "LoginInstructions",
   "MemoryView",
   "MergeAdvanceNotice",
@@ -135,6 +152,7 @@ const qualityAppComponentTests = [
   "PrCreateModal",
   "PrCreateModal.layout",
   "ProjectCard",
+  "ProjectHealthBadge",
   "ProjectSelector",
   "ProviderIcon",
   "PrPanel",
@@ -160,16 +178,22 @@ const qualityAppComponentTests = [
   "TaskDetailModal",
   "TaskDetailModal.allow-resurrection",
   "TaskDetailModal.create-pr-e2e",
+  "TaskDetailModal.custom-fields",
   "TestModeBanner",
   "TaskDetailModal.create-pr-integration",
   "TaskDetailModal.github-tracking-header",
   "TaskDetailModal.github-tracking-stale",
   "TaskDetailModal.rebind-banner",
   "TaskDocumentsTab",
+  "TaskFieldsSection",
   "TaskForm",
   "TaskIdIntegrityBanner",
   "TrackingRepoSelect",
+  "WorkflowFieldsPanel",
+  "WorkflowNodeEditor",
   "WorkflowResultsTab",
+  "WorkflowSelector",
+  "workflow-flow-mapping",
   "WorktrunkInstallApprovalDetails",
 ] as const;
 
@@ -183,7 +207,7 @@ const batchedQualityAppComponentTestsB = batchedQualityAppComponentTests.slice(b
 
 function buildComponentQualityInclude(testNames: readonly string[]): string[] {
   return testNames.length > 0
-    ? [`app/components/__tests__/{${testNames.join(",")}}.test.tsx`]
+    ? [`app/components/__tests__/{${testNames.join(",")}}.test.{ts,tsx}`]
     : [];
 }
 
@@ -208,10 +232,31 @@ const qualityAppSettingsOnlyTests = ["app/components/__tests__/SettingsModal.tes
 const qualityApiTests = [
   // Critical HTTP/server behavior: auth, task/project/settings mutation,
   // git/GitHub, agents, nodes, chat/files, realtime, and isolation guards.
-  "src/__tests__/{api-error,auth-middleware,auth-middleware-integration,chat-attachment-routes,chat-routes,file-service,github,github-webhooks,initialize,planning-flow-diagnostics-guardrail,pr-routes-auto-merge,pr-routes.contract,project-routes,project-store-resolver,register-git-github.pr-options-preflight-metadata,remote-access-routes,remote-auth,routes-agent-budget,routes-agent-keys,routes-agent-permissions,routes-agent-ratings,routes-agent-runs,routes-agent-soul-memory,routes-agents,routes-automation,routes-branch-groups,routes-git,routes-github,routes-merge-advance-push-origin,routes-nodes,routes-nodes-sync-contract,routes-planning,routes-secrets-sync,routes-settings,routes-task-commit-associations,routes-tasks,routes-tasks-deterministic-dedup,routes-tasks-duplicate-check,routes-tasks-explicit-duplicate-marker,server,server-static-assets,server-webhook,server.events,setup-routes,sse,sse-buffer,test-isolation-guard,update-check-route,websocket,recover-branch-binding-route}.test.ts",
+  "src/__tests__/{api-error,auth-middleware,auth-middleware-integration,chat-attachment-routes,chat-routes,file-service,github,github-webhooks,initialize,planning-flow-diagnostics-guardrail,pr-routes-auto-merge,pr-routes.contract,project-routes,project-store-resolver,register-git-github.pr-options-preflight-metadata,register-git-github.pr-resolve-conflicts,remote-access-routes,remote-auth,routes-agent-budget,routes-agent-keys,routes-agent-permissions,routes-agent-ratings,routes-agent-runs,routes-agent-soul-memory,routes-agents,routes-automation,routes-branch-groups,routes-git,routes-github,routes-merge-advance-push-origin,routes-nodes,routes-nodes-sync-contract,routes-planning,routes-secrets-sync,routes-settings,routes-task-commit-associations,routes-tasks,routes-tasks-deterministic-dedup,routes-tasks-duplicate-check,routes-tasks-explicit-duplicate-marker,server,server-static-assets,server-webhook,server.events,setup-routes,sse,sse-buffer,test-isolation-guard,update-check-route,websocket,recover-branch-binding-route}.test.ts",
   "src/__tests__/dashboard-test-config-guard.test.ts",
   "src/routes/__tests__/{custom-provider-routes,custom-providers,register-docker-node-routes,register-diagnostics-routes,stash-recovery-routes}.test.ts",
+  "scripts/__tests__/run-vitest-with-heap.test.ts",
 ];
+
+// Backfill projects (plan U2 / R7). Historically the curated quality lanes
+// enumerated their files by hand, so any app/ or src/ test file that nobody
+// added to a curated list ran in NO project — not locally, not in CI. The
+// backfill projects close that hole structurally: they include the broad
+// globs and EXCLUDE only (a) files already executed by a curated lane and
+// (b) the explicit skip-list. A brand-new test file therefore lands in
+// backfill automatically; it can never silently fall through again.
+const backfillAppExclude = [
+  ...qualityAppTests,
+  ...skipListDashboardGlobs.filter((file) => file.startsWith("app/")),
+  "app/__tests__/build-output.test.ts",
+];
+const qualityAppBackfillTests = ["app/**/*.test.{ts,tsx}"];
+
+const backfillApiExclude = [
+  ...qualityApiTests,
+  ...skipListDashboardGlobs.filter((file) => file.startsWith("src/")),
+];
+const qualityApiBackfillTests = ["src/**/*.test.{ts,tsx}"];
 
 export default defineConfig({
   plugins: [react()],
@@ -221,6 +266,10 @@ export default defineConfig({
       "@fusion/engine": resolve(__dirname, "../engine/src/index.ts"),
       "@fusion/plugin-sdk": resolve(__dirname, "../plugin-sdk/src/index.ts"),
       "@fusion/test-utils": resolve(__dirname, "../core/src/__test-utils__/workspace.ts"),
+      "@fusion/dashboard/app/components/TaskCard": resolve(__dirname, "app/components/TaskCard.tsx"),
+      "@fusion/dashboard/app/plugins/types": resolve(__dirname, "app/plugins/types.ts"),
+      "@fusion/dashboard/app/utils/projectStorage": resolve(__dirname, "app/utils/projectStorage.ts"),
+      "@fusion/dashboard/app/utils/taskStuck": resolve(__dirname, "app/utils/taskStuck.ts"),
       "@fusion-plugin-examples/droid-runtime/probe": resolve(
         __dirname,
         "../../plugins/fusion-plugin-droid-runtime/src/probe.ts",
@@ -357,6 +406,26 @@ export default defineConfig({
           name: "dashboard-api-quality",
           environment: "node",
           include: qualityApiTests,
+          css: { include: [] },
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: "dashboard-app-quality-backfill",
+          environment: "jsdom",
+          include: qualityAppBackfillTests,
+          exclude: backfillAppExclude,
+          css: { include: [/app\//] },
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: "dashboard-api-quality-backfill",
+          environment: "node",
+          include: qualityApiBackfillTests,
+          exclude: backfillApiExclude,
           css: { include: [] },
         },
       },

@@ -19,6 +19,7 @@ import * as useChatModule from "../../hooks/useChat";
 import type { UseChatReturn, ChatSessionInfo, ChatMessageInfo, ToolCallInfo } from "../../hooks/useChat";
 import * as apiModule from "../../api";
 import { _resetInitialViewportHeight } from "../../hooks/useMobileKeyboard";
+import { SWR_CACHE_KEYS, writeCache } from "../../utils/swrCache";
 import * as useChatRoomsModule from "../../hooks/useChatRooms";
 import type { UseChatRoomsResult } from "../../hooks/useChatRooms";
 
@@ -462,14 +463,46 @@ describe("ChatView", () => {
     await userEvent.click(screen.getByTestId("chat-new-btn"));
 
     const dialog = document.querySelector(".chat-new-dialog") as HTMLElement | null;
+    const createBtn = within(dialog!).getByText("Create") as HTMLButtonElement;
 
     await userEvent.click(within(dialog!).getByTestId("chat-new-dialog-mode-model"));
 
     await waitFor(() => {
       expect(within(dialog!).getByTestId("mock-model-dropdown")).toHaveValue("anthropic/claude-sonnet-4-5");
     });
+    expect(createBtn).toBeEnabled();
 
-    await userEvent.click(within(dialog!).getByText("Create"));
+    await userEvent.click(createBtn);
+
+    await waitFor(() => {
+      expect(createSession).toHaveBeenCalledWith({
+        agentId: "__fn_agent__",
+        modelProvider: "anthropic",
+        modelId: "claude-sonnet-4-5",
+      });
+    });
+  });
+
+  it("creates session with the default model when Use default is selected in model mode", async () => {
+    const createSession = vi.fn().mockResolvedValue({ id: "session-new", agentId: "__fn_agent__" });
+    setupMockChat({ sessions: [], filteredSessions: [], createSession });
+
+    render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+
+    await userEvent.click(screen.getByTestId("chat-new-btn"));
+
+    const dialog = document.querySelector(".chat-new-dialog") as HTMLElement | null;
+    const createBtn = within(dialog!).getByText("Create") as HTMLButtonElement;
+
+    await userEvent.click(within(dialog!).getByTestId("chat-new-dialog-mode-model"));
+
+    const modelDropdown = await within(dialog!).findByTestId("mock-model-dropdown");
+    await userEvent.selectOptions(modelDropdown, "");
+
+    expect(modelDropdown).toHaveValue("");
+    expect(createBtn).toBeEnabled();
+
+    await userEvent.click(createBtn);
 
     await waitFor(() => {
       expect(createSession).toHaveBeenCalledWith({
@@ -486,7 +519,8 @@ describe("ChatView", () => {
       defaultProvider: null,
       defaultModelId: null,
     });
-    setupMockChat({ sessions: [], filteredSessions: [] });
+    const createSession = vi.fn().mockResolvedValue({ id: "session-new", agentId: "__fn_agent__" });
+    setupMockChat({ sessions: [], filteredSessions: [], createSession });
 
     render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
 
@@ -497,10 +531,38 @@ describe("ChatView", () => {
 
     await userEvent.click(within(dialog!).getByTestId("chat-new-dialog-mode-model"));
 
-    await waitFor(() => {
-      expect(within(dialog!).getByTestId("mock-model-dropdown")).toHaveValue("");
-    });
+    const modelDropdown = await within(dialog!).findByTestId("mock-model-dropdown");
+    await userEvent.selectOptions(modelDropdown, "");
+
+    expect(modelDropdown).toHaveValue("");
     expect(createBtn).toBeDisabled();
+    expect(createSession).not.toHaveBeenCalled();
+  });
+
+  it("creates session with an explicitly selected non-default model in model mode", async () => {
+    const createSession = vi.fn().mockResolvedValue({ id: "session-new", agentId: "__fn_agent__" });
+    setupMockChat({ sessions: [], filteredSessions: [], createSession });
+
+    render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+
+    await userEvent.click(screen.getByTestId("chat-new-btn"));
+
+    const dialog = document.querySelector(".chat-new-dialog") as HTMLElement | null;
+
+    await userEvent.click(within(dialog!).getByTestId("chat-new-dialog-mode-model"));
+
+    const modelDropdown = await within(dialog!).findByTestId("mock-model-dropdown");
+    await userEvent.selectOptions(modelDropdown, "openai/gpt-4o");
+
+    await userEvent.click(within(dialog!).getByText("Create"));
+
+    await waitFor(() => {
+      expect(createSession).toHaveBeenCalledWith({
+        agentId: "__fn_agent__",
+        modelProvider: "openai",
+        modelId: "gpt-4o",
+      });
+    });
   });
 
   it("creates session without model selection omits model fields (agent mode)", async () => {
@@ -1842,6 +1904,47 @@ describe("ChatView", () => {
 
       fireEvent.keyDown(textarea, { key: "Enter" });
       await waitFor(() => expect(textarea).toHaveValue("/skill:gamma "));
+    });
+
+    it("keeps the keyboard highlight when revalidation re-delivers an identical skill list", async () => {
+      // Regression: the SWR skills cache re-delivers content-identical lists
+      // with fresh array identities (cache reads re-parse; revalidation
+      // notifies a new array). The highlight reset must key on skill ids, not
+      // array identity, or a revalidation landing mid-navigation wipes the
+      // user's keyboard position (the source of this test family's CI flakes).
+      const skillsList = [
+        createMockSkill({ id: "skill-alpha", name: "alpha", relativePath: "skills/alpha.md" }),
+        createMockSkill({ id: "skill-beta", name: "beta", relativePath: "skills/beta.md" }),
+        createMockSkill({ id: "skill-gamma", name: "gamma", relativePath: "skills/gamma.md" }),
+      ];
+      // Seed the cache so the menu renders before the (deferred) revalidation fetch.
+      writeCache(`${SWR_CACHE_KEYS.DISCOVERED_SKILLS_PREFIX}proj-123`, skillsList);
+      let resolveFetch!: (skills: DiscoveredSkill[]) => void;
+      mockFetchDiscoveredSkills.mockImplementationOnce(
+        () => new Promise<DiscoveredSkill[]>((resolve) => { resolveFetch = resolve; }),
+      );
+      setupMockChat({ activeSession: activeSessionFixture, messages: [] });
+      render(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+
+      const textarea = screen.getByTestId("chat-input");
+      fireEvent.change(textarea, { target: { value: "/" } });
+      await screen.findByRole("option", { name: /alpha/i });
+
+      fireEvent.keyDown(textarea, { key: "ArrowUp" });
+      await waitFor(() =>
+        expect(screen.getByRole("option", { name: /gamma/i })).toHaveClass(
+          "chat-skill-menu-item--highlighted",
+        ),
+      );
+
+      // Revalidation lands mid-navigation: identical content, new identity.
+      await act(async () => {
+        resolveFetch(JSON.parse(JSON.stringify(skillsList)) as DiscoveredSkill[]);
+      });
+
+      expect(screen.getByRole("option", { name: /gamma/i })).toHaveClass(
+        "chat-skill-menu-item--highlighted",
+      );
     });
 
     it("supports selecting highlighted skill with Tab", async () => {

@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { MissionStore, deriveMilestoneAcceptanceCriteriaFromFeatures } from "../mission-store.js";
+import { GoalStore } from "../goal-store.js";
 import { Database } from "../db.js";
 import type { MissionFeature } from "../mission-types.js";
 import { mkdtempSync } from "node:fs";
@@ -25,11 +26,19 @@ function createTaskInDb(
   ).run(taskId, description, options?.column ?? "triage", status ?? null, now, now, options?.deletedAt ?? null);
 }
 
+function createGoalInDb(database: Database, goalId: string, title = "Test goal"): void {
+  const now = new Date().toISOString();
+  database.prepare(
+    "INSERT INTO goals (id, title, description, status, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)"
+  ).run(goalId, title, null, "active", now, now);
+}
+
 describe("MissionStore", () => {
   let tmpDir: string;
   let fusionDir: string;
   let db: Database;
   let store: MissionStore;
+  let goalStore: GoalStore;
 
   beforeEach(() => {
     tmpDir = makeTmpDir();
@@ -40,6 +49,7 @@ describe("MissionStore", () => {
     db = new Database(fusionDir, { inMemory: true });
     db.init();
     store = new MissionStore(fusionDir, db);
+    goalStore = new GoalStore(fusionDir, db);
   });
 
   afterEach(async () => {
@@ -235,6 +245,8 @@ describe("MissionStore", () => {
         completedMilestones: 0,
         totalFeatures: 0,
         completedFeatures: 0,
+        linkedGoalCount: 0,
+        eventCount: 0,
         progressPercent: 0,
       });
     });
@@ -298,6 +310,31 @@ describe("MissionStore", () => {
 
       const summary = store.getMissionSummary(mission.id);
       expect(summary.progressPercent).toBe(33);
+    });
+
+    it("getMissionSummary reports linked goal counts", () => {
+      const mission = store.createMission({ title: "Goal-linked mission" });
+      createGoalInDb(db, "G-001", "North Star");
+      createGoalInDb(db, "G-002", "Reliability");
+
+      expect(store.getMissionSummary(mission.id).linkedGoalCount).toBe(0);
+
+      store.linkGoal(mission.id, "G-001");
+      store.linkGoal(mission.id, "G-002");
+
+      expect(store.getMissionSummary(mission.id).linkedGoalCount).toBe(2);
+    });
+
+    it("getMissionSummary reports unfiltered event counts", () => {
+      const mission = store.createMission({ title: "Eventful mission" });
+
+      expect(store.getMissionSummary(mission.id).eventCount).toBe(0);
+
+      store.logMissionEvent(mission.id, "mission_started", "started");
+      store.logMissionEvent(mission.id, "warning", "warning");
+      store.logMissionEvent(mission.id, "error", "error");
+
+      expect(store.getMissionSummary(mission.id).eventCount).toBe(3);
     });
 
     it("findNextPendingSlice skips completed slices in earlier milestones", () => {
@@ -373,6 +410,8 @@ describe("MissionStore", () => {
         completedMilestones: 0,
         totalFeatures: 0,
         completedFeatures: 0,
+        linkedGoalCount: 0,
+        eventCount: 0,
         progressPercent: 0,
       });
 
@@ -383,6 +422,8 @@ describe("MissionStore", () => {
         completedMilestones: 0,
         totalFeatures: 0,
         completedFeatures: 0,
+        linkedGoalCount: 0,
+        eventCount: 0,
         progressPercent: 0,
       });
 
@@ -393,6 +434,8 @@ describe("MissionStore", () => {
         completedMilestones: 1,
         totalFeatures: 2,
         completedFeatures: 1,
+        linkedGoalCount: 0,
+        eventCount: 0,
         progressPercent: 50,
       });
     });
@@ -405,8 +448,13 @@ describe("MissionStore", () => {
       store.updateFeature(f1.id, { status: "done" });
       const f2 = store.addFeature(slice.id, { title: "F2" });
       store.updateFeature(f2.id, { status: "done" });
-      const f3 = store.addFeature(slice.id, { title: "F3" });
-      // f3 not done
+      store.addFeature(slice.id, { title: "F3" });
+      createGoalInDb(db, "G-003", "North Star");
+      createGoalInDb(db, "G-004", "Reliability");
+      store.linkGoal(mission.id, "G-003");
+      store.linkGoal(mission.id, "G-004");
+      store.logMissionEvent(mission.id, "mission_started", "started");
+      store.logMissionEvent(mission.id, "warning", "warning");
 
       const singleSummary = store.getMissionSummary(mission.id);
       const batchedResult = store.listMissionsWithSummaries().find((m) => m.id === mission.id)!;
@@ -415,6 +463,8 @@ describe("MissionStore", () => {
       expect(batchedResult.summary.completedMilestones).toBe(singleSummary.completedMilestones);
       expect(batchedResult.summary.totalFeatures).toBe(singleSummary.totalFeatures);
       expect(batchedResult.summary.completedFeatures).toBe(singleSummary.completedFeatures);
+      expect(batchedResult.summary.linkedGoalCount).toBe(singleSummary.linkedGoalCount);
+      expect(batchedResult.summary.eventCount).toBe(singleSummary.eventCount);
       expect(batchedResult.summary.progressPercent).toBe(singleSummary.progressPercent);
     });
 
@@ -1838,6 +1888,8 @@ describe("MissionStore", () => {
         title: "Hierarchy Test",
         description: "Testing full tree loading",
       });
+      const linkedGoal = goalStore.createGoal({ title: "Ship linked goal visibility" });
+      store.linkGoal(mission.id, linkedGoal.id);
       const m1 = store.addMilestone(mission.id, { title: "Milestone 1" });
       const m2 = store.addMilestone(mission.id, { title: "Milestone 2" });
       const s1 = store.addSlice(m1.id, { title: "Slice 1" });
@@ -1849,6 +1901,7 @@ describe("MissionStore", () => {
 
       expect(withHierarchy.id).toBe(mission.id);
       expect(withHierarchy.title).toBe("Hierarchy Test");
+      expect(withHierarchy.linkedGoals).toEqual([linkedGoal]);
       expect(withHierarchy.milestones).toHaveLength(2);
 
       const m1Data = withHierarchy.milestones.find((m) => m.id === m1.id)!;
@@ -1858,6 +1911,160 @@ describe("MissionStore", () => {
       expect(s1Data.features).toHaveLength(2);
       expect(s1Data.features.find((f: import("../mission-types.js").MissionFeature) => f.id === f1.id)).toBeDefined();
       expect(s1Data.features.find((f: import("../mission-types.js").MissionFeature) => f.id === f2.id)).toBeDefined();
+    });
+
+    it("returns an empty linkedGoals array when no goals are linked", () => {
+      const mission = store.createMission({ title: "Hierarchy without goals" });
+
+      const withHierarchy = store.getMissionWithHierarchy(mission.id)!;
+
+      expect(withHierarchy.linkedGoals).toEqual([]);
+    });
+
+    it("reports detail eventCount consistently with mission summaries", () => {
+      const mission = store.createMission({ title: "Hierarchy event counts" });
+
+      const emptyHierarchy = store.getMissionWithHierarchy(mission.id)!;
+      const emptySummary = store.getMissionSummary(mission.id);
+      expect(emptyHierarchy.eventCount).toBe(0);
+      expect(emptyHierarchy.eventCount).toBe(emptySummary.eventCount);
+
+      store.logMissionEvent(mission.id, "mission_started", "started");
+      store.logMissionEvent(mission.id, "warning", "warning");
+      store.logMissionEvent(mission.id, "error", "error");
+
+      const populatedHierarchy = store.getMissionWithHierarchy(mission.id)!;
+      const populatedSummary = store.getMissionSummary(mission.id);
+      expect(populatedHierarchy.eventCount).toBe(3);
+      expect(populatedHierarchy.eventCount).toBe(populatedSummary.eventCount);
+    });
+  });
+
+  describe("task goal provenance", () => {
+    async function createStoreWithTaskStore() {
+      const { TaskStore } = await import("../store.js");
+      const ts = new TaskStore(tmpDir, join(tmpDir, ".fusion-global-settings"), { inMemoryDb: true });
+      return { ts, ms: ts.getMissionStore(), goals: ts.getGoalStore() };
+    }
+
+    it("returns empty arrays for unknown and unlinked tasks", async () => {
+      const { ts, ms } = await createStoreWithTaskStore();
+      const task = await ts.createTask({ title: "Standalone task", description: "No mission link" });
+
+      expect(ms.listGoalIdsForTask("FN-DOES-NOT-EXIST")).toEqual([]);
+      expect(ms.listGoalsForTask("FN-DOES-NOT-EXIST")).toEqual([]);
+      expect(ms.listGoalIdsForTask(task.id)).toEqual([]);
+      expect(ms.listGoalsForTask(task.id)).toEqual([]);
+    });
+
+    it("returns an empty array for mission-linked tasks when the mission has no goals", async () => {
+      const { ts, ms } = await createStoreWithTaskStore();
+      const mission = ms.createMission({ title: "Mission" });
+      const milestone = ms.addMilestone(mission.id, { title: "Milestone" });
+      const slice = ms.addSlice(milestone.id, { title: "Slice" });
+      const feature = ms.addFeature(slice.id, { title: "Feature" });
+      const task = await ts.createTask({ title: "Task", description: "Linked task" });
+
+      ms.linkFeatureToTask(feature.id, task.id);
+
+      expect(ms.listGoalIdsForTask(task.id)).toEqual([]);
+      expect(ms.listGoalsForTask(task.id)).toEqual([]);
+    });
+
+    it("preserves stable ordering for multiple linked goals and matches hierarchy mapping", async () => {
+      const { ts, ms, goals } = await createStoreWithTaskStore();
+      const mission = ms.createMission({ title: "Mission" });
+      const milestone = ms.addMilestone(mission.id, { title: "Milestone" });
+      const slice = ms.addSlice(milestone.id, { title: "Slice" });
+      const feature = ms.addFeature(slice.id, { title: "Feature" });
+      const goalA = goals.createGoal({ title: "Goal A" });
+      const goalB = goals.createGoal({ title: "Goal B" });
+
+      ms.linkGoal(mission.id, goalA.id);
+      ms.linkGoal(mission.id, goalB.id);
+
+      const task = await ts.createTask({ title: "Task", description: "Linked task" });
+      ms.linkFeatureToTask(feature.id, task.id);
+
+      expect(ms.listGoalIdsForTask(task.id)).toEqual([goalA.id, goalB.id]);
+      expect(ms.listGoalsForTask(task.id)).toEqual(ms.getMissionWithHierarchy(mission.id)?.linkedGoals ?? []);
+    });
+
+    it("keeps archived linked goals in task provenance", async () => {
+      const { ts, ms, goals } = await createStoreWithTaskStore();
+      const mission = ms.createMission({ title: "Mission" });
+      const milestone = ms.addMilestone(mission.id, { title: "Milestone" });
+      const slice = ms.addSlice(milestone.id, { title: "Slice" });
+      const feature = ms.addFeature(slice.id, { title: "Feature" });
+      const goal = goals.createGoal({ title: "Archived goal" });
+      ms.linkGoal(mission.id, goal.id);
+      const archivedGoal = goals.archiveGoal(goal.id);
+
+      const task = await ts.createTask({ title: "Task", description: "Linked task" });
+      ms.linkFeatureToTask(feature.id, task.id);
+
+      expect(ms.listGoalIdsForTask(task.id)).toEqual([goal.id]);
+      expect(ms.listGoalsForTask(task.id)).toEqual([archivedGoal]);
+    });
+
+    it("falls back through feature linkage when tasks.missionId is unset", async () => {
+      const { ts, ms, goals } = await createStoreWithTaskStore();
+      const mission = ms.createMission({ title: "Mission" });
+      const milestone = ms.addMilestone(mission.id, { title: "Milestone" });
+      const slice = ms.addSlice(milestone.id, { title: "Slice" });
+      const feature = ms.addFeature(slice.id, { title: "Feature" });
+      const goal = goals.createGoal({ title: "Fallback goal" });
+      ms.linkGoal(mission.id, goal.id);
+
+      const task = await ts.createTask({ title: "Task", description: "Linked task" });
+      ms.linkFeatureToTask(feature.id, task.id);
+      // Clear missionId on THIS test's in-memory TaskStore db (the outer `db`
+      // belongs to a different store) so the lookup genuinely exercises the
+      // feature-linkage fallback instead of the normal task→mission path.
+      (ts as unknown as { db: { prepare(sql: string): { run(...args: unknown[]): unknown } } }).db
+        .prepare("UPDATE tasks SET missionId = NULL WHERE id = ?")
+        .run(task.id);
+
+      expect(ms.listGoalIdsForTask(task.id)).toEqual([goal.id]);
+      expect(ms.listGoalsForTask(task.id)).toEqual([goal]);
+    });
+
+    it("resolves provenance for triaged tasks without storing goal ids on the task row", async () => {
+      const { ts, ms, goals } = await createStoreWithTaskStore();
+      const goal = goals.createGoal({ title: "Goal title" });
+      const mission = ms.createMission({ title: "Mission" });
+      ms.linkGoal(mission.id, goal.id);
+      const milestone = ms.addMilestone(mission.id, { title: "Milestone" });
+      const slice = ms.addSlice(milestone.id, { title: "Slice" });
+      const feature = ms.addFeature(slice.id, { title: "Feature", description: "Desc" });
+
+      const triaged = await ms.triageFeature(feature.id);
+      const task = await ts.getTask(triaged.taskId!);
+
+      expect(ms.listGoalsForTask(triaged.taskId!)).toEqual([
+        expect.objectContaining({ id: goal.id, title: goal.title }),
+      ]);
+      expect(task?.missionId).toBe(mission.id);
+      expect(task).not.toHaveProperty("goalId");
+      expect(task).not.toHaveProperty("goalIds");
+    });
+
+    it("resolves provenance identically for manual feature linkage", async () => {
+      const { ts, ms, goals } = await createStoreWithTaskStore();
+      const goal = goals.createGoal({ title: "Manual goal" });
+      const mission = ms.createMission({ title: "Mission" });
+      ms.linkGoal(mission.id, goal.id);
+      const milestone = ms.addMilestone(mission.id, { title: "Milestone" });
+      const slice = ms.addSlice(milestone.id, { title: "Slice" });
+      const feature = ms.addFeature(slice.id, { title: "Feature" });
+      const task = await ts.createTask({ title: "Manual task", description: "Manual" });
+
+      ms.linkFeatureToTask(feature.id, task.id);
+
+      expect(ms.listGoalIdsForTask(task.id)).toEqual([goal.id]);
+      expect(ms.listGoalsForTask(task.id)).toEqual([
+        expect.objectContaining({ id: goal.id, title: goal.title }),
+      ]);
     });
   });
 
@@ -2137,6 +2344,12 @@ describe("MissionStore", () => {
       const task = await ts.getTask(triaged.taskId!);
 
       expect(task?.branchContext?.assignmentMode).toBe("per-task-derived");
+      // Non-shared members must NOT carry a groupId: stamping a synthetic
+      // `mission:<id>` would let the legacy membership fallback sweep them into a
+      // shared group later created for the same mission.
+      expect(task?.branchContext?.groupId).toBeUndefined();
+      // And no branch group is ensured for a non-shared mission triage.
+      expect(ts.getBranchGroupBySource("mission", mission.id)).toBeNull();
     });
 
     it("uses mission branchStrategy existing branch when branch options are omitted", async () => {
@@ -2157,7 +2370,9 @@ describe("MissionStore", () => {
 
       expect(task?.branch).toMatch(/^release\/shared\//);
       expect(task?.branch).not.toBe("release/shared");
-      expect(task?.branchContext?.groupId).toBe(`mission:${mission.id}`);
+      // U1: branchContext.groupId carries the real BranchGroup id, not the synthetic `mission:<id>` string.
+      expect(task?.branchContext?.groupId).toBe(ts.getBranchGroupBySource("mission", mission.id)?.id);
+      expect(task?.branchContext?.groupId).toMatch(/^BG-/);
       expect(task?.branchContext?.assignmentMode).toBe("shared");
     });
 
@@ -2179,7 +2394,9 @@ describe("MissionStore", () => {
 
       expect(task?.branch).toMatch(/^hotfix\/shared\//);
       expect(task?.branch).not.toBe("hotfix/shared");
-      expect(task?.branchContext?.groupId).toBe(`mission:${mission.id}`);
+      // U1: branchContext.groupId carries the real BranchGroup id, not the synthetic `mission:<id>` string.
+      expect(task?.branchContext?.groupId).toBe(ts.getBranchGroupBySource("mission", mission.id)?.id);
+      expect(task?.branchContext?.groupId).toMatch(/^BG-/);
       expect(task?.branchContext?.assignmentMode).toBe("shared");
     });
 
@@ -2380,6 +2597,10 @@ describe("MissionStore", () => {
 
       expect(triaged[0].id).toBe(f1.id);
       expect(task?.branchContext?.assignmentMode).toBe("per-task-derived");
+      // Non-shared invariant: a per-task-derived member must NOT carry a groupId
+      // and must NOT create a synthetic mission:<id> branch group.
+      expect(task?.branchContext?.groupId).toBeUndefined();
+      expect(ts.getBranchGroupBySource("mission", mission.id)).toBeNull();
     });
 
     it("triageSlice respects explicit branch options over mission strategy defaults", async () => {
@@ -2406,7 +2627,9 @@ describe("MissionStore", () => {
       expect(task?.branch).toMatch(/^feature\/manual\//);
       expect(task?.branch).not.toBe("feature/manual");
       expect(task?.baseBranch).toBe("release");
-      expect(task?.branchContext?.groupId).toBe(`mission:${mission.id}`);
+      // U1: branchContext.groupId carries the real BranchGroup id, not the synthetic `mission:<id>` string.
+      expect(task?.branchContext?.groupId).toBe(ts.getBranchGroupBySource("mission", mission.id)?.id);
+      expect(task?.branchContext?.groupId).toMatch(/^BG-/);
       expect(task?.branchContext?.assignmentMode).toBe("shared");
     });
 
@@ -2433,15 +2656,23 @@ describe("MissionStore", () => {
       expect(firstTask?.branch).not.toBe("feature/shared");
       expect(secondTask?.branch).not.toBe("feature/shared");
       expect(firstTask?.branch).not.toBe(secondTask?.branch);
-      expect(firstTask?.branchContext?.groupId).toBe(`mission:${mission.id}`);
-      expect(secondTask?.branchContext?.groupId).toBe(`mission:${mission.id}`);
+      const branchGroup = ts.getBranchGroupBySource("mission", mission.id);
+      // U1: both members carry the real BranchGroup id so listTasksByBranchGroup(group.id) resolves them.
+      expect(branchGroup?.id).toMatch(/^BG-/);
+      expect(firstTask?.branchContext?.groupId).toBe(branchGroup?.id);
+      expect(secondTask?.branchContext?.groupId).toBe(branchGroup?.id);
       expect(firstTask?.branchContext?.assignmentMode).toBe("shared");
       expect(secondTask?.branchContext?.assignmentMode).toBe("shared");
       expect(firstTask?.branchContext?.source).toBe("mission");
       expect(secondTask?.branchContext?.source).toBe("mission");
 
-      const branchGroup = ts.getBranchGroupBySource("mission", mission.id);
       expect(branchGroup?.branchName).toBe("feature/shared");
+
+      // U1: members enumerate by the real group id.
+      const members = await ts.listTasksByBranchGroup(branchGroup!.id);
+      expect(members.map((task) => task.id).sort()).toEqual(
+        [firstTask!.id, secondTask!.id].sort(),
+      );
     });
 
     it("triageSlice does not inject baseBranch when mission has none", async () => {
@@ -3324,14 +3555,33 @@ describe("MissionStore", () => {
       expect(linked[0].sourceFeatureId).toBe(feature.id);
     });
 
+    it("lazily re-links exactly one managed assertion for legacy acceptance-criteria features", () => {
+      const mission = store.createMission({ title: "M" });
+      const milestone = store.addMilestone(mission.id, { title: "MS" });
+      const slice = store.addSlice(milestone.id, { title: "SL" });
+      const feature = store.addFeature(slice.id, { title: "Feature", acceptanceCriteria: "AC text" });
+      const [managed] = store.listAssertionsForFeature(feature.id);
+      store.unlinkFeatureFromAssertion(feature.id, managed.id);
+      store.deleteContractAssertion(managed.id);
+
+      const first = store.ensureFeatureAssertionLinked(feature.id);
+      const second = store.ensureFeatureAssertionLinked(feature.id);
+
+      expect(first).toHaveLength(1);
+      expect(first[0].assertion).toBe("AC text");
+      expect(second).toHaveLength(1);
+      expect(second[0].id).toBe(first[0].id);
+      expect(store.listAssertionsForFeature(feature.id)).toHaveLength(1);
+    });
+
     it("derives managed assertion text from description or fallback", () => {
       const mission = store.createMission({ title: "M" });
       const milestone = store.addMilestone(mission.id, { title: "MS" });
       const slice = store.addSlice(milestone.id, { title: "SL" });
       const fromDescription = store.addFeature(slice.id, { title: "Desc Feature", description: "Desc text" });
       const fallback = store.addFeature(slice.id, { title: "Fallback Feature" });
-      expect(store.listAssertionsForFeature(fromDescription.id)[0].assertion).toBe("Desc text");
-      expect(store.listAssertionsForFeature(fallback.id)[0].assertion).toBe("Verify implementation of: Fallback Feature");
+      expect(store.ensureFeatureAssertionLinked(fromDescription.id)[0].assertion).toBe("Desc text");
+      expect(store.ensureFeatureAssertionLinked(fallback.id)[0].assertion).toBe("Verify implementation of: Fallback Feature");
     });
 
     it("syncs managed assertion in place on acceptanceCriteria update", () => {
@@ -3495,8 +3745,8 @@ describe("MissionStore", () => {
   // ── Loop State & Validator Run Schema Tests ───────────────────────────
 
   describe("Loop State & Validator Run Schema (v31)", () => {
-    it("schema version is 40 after migration", () => {
-      expect(db.getSchemaVersion()).toBe(100);
+    it("schema version is 101 after migration", () => {
+      expect(db.getSchemaVersion()).toBe(108);
     });
 
     it("mission_features table has loop state columns", () => {
@@ -3866,6 +4116,105 @@ describe("MissionStore", () => {
       expect(retrieved).toBeDefined();
       expect(retrieved!.id).toBe(run.id);
       expect(retrieved!.status).toBe("running");
+    });
+
+    it("listStaleRunningValidatorRuns filters by age", () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-01-15T12:00:00.000Z"));
+
+      const mission = store.createMission({ title: "Stale Run Test" });
+      const milestone = store.addMilestone(mission.id, { title: "MS" });
+      const slice = store.addSlice(milestone.id, { title: "SL" });
+      const staleFeature = store.addFeature(slice.id, { title: "Stale Feature" });
+      const freshFeature = store.addFeature(slice.id, { title: "Fresh Feature" });
+
+      const staleRun = store.startValidatorRun(staleFeature.id, "manual");
+      vi.setSystemTime(new Date("2026-01-15T12:09:00.000Z"));
+      const freshRun = store.startValidatorRun(freshFeature.id, "auto");
+
+      const staleRuns = store.listStaleRunningValidatorRuns(5 * 60 * 1000, new Date("2026-01-15T12:10:00.000Z").getTime());
+
+      expect(staleRuns.map((run) => run.id)).toEqual([staleRun.id]);
+      expect(staleRuns.some((run) => run.id === freshRun.id)).toBe(false);
+
+      vi.useRealTimers();
+    });
+
+    it("reapValidatorRun transitions running run to error and unwedges live feature", () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-01-15T12:00:00.000Z"));
+
+      const mission = store.createMission({ title: "Reap Test" });
+      const milestone = store.addMilestone(mission.id, { title: "MS" });
+      const slice = store.addSlice(milestone.id, { title: "SL" });
+      const feature = store.addFeature(slice.id, { title: "Test Feature" });
+
+      const run = store.startValidatorRun(feature.id, "manual");
+      vi.setSystemTime(new Date("2026-01-15T12:06:00.000Z"));
+
+      const completedListener = vi.fn();
+      store.on("validator-run:completed", completedListener);
+      const reapedRun = store.reapValidatorRun(run.id, "stale owner");
+
+      expect(reapedRun.status).toBe("error");
+      expect(reapedRun.summary).toBe("stale owner");
+      expect(reapedRun.completedAt).toBe("2026-01-15T12:06:00.000Z");
+      expect(store.getFeature(feature.id)).toMatchObject({
+        loopState: "needs_fix",
+        lastValidatorStatus: "error",
+        lastValidatorRunId: run.id,
+      });
+      expect(completedListener).toHaveBeenCalledWith(reapedRun, "error", 360000);
+      store.off("validator-run:completed", completedListener);
+
+      vi.useRealTimers();
+    });
+
+    it("reapValidatorRun leaves completed or archived parent state untouched", () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-01-15T12:00:00.000Z"));
+
+      const completeMission = store.createMission({ title: "Complete Parent" });
+      const completeMilestone = store.addMilestone(completeMission.id, { title: "MS" });
+      const completeSlice = store.addSlice(completeMilestone.id, { title: "SL" });
+      const completeFeature = store.addFeature(completeSlice.id, { title: "Feature" });
+      const completeRun = store.startValidatorRun(completeFeature.id, "manual");
+      store.updateFeature(completeFeature.id, { loopState: "passed", lastValidatorStatus: "passed", status: "done" });
+      store.updateMission(completeMission.id, { status: "complete" });
+
+      const archivedMission = store.createMission({ title: "Archived Parent" });
+      const archivedMilestone = store.addMilestone(archivedMission.id, { title: "MS" });
+      const archivedSlice = store.addSlice(archivedMilestone.id, { title: "SL" });
+      const archivedFeature = store.addFeature(archivedSlice.id, { title: "Feature" });
+      const archivedRun = store.startValidatorRun(archivedFeature.id, "auto");
+      store.updateFeature(archivedFeature.id, { loopState: "blocked", lastValidatorStatus: "blocked" });
+      store.updateMission(archivedMission.id, { status: "archived" });
+
+      vi.setSystemTime(new Date("2026-01-15T12:08:00.000Z"));
+
+      expect(store.reapValidatorRun(completeRun.id, "complete mission stale").status).toBe("error");
+      expect(store.reapValidatorRun(archivedRun.id, "archived mission stale").status).toBe("error");
+      expect(store.getFeature(completeFeature.id)).toMatchObject({ loopState: "passed", lastValidatorStatus: "passed", lastValidatorRunId: completeRun.id });
+      expect(store.getFeature(archivedFeature.id)).toMatchObject({ loopState: "blocked", lastValidatorStatus: "blocked", lastValidatorRunId: archivedRun.id });
+
+      vi.useRealTimers();
+    });
+
+    it("reapValidatorRun is idempotent for terminal runs", () => {
+      const mission = store.createMission({ title: "Idempotent Reap Test" });
+      const milestone = store.addMilestone(mission.id, { title: "MS" });
+      const slice = store.addSlice(milestone.id, { title: "SL" });
+      const feature = store.addFeature(slice.id, { title: "Test Feature" });
+
+      const run = store.startValidatorRun(feature.id, "manual");
+      const reaped = store.reapValidatorRun(run.id, "first reap");
+      const featureAfterFirstReap = store.getFeature(feature.id);
+
+      const second = store.reapValidatorRun(run.id, "second reap");
+      const featureAfterSecondReap = store.getFeature(feature.id);
+
+      expect(second).toEqual(reaped);
+      expect(featureAfterSecondReap).toEqual(featureAfterFirstReap);
     });
 
     it("startValidatorRun emits validator-run:started event", () => {

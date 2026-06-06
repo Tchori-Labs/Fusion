@@ -14,6 +14,7 @@ const RUNTIME_PLUGIN_IDS = [
   "fusion-plugin-paperclip-runtime",
   "fusion-plugin-cursor-runtime",
   "fusion-plugin-droid-runtime",
+  "fusion-plugin-acp-runtime",
 ] as const;
 
 const RUNTIME_PLUGINS_WITH_MCP_SCHEMA_SERVER = new Set([
@@ -40,6 +41,8 @@ const reportsPluginSrc = join(__dirname, "..", "..", "plugins", "fusion-plugin-r
 const reportsPluginDest = join(__dirname, "dist", "plugins", "fusion-plugin-reports");
 const cliPrintingPressPluginSrc = join(__dirname, "..", "..", "plugins", "fusion-plugin-cli-printing-press");
 const cliPrintingPressPluginDest = join(__dirname, "dist", "plugins", "fusion-plugin-cli-printing-press");
+const compoundEngineeringPluginSrc = join(__dirname, "..", "..", "plugins", "fusion-plugin-compound-engineering");
+const compoundEngineeringPluginDest = join(__dirname, "dist", "plugins", "fusion-plugin-compound-engineering");
 const dashboardClientStub = `<!doctype html>
 <html lang="en">
   <head>
@@ -238,6 +241,12 @@ const cliBuildConfig = {
       pluginId: "fusion-plugin-roadmap",
       srcDir: roadmapPluginSrc,
       destDir: roadmapPluginDest,
+    });
+
+    await bundlePluginEntry({
+      pluginId: "fusion-plugin-compound-engineering",
+      srcDir: compoundEngineeringPluginSrc,
+      destDir: compoundEngineeringPluginDest,
     });
 
     if (existsSync(reportsPluginDest)) {

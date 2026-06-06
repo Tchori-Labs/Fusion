@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useMemo, useRef, lazy, Suspense } from "react";
+import { useTranslation } from "react-i18next";
 import {
   computeCapacityRisk,
   DEFAULT_CAPACITY_RISK_TODO_THRESHOLD,
@@ -31,6 +32,7 @@ import { DbCorruptionBanner } from "./components/DbCorruptionBanner";
 import { UpdateAvailableBanner } from "./components/UpdateAvailableBanner";
 import MergeAdvanceNotice from "./components/MergeAdvanceNotice";
 import { ApprovalNotificationBanner } from "./components/ApprovalNotificationBanner";
+import { GitHubStarPrompt } from "./components/GitHubStarPrompt";
 import { OnboardingResumeCard } from "./components/OnboardingResumeCard";
 import { PostOnboardingRecommendations } from "./components/PostOnboardingRecommendations";
 import {
@@ -43,12 +45,15 @@ import { MobileNavBar } from "./components/MobileNavBar";
 import { QuickChatFAB } from "./components/QuickChatFAB";
 import { ToastContainer } from "./components/ToastContainer";
 import { useBackgroundSessions } from "./hooks/useBackgroundSessions";
+import { useGitHubStarPromptShown, markGitHubStarPromptShown } from "./hooks/useGitHubStarPrompt";
 import { useSessionBannersHidden } from "./hooks/useSessionBannerPref";
 import { useTasks } from "./hooks/useTasks";
 import { useProjects } from "./hooks/useProjects";
 import { useAgents } from "./hooks/useAgents";
 import { useNodes } from "./hooks/useNodes";
 import { useCurrentProject } from "./hooks/useCurrentProject";
+import { I18nextProvider } from "react-i18next";
+import i18n from "./i18n";
 import { ToastProvider, useToast } from "./hooks/useToast";
 import { ConfirmDialogProvider } from "./hooks/useConfirm";
 import { useTheme } from "./hooks/useTheme";
@@ -164,6 +169,10 @@ export function didEnterAwaitingApproval(nextStatus: string | undefined, previou
   return nextStatus === "awaiting-approval" && previousStatus !== "awaiting-approval";
 }
 
+export function didEnterDone(nextStatus: string | undefined, previousStatus: string | undefined): boolean {
+  return nextStatus === "done" && previousStatus !== undefined && previousStatus !== "done";
+}
+
 function parseDateMs(value: string | undefined): number {
   if (!value) return 0;
   const parsed = Date.parse(value);
@@ -234,6 +243,7 @@ export function shouldShowFirstEverBootLoader(projectsLoading: boolean, projectC
 }
 
 function AppInner() {
+  const { t } = useTranslation("app");
   const { toasts, addToast, removeToast } = useToast();
   const { shellApi, state: shellState, ready: shellReady, openConnectionManagerSignal } = useShellConnection();
   const shellHost = useShellHostContext();
@@ -311,7 +321,34 @@ function AppInner() {
     setBaseBranchFilter(value);
     setScopedItem(BASE_BRANCH_FILTER_STORAGE_KEY, value, currentProject?.id);
   }, [currentProject?.id]);
-  
+
+  // Host capability handed to plugin dashboard views: subscribe to a plugin's
+  // custom SSE events (forwarded by the server as `plugin:custom`, scoped to the
+  // current project) over the shared bus — so plugins push live updates without
+  // deep-importing the dashboard's sse-bus or opening their own EventSource.
+  const subscribePluginEvents = useCallback(
+    (pluginId: string, onEvent: (e: { event: string; payload: unknown }) => void) => {
+      const params = new URLSearchParams();
+      if (currentProject?.id) params.set("projectId", currentProject.id);
+      const query = params.size > 0 ? `?${params.toString()}` : "";
+      return subscribeSse(`/api/events${query}`, {
+        events: {
+          "plugin:custom": (event: MessageEvent) => {
+            try {
+              const d = JSON.parse(event.data) as { pluginId?: string; event?: string; payload?: unknown };
+              if (d.pluginId === pluginId && typeof d.event === "string") {
+                onEvent({ event: d.event, payload: d.payload });
+              }
+            } catch {
+              // Ignore malformed plugin:custom payloads.
+            }
+          },
+        },
+      });
+    },
+    [currentProject?.id],
+  );
+
   // Remote node data and events when in remote mode (pass searchQuery for server-side filtering)
   const remoteData = useRemoteNodeData(currentNodeId, { projectId: currentProject?.id, searchQuery: searchQuery || undefined });
   useRemoteNodeEvents(currentNodeId);
@@ -378,6 +415,9 @@ function AppInner() {
       setMissionResumeSessionId(undefined);
       setMissionTargetId(undefined);
       setMilestoneSliceResumeSessionId(undefined);
+    }
+    if (newView !== "goalsView") {
+      setGoalAnchorId(undefined);
     }
     const previousView = taskView;
     handleChangeTaskView(newView);
@@ -499,9 +539,11 @@ function AppInner() {
   const [chatHasUnreadResponse, setChatHasUnreadResponse] = useState(false);
   const [stashOrphanCount, setStashOrphanCount] = useState(0);
   const [approvalBannerCandidate, setApprovalBannerCandidate] = useState<ApprovalBannerCandidate | null>(null);
+  const [showGitHubStarPrompt, setShowGitHubStarPrompt] = useState(false);
   const taskStatusByIdRef = useRef<Map<string, string | undefined>>(new Map());
   const seenApprovalKeysRef = useRef<Set<string>>(new Set());
   const approvalDismissalsRef = useRef<Map<string, number>>(loadApprovalBannerDismissals());
+  const gitHubStarPromptShown = useGitHubStarPromptShown();
 
   const refreshMailboxUnreadCount = useCallback(() => {
     fetchUnreadCount(currentProject?.id)
@@ -580,6 +622,9 @@ function AppInner() {
             const dedupeKey = `task:${payload.id}`;
             const previousStatus = taskStatusByIdRef.current.get(payload.id);
             taskStatusByIdRef.current.set(payload.id, payload.status);
+            if (!gitHubStarPromptShown && didEnterDone(payload.status, previousStatus)) {
+              setShowGitHubStarPrompt(true);
+            }
             if (payload.status !== "awaiting-approval") {
               seenApprovalKeysRef.current.delete(dedupeKey);
               approvalDismissalsRef.current.delete(dedupeKey);
@@ -603,7 +648,7 @@ function AppInner() {
         },
       },
     });
-  }, [currentProject?.id, refreshMailboxUnreadCount]);
+  }, [currentProject?.id, gitHubStarPromptShown, refreshMailboxUnreadCount]);
 
   useEffect(() => {
     if (taskView === "chat") {
@@ -711,7 +756,14 @@ function AppInner() {
   const [retryingProjects, setRetryingProjects] = useState(false);
   const [missionResumeSessionId, setMissionResumeSessionId] = useState<string | undefined>(undefined);
   const [missionTargetId, setMissionTargetId] = useState<string | undefined>(undefined);
+  const [goalAnchorId, setGoalAnchorId] = useState<string | undefined>(undefined);
   const [milestoneSliceResumeSessionId, setMilestoneSliceResumeSessionId] = useState<string | undefined>(undefined);
+
+  useEffect(() => {
+    if (taskView !== "goalsView" && goalAnchorId !== undefined) {
+      setGoalAnchorId(undefined);
+    }
+  }, [goalAnchorId, taskView]);
   const [quickChatOpen, setQuickChatOpen] = useState(false);
   const [authTokenRecoveryOpen, setAuthTokenRecoveryOpen] = useState(false);
   const [dashboardHealth, setDashboardHealth] = useState<DashboardHealthResponse | null>(null);
@@ -1324,7 +1376,7 @@ function AppInner() {
     if (showBackendConnectionErrorPage) {
       return (
         <BackendConnectionErrorPage
-          errorMessage={projectsError ?? "Failed to fetch projects"}
+          errorMessage={projectsError ?? t("app.backendError.failedFetch", "Failed to fetch projects")}
           isRetrying={retryingProjects}
           onRetry={handleRetryProjects}
           onManageConnection={shellApi ? () => {
@@ -1375,6 +1427,7 @@ function AppInner() {
               projectId: currentProject?.id,
               tasks: isRemote && remoteData.tasks.length > 0 ? remoteData.tasks : tasks,
               workflowSteps,
+              subscribePluginEvents,
               openTaskDetail: (task: Task | TaskDetail, initialTab?: DetailTaskTab) => openDetailTask(task, initialTab),
               renderTaskCard: (task: Task | TaskDetail) => (
                 <TaskCard
@@ -1462,6 +1515,10 @@ function AppInner() {
             targetMissionId={missionTargetId}
             milestoneSliceResumeSessionId={milestoneSliceResumeSessionId}
             onMilestoneSliceResumeFetchError={() => setMilestoneSliceResumeSessionId(undefined)}
+            onNavigateToGoal={(goalId) => {
+              setGoalAnchorId(goalId);
+              handleChangeTaskView("goalsView");
+            }}
           />
         </PageErrorBoundary>
       );
@@ -1593,7 +1650,7 @@ function AppInner() {
       return (
         <PageErrorBoundary>
           <Suspense fallback={null}>
-            <GoalsView />
+            <GoalsView anchorGoalId={goalAnchorId} />
           </Suspense>
         </PageErrorBoundary>
       );
@@ -1903,6 +1960,14 @@ function AppInner() {
           }}
         />
       )}
+      {viewMode === "project" && currentProject && showGitHubStarPrompt && !gitHubStarPromptShown && (
+        <GitHubStarPrompt
+          onDismiss={() => {
+            markGitHubStarPromptShown();
+            setShowGitHubStarPrompt(false);
+          }}
+        />
+      )}
       <div
         className={`project-content${viewMode === "project" && currentProject && (!isMobile || !mobileKeyboardOpen) ? " project-content--with-footer" : ""}${isMobile && !mobileKeyboardOpen ? " project-content--with-mobile-nav" : ""}`}
       >
@@ -2043,16 +2108,18 @@ function AppInner() {
 
 export function App() {
   return (
-    <ToastProvider>
-      <ShellHostProvider>
-        <ShellProvider>
-          <NodeProvider>
-            <ConfirmDialogProvider>
-              <AppInner />
-            </ConfirmDialogProvider>
-          </NodeProvider>
-        </ShellProvider>
-      </ShellHostProvider>
-    </ToastProvider>
+    <I18nextProvider i18n={i18n}>
+      <ToastProvider>
+        <ShellHostProvider>
+          <ShellProvider>
+            <NodeProvider>
+              <ConfirmDialogProvider>
+                <AppInner />
+              </ConfirmDialogProvider>
+            </NodeProvider>
+          </ShellProvider>
+        </ShellHostProvider>
+      </ToastProvider>
+    </I18nextProvider>
   );
 }

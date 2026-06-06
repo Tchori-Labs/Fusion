@@ -23,6 +23,54 @@ Mission: Improve Reliability
         Task: FN-214
 ```
 
+## Mission → Goal linkage
+
+Missions and goals are stored independently, with an optional many-to-many linkage persisted in the `mission_goals` join table.
+
+- Columns: `missionId`, `goalId`, `createdAt`
+- Primary key: `(missionId, goalId)`
+- Foreign keys: `missionId → missions.id`, `goalId → goals.id`
+- Delete behavior: both foreign keys use `ON DELETE CASCADE`, so removing either parent deletes only the corresponding join rows
+- Reverse lookups are indexed via `idxMissionGoalsGoalId`
+
+`MissionStore` owns the persisted linkage CRUD surface:
+
+- `linkGoal(missionId, goalId)` — idempotently create a link and return `{ missionId, goalId, createdAt }`
+- `unlinkGoal(missionId, goalId)` — remove a link and report whether anything changed
+- `listGoalIdsForMission(missionId)` — list linked goals in deterministic creation order
+- `listMissionIdsForGoal(goalId)` — list linked missions in deterministic creation order
+
+### No-backfill decision
+
+Existing missions are intentionally **not** auto-linked to any goals. Fusion does not run a migration backfill for pre-existing missions, so a mission with no links should be treated as genuinely unlinked until an operator or agent associates it with one or more goals.
+
+### Manual linkage workflow
+
+Mission ↔ goal links are created and removed deliberately as part of normal planning and operations work. Read surfaces can show current associations, and operator-facing write surfaces can add or remove links when a mission should explicitly support a goal. The workflow is intentionally manual so teams can choose the correct strategic relationship per mission instead of inheriting guessed links from older data.
+
+### Unlinked mission indicator
+
+Mission Manager shows an **Unlinked** indicator on active mission cards when `linkedGoalCount` is zero. This is a read-only attention badge so operators can quickly find active missions that still need an explicit goal association.
+
+### Task → Goal provenance
+
+When a mission feature is linked or triaged into a task, Fusion does **not** copy goal ids onto the task row. Instead, task goal provenance is always derived from the mission link owned by `MissionStore`:
+
+- `listGoalIdsForTask(taskId)` resolves the owning mission from the linked feature hierarchy first (`feature -> slice -> milestone -> mission`), then falls back to the live task row's `missionId` when needed.
+- `listGoalsForTask(taskId)` maps those ids back to full `Goal` records using the same goals-table read path as `getMissionWithHierarchy`, so mission reads and task provenance stay in sync.
+- Unknown, unlinked, or partially missing hierarchy state resolves fail-soft to `[]`.
+- Archived goals remain part of provenance; only missing goal rows are dropped.
+
+This derived bridge lets downstream systems recover which strategic goals a task serves without duplicating mission-goal linkage during task creation.
+
+### Goal-injection diagnostics provenance field
+
+The engine's `resolveAndEmitGoalContext` seam still injects only the always-on active-goal context into prompts, but diagnostics now add `provenanceGoalIds: string[]` alongside the existing injected `goalIds` / `goalCount` fields.
+
+- `goalIds` / `goalCount` continue to describe the active goals injected into the prompt.
+- `provenanceGoalIds` records which mission-linked goals the task serves.
+- Diagnostics and run-audit metadata persist ids/counts only — never goal titles, descriptions, or prompt text.
+
 ## Creating Missions
 
 ### Mission base branch defaults
@@ -70,12 +118,41 @@ Mission, milestone, slice, and feature read-only text surfaces in Mission Manage
 ### CLI
 
 ```bash
-fn mission create "Reliability initiative" "Reduce execution failures and improve recovery"
+fn mission create "Reliability initiative" "Reduce execution failures and improve recovery" --goal G-001 --goal G-002
 fn mission list
 fn mission show mission_123
+fn mission goals mission_123
+fn mission link-goal mission_123 G-001
+fn mission unlink-goal mission_123 G-001
 fn mission activate-slice slice_456
 fn mission delete mission_123 --force
 ```
+
+## Mission ↔ Goal operator surfaces
+
+Fusion surfaces the persisted mission↔goal linkage through REST, CLI, and pi-extension tools.
+
+### REST endpoints
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /api/missions` | Create a mission. Optional body field `goalIds: string[]` links goals during creation and returns `linkedGoals` in the response. |
+| `PATCH /api/missions/:missionId` | Update mission fields. Optional `goalIds: string[]` replaces the full linked-goal set; `[]` clears links and `undefined` leaves links unchanged. |
+| `GET /api/missions/:missionId` | Return `MissionWithHierarchy`, including `linkedGoals` as an always-present array of `Goal` objects for the selected mission and optional `eventCount` as the authoritative unfiltered mission activity total. |
+| `GET /api/missions/:missionId/goals` | List linked goals for a mission. Returns `{ goals }`. |
+| `PUT /api/missions/:missionId/goals` | Replace the full linked-goal set with body `{ goalIds: string[] }`. Duplicate ids are deduplicated before reconciliation. |
+| `POST /api/missions/:missionId/goals/:goalId` | Idempotently link one goal to a mission. |
+| `DELETE /api/missions/:missionId/goals/:goalId` | Idempotently unlink one goal from a mission. |
+
+The mission detail payload keeps `linkedGoals` separate from the milestone tree so read paths can surface strategy context without traversing slices/features. All goal-link write endpoints preserve the same invariant: missing goals return `404`, archived goals reject with `400 { code: "GOAL_ARCHIVED" }`, duplicate/relinked ids are no-ops, and unlink remains allowed even after a goal is archived.
+
+### CLI
+
+- `fn mission create ... --goal <goal-id> [--goal <goal-id> ...]` — create a mission and batch-link active goals.
+- `fn mission goals <mission-id>` — list linked goals for a mission.
+- `fn mission link-goal <mission-id> <goal-id>` — idempotently link a goal; archived goals reject with `GOAL_ARCHIVED`.
+- `fn mission unlink-goal <mission-id> <goal-id>` — idempotently unlink a goal, including archived goals.
+- Mission detail screens in the dashboard render linked-goal chips in the mission header; selecting a chip opens the Goals view and scrolls/highlights the anchored goal card.
 
 ## Mission Planning Tools (pi extension)
 
@@ -85,7 +162,10 @@ The canonical per-parameter tool reference lives in `packages/cli/skill/fusion/r
 |---|---|
 | `fn_mission_create` | Create a mission with title/description, optional `baseBranch`, and optional auto-advance behavior. |
 | `fn_mission_list` | List missions and their current status. |
-| `fn_mission_show` | Show mission details with milestone/slice/feature hierarchy, including milestone/feature acceptance criteria and slice verification when present. |
+| `fn_mission_show` | Show mission details with milestone/slice/feature hierarchy, including a **Linked Goals** section plus milestone/feature acceptance criteria and slice verification when present. |
+| `fn_mission_list_goals` | List the goals linked to a mission. |
+| `fn_mission_link_goal` | Idempotently link a goal to a mission; archived goals reject with `GOAL_ARCHIVED`. |
+| `fn_mission_unlink_goal` | Idempotently unlink a goal from a mission, including archived goals. |
 | `fn_mission_delete` | Delete a mission and its hierarchy. |
 | `fn_mission_update` | Update mission title/description using partial patches. |
 | `fn_milestone_add` | Add a milestone to a mission. |
@@ -159,7 +239,7 @@ The dashboard supports mission planning workflows where you can:
 - Track progress at each layer
 - Persisted missions with `interviewState: "in_progress"` remain visible as interview-styled mission cards in the main mission list so planning work does not disappear after reloads
 - Resume in-progress mission interview sessions directly from separate transient session rows in the main missions list (`mission_interview` sessions in `generating`, `awaiting_input`, `error`, or `complete`) before a mission record is created; `complete` means the plan summary is ready for review/approval but has not been converted into a mission yet
-- Mission interview closes are non-destructive: the modal now uses a single close action for header close, backdrop click, and Escape. Closing preserves the in-progress `mission_interview` session, and Missions re-fetches project-scoped transient rows (including on the mobile stacked Missions view) so resume/retry remains discoverable without losing persisted `interviewState: "in_progress"` mission cards. Deletion remains an explicit sidebar action.
+- Mission interview closes are non-destructive: the modal now uses a single close action for header close, backdrop click, and Escape. Closing preserves the in-progress `mission_interview` session, and Missions re-fetches project-scoped transient rows (including on the mobile stacked Missions view) so resume/retry remains discoverable without losing persisted `interviewState: "in_progress"` mission cards. Resume-launched interview modals also expose a **Send to background** action that performs the same non-destructive park without cancelling the session. Deletion remains an explicit sidebar action.
 - Mission interview, milestone interview, and slice interview agents have read-only board visibility via `fn_task_list` and `fn_task_get`, so they can reference active backlog context and avoid duplicating in-flight tasks while asking planning questions
 
 ### Mission Interview Drafts
@@ -403,7 +483,9 @@ On task completion, the scheduler calls `MissionExecutionLoop.processTaskOutcome
 2. If assertions are linked, keep feature completion gated until validation passes
 3. Transition feature to `validating` state
 4. Fire AI validator agent against contract assertions
-5. Record `MissionValidatorRun` with per-assertion results
+5. Record `MissionValidatorRun` metadata for the validation attempt (per-assertion failures are stored separately in `MissionAssertionFailureRecord` rows)
+
+Mission validation resolves its model from the validator lane before session creation: assigned agent runtime model (when the linked task has an assigned durable agent) → per-task `validatorModelProvider`/`validatorModelId` → project `validatorProvider`/`validatorModelId` → global `validatorGlobalProvider`/`validatorGlobalModelId` → project `defaultProviderOverride`/`defaultModelIdOverride` → global `defaultProvider`/`defaultModelId`. In `testMode`, validation is forced to `mock/scripted` instead of falling through to provider auto-detection.
 
 Validation runs are internal mission-loop operations: Fusion does **not** create visible `🔍 Validate:` board tasks for single-feature validation.
 
@@ -411,21 +493,25 @@ Validation runs are internal mission-loop operations: Fusion does **not** create
 interface MissionValidatorRun {
   id: string;
   featureId: string;
-  missionId: string;
-  taskId: string;
-  triggerType: "manual" | "automatic";
+  milestoneId: string;
+  sliceId: string;
+  status: "running" | "passed" | "failed" | "blocked" | "error";
+  triggerType?: string;
   implementationAttempt: number;
   validatorAttempt: number;
-  status: "started" | "passed" | "failed" | "blocked" | "error";
-  summary: string;
-  results: AssertionResult[];
+  taskId?: string;
+  summary?: string;
   blockedReason?: string;
   startedAt: string;
   completedAt?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 ```
 
-**Validation timeout:** 10 minutes (`VALIDATION_TIMEOUT_MS = 10 * 60 * 1000`). If the validator times out, the run is marked `error` and the feature remains in `needs_fix` for retry.
+**Validation timeout:** 10 minutes (`VALIDATION_TIMEOUT_MS = 10 * 60 * 1000`). If session creation, auth/credit checks, prompting, or timeout fails, the run is marked `error` and emits a surfaced `validation_error` mission event instead of silently spawning a fix feature.
+
+**Stale validator-run reaper:** startup recovery and periodic self-healing also sweep `MissionValidatorRun` rows stuck in `status="running"` longer than `VALIDATOR_RUN_STALE_MAX_AGE_MS` (currently 6 hours). Ownerless stale runs are reaped to terminal `status="error"`, their reap reason is stored in `summary`, and active mission features are moved to `loopState="needs_fix"` with `lastValidatorStatus="error"` so the loop can re-trigger. Runs whose parent mission is already `complete`/`archived` are still terminated, but their feature state is left untouched. Each successful reap emits a run-audit event with `mutationType: "mission:validator-run-reaped"`.
 
 ### Phase 5: Fix-Feature Retries
 
@@ -456,9 +542,9 @@ A feature transitions to `blocked` when:
 - `MilestoneValidationRollup.state` reflects `blocked` assertions
 - The feature remains in `blocked` state until operator intervention
 
-On engine restart, `recoverActiveMissions()` re-enqueues features in `validating` or `needs_fix` states from the `activeValidations` set, ensuring no validation work is lost. It also re-triggers `implementing` features whose linked task is already `done`/`archived` and whose assertion validation has not passed yet. The same recovery path is replayed during periodic self-heal maintenance, so historically stranded `implementing` features can self-heal without requiring an engine restart.
+On engine restart, `recoverActiveMissions()` re-enqueues features in `validating` or `needs_fix` states, ensuring no validation work is lost. It also re-triggers `implementing` features whose linked task is already `done`/`archived` and whose assertion validation has not passed yet. When the stale-run reaper has already converted an abandoned validator run into `needs_fix`, `processTaskOutcome()` promotes the feature back through `implementing` and re-validates instead of skipping it. The same recovery path is replayed during periodic self-heal maintenance, so historically stranded `implementing` features can self-heal without requiring an engine restart.
 
-For features with zero linked assertions, the completion path is explicit: the loop marks the feature `done`, advances `loopState` to `passed`, emits `validation:passed` with summary `"No assertions linked"`, and records mission event code `validation_auto_passed_no_assertions`. Contract details (including canonical no-assertions behavior and FN-5696 assertion-authoring separation) are defined in [Mission Completion Gate Contract](./missions-completion-contract.md).
+For features with missing linked assertions, the completion path is now validator-first: the loop lazily restores the store-managed per-feature assertion just before validation, then runs the AI validator instead of auto-passing. Milestone `acceptanceCriteria` is threaded into the validator prompt for every feature in that milestone, so all mission criteria are AI-evaluated. Contract details are defined in [Mission Completion Gate Contract](./missions-completion-contract.md).
 
 ### Autopilot / Scheduler Interplay
 
@@ -489,15 +575,14 @@ These are independent tracking mechanisms — autopilot monitors mission progres
 **MissionEvent audit types:**
 - `slice_activated`, `feature_planned`, `feature_completed`
 - `validation:started`, `validation:passed`, `validation:failed`, `validation:blocked`
-- `validation_auto_passed_no_assertions` (reason: `"No assertions linked"`)
-- `milestone_missing_structured_assertions` (warning when prose criteria exist with zero structured assertions)
+- `milestone_missing_structured_assertions` (legacy-data warning surface; enforcement still lazy-restores managed assertions at runtime)
 - `fix_feature:created`, `feature:blocked`
 
 **Validator run telemetry:**
-- `triggerType` — manual vs automatic
+- `triggerType` — free-form trigger source (`manual`, `task_completion`, `auto`, etc.)
 - `implementationAttempt` — which retry attempt this was
 - `validatorAttempt` — how many validator runs for this implementation
-- `status` — started | passed | failed | blocked | error
+- `status` — running | passed | failed | blocked | error
 - `summary` — natural language summary of results
 
 **Assertion failure records:**
@@ -517,7 +602,7 @@ interface MissionAssertionFailureRecord {
 
 | Symptom | Diagnosis | Resolution |
 |---------|-----------|------------|
-| Feature stuck in "validating" | `activeValidations` set may be stale; engine restart needed | Check logs for validator errors; restart engine to trigger `recoverActiveMissions()` |
+| Feature stuck in "validating" | Validator owner may have died, leaving a stale `MissionValidatorRun` in `status="running"` | Check mission-loop/self-healing logs; the startup or maintenance reaper should terminate runs older than `VALIDATOR_RUN_STALE_MAX_AGE_MS` (6h) and emit `mission:validator-run-reaped` |
 | Fix feature not auto-planning | `planFeature()` may have errored; check logs | Manual planning via `fn mission plan-feature <id>`; investigate `planFeature()` errors |
 | Budget exhaustion loop | `implementationAttemptCount >= maxRetryBudget` (default: 3) | Increase `maxRetryBudget` in mission settings or fix root cause |
 | Blocked mission not advancing | `MilestoneValidationRollup.state` shows `blocked` | Identify blocked assertions; operator must resolve root cause |
