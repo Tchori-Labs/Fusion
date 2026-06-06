@@ -26,7 +26,8 @@ import type {
   Settings,
   TaskStore,
 } from "@fusion/core";
-import { summarizeTitle } from "@fusion/core";
+import { summarizeTitle, isCompanyModelEnabled } from "@fusion/core";
+import { buildCeoChatToolset, isCeoAgent } from "./ceo-chat-tools.js";
 import { EventEmitter } from "node:events";
 import { existsSync } from "node:fs";
 import { join, resolve, relative } from "node:path";
@@ -1662,7 +1663,33 @@ export class ChatManager {
         ? createWorkflowAuthoringTools(this.taskStore, "", { stripApprovalFlags: true })
         : [];
 
-      const customTools = [...messagingTools, ...workflowTools];
+      // Company-model CEO routing (U8): when the flag is on AND this session runs
+      // under the project CEO identity, expose the routing tool set (fn_board_list
+      // + CEO-aware fn_task_create + read tools) and append the routing policy to
+      // the system prompt. Flag off, or a non-CEO session, leaves the toolset and
+      // identity byte-identical to today. The boardId authorization lives in the
+      // engine tool itself (defense in depth).
+      let ceoRoutingTools: typeof workflowTools = [];
+      if (this.taskStore && agent && isCeoAgent(agent)) {
+        let companyModelOn = false;
+        try {
+          companyModelOn = isCompanyModelEnabled(await this.taskStore.getSettings());
+        } catch (settingsError) {
+          diagnostics.warn(`Failed to read company-model flag for CEO chat ${agent.id}: ${settingsError instanceof Error ? settingsError.message : String(settingsError)}`);
+        }
+        if (companyModelOn) {
+          const ceoToolset = buildCeoChatToolset({
+            taskStore: this.taskStore,
+            ceoAgentId: agent.id,
+            auditRunId: `chat:${sessionId}:${generationId}`,
+            agentStore: this.agentStore,
+          });
+          ceoRoutingTools = ceoToolset.tools;
+          systemPrompt = `${systemPrompt}\n\n${ceoToolset.systemPromptSuffix}`;
+        }
+      }
+
+      const customTools = [...messagingTools, ...workflowTools, ...ceoRoutingTools];
 
       const sessionOptions = {
         cwd: this.rootDir,

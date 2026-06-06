@@ -5,6 +5,17 @@
  * helper first instead of adding another full inline export map in the test file.
  */
 import { vi, type Mock } from "vitest";
+// Real shared board/plan helpers (issue #4). board-actions.ts imports only from
+// @fusion/core (no @fusion/engine), so this deep relative import does not pull
+// the heavy engine index — and it is NOT intercepted by `vi.mock("@fusion/engine")`
+// (which targets the package specifier, not this relative path).
+import {
+  moveTaskToBoard,
+  rejectPlanForTask,
+  createBoardWithTeam,
+  previewBoardConvertToSimple,
+  convertBoardToSimple,
+} from "../../../engine/src/board-actions.js";
 
 type AnyModule = Record<string, unknown>;
 type AnyMock = Mock;
@@ -50,6 +61,14 @@ export function createEngineMock(overrides: AnyModule = {}): AnyModule {
     // Returns an iterable tool list; dashboard code spreads its result
     // (`...createWorkflowAuthoringTools(...)`), so it must not be undefined.
     createWorkflowAuthoringTools: vi.fn(() => []),
+    // Shared company-model board/plan helpers (issue #4): routes refactored to
+    // call these are exercised against a mock store, so the REAL helpers must be
+    // present (a fallback vi.fn() would no-op the route's business logic).
+    moveTaskToBoard,
+    rejectPlanForTask,
+    createBoardWithTeam,
+    previewBoardConvertToSimple,
+    convertBoardToSimple,
     ...overrides,
   });
 }

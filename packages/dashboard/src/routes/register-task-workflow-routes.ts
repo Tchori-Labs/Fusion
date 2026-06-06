@@ -38,12 +38,13 @@ import {
   parseExplicitDuplicateMarker,
   isWorkflowColumnsEnabled,
   TransitionRejectionError,
+  RESERVED_CUSTOM_FIELD_PREFIX,
   type NearDuplicateCandidate,
 } from "@fusion/core";
 import { GitHubClient } from "../github.js";
 import { createTrackingIssueForTask } from "../github-tracking-hook.js";
 import { parseGitHubBadgeUrl } from "./register-git-github.js";
-import { planTaskWorktreePath, promoteHeldTask } from "@fusion/engine";
+import { planTaskWorktreePath, promoteHeldTask, moveTaskToBoard, rejectPlanForTask } from "@fusion/engine";
 import { buildBoardWorkflowsPayload } from "./board-workflows.js";
 import type { RunAuditEventInput } from "@fusion/core";
 import { ApiError, badRequest, conflict, notFound } from "../api-error.js";
@@ -807,21 +808,33 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
     }
   });
 
-  // Multi-lane board metadata (U9, R16). Additive sibling to GET /tasks — the
-  // task list payload stays byte-identical. Flag-OFF returns
-  // { flagEnabled: false } and the client renders the legacy single-lane board.
+  // Board-scoped board metadata (U10, R4/R12/R13). Additive sibling to GET
+  // /tasks — the task list payload stays byte-identical. Unconditional: boards
+  // are the universal task container in every mode (no flag short-circuit).
   router.get("/tasks/board-workflows", async (req, res) => {
     try {
-      const { store: scopedStore } = await getProjectContext(req);
-      const settings = await scopedStore.getSettingsFast();
-      if (!isWorkflowColumnsEnabled(settings)) {
-        res.json({ flagEnabled: false, defaultWorkflowId: "builtin:coding", workflows: [], taskWorkflowIds: {} });
-        return;
-      }
-      // Resolve over the same (non-archived) board list the client renders.
+      const { store: scopedStore, engine } = await getProjectContext(req);
+      // Resolve over the same (non-archived) board list the client renders. The
+      // builder buckets tasks per board from each task's `boardId` (null falls
+      // back to the default board).
       const tasks = await scopedStore.listTasks({ slim: true, includeArchived: false });
-      const taskIds = tasks.map((t) => t.id);
-      const payload = await buildBoardWorkflowsPayload(scopedStore, taskIds, settings);
+      const taskRefs = tasks.map((t) => ({ id: t.id, boardId: t.boardId ?? null }));
+
+      // Resolve column-agent ids to display names through the engine's
+      // AgentStore when reachable; the builder echoes the id when it cannot.
+      const agentStore = engine?.getAgentStore?.();
+      const resolveAgentName = agentStore
+        ? async (agentId: string) => {
+            try {
+              const agent = await agentStore.getAgent?.(agentId);
+              return (agent as { name?: string } | null | undefined)?.name;
+            } catch {
+              return undefined;
+            }
+          }
+        : undefined;
+
+      const payload = await buildBoardWorkflowsPayload(scopedStore, taskRefs, resolveAgentName);
       res.json(payload);
     } catch (err: unknown) {
       if (err instanceof ApiError) {
@@ -1424,6 +1437,65 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
       }
       const status = (err instanceof Error ? err.message : String(err)).includes("Invalid transition") ? 400 : 500;
       throw new ApiError(status, err instanceof Error ? err.message : String(err));
+    }
+  });
+
+  // Cross-board move (U10, R13). Re-homes a task onto a different board and moves
+  // it to that board's todo as a SYSTEM action — bypassing the human movement
+  // matrix so the re-home is not blocked by the company-model drag rules. Any
+  // active session is aborted (its execution agent bindings released) the way a
+  // soft-delete / reset does, since the task restarts under the target board's
+  // Lead. The re-home + abort are recorded in the task log.
+  router.post("/tasks/:id/move-to-board", async (req, res) => {
+    try {
+      const { store: scopedStore, engine } = await getProjectContext(req);
+      const { boardId } = (req.body ?? {}) as { boardId?: unknown };
+      if (typeof boardId !== "string" || boardId.trim().length === 0) {
+        throw badRequest("boardId is required");
+      }
+
+      // Shared move-to-board sequence (issue #4): release execution-agent
+      // bindings, setTaskBoard, SYSTEM move to the target Todo, log. The engine
+      // helper is the single source of truth; this route maps its structured
+      // result to the route's existing HTTP vocabulary (byte-identical).
+      const result = await moveTaskToBoard(
+        scopedStore,
+        engine?.getAgentStore?.(),
+        req.params.id,
+        boardId,
+      );
+      if (!result.ok) {
+        if (result.code === "task-not-found") {
+          throw notFound(result.message);
+        }
+        if (result.code === "board-not-found") {
+          throw notFound(result.message);
+        }
+        // Any future result code must fail loudly rather than being silently
+        // mapped to a 404 — surface the unknown code so the gap is visible.
+        throw badRequest(`Unexpected move-to-board result: ${(result as { code: string }).code}`, {
+          reason: (result as { code: string }).code,
+        });
+      }
+      res.json(result.task);
+    } catch (err: unknown) {
+      if (err instanceof ApiError) {
+        throw err;
+      }
+      if (err instanceof TransitionRejectionError) {
+        throw new ApiError(409, err.message, {
+          code: err.rejection.code,
+          messageKey: err.rejection.messageKey,
+          retryable: err.rejection.retryable,
+        });
+      }
+      // The engine's getTask THROWS (rather than returning the typed
+      // task-not-found result) for an unknown id; map that to a 404 so a missing
+      // task is a notFound, not a generic 500.
+      if (err instanceof Error && /task .* not found/i.test(err.message)) {
+        throw notFound(err.message);
+      }
+      rethrowAsApiError(err);
     }
   });
 
@@ -2241,26 +2313,20 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
     }
   });
 
-  // Approve plan for a task in awaiting-approval status
+  // Approve plan for a task in awaiting-approval status (R20 plan-approval hold).
+  // Legacy boards park the task in `triage`; company-model boards (U5) park it in
+  // the Lead column (`todo`). `approvePlanForTask` releases either forward — to
+  // `todo` from triage, or to `in-progress` from a company Lead column.
   router.post("/tasks/:id/approve-plan", async (req, res) => {
     try {
       const { store: scopedStore } = await getProjectContext(req);
       const task = await scopedStore.getTask(req.params.id);
 
-      // Verify task is in triage column with awaiting-approval status
-      if (task.column !== "triage") {
-        throw badRequest("Task must be in 'triage' column to approve plan");
-      }
       if (task.status !== "awaiting-approval") {
         throw badRequest("Task must have status 'awaiting-approval' to approve plan");
       }
 
-      // Log the approval
-      await scopedStore.logEntry(task.id, "Plan approved by user");
-
-      // Move to todo and clear status
-      const updated = await scopedStore.moveTask(task.id, "todo");
-      await scopedStore.updateTask(task.id, { status: undefined });
+      const updated = await scopedStore.approvePlanForTask(task.id);
 
       res.json({ ...updated, status: undefined });
     } catch (err: unknown) {
@@ -2279,27 +2345,14 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
       const { store: scopedStore } = await getProjectContext(req);
       const task = await scopedStore.getTask(req.params.id);
 
-      // Verify task is in triage column with awaiting-approval status
-      if (task.column !== "triage") {
-        throw badRequest("Task must be in 'triage' column to reject plan");
-      }
       if (task.status !== "awaiting-approval") {
         throw badRequest("Task must have status 'awaiting-approval' to reject plan");
       }
 
-      // Log the rejection
-      await scopedStore.logEntry(task.id, "Plan rejected by user", "Specification will be regenerated");
-
-      // Clear status to return to normal triage state
-      await scopedStore.updateTask(task.id, { status: undefined });
-
-      // Remove PROMPT.md to force regeneration
-      const { rm } = await import("node:fs/promises");
-      const { join } = await import("node:path");
-      const promptPath = join(scopedStore.getRootDir(), ".fusion", "tasks", task.id, "PROMPT.md");
-      await rm(promptPath, { force: true });
-
-      const updated = await scopedStore.getTask(task.id);
+      // Shared reject-plan sequence (issue #4): log rejection, clear status,
+      // remove PROMPT.md to force regeneration. The engine helper is the single
+      // source of truth shared with fn_plan_reject (byte-identical).
+      const updated = await rejectPlanForTask(scopedStore, task.id);
       res.json(updated);
     } catch (err: unknown) {
       if (err instanceof ApiError) {
@@ -2523,6 +2576,90 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
       const status = errorWithCode.code === "ENOENT" ? 404
         : (err instanceof Error ? err.message : String(err)).includes("not found") ? 404
         : 500;
+      throw new ApiError(status, err instanceof Error ? err.message : String(err));
+    }
+  });
+
+  // ── Per-agent queued message routes (U9) ──────────────────────────────────
+  // Addressed agent messages ride the steering-comment channel: delivered on the
+  // target agent's next reasoning cycle, or queued (pending) until the task next
+  // activates in that agent's column. The full Q&A UI (U14) consumes these.
+
+  // GET /tasks/:id/agent-messages?state=pending&agent=<id> — list addressed messages.
+  router.get("/tasks/:id/agent-messages", async (req, res) => {
+    try {
+      const { store: scopedStore } = await getProjectContext(req);
+      const state = typeof req.query.state === "string" ? req.query.state : undefined;
+      const targetAgentId = typeof req.query.agent === "string" ? req.query.agent : undefined;
+      const validStates = ["pending", "delivered", "cancelled", "discarded"] as const;
+      if (state !== undefined && !validStates.includes(state as (typeof validStates)[number])) {
+        throw badRequest(`state must be one of: ${validStates.join(", ")}`);
+      }
+      const messages = await scopedStore.listAgentMessages(req.params.id, {
+        state: state as (typeof validStates)[number] | undefined,
+        targetAgentId,
+      });
+      res.json(messages);
+    } catch (err: unknown) {
+      if (err instanceof ApiError) throw err;
+      const errorWithCode = err as NodeJS.ErrnoException;
+      const status = errorWithCode.code === "ENOENT" ? 404 : 500;
+      throw new ApiError(status, err instanceof Error ? err.message : String(err));
+    }
+  });
+
+  // POST /tasks/:id/agent-messages { targetAgentId, text, author? } — queue a message.
+  router.post("/tasks/:id/agent-messages", async (req, res) => {
+    try {
+      const { store: scopedStore } = await getProjectContext(req);
+      const { targetAgentId, text, author } = req.body ?? {};
+      if (!targetAgentId || typeof targetAgentId !== "string") {
+        throw badRequest("targetAgentId is required and must be a string");
+      }
+      if (!text || typeof text !== "string" || text.length === 0 || text.length > 2000) {
+        throw badRequest("text is required and must be between 1 and 2000 characters");
+      }
+      if (author !== undefined && typeof author !== "string") {
+        throw badRequest("author must be a string");
+      }
+      const { task, messageId } = await scopedStore.queueAgentMessage(
+        req.params.id,
+        targetAgentId.trim(),
+        text,
+        author?.trim() === "agent" ? "agent" : "user",
+      );
+
+      // Reuse the steering wake path so an actively-running target agent picks up
+      // the message on its next cycle instead of waiting for a poll.
+      void triggerCommentWakeForAssignedAgent(scopedStore, task, {
+        triggeringCommentType: "steering",
+        triggeringCommentIds: [messageId],
+        triggerDetail: "agent-message",
+      }).catch((error) => {
+        runtimeLogger.warn(
+          `failed to trigger agent-message heartbeat for ${task.id}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      });
+
+      res.json({ task, messageId });
+    } catch (err: unknown) {
+      if (err instanceof ApiError) throw err;
+      const errorWithCode = err as NodeJS.ErrnoException;
+      const status = errorWithCode.code === "ENOENT" ? 404 : 500;
+      throw new ApiError(status, err instanceof Error ? err.message : String(err));
+    }
+  });
+
+  // POST /tasks/:id/agent-messages/:messageId/cancel — cancel a pending message.
+  router.post("/tasks/:id/agent-messages/:messageId/cancel", async (req, res) => {
+    try {
+      const { store: scopedStore } = await getProjectContext(req);
+      const task = await scopedStore.cancelQueuedMessage(req.params.id, req.params.messageId);
+      res.json(task);
+    } catch (err: unknown) {
+      if (err instanceof ApiError) throw err;
+      const errorWithCode = err as NodeJS.ErrnoException;
+      const status = errorWithCode.code === "ENOENT" ? 404 : 500;
       throw new ApiError(status, err instanceof Error ? err.message : String(err));
     }
   });
@@ -3248,6 +3385,20 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
       const patch = body?.customFields;
       if (patch === undefined || patch === null || typeof patch !== "object" || Array.isArray(patch)) {
         throw badRequest("customFields must be an object");
+      }
+
+      // Reject engine-internal reserved (`__`-prefixed) keys at the HTTP boundary.
+      // task-fields validation exempts these from workflow-field checks, so an HTTP
+      // caller could otherwise set e.g. __lfgMode:true and bypass the plan-approval
+      // hold. Reserved keys are written only by in-process engine writers.
+      const reservedKey = Object.keys(patch as Record<string, unknown>).find((key) =>
+        key.startsWith(RESERVED_CUSTOM_FIELD_PREFIX),
+      );
+      if (reservedKey !== undefined) {
+        throw badRequest(`reserved custom-field key '${reservedKey}' is not writable`, {
+          fieldId: reservedKey,
+          code: "reserved-key",
+        });
       }
 
       const storeWithFields = scopedStore as TaskStore & {

@@ -139,6 +139,7 @@ import { createSessionDiagnostics } from "./ai-session-diagnostics.js";
 import { createApiRoutesContext } from "./routes/context.js";
 import { registerTaskWorkflowRoutes } from "./routes/register-task-workflow-routes.js";
 import { registerWorkflowRoutes } from "./routes/register-workflow-routes.js";
+import { registerBoardsRoutes } from "./routes/register-boards-routes.js";
 import { registerPlanningSubtaskRoutes } from "./routes/register-planning-subtask-routes.js";
 import { registerChatRoutes } from "./routes/register-chat-routes.js";
 import { registerChatRoomRoutes } from "./routes/register-chat-room-routes.js";
@@ -1061,6 +1062,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
     resolveSelfHealingManager: (...args) => resolveSelfHealingManager(...args),
   });
   registerWorkflowRoutes(routeContext);
+  registerBoardsRoutes(routeContext);
   registerPlanningSubtaskRoutes(routeContext, {
     store,
     aiSessionStore,

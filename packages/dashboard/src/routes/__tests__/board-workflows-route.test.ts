@@ -1,15 +1,14 @@
 // @vitest-environment node
 //
-// FN-1414: HTTP integration coverage for GET /tasks/board-workflows.
-//
-// Only the payload builder (buildBoardWorkflowsPayload) had a unit test; the
-// route registration, the flag-gated early-return shape, and the deduped
-// flag-ON payload were untested. This exercises the route end-to-end against a
+// U10: HTTP integration coverage for the board-scoped GET /tasks/board-workflows
+// and the cross-board POST /tasks/:id/move-to-board route, exercised against a
 // REAL TaskStore via createApiRoutes:
-//   - flag OFF → { flagEnabled: false } (the legacy single-lane shape)
-//   - flag ON, mixed default + custom selections → correct taskWorkflowIds and a
-//     DEDUPED workflows array (two cards on the same default lane collapse to one
-//     workflow entry).
+//   - two boards return their own columns + taskIds
+//   - a null-boardId task falls back to the default board
+//   - the team summary resolves agent names via the engine's AgentStore
+//   - move-to-board re-homes the task, lands it in the target board's todo,
+//     aborts the active session (releaseExecutionAgentBindings), and records the
+//     move in the task log
 
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import express from "express";
@@ -17,49 +16,10 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { TaskStore } from "@fusion/core";
-import type { WorkflowIr } from "@fusion/core";
 import { createApiRoutes } from "../../routes.js";
-import { buildBoardWorkflowsPayload } from "../board-workflows.js";
 import { request as REQUEST } from "../../test-request.js";
 
-const DEFAULT_LANE = "builtin:coding";
-
-/** Resolve the per-task workflow id the way the payload builder does, straight
- *  from each task's selection — the ground truth the route must reproduce. */
-async function expectedTaskWorkflowIds(store: TaskStore, taskIds: string[]): Promise<Record<string, string>> {
-  const out: Record<string, string> = {};
-  for (const id of taskIds) {
-    let workflowId = DEFAULT_LANE;
-    try {
-      const sel = store.getTaskWorkflowSelection(id);
-      if (sel?.workflowId) workflowId = sel.workflowId;
-    } catch {
-      workflowId = DEFAULT_LANE;
-    }
-    out[id] = workflowId;
-  }
-  return out;
-}
-
-/** A linear v2 custom workflow so it both saves and selects cleanly. */
-function customV2(name: string): WorkflowIr {
-  return {
-    version: "v2",
-    name,
-    columns: [
-      { id: "c-intake", name: "Intake", traits: [{ trait: "intake" }] },
-      { id: "c-run", name: "Run", traits: [{ trait: "wip", config: { limit: 5 } }] },
-      { id: "c-done", name: "Done", traits: [{ trait: "complete" }] },
-    ],
-    nodes: [
-      { id: "start", kind: "start", column: "c-intake" },
-      { id: "end", kind: "end", column: "c-done" },
-    ],
-    edges: [{ from: "start", to: "end" }],
-  } as WorkflowIr;
-}
-
-describe("GET /tasks/board-workflows", () => {
+describe("GET /tasks/board-workflows (board-scoped)", () => {
   let store: TaskStore;
   let rootDir: string;
   let globalDir: string;
@@ -70,6 +30,9 @@ describe("GET /tasks/board-workflows", () => {
     globalDir = mkdtempSync(join(tmpdir(), "bw-route-global-"));
     store = new TaskStore(rootDir, globalDir, { inMemoryDb: true });
     await store.init();
+    // Watch so the non-watching slim-list memo (store.ts ~L5279) is disabled and
+    // the route reads a fresh task list right after we mutate it.
+    await store.watch();
 
     app = express();
     app.use(express.json());
@@ -83,123 +46,149 @@ describe("GET /tasks/board-workflows", () => {
   });
 
   const get = (path: string) => REQUEST(app, "GET", path);
+  const postTo = (a: express.Express, path: string, body?: unknown) =>
+    REQUEST(a, "POST", path, body === undefined ? undefined : JSON.stringify(body), {
+      "content-type": "application/json",
+    });
 
-  it("flag OFF → { flagEnabled: false } legacy shape", async () => {
-    // Even with tasks on the board, flag-OFF returns the empty single-lane shape.
-    await store.createTask({ description: "card" });
-    const res = await get("/api/tasks/board-workflows");
-    expect(res.status).toBe(200);
-    const body = res.body as { flagEnabled: boolean; workflows: unknown[]; taskWorkflowIds: Record<string, string> };
-    expect(body.flagEnabled).toBe(false);
-    expect(body.workflows).toEqual([]);
-    expect(body.taskWorkflowIds).toEqual({});
-  });
+  /** The v114 migration seeds a default "Board 1" (builtin:coding) on init. */
+  function defaultBoardId(): string {
+    const b = store.getBoardStore().getDefaultBoard();
+    if (!b) throw new Error("expected a seeded default board");
+    return b.id;
+  }
 
-  it("flag ON, mixed default + custom → correct taskWorkflowIds and deduped workflows", async () => {
-    await store.updateGlobalSettings({ experimentalFeatures: { workflowColumns: true } });
+  function homeTaskOnBoard(taskId: string, boardId: string): void {
+    store.setTaskBoard(taskId, boardId);
+  }
 
-    const custom = await store.createWorkflowDefinition({ name: "Custom", ir: customV2("custom") });
+  it("returns two boards each with their own columns and taskIds; null-boardId homes on the default", async () => {
+    const defId = defaultBoardId();
+    const content = store.getBoardStore().createBoard({ name: "Content", workflowId: "builtin:coding", ordering: 1 });
 
-    // Two cards on the implicit default lane (no explicit selection) + one card
-    // selecting the custom workflow.
-    const a = await store.createTask({ description: "default-a" });
-    const b = await store.createTask({ description: "default-b" });
-    const c = await store.createTask({ description: "custom-c" });
-    await store.selectTaskWorkflowAndReconcile(c.id, custom.id);
+    const a = await store.createTask({ description: "default-a" }); // null boardId → default
+    const b = await store.createTask({ description: "content-b" });
+    homeTaskOnBoard(b.id, content.id);
 
     const res = await get("/api/tasks/board-workflows");
     expect(res.status).toBe(200);
     const body = res.body as {
-      flagEnabled: boolean;
-      defaultWorkflowId: string;
-      workflows: Array<{ id: string; name: string; columns: unknown[] }>;
-      taskWorkflowIds: Record<string, string>;
+      boards: Array<{ id: string; name: string }>;
+      boardPayloads: Record<string, { columns: Array<{ id: string }>; team: Record<string, unknown>; taskIds: string[] }>;
+      defaultBoardId: string | null;
     };
 
-    expect(body.flagEnabled).toBe(true);
-    expect(body.defaultWorkflowId).toBe(DEFAULT_LANE);
+    expect(body.defaultBoardId).toBe(defId);
+    expect(body.boards.map((x) => x.id).sort()).toEqual([defId, content.id].sort());
 
-    // taskWorkflowIds: the two default cards map to the default lane, the custom
-    // card maps to its workflow id. We compute the expected map directly from
-    // each task's selection so the assertion is independent of the route's
-    // task-listing path (see the stale-slim-memo note below).
-    const expectedMap = await expectedTaskWorkflowIds(store, [a.id, b.id, c.id]);
-    expect(expectedMap[a.id]).toBe(DEFAULT_LANE);
-    expect(expectedMap[b.id]).toBe(DEFAULT_LANE);
-    expect(expectedMap[c.id]).toBe(custom.id);
+    // Each board carries its own ordered columns.
+    expect(body.boardPayloads[defId].columns.length).toBeGreaterThan(0);
+    expect(body.boardPayloads[content.id].columns.length).toBeGreaterThan(0);
 
-    // The route's own taskWorkflowIds must agree with the per-task selection
-    // truth for every task it actually enumerates. This is the integration check
-    // that the route keys the map by task id and resolves the right workflow.
-    for (const [taskId, workflowId] of Object.entries(body.taskWorkflowIds)) {
-      expect(expectedMap[taskId]).toBe(workflowId);
-    }
-    // The custom-workflow card, when enumerated, is mapped to its workflow id.
-    if (body.taskWorkflowIds[c.id] !== undefined) {
-      expect(body.taskWorkflowIds[c.id]).toBe(custom.id);
-    }
-
-    // workflows is DEDUPED: two default-lane cards collapse to a single default
-    // entry. The default lane is always describable; when the custom card is
-    // enumerated its lane is added exactly once (no duplicate entries).
-    const ids = body.workflows.map((w) => w.id);
-    expect(new Set(ids).size).toBe(ids.length); // no duplicate workflow entries
-    expect(ids).toContain(DEFAULT_LANE);
-    // Each described workflow carries its ordered columns.
-    const defaultLane = body.workflows.find((w) => w.id === DEFAULT_LANE);
-    expect(Array.isArray(defaultLane?.columns)).toBe(true);
-    expect((defaultLane?.columns.length ?? 0)).toBeGreaterThan(0);
+    // The null-boardId task homes on the default; the explicit one on Content.
+    expect(body.boardPayloads[defId].taskIds).toContain(a.id);
+    expect(body.boardPayloads[defId].taskIds).not.toContain(b.id);
+    expect(body.boardPayloads[content.id].taskIds).toEqual([b.id]);
   });
 
-  it("payload contract (flag ON): mixed default + custom ids → full taskWorkflowIds + deduped workflows", async () => {
-    // Drives buildBoardWorkflowsPayload with the explicit task-id set the route
-    // would pass, isolating the payload contract from the route's slim-list read
-    // (which is subject to the stale-memo bug captured in the next test). This is
-    // the deterministic proof of the deduped, correctly-keyed payload.
-    await store.updateGlobalSettings({ experimentalFeatures: { workflowColumns: true } });
-    const custom = await store.createWorkflowDefinition({ name: "Custom", ir: customV2("custom") });
-    const a = await store.createTask({ description: "default-a" });
-    const b = await store.createTask({ description: "default-b" });
-    const c = await store.createTask({ description: "custom-c" });
-    await store.selectTaskWorkflowAndReconcile(c.id, custom.id);
+  it("resolves the team summary to agent names via the engine's AgentStore", async () => {
+    // A company-template board carries column-agent bindings; resolve their names
+    // through a stub engine AgentStore injected as `options.engine`.
+    const { COMPANY_BOARD_TEMPLATE_IR } = await import("@fusion/core");
+    // Stamp a binding onto the company template's first role column.
+    const ir = JSON.parse(JSON.stringify(COMPANY_BOARD_TEMPLATE_IR)) as {
+      columns: Array<{ id: string; role?: string; agent?: { agentId: string; mode: string } }>;
+    };
+    const roleCol = ir.columns.find((c) => c.role);
+    if (!roleCol) throw new Error("expected a role column in the company template");
+    roleCol.agent = { agentId: "agent-lead", mode: "defer" };
 
-    const payload = await buildBoardWorkflowsPayload(store, [a.id, b.id, c.id]);
-    expect(payload.flagEnabled).toBe(true);
-    expect(payload.defaultWorkflowId).toBe(DEFAULT_LANE);
-    expect(payload.taskWorkflowIds).toEqual({
-      [a.id]: DEFAULT_LANE,
-      [b.id]: DEFAULT_LANE,
-      [c.id]: custom.id,
-    });
-    const ids = payload.workflows.map((w) => w.id);
-    expect(new Set(ids).size).toBe(ids.length); // deduped
-    expect(ids.sort()).toEqual([DEFAULT_LANE, custom.id].sort());
-    const customLane = payload.workflows.find((w) => w.id === custom.id);
-    expect(customLane?.name).toBe("Custom");
-    expect((customLane?.columns.length ?? 0)).toBeGreaterThan(0);
+    const def = await store.createWorkflowDefinition({ name: "Company", ir: ir as never });
+    const board = store.getBoardStore().createBoard({ name: "Company Board", workflowId: def.id, ordering: 2 });
+
+    const agentStore = {
+      async getAgent(id: string) {
+        return id === "agent-lead" ? { id, name: "Ada Lead" } : null;
+      },
+    };
+    const fakeEngine = {
+      getTaskStore: () => store,
+      getAgentStore: () => agentStore,
+    };
+
+    const engApp = express();
+    engApp.use(express.json());
+    engApp.use("/api", createApiRoutes(store, { engine: fakeEngine as never }));
+
+    const res = await REQUEST(engApp, "GET", "/api/tasks/board-workflows");
+    expect(res.status).toBe(200);
+    const body = res.body as {
+      boardPayloads: Record<string, { team: Record<string, { agentId: string; agentName: string }> }>;
+    };
+    const team = body.boardPayloads[board.id].team;
+    expect(team[roleCol.id]).toEqual({ agentId: "agent-lead", agentName: "Ada Lead" });
   });
 
-  it("REGRESSION (FN-1414 finding): non-watching store + stale slim memo → route reports empty taskWorkflowIds for a populated board", async () => {
-    // PRODUCTION BUG CAPTURED (report only — prod owned by another agent):
-    // TaskStore.listTasks({ slim: true }) is memoized for 2.5s whenever the store
-    // is NOT watching (startupSlimListMemo, store.ts ~L4902). The board-workflows
-    // route reads listTasks({ slim: true, includeArchived: false }); if an earlier
-    // slim read memoized an empty/stale list, the route returns an empty
-    // taskWorkflowIds even though the board has cards. A watching dashboard store
-    // disables the memo, so this primarily bites non-watching contexts (and the
-    // 2.5s window right after boot). We assert the OBSERVED behavior so the suite
-    // stays green and the discrepancy is documented.
-    await store.updateGlobalSettings({ experimentalFeatures: { workflowColumns: true } });
-    await store.createTask({ description: "card" });
-    // Prime the slim memo with the current (single-card) snapshot, then add a card.
-    const slimBefore = await store.listTasks({ slim: true, includeArchived: false });
-    await store.createTask({ description: "card-2" });
-    const slimAfter = await store.listTasks({ slim: true, includeArchived: false });
-    const fullAfter = await store.listTasks({ includeArchived: false });
+  it("move-to-board re-homes the task, lands it in the target todo, aborts the session, and logs the move", async () => {
+    const defId = defaultBoardId();
+    const content = store.getBoardStore().createBoard({ name: "Content", workflowId: "builtin:coding", ordering: 1 });
 
-    // The non-slim read sees both cards; the memoized slim read is stale.
-    expect(fullAfter.length).toBe(2);
-    expect(slimAfter.length).toBe(slimBefore.length); // stale — second card not visible
-    expect(slimAfter.length).toBeLessThan(fullAfter.length);
+    const task = await store.createTask({ description: "movable" });
+    // It starts on the default board (null boardId resolves there).
+
+    // Spy AgentStore so we can assert the session abort path runs.
+    let listAgentsCalled = false;
+    const agentStore = {
+      async listAgents() {
+        listAgentsCalled = true;
+        return [] as Array<{ id: string; taskId?: string }>;
+      },
+      async syncExecutionTaskLink() {},
+      async deleteAgent() {},
+      async getAgent() {
+        return null;
+      },
+    };
+    const fakeEngine = { getTaskStore: () => store, getAgentStore: () => agentStore };
+
+    const engApp = express();
+    engApp.use(express.json());
+    engApp.use("/api", createApiRoutes(store, { engine: fakeEngine as never }));
+
+    const res = await postTo(engApp, `/api/tasks/${task.id}/move-to-board`, { boardId: content.id });
+    expect(res.status).toBe(200);
+
+    // Re-homed onto the target board, in its todo.
+    expect(store.getTaskBoardId(task.id)).toBe(content.id);
+    const moved = await store.getTask(task.id);
+    expect(moved.column).toBe("todo");
+
+    // Session abort ran (listAgents consulted).
+    expect(listAgentsCalled).toBe(true);
+
+    // The move is recorded in the task log.
+    const full = await store.getTask(task.id);
+    const logText = JSON.stringify(full.log ?? []);
+    expect(logText).toContain("moved to board");
+
+    // Moving to a board it already lives on is a no-op (still resolves 200).
+    const noop = await postTo(engApp, `/api/tasks/${task.id}/move-to-board`, { boardId: content.id });
+    expect(noop.status).toBe(200);
+
+    // A missing board → 404, and the message names the BOARD (not the task) so
+    // the board-not-found branch is honestly differentiated from task-not-found.
+    const missing = await postTo(engApp, `/api/tasks/${task.id}/move-to-board`, { boardId: "gone" });
+    expect(missing.status).toBe(404);
+    expect(missing.body.error).toMatch(/Board/i);
+    expect(missing.body.error).not.toMatch(/Task/i);
+
+    // A missing task → 404, and the message names the TASK.
+    const missingTask = await postTo(engApp, `/api/tasks/does-not-exist/move-to-board`, { boardId: content.id });
+    expect(missingTask.status).toBe(404);
+    expect(missingTask.body.error).toMatch(/Task/i);
+
+    // Missing boardId → 400.
+    const bad = await postTo(engApp, `/api/tasks/${task.id}/move-to-board`, {});
+    expect(bad.status).toBe(400);
   });
 });

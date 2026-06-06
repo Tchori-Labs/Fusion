@@ -241,7 +241,15 @@ export function emitApprovalSseEvent(event: ApprovalSseEventType, payload: unkno
  * update / delete. Board.tsx listens for `workflow:updated` to invalidate and
  * re-fetch board-workflows when a definition (its lanes / column traits) changes.
  */
-export type WorkflowSseEventType = "workflow:created" | "workflow:updated" | "workflow:deleted";
+export type WorkflowSseEventType =
+  | "workflow:created"
+  | "workflow:updated"
+  | "workflow:deleted"
+  // U12: board lifecycle events ride the same SSE forwarder so the dashboard
+  // Board view invalidates its board-scoped payload on board create/convert.
+  | "board:created"
+  | "board:updated"
+  | "board:deleted";
 
 type WorkflowSseListener = (event: WorkflowSseEventType, payload: unknown, projectId?: string) => void;
 
@@ -251,6 +259,19 @@ export function emitWorkflowSseEvent(event: WorkflowSseEventType, payload: unkno
   for (const listener of workflowSseListeners) {
     listener(event, payload, projectId);
   }
+}
+
+/**
+ * Register a workflow/board SSE listener and return a disposer. The SSE stream
+ * handler registers its own forwarder internally; this exported seam lets other
+ * subscribers (and tests) observe `workflow:*` / `board:*` emissions without an
+ * open HTTP stream. Call the returned function to unsubscribe.
+ */
+export function addWorkflowSseListener(listener: WorkflowSseListener): () => void {
+  workflowSseListeners.add(listener);
+  return () => {
+    workflowSseListeners.delete(listener);
+  };
 }
 
 /**

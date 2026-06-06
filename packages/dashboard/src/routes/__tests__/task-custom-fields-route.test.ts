@@ -124,6 +124,20 @@ describe("custom task fields routes (U13/KTD-14)", () => {
     expect(res.status).toBe(400);
   });
 
+  it("PATCH custom-fields rejects a reserved __-prefixed key with 400 reserved-key", async () => {
+    const { task } = await taskWithFields();
+    const res = await patch(`/api/tasks/${task.id}/custom-fields`, {
+      customFields: { __lfgMode: true },
+    });
+    expect(res.status).toBe(400);
+    const details = (res.body as { details?: { fieldId?: string; code?: string } }).details;
+    expect(details?.fieldId).toBe("__lfgMode");
+    expect(details?.code).toBe("reserved-key");
+    // The reserved key must not have been written to the task.
+    const after = await store.getTask(task.id);
+    expect((after.customFields ?? {}).__lfgMode).toBeUndefined();
+  });
+
   it("PATCH custom-fields deletes a value via null", async () => {
     const { task } = await taskWithFields();
     await patch(`/api/tasks/${task.id}/custom-fields`, { customFields: { owner: "alice" } });
@@ -133,28 +147,31 @@ describe("custom task fields routes (U13/KTD-14)", () => {
     expect(body.customFields.owner).toBeUndefined();
   });
 
-  it("board-workflows payload (flag ON) carries the workflow's fields declaration", async () => {
-    await store.updateGlobalSettings({ experimentalFeatures: { workflowColumns: true } });
+  it("board-workflows payload carries the board workflow's fields declaration (U10)", async () => {
     const { wf, task } = await taskWithFields();
-    // Drive the payload builder with the explicit task-id set the route would
-    // pass — isolates the fields pass-through from the route's slim-list read
-    // (subject to the known startup-slim-memo staleness, see board-workflows-route.test).
-    const payload = await buildBoardWorkflowsPayload(store, [task.id]);
-    expect(payload.flagEnabled).toBe(true);
-    const fielded = payload.workflows.find((w) => w.id === wf.id) as
-      | { id: string; fields?: Array<{ id: string; type: string; render?: { placement?: string } }> }
-      | undefined;
-    expect(fielded?.fields).toBeDefined();
+    // Home the task on a board wrapping the fielded workflow; the fields ride
+    // on that board's payload (the field-defs source is board-scoped now).
+    const board = store.getBoardStore().createBoard({ name: "Fielded board", workflowId: wf.id });
+    store.setTaskBoard(task.id, board.id);
+    const payload = await buildBoardWorkflowsPayload(store, [{ id: task.id, boardId: board.id }]);
+    const fielded = payload.boardPayloads[board.id];
+    expect(fielded?.taskIds).toEqual([task.id]);
     expect(fielded?.fields?.map((f) => f.id).sort()).toEqual(["owner", "severity"]);
     const severity = fielded?.fields?.find((f) => f.id === "severity");
     expect(severity?.render?.placement).toBe("card");
+    // A board with a field-less workflow carries no fields key.
+    const defaultPayload = payload.defaultBoardId
+      ? payload.boardPayloads[payload.defaultBoardId]
+      : undefined;
+    expect(defaultPayload?.fields).toBeUndefined();
   });
 
-  it("GET /tasks/board-workflows route returns 200 with flagEnabled true", async () => {
-    await store.updateGlobalSettings({ experimentalFeatures: { workflowColumns: true } });
+  it("GET /tasks/board-workflows route returns 200 with the board-scoped shape", async () => {
     await taskWithFields();
     const res = await get("/api/tasks/board-workflows");
     expect(res.status).toBe(200);
-    expect((res.body as { flagEnabled: boolean }).flagEnabled).toBe(true);
+    const body = res.body as { boards: unknown[]; boardPayloads: Record<string, unknown>; defaultBoardId: string | null };
+    expect(Array.isArray(body.boards)).toBe(true);
+    expect(body.boardPayloads).toBeDefined();
   });
 });
