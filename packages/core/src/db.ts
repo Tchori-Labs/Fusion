@@ -149,7 +149,11 @@ export function probeFts5(db: DatabaseSync): boolean {
 
 // ── Schema Definition ────────────────────────────────────────────────
 
-const SCHEMA_VERSION = 113;
+const SCHEMA_VERSION = 114;
+
+const TASKS_FTS_AUTOMERGE = 8;
+const TASKS_FTS_CRISISMERGE = 16;
+const TASKS_FTS_MERGE_PAGES = 16;
 
 export { SCHEMA_VERSION };
 
@@ -1655,6 +1659,48 @@ export class Database {
     return this._fts5Available;
   }
 
+  private getTaskFtsTriggerParts(): {
+    updateColumns: string;
+    oldTitle: string;
+    newTitle: string;
+    whenClause: string;
+    reinsertWhere: string;
+  } {
+    const hasTaskTitle = this.hasColumn("tasks", "title");
+    const hasDeletedAt = this.hasColumn("tasks", "deletedAt");
+    const updateColumns = hasTaskTitle
+      ? hasDeletedAt ? "id, title, description, comments, deletedAt" : "id, title, description, comments"
+      : hasDeletedAt ? "id, description, comments, deletedAt" : "id, description, comments";
+    const oldTitle = hasTaskTitle ? "COALESCE(old.title, '')" : "''";
+    const newTitle = hasTaskTitle ? "COALESCE(new.title, '')" : "''";
+    const whenChecks = [
+      "old.id IS NOT new.id",
+      hasTaskTitle ? "old.title IS NOT new.title" : "0",
+      "old.description IS NOT new.description",
+      "old.comments IS NOT new.comments",
+      hasDeletedAt ? "old.deletedAt IS NOT new.deletedAt" : "0",
+    ].join(" OR\n          ");
+
+    return {
+      updateColumns,
+      oldTitle,
+      newTitle,
+      whenClause: `WHEN (\n          ${whenChecks}\n        ) `,
+      reinsertWhere: hasDeletedAt ? "new.deletedAt IS NULL" : "1 = 1",
+    };
+  }
+
+  private configureTaskFts5(): void {
+    if (!this.tableExists("tasks_fts")) {
+      return;
+    }
+    // Per https://www.sqlite.org/fts5.html, lower automerge/crisismerge
+    // bounds keep segment counts from ballooning under legitimate text edits
+    // without forcing every write onto the heaviest optimize path.
+    this.db.exec(`INSERT INTO tasks_fts(tasks_fts, rank) VALUES('automerge', ${TASKS_FTS_AUTOMERGE})`);
+    this.db.exec(`INSERT INTO tasks_fts(tasks_fts, rank) VALUES('crisismerge', ${TASKS_FTS_CRISISMERGE})`);
+  }
+
   /**
    * Rebuild the task FTS5 index and maintenance triggers from scratch.
    * Returns false when FTS5 is unavailable in this runtime.
@@ -1681,8 +1727,8 @@ export class Database {
         )
       `);
 
-      const hasTaskTitle = this.hasColumn("tasks", "title");
       const hasDeletedAt = this.hasColumn("tasks", "deletedAt");
+      const { updateColumns, oldTitle, newTitle, whenClause, reinsertWhere } = this.getTaskFtsTriggerParts();
 
       this.db.exec(`
         CREATE TRIGGER IF NOT EXISTS tasks_fts_ai AFTER INSERT ON tasks
@@ -1692,19 +1738,14 @@ export class Database {
         END
       `);
 
-      const updateColumns = hasTaskTitle
-        ? hasDeletedAt ? "id, title, description, comments, deletedAt" : "id, title, description, comments"
-        : hasDeletedAt ? "id, description, comments, deletedAt" : "id, description, comments";
-      const oldTitle = hasTaskTitle ? "COALESCE(old.title, '')" : "''";
-      const newTitle = hasTaskTitle ? "COALESCE(new.title, '')" : "''";
-
       this.db.exec(`
-        CREATE TRIGGER IF NOT EXISTS tasks_fts_au AFTER UPDATE OF ${updateColumns} ON tasks BEGIN
+        CREATE TRIGGER IF NOT EXISTS tasks_fts_au AFTER UPDATE OF ${updateColumns} ON tasks
+        ${whenClause}BEGIN
           INSERT INTO tasks_fts(tasks_fts, rowid, id, title, description, comments)
             VALUES('delete', old.rowid, old.id, ${oldTitle}, old.description, COALESCE(old.comments, '[]'));
           INSERT INTO tasks_fts(rowid, id, title, description, comments)
             SELECT new.rowid, new.id, ${newTitle}, new.description, COALESCE(new.comments, '[]')
-            WHERE ${hasDeletedAt ? "new.deletedAt IS NULL" : "1 = 1"};
+            WHERE ${reinsertWhere};
         END
       `);
 
@@ -1716,12 +1757,58 @@ export class Database {
         END
       `);
 
+      this.configureTaskFts5();
       this.db.exec("INSERT INTO tasks_fts(tasks_fts) VALUES('rebuild')");
       return true;
     } catch (error) {
       console.warn("[fusion:db] Failed to rebuild FTS5 index", error);
       throw error;
     }
+  }
+
+  /**
+   * Run incremental or full FTS5 compaction.
+   * Returns false when FTS5 is unavailable in this runtime.
+   */
+  optimizeFts5(mode: "optimize" | "merge" = "optimize"): boolean {
+    if (!this._fts5Available) {
+      return false;
+    }
+
+    try {
+      if (mode === "merge") {
+        this.db.exec(`INSERT INTO tasks_fts(tasks_fts, rank) VALUES('merge', ${TASKS_FTS_MERGE_PAGES})`);
+      } else {
+        this.db.exec("INSERT INTO tasks_fts(tasks_fts) VALUES('optimize')");
+      }
+      return true;
+    } catch (error) {
+      if (this.isFts5CorruptionError(error)) {
+        return this.rebuildFts5Index();
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Estimate FTS index bytes using the aggregate size of `tasks_fts_data.block`.
+   * Prefer this over `dbstat` because node:sqlite builds do not guarantee
+   * `SQLITE_ENABLE_DBSTAT_VTAB`, while the shadow table exists anywhere FTS5 does.
+   */
+  getFtsIndexBytes(): number | null {
+    if (!this._fts5Available) {
+      return null;
+    }
+
+    const row = this.db.prepare("SELECT COALESCE(SUM(LENGTH(block)), 0) AS bytes FROM tasks_fts_data").get() as
+      | { bytes?: number }
+      | undefined;
+    return typeof row?.bytes === "number" ? row.bytes : 0;
+  }
+
+  getTaskRowCount(): number {
+    const row = this.db.prepare("SELECT COUNT(*) AS count FROM tasks").get() as { count?: number } | undefined;
+    return typeof row?.count === "number" ? row.count : 0;
   }
 
   /**
@@ -2593,7 +2680,6 @@ export class Database {
         }
 
         // AFTER INSERT trigger - index new tasks
-        const hasTaskTitle = this.hasColumn("tasks", "title");
         const hasDeletedAt = this.hasColumn("tasks", "deletedAt");
         this.db.exec(`
           CREATE TRIGGER IF NOT EXISTS tasks_fts_ai AFTER INSERT ON tasks
@@ -2603,22 +2689,20 @@ export class Database {
           END
         `);
 
-        const updateColumns = hasTaskTitle
-          ? hasDeletedAt ? "id, title, description, comments, deletedAt" : "id, title, description, comments"
-          : hasDeletedAt ? "id, description, comments, deletedAt" : "id, description, comments";
-        const oldTitle = hasTaskTitle ? "COALESCE(old.title, '')" : "''";
-        const newTitle = hasTaskTitle ? "COALESCE(new.title, '')" : "''";
+        const { updateColumns, oldTitle, newTitle, whenClause, reinsertWhere } = this.getTaskFtsTriggerParts();
 
         // AFTER UPDATE trigger - reindex updated tasks (delete old + insert new).
         // Restrict this to searchable columns so log/status churn does not bloat
-        // the FTS index during long-running executor activity.
+        // the FTS index during long-running executor activity, then add a
+        // value-aware WHEN guard so no-op `SET title = title` upserts do not churn.
         this.db.exec(`
-          CREATE TRIGGER IF NOT EXISTS tasks_fts_au AFTER UPDATE OF ${updateColumns} ON tasks BEGIN
+          CREATE TRIGGER IF NOT EXISTS tasks_fts_au AFTER UPDATE OF ${updateColumns} ON tasks
+          ${whenClause}BEGIN
             INSERT INTO tasks_fts(tasks_fts, rowid, id, title, description, comments)
               VALUES('delete', old.rowid, old.id, ${oldTitle}, old.description, COALESCE(old.comments, '[]'));
             INSERT INTO tasks_fts(rowid, id, title, description, comments)
               SELECT new.rowid, new.id, ${newTitle}, new.description, COALESCE(new.comments, '[]')
-              WHERE ${hasDeletedAt ? "new.deletedAt IS NULL" : "1 = 1"};
+              WHERE ${reinsertWhere};
           END
         `);
 
@@ -2630,6 +2714,8 @@ export class Database {
               VALUES('delete', old.rowid, old.id, COALESCE(old.title, ''), old.description, COALESCE(old.comments, '[]'));
           END
         `);
+
+        this.configureTaskFts5();
       });
     }
 
@@ -3053,23 +3139,21 @@ export class Database {
           return;
         }
         const hasTaskTitle = this.hasColumn("tasks", "title");
-        const hasDeletedAt = this.hasColumn("tasks", "deletedAt");
-        const updateColumns = hasTaskTitle
-          ? hasDeletedAt ? "id, title, description, comments, deletedAt" : "id, title, description, comments"
-          : hasDeletedAt ? "id, description, comments, deletedAt" : "id, description, comments";
-        const oldTitle = hasTaskTitle ? "COALESCE(old.title, '')" : "''";
-        const newTitle = hasTaskTitle ? "COALESCE(new.title, '')" : "''";
+        const { updateColumns, oldTitle, newTitle, whenClause, reinsertWhere } = this.getTaskFtsTriggerParts();
 
         this.db.exec(`
           DROP TRIGGER IF EXISTS tasks_fts_au;
-          CREATE TRIGGER tasks_fts_au AFTER UPDATE OF ${updateColumns} ON tasks BEGIN
+          CREATE TRIGGER tasks_fts_au AFTER UPDATE OF ${updateColumns} ON tasks
+          ${whenClause}BEGIN
             INSERT INTO tasks_fts(tasks_fts, rowid, id, title, description, comments)
               VALUES('delete', old.rowid, old.id, ${oldTitle}, old.description, COALESCE(old.comments, '[]'));
             INSERT INTO tasks_fts(rowid, id, title, description, comments)
               SELECT new.rowid, new.id, ${newTitle}, new.description, COALESCE(new.comments, '[]')
-              WHERE ${hasDeletedAt ? "new.deletedAt IS NULL" : "1 = 1"};
+              WHERE ${reinsertWhere};
           END;
         `);
+
+        this.configureTaskFts5();
 
         if (hasTaskTitle) {
           this.db.exec("INSERT INTO tasks_fts(tasks_fts) VALUES('rebuild')");
@@ -4510,6 +4594,30 @@ export class Database {
              WHERE bg.prState IN ('open','merged','closed') AND bg.prNumber IS NOT NULL`,
           )
           .run(now, now);
+      });
+    }
+
+    // Migration 114: FTS5 task index maintenance. Rebuilds the task-update
+    // trigger so no-op searchable-field updates do not rewrite index rows, and
+    // reapplies maintenance tuning on migrated databases.
+    if (version < 114) {
+      this.applyMigration(114, () => {
+        if (!this._fts5Available) {
+          return;
+        }
+        const { updateColumns, oldTitle, newTitle, whenClause, reinsertWhere } = this.getTaskFtsTriggerParts();
+        this.db.exec(`
+          DROP TRIGGER IF EXISTS tasks_fts_au;
+          CREATE TRIGGER tasks_fts_au AFTER UPDATE OF ${updateColumns} ON tasks
+          ${whenClause}BEGIN
+            INSERT INTO tasks_fts(tasks_fts, rowid, id, title, description, comments)
+              VALUES('delete', old.rowid, old.id, ${oldTitle}, old.description, COALESCE(old.comments, '[]'));
+            INSERT INTO tasks_fts(rowid, id, title, description, comments)
+              SELECT new.rowid, new.id, ${newTitle}, new.description, COALESCE(new.comments, '[]')
+              WHERE ${reinsertWhere};
+          END;
+        `);
+        this.configureTaskFts5();
       });
     }
 

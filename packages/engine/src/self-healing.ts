@@ -71,6 +71,13 @@ const yieldEventLoop = (): Promise<void> => new Promise((resolve) => setImmediat
 const DONE_TASK_INTEGRITY_SWEEP_LIMIT = 50;
 const BOARD_STALL_NOTIFICATION_COOLDOWN_MS = 60 * 60_000;
 const DB_CORRUPTION_NOTIFICATION_COOLDOWN_MS = 60 * 60 * 1000;
+const FTS_MAINTENANCE_MERGE_CADENCE_TICKS = 1;
+const FTS_MAINTENANCE_OPTIMIZE_CADENCE_TICKS = 4;
+// Live pathology peaked around 775 KB/task (~96 MB for ~120 tasks), while a
+// rebuilt healthy index was ~0.1 MB. Keep the steady-state budget generous but
+// bounded so sustained text churn heals before segment growth becomes material.
+const FTS_REBUILD_THRESHOLD_BYTES = 32 * 1024 * 1024;
+const FTS_REBUILD_BYTES_PER_TASK = 1 * 1024 * 1024;
 export const STALE_ACTIVE_BRANCH_EXECUTION_GRACE_MS = 10 * 60_000;
 export const COMPLETION_HANDOFF_LIMBO_GRACE_MS = 5 * 60_000;
 export const MAX_COMPLETION_HANDOFF_LIMBO_RECOVERIES = 3;
@@ -1716,6 +1723,7 @@ export class SelfHealingManager {
             log.log(`Maintenance batch 1 step "prune-agent-log-files" succeeded — files=${prunedFiles} entries=${prunedEntries} bytes=${freedBytes}`);
           },
         },
+        { name: "fts-maintenance", fn: () => this.maintainTaskFts() },
         { name: "checkpoint-wal", fn: () => Promise.resolve(this.checkpointWal()) },
         { name: "enforce-worktree-cap", fn: () => this.enforceWorktreeCap() },
       ];
@@ -8634,6 +8642,68 @@ export class SelfHealingManager {
       const errorMessage = err instanceof Error ? err.message : String(err);
       log.error(`Orphaned branch cleanup failed: ${errorMessage}`);
       return 0;
+    }
+  }
+
+  private async maintainTaskFts(): Promise<void> {
+    if (!this.store.fts5Available) {
+      log.log('Maintenance batch 1 step "fts-maintenance" skipped — FTS5 unavailable');
+      return;
+    }
+
+    const bytesBefore = this.store.getFtsIndexBytes();
+    if (bytesBefore === null) {
+      log.log('Maintenance batch 1 step "fts-maintenance" skipped — FTS shadow tables unavailable');
+      return;
+    }
+
+    const taskCount = this.store.getTaskRowCount();
+    const relativeThresholdBytes = taskCount > 0 ? taskCount * FTS_REBUILD_BYTES_PER_TASK : null;
+    const shouldRebuild = bytesBefore >= FTS_REBUILD_THRESHOLD_BYTES
+      || (relativeThresholdBytes !== null && bytesBefore > relativeThresholdBytes);
+    const shouldOptimize = !shouldRebuild
+      && FTS_MAINTENANCE_OPTIMIZE_CADENCE_TICKS > 0
+      && this.maintenanceTickCounter % FTS_MAINTENANCE_OPTIMIZE_CADENCE_TICKS === 0;
+    const mode = shouldRebuild ? "rebuild" : shouldOptimize ? "optimize" : "merge";
+
+    if (mode === "merge"
+      && FTS_MAINTENANCE_MERGE_CADENCE_TICKS > 1
+      && this.maintenanceTickCounter % FTS_MAINTENANCE_MERGE_CADENCE_TICKS !== 0) {
+      log.log('Maintenance batch 1 step "fts-maintenance" skipped — merge cadence not due');
+      return;
+    }
+
+    let rebuilt = false;
+    if (mode === "rebuild") {
+      rebuilt = this.store.getDatabase().rebuildFts5Index();
+    } else {
+      this.store.optimizeFts5(mode);
+    }
+
+    const bytesAfter = this.store.getFtsIndexBytes();
+    log.log(`Maintenance batch 1 step "fts-maintenance" ${mode}: ${bytesBefore} → ${bytesAfter ?? "unknown"} bytes (tasks=${taskCount})`);
+
+    try {
+      await createRunAuditor(this.store, {
+        runId: generateSyntheticRunId("self-heal-fts-maintenance", "tasks_fts"),
+        agentId: "self-healing",
+        phase: "maintenance-fts",
+      }).database({
+        type: "task:fts-maintenance" as DatabaseMutationType,
+        target: "tasks_fts",
+        metadata: {
+          mode,
+          bytesBefore,
+          bytesAfter,
+          taskCount,
+          rebuilt,
+          absoluteThresholdBytes: FTS_REBUILD_THRESHOLD_BYTES,
+          relativeThresholdBytes,
+        },
+      });
+    } catch (err: unknown) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      log.warn(`Failed to write task:fts-maintenance run-audit event: ${errorMessage}`);
     }
   }
 

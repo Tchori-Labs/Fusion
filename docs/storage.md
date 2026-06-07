@@ -136,6 +136,20 @@ Important execution nuance:
   - done tasks: prefer `mergeDetails.landedFiles`
   - in-progress/in-review (or legacy pre-FN-4646 tasks): fall back to `task.modifiedFiles`
 
+## FTS5 task-index maintenance (FN-5943)
+
+- Live task search uses the `tasks_fts` external-content FTS5 table in `fusion.db`; the archive log uses a separate `archived_tasks_fts` table in `archive.db`.
+- `tasks_fts_au` is value-aware: even though hot task writes still upsert full rows, the trigger only fires when indexed text actually changes (`id`, `title`, `description`, `comments`, `deletedAt`). Status/step/worktree churn no longer rewrites the FTS row on every update.
+- `Database.getFtsIndexBytes()` measures index size via `SELECT SUM(LENGTH(block)) FROM tasks_fts_data`. Fusion intentionally does **not** rely on `dbstat`, because node:sqlite builds do not guarantee `SQLITE_ENABLE_DBSTAT_VTAB`.
+- `SelfHealingManager` Batch 1 now runs `fts-maintenance` when `fts5Available === true`:
+  - every maintenance tick: incremental `merge` compaction
+  - every 4th maintenance tick: heavier `optimize`
+  - immediate full `rebuild` when `tasks_fts` exceeds either `32 MiB` absolute or `1 MiB × live task count`
+- Each maintenance pass emits run-audit telemetry with `mutationType: "task:fts-maintenance"` and `metadata` including `mode`, `bytesBefore`, `bytesAfter`, `taskCount`, `rebuilt`, and the threshold values.
+- `rebuildFts5Index()` and migration 103 also set conservative FTS5 merge policy (`automerge=8`, `crisismerge=16`) so legitimate text edits merge segments sooner without forcing the heaviest optimize path on every write.
+- `archived_tasks_fts` is intentionally **not** compacted by this task. The archive DB is effectively append-only for completed tasks, so it does not see the same constant-update churn as the live board; archive FTS compaction is deferred to a follow-up if archive bloat is observed.
+- Separate attached-DB recommendation: **defer** moving `tasks_fts*` into a dedicated attached SQLite file. It would isolate FTS bloat/corruption from the main DB, but today it would complicate cross-DB joins in `searchTasks`, widen transaction/backup/checkpoint coordination, and add new multi-instance/polling failure modes on a path that is now bounded by guarded triggers + maintenance. Revisit only if live-main-DB FTS size or corruption remains operationally significant after FN-5943.
+
 ## SQLite write-path lock recovery (FN-4042 / FN-4083)
 
 - Every disk-backed SQLite connection that Fusion opens for project storage (`fusion.db`), the central registry (`fusion-central.db`), archives (`archive.db`), and worktree hydration explicitly sets `PRAGMA busy_timeout = 5000` and `PRAGMA journal_mode = WAL` at connection open time before write work begins.

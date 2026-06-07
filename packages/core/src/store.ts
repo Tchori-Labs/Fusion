@@ -14430,6 +14430,22 @@ ${stepsSection}`;
     this.secretsStore = null;
   }
 
+  get fts5Available(): boolean {
+    return this.db.fts5Available;
+  }
+
+  optimizeFts5(mode?: "optimize" | "merge"): boolean {
+    return this.db.optimizeFts5(mode);
+  }
+
+  getFtsIndexBytes(): number | null {
+    return this.db.getFtsIndexBytes();
+  }
+
+  getTaskRowCount(): number {
+    return this.db.getTaskRowCount();
+  }
+
   /**
    * Run a WAL checkpoint and return checkpoint stats.
    *

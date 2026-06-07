@@ -38,7 +38,11 @@ CREATE TRIGGER IF NOT EXISTS archived_tasks_fts_ai AFTER INSERT ON archived_task
   VALUES (new.rowid, new.id, COALESCE(new.title, ''), new.description, COALESCE(new.comments, '[]'));
 END;
 
-CREATE TRIGGER IF NOT EXISTS archived_tasks_fts_au AFTER UPDATE OF id, title, description, comments ON archived_tasks BEGIN
+CREATE TRIGGER IF NOT EXISTS archived_tasks_fts_au AFTER UPDATE OF id, title, description, comments ON archived_tasks
+WHEN (
+  old.id IS NOT new.id OR old.title IS NOT new.title
+  OR old.description IS NOT new.description OR old.comments IS NOT new.comments
+) BEGIN
   INSERT INTO archived_tasks_fts(archived_tasks_fts, rowid, id, title, description, comments)
     VALUES('delete', old.rowid, old.id, COALESCE(old.title, ''), old.description, COALESCE(old.comments, '[]'));
   INSERT INTO archived_tasks_fts(rowid, id, title, description, comments)

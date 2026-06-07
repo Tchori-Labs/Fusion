@@ -981,6 +981,39 @@ describe("searchTasks", () => {
 
     expect(results.length).toBeGreaterThanOrEqual(0); // Should not throw
   });
+
+  it("keeps search correctness across hyphenated tokens, null text fields, soft delete, restore, and compaction", async () => {
+    const hyphenTask = await store.createTask({ title: "release-note-guard", description: "hyphenated task target" });
+    const nullTitleTask = await store.createTask({ description: "null title searchable phrase" });
+    await store.addComment(nullTitleTask.id, "comment-needle text", "tester");
+    (store as any).db.prepare("UPDATE tasks SET comments = NULL WHERE id = ?").run(nullTitleTask.id);
+
+    const hyphenBefore = await store.searchTasks("release-note-guard");
+    expect(hyphenBefore.map((entry) => entry.id)).toContain(hyphenTask.id);
+
+    const nullFieldResults = await store.searchTasks("searchable phrase");
+    expect(nullFieldResults.map((entry) => entry.id)).toContain(nullTitleTask.id);
+
+    await store.deleteTask(hyphenTask.id, { allowResurrection: true });
+    expect((await store.searchTasks("release-note-guard")).map((entry) => entry.id)).not.toContain(hyphenTask.id);
+
+    await store.createTaskWithReservedId(
+      {
+        title: "release-note-guard restored",
+        description: "hyphenated task target",
+        forceResurrect: true,
+      },
+      { taskId: hyphenTask.id },
+    );
+
+    const beforeOptimize = (await store.searchTasks("release-note-guard")).map((entry) => entry.id).sort();
+    expect(beforeOptimize).toContain(hyphenTask.id);
+
+    expect(store.optimizeFts5("optimize")).toBe(store.fts5Available);
+
+    const afterOptimize = (await store.searchTasks("release-note-guard")).map((entry) => entry.id).sort();
+    expect(afterOptimize).toEqual(beforeOptimize);
+  });
 });
 
 
