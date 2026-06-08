@@ -40,7 +40,13 @@
  * ```
  */
 
-import { classifyThrownError, isRetryableError, type EngineError } from "./engine-errors.js";
+import {
+  classifyThrownError,
+  isRetryableError,
+  RateLimitError,
+  TimeoutError,
+  type EngineError,
+} from "./engine-errors.js";
 import { isUsageLimitError } from "./usage-limit-detector.js";
 
 // ── Types ───────────────────────────────────────────────────────────────
@@ -168,7 +174,7 @@ export function cancellableSleep(ms: number, signal?: AbortSignal): Promise<void
  * the AbortController.
  */
 function withTimeout<T>(
-  fn: () => Promise<T>,
+  fn: (signal?: AbortSignal) => Promise<T>,
   timeoutMs: number,
   parentSignal?: AbortSignal,
 ): Promise<T> {
@@ -188,11 +194,12 @@ function withTimeout<T>(
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
-      ac.abort(new Error(`Operation timed out after ${timeoutMs}ms`));
-      reject(new Error(`Operation timed out after ${timeoutMs}ms`));
+      const timeoutErr = new TimeoutError(`Operation timed out after ${timeoutMs}ms`, timeoutMs);
+      ac.abort(timeoutErr);
+      reject(timeoutErr);
     }, timeoutMs);
 
-    fn()
+    fn(ac.signal)
       .then((result) => {
         if (settled) return;
         settled = true;
@@ -229,7 +236,7 @@ function withTimeout<T>(
  * @returns The return value of `fn()`
  */
 export async function withRetry<T>(
-  fn: () => Promise<T>,
+  fn: (signal?: AbortSignal) => Promise<T>,
   options: RetryOptions = {},
 ): Promise<T> {
   const {
@@ -243,9 +250,7 @@ export async function withRetry<T>(
     isRetryable: customIsRetryable,
   } = options;
 
-  const startTime = Date.now();
   let lastError: EngineError | undefined;
-  let retryCount = 0;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     // Check abort before each attempt
@@ -257,14 +262,14 @@ export async function withRetry<T>(
       // Wrap with timeout if configured
       const result = timeoutMs
         ? await withTimeout(fn, timeoutMs, signal)
-        : await fn();
+        : await fn(signal);
       return result;
     } catch (err: unknown) {
       // Classify the error into a structured type
       const classified = classifyThrownError(err);
 
       // Rate-limit errors: never retry locally — re-throw immediately
-      if (isUsageLimitError(classified.message)) {
+      if (classified instanceof RateLimitError || isUsageLimitError(classified.message)) {
         throw classified;
       }
 
@@ -297,8 +302,6 @@ export async function withRetry<T>(
 
       // Sleep with cancellation support
       await cancellableSleep(delay, signal);
-
-      retryCount++;
     }
   }
 
@@ -317,17 +320,14 @@ export async function withRetry<T>(
  * @returns A `RetryResult<T>` with value and retry metadata
  */
 export async function withRetryResult<T>(
-  fn: () => Promise<T>,
+  fn: (signal?: AbortSignal) => Promise<T>,
   options: RetryOptions = {},
 ): Promise<RetryResult<T>> {
   const startTime = Date.now();
   let retries = 0;
 
-  const result = await withRetry<T>(async () => {
-    if (retries > 0) {
-      // We're in a retry — count it
-    }
-    return fn();
+  const result = await withRetry<T>(async (signal) => {
+    return fn(signal);
   }, {
     ...options,
     onRetry: (attempt, delayMs, err) => {

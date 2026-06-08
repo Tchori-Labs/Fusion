@@ -244,7 +244,7 @@ export function classifyThrownError(err: unknown): EngineError {
     return new ServiceUnavailableError(message, undefined, undefined, err instanceof Error ? err : undefined);
   }
 
-  if (/"type":"server_error"|\"code\":\"server_error\"/i.test(message)) {
+  if (/"type":"server_error"|"code":"server_error"/i.test(message)) {
     return new ServiceUnavailableError(message, 500, undefined, err instanceof Error ? err : undefined);
   }
 

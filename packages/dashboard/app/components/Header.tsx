@@ -836,7 +836,7 @@ export function Header({
         )}
 
         {/* Project Selector - Back button when project selected, dropdown when 2+ projects (tablet + desktop) */}
-        {!isMobile && projects.length >= 1 && onViewAllProjects && (
+        {!isMobile && projects.length >= 1 && onViewAllProjects && onSelectProject && (
           <StandaloneProjectSelector
             projects={projects}
             currentProject={currentProject ?? null}

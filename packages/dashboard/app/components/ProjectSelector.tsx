@@ -169,27 +169,31 @@ export function ProjectSelector({
   const displayProjects = useMemo(() => {
     const recentIds = new Set(recentProjects.map((p) => p.id));
     const currentId = currentProject?.id;
+    const hasSearch = Boolean(searchQuery.trim());
 
     // Bookmarked projects (excluding current)
-    const bookmarked = filteredProjects.filter(
-      (p) =>
-        p.id !== currentId &&
-        bookmarkedIds.has(p.id) &&
-        !recentIds.has(p.id)
-    );
+    const bookmarked = hasSearch
+      ? []
+      : filteredProjects.filter(
+          (p) =>
+            p.id !== currentId &&
+            bookmarkedIds.has(p.id) &&
+            !recentIds.has(p.id)
+        );
 
-    // Exclude current, bookmarked, and recent from "others"
+    // Exclude current, bookmarked, and recent from "others" only when those
+    // sections are visible. Search mode surfaces every matching project here.
     const bookmarkedAndRecentIds = new Set([
       ...bookmarked.map((p) => p.id),
-      ...recentIds,
+      ...(hasSearch ? [] : recentIds),
     ]);
     const others = filteredProjects.filter(
       (p) => p.id !== currentId && !bookmarkedAndRecentIds.has(p.id)
     );
 
     return {
-      bookmarked: searchQuery.trim() ? [] : bookmarked,
-      recent: searchQuery.trim() ? [] : recentProjects,
+      bookmarked,
+      recent: hasSearch ? [] : recentProjects,
       others,
     };
   }, [filteredProjects, recentProjects, currentProject, searchQuery, bookmarkedIds]);
@@ -228,13 +232,13 @@ export function ProjectSelector({
 
             if (highlightedIndex < bookmarkedCount) {
               // Select bookmarked project
-              onSelect(displayProjects.bookmarked[highlightedIndex]);
+              onSelect?.(displayProjects.bookmarked[highlightedIndex]);
             } else if (highlightedIndex < bookmarkedCount + recentCount) {
               // Select recent project
-              onSelect(displayProjects.recent[highlightedIndex - bookmarkedCount]);
+              onSelect?.(displayProjects.recent[highlightedIndex - bookmarkedCount]);
             } else if (highlightedIndex < bookmarkedCount + recentCount + othersCount) {
               // Select other project
-              onSelect(displayProjects.others[highlightedIndex - bookmarkedCount - recentCount]);
+              onSelect?.(displayProjects.others[highlightedIndex - bookmarkedCount - recentCount]);
             } else {
               // View All
               onViewAll();
@@ -297,7 +301,7 @@ export function ProjectSelector({
   // Handle project selection
   const handleSelectProject = useCallback(
     (project: ProjectInfo) => {
-      onSelect(project);
+      onSelect?.(project);
       setIsOpen(false);
       setSearchQuery("");
     },

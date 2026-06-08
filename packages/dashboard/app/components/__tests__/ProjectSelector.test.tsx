@@ -193,6 +193,23 @@ describe("ProjectSelector", () => {
     expect(onSelect).toHaveBeenCalledWith(projectTwo);
   });
 
+  it("does not throw when clicking a project without onSelect", () => {
+    render(
+      <ProjectSelector
+        projects={[
+          makeProject({ id: "proj_1", name: "Project One" }),
+          makeProject({ id: "proj_2", name: "Project Two" }),
+        ]}
+        currentProject={makeProject({ id: "proj_1" })}
+        onViewAll={noop}
+      />
+    );
+
+    fireEvent.click(screen.getByTestId("project-selector-trigger"));
+    expect(() => fireEvent.click(screen.getByText("Project Two"))).not.toThrow();
+    expect(screen.queryByTestId("project-selector-dropdown")).toBeNull();
+  });
+
   it("closes dropdown after selection", () => {
     const onSelect = vi.fn();
 
@@ -729,6 +746,53 @@ describe("ProjectSelector", () => {
       fireEvent.change(searchInput, { target: { value: "zzznonexistent" } });
 
       expect(screen.getByTestId("project-selector-no-results")).toBeDefined();
+    });
+
+    it("shows bookmarked projects that match an active search", () => {
+      mockBookmarkedIds = new Set(["proj_2"]);
+
+      render(
+        <ProjectSelector
+          projects={[
+            makeProject({ id: "proj_1", name: "Alpha" }),
+            makeProject({ id: "proj_2", name: "Starred Project" }),
+          ]}
+          currentProject={makeProject({ id: "proj_1" })}
+          onSelect={noop}
+          onViewAll={noop}
+        />
+      );
+
+      fireEvent.click(screen.getByTestId("project-selector-trigger"));
+      fireEvent.change(screen.getByPlaceholderText("Search projects..."), {
+        target: { value: "Starred" },
+      });
+
+      expect(screen.getByText("Starred")).toBeDefined();
+      expect(screen.getByText("Project")).toBeDefined();
+      expect(screen.queryByTestId("project-selector-no-results")).toBeNull();
+    });
+
+    it("does not throw when pressing Enter on a highlighted project without onSelect", async () => {
+      render(
+        <ProjectSelector
+          projects={[
+            makeProject({ id: "proj_1", name: "Alpha" }),
+            makeProject({ id: "proj_2", name: "Beta" }),
+          ]}
+          currentProject={makeProject({ id: "proj_1" })}
+          onViewAll={noop}
+        />
+      );
+
+      fireEvent.click(screen.getByTestId("project-selector-trigger"));
+      const searchInput = screen.getByPlaceholderText("Search projects...");
+      fireEvent.change(searchInput, { target: { value: "Beta" } });
+      await waitFor(() => {
+        expect(screen.getByTestId("project-selector-item-proj_2").className).toContain("highlighted");
+      });
+      expect(() => fireEvent.keyDown(searchInput, { key: "Enter" })).not.toThrow();
+      expect(screen.queryByTestId("project-selector-dropdown")).toBeNull();
     });
 
     it("clear button clears search query", () => {

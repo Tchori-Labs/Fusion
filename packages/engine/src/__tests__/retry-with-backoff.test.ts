@@ -327,6 +327,22 @@ describe("withRetry", () => {
     expect(onRetry).not.toHaveBeenCalled();
   });
 
+  it("does not let a custom retry check override RateLimitError instances", async () => {
+    const fn = vi.fn().mockRejectedValue(new RateLimitError("429"));
+    const onRetry = vi.fn();
+
+    await expect(
+      withRetry(fn, {
+        baseDelayMs: 100,
+        onRetry,
+        isRetryable: () => true,
+      }),
+    ).rejects.toThrow("429");
+
+    expect(fn).toHaveBeenCalledTimes(1);
+    expect(onRetry).not.toHaveBeenCalled();
+  });
+
   it("applies exponential backoff with increasing delays", async () => {
     const fn = vi
       .fn()
@@ -585,6 +601,27 @@ describe("withRetry", () => {
     // Verify the retry was triggered by a timeout classification
     const retryErr = onRetry.mock.calls[0][2];
     expect(retryErr.code).toBe("TIMEOUT");
+  });
+
+  it("passes a per-attempt abort signal that is aborted on timeout", async () => {
+    let attemptSignal: AbortSignal | undefined;
+    const fn = vi.fn((signal?: AbortSignal) => {
+      attemptSignal = signal;
+      return new Promise(() => {});
+    });
+
+    const promise = withRetry(fn, {
+      maxRetries: 0,
+      timeoutMs: 500,
+    });
+    const assertion = expect(promise).rejects.toBeInstanceOf(TimeoutError);
+
+    await vi.advanceTimersByTimeAsync(600);
+
+    await assertion;
+    expect(attemptSignal).toBeInstanceOf(AbortSignal);
+    expect(attemptSignal?.aborted).toBe(true);
+    expect(attemptSignal?.reason).toBeInstanceOf(TimeoutError);
   });
 });
 
