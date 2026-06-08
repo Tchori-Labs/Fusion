@@ -471,10 +471,18 @@ export type DatabaseMutationType =
   | "task:auto-recover-post-done-noncontinuable-wedge-exhausted"
   | "task:auto-recover-worktree-session-exhausted"
   | "task:auto-recover-in-progress-limbo"
+  /** Metadata: { taskId, branch, worktree, checkedOutBy, executionStartedAt, executionAgeMs, graceMs, liveWorktreeBoundBranch, reason } */
+  | "task:auto-recover-in-progress-limbo-no-action"
   | "task:resume-limbo-escalated"
+  /** Metadata: { taskId, branch, worktree, checkedOutBy, executionStartedAt, executionAgeMs, graceMs, liveWorktreeBoundBranch, reason } */
+  | "task:reclaim-self-owned-branch-conflict-no-action"
   | "task:orphan-detected-no-action"
+  /** Metadata: { taskId, lastReason, stuckKillCount, attemptedStuckKillCount, maxStuckKills, checkedOutBy, executionStartedAt, executionAgeMs, graceMs, liveWorktreeBoundBranch } */
+  | "task:stuck-loop-exhausted-no-action"
   /** Metadata: { taskId: string; ignoredStepUpdateCount: number; stuckKillStreak: number; lastReason: "no-progress-churn" } */
   | "task:stuck-no-progress-churn-terminalized"
+  /** Metadata: { taskId, cycleCount, windowMs, lastMoveSource } */
+  | "task:dispatch-oscillation-terminalized"
   | "task:auto-recover-starved-refinement"
   /** Metadata: { rawDiffFileCount: number; attributedFileCount: number; foreignCommitCount: number; foreignCommitShas: string[]; source: string } */
   | "task:worktree-contamination-detected"

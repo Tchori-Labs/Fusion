@@ -181,7 +181,13 @@ describe("settings key parity", () => {
 
   it("keeps task stuck timeout active by default without coupling to workflow step timeout", () => {
     expect(DEFAULT_PROJECT_SETTINGS.taskStuckTimeoutMs).toBe(600_000);
+    expect(DEFAULT_PROJECT_SETTINGS.dispatchOscillationThreshold).toBe(5);
+    expect(DEFAULT_PROJECT_SETTINGS.dispatchOscillationWindowMs).toBe(60_000);
+    expect(DEFAULT_PROJECT_SETTINGS.dispatchOscillationSettleMs).toBe(5_000);
     expect(DEFAULT_PROJECT_SETTINGS.runtimeStopDrainMs).toBe(2_000);
+    expect(isProjectSettingsKey("dispatchOscillationThreshold")).toBe(true);
+    expect(isProjectSettingsKey("dispatchOscillationWindowMs")).toBe(true);
+    expect(isProjectSettingsKey("dispatchOscillationSettleMs")).toBe(true);
     // workflowStepTimeoutMs MOVED to workflow settings (U4) — no longer a project key.
     expect(isProjectSettingsKey("workflowStepTimeoutMs")).toBe(false);
     expect(PROJECT_SETTINGS_KEYS).not.toContain("workflowStepTimeoutMs");

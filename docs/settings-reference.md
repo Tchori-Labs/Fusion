@@ -389,6 +389,9 @@ Default notes:
 | `specStalenessEnabled` | `boolean` | `false` | Enforce automatic re-planning for stale plans. |
 | `specStalenessMaxAgeMs` | `number` | `21600000` | Spec staleness threshold in ms (6 hours). |
 | `taskStuckTimeoutMs` | `number` | `undefined` | Inactivity timeout for stuck-task recovery. |
+| `dispatchOscillationThreshold` | `number` | `5` | Number of rapid `todo↔in-progress` cycles allowed before scheduler auto-pauses the task with `pausedReason="dispatch-oscillation"`. |
+| `dispatchOscillationWindowMs` | `number` | `60000` | Sliding window in ms used to count rapid `todo↔in-progress` cycles for the dispatch-oscillation breaker. |
+| `dispatchOscillationSettleMs` | `number` | `5000` | Minimum settle delay after an engine-sourced `in-progress → todo` recovery before scheduler may re-dispatch the task. Prevents immediate same-tick redispatch races. |
 | `runtimeStopDrainMs` | `number` | `2000` | Maximum milliseconds `InProcessRuntime.stop()` waits for in-flight tasks to drain after aborting AI sessions. Set `0` to skip drain polling entirely (useful for test/CI). |
 | `engineActiveSinceMs` | `number` | `undefined` | Epoch ms when the in-process runtime last became active (startup or unpause). Time-based stuck/stalled/stale surfaces floor their activity anchor at this timestamp so paused/stopped downtime is not counted as quiet age. Runtime-managed; typically not set manually. |
 | `engineActivationGraceMs` | `number` | `300000` | Extra grace window (ms) added after `engineActiveSinceMs` before time-based stuck/stalled/stale surfaces can fire. Set `0` to disable warmup. |

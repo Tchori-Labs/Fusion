@@ -71,6 +71,15 @@ Time-based stuck/stalled/stale surfaces now floor activity timestamps using `set
 - Audit event: `task:stuck-no-progress-churn-terminalized` with `{ taskId, ignoredStepUpdateCount, stuckKillStreak, lastReason: "no-progress-churn" }`.
 - Outcome: task is marked `status: "failed"`, moved to `in-review`, and not requeued; operators should decompose/rescope the task instead of waiting for more automatic stuck-kill retries.
 
+## Dispatch oscillation breaker (`[scheduler]`, `[self-healing]`)
+
+FN-5941 adds a convergence backstop for repeated `todo↔in-progress` churn.
+
+- Suppressed false-positive backward recoveries emit `task:reclaim-self-owned-branch-conflict-no-action`, `task:auto-recover-in-progress-limbo-no-action`, or `task:stuck-loop-exhausted-no-action` with liveness metadata (`taskId`, `branch`, `worktree`, `checkedOutBy`, `executionStartedAt`, `executionAgeMs`, `graceMs`, `liveWorktreeBoundBranch`, `reason`).
+- Scheduler settle-window diagnostic: `Task <id> was engine-requeued <age>ms ago — waiting <settleMs>ms settle window before redispatch`.
+- Terminal audit event: `task:dispatch-oscillation-terminalized` with `{ taskId, cycleCount, windowMs, lastMoveSource }`.
+- Outcome: task stays in `todo`, is auto-paused with `pausedReason: "dispatch-oscillation"`, and requires operator unpause/forward progress to reset the counter.
+
 ## Stale self-owned active-session cleanup diagnostics (`[executor]`)
 
 FN-5346 adds a same-task stale-binding reconcile marker before worktree removal:

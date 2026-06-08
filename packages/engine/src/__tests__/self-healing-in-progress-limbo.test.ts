@@ -98,7 +98,7 @@ describe("recoverInProgressLimbo", () => {
       rootDir: "/tmp/test-project",
       getExecutingTaskIds: () => new Set<string>(),
       leaseManager: {
-        recoverAbandonedLease: vi.fn().mockResolvedValue(false),
+        recoverAbandonedLease: vi.fn().mockResolvedValue(true),
         reconcileLeaseRow,
       } as any,
     });

@@ -142,6 +142,10 @@ const COORDINATION_SAFE_SCOPE_PREFIXES = [
   ".changeset/",
 ];
 
+const DEFAULT_DISPATCH_OSCILLATION_SETTLE_MS = 5_000;
+const DEFAULT_DISPATCH_OSCILLATION_THRESHOLD = 5;
+const DEFAULT_DISPATCH_OSCILLATION_WINDOW_MS = 60_000;
+
 function isCoordinationSafeScopeEntry(entry: string): boolean {
   const normalized = normalizeOverlapPath(entry).toLowerCase();
   if (!normalized) return false;
@@ -483,6 +487,8 @@ export class Scheduler {
   private dispatchQueuedConcurrencyAuditMemo = new Map<string, string>();
   /** Tracks per-task candidacy fingerprints for task:updated auto-claim invalidation gating. */
   private lastAutoClaimFingerprint = new Map<string, string>();
+  /** Tracks recent engine-sourced in-progress → todo requeues to prevent immediate re-dispatch races. */
+  private recentEngineTodoRequeues = new Map<string, string>();
   private readonly staleTaskReporter: StaleTaskReporter;
   private readonly backlogPressureReporter: BacklogPressureReporter;
   private readonly unlinkedMissionsAdvisoryReporter: UnlinkedMissionsAdvisoryReporter;
@@ -559,7 +565,7 @@ export class Scheduler {
      * Also handles mission auto-advance: when a linked task completes,
      * update feature status and potentially activate next pending slice.
      */
-    this.store.on("task:moved", async ({ task, from, to }) => {
+    this.store.on("task:moved", async ({ task, from, to, source }) => {
       this.lastAutoClaimFingerprint.set(task.id, computeAutoClaimFingerprint(task));
       if (from === "todo" || to === "todo") {
         this.options.snapshotManager?.invalidate(`task:moved:${from}->${to}`);
@@ -670,6 +676,24 @@ export class Scheduler {
         }
       }
 
+      if (from === "in-progress" && to === "todo") {
+        if (source === "engine") {
+          this.recentEngineTodoRequeues.set(task.id, task.columnMovedAt ?? new Date().toISOString());
+        } else {
+          this.recentEngineTodoRequeues.delete(task.id);
+        }
+      } else if (to === "in-review" || to === "done" || to === "archived") {
+        this.recentEngineTodoRequeues.delete(task.id);
+        if (task.dispatchStormCount != null || task.lastDispatchAt != null) {
+          void this.store.updateTask(task.id, {
+            dispatchStormCount: null,
+            lastDispatchAt: null,
+          }).catch((error) => {
+            schedulerLog.warn(`Failed to reset dispatch oscillation state for ${task.id} on move to ${to}: ${error instanceof Error ? error.message : String(error)}`);
+          });
+        }
+      }
+
       // Event-driven scheduling: when a task moves to "done" (completion) or "todo" (retry/manual move),
       // trigger scheduling immediately so waiting tasks can start without waiting
       // for the next poll interval (up to 15 seconds).
@@ -706,6 +730,14 @@ export class Scheduler {
       } else if (this.pausedTaskIds.has(task.id)) {
         // Task was paused, now unpaused — trigger scheduling
         this.pausedTaskIds.delete(task.id);
+        if (task.userPaused === false && (task.dispatchStormCount != null || task.lastDispatchAt != null)) {
+          void this.store.updateTask(task.id, {
+            dispatchStormCount: null,
+            lastDispatchAt: null,
+          }).catch((error) => {
+            schedulerLog.warn(`Failed to reset dispatch oscillation state for ${task.id} on unpause: ${error instanceof Error ? error.message : String(error)}`);
+          });
+        }
         if (this.running && (task.column === "todo" || task.column === "triage")) {
           schedulerLog.log(`Task ${task.id} unpaused — triggering scheduling`);
           this.schedule();
@@ -734,6 +766,7 @@ export class Scheduler {
       this.options.snapshotManager?.invalidate("task:deleted");
       this.pausedTaskIds.delete(task.id);
       this.failedTaskIds.delete(task.id);
+      this.recentEngineTodoRequeues.delete(task.id);
       this.wasNodeDispatchValidationBlocked.delete(task.id);
       this.wasNodeBlocked.delete(task.id);
       this.wasPermanentAgentUnavailable.delete(task.id);
@@ -1687,6 +1720,31 @@ export class Scheduler {
         }
 
         const latestSettings = await this.store.getSettings();
+        const oscillationSettings = latestSettings as Settings & {
+          dispatchOscillationSettleMs?: number;
+          dispatchOscillationThreshold?: number;
+          dispatchOscillationWindowMs?: number;
+        };
+        const dispatchSettleMs = oscillationSettings.dispatchOscillationSettleMs
+          ?? DEFAULT_DISPATCH_OSCILLATION_SETTLE_MS;
+        const dispatchOscillationThreshold = oscillationSettings.dispatchOscillationThreshold
+          ?? DEFAULT_DISPATCH_OSCILLATION_THRESHOLD;
+        const dispatchOscillationWindowMs = oscillationSettings.dispatchOscillationWindowMs
+          ?? DEFAULT_DISPATCH_OSCILLATION_WINDOW_MS;
+        const recentEngineTodoMovedAt = this.recentEngineTodoRequeues.get(task.id);
+        if (recentEngineTodoMovedAt) {
+          if (freshTask.columnMovedAt !== recentEngineTodoMovedAt) {
+            this.recentEngineTodoRequeues.delete(task.id);
+          } else {
+            const movedAtMs = Date.parse(recentEngineTodoMovedAt);
+            const settleAgeMs = Number.isFinite(movedAtMs) ? Math.max(0, Date.now() - movedAtMs) : dispatchSettleMs;
+            if (settleAgeMs < dispatchSettleMs) {
+              schedulerLog.log(`Task ${task.id} was engine-requeued ${settleAgeMs}ms ago — waiting ${dispatchSettleMs}ms settle window before redispatch`);
+              continue;
+            }
+            this.recentEngineTodoRequeues.delete(task.id);
+          }
+        }
         if (latestSettings.globalPause) {
           schedulerLog.log(`Task ${task.id} dispatch aborted — globalPause became active mid-pass`);
           continue;
@@ -1892,6 +1950,53 @@ export class Scheduler {
         // with mergeRetries=MAX, the merger refuses it (canMergeTask false),
         // and the ghost-review fallback bounces it back to todo every 10 min
         // before the 30-min cooldown can elapse — infinite loop. See FN-3305.
+        const dispatchTimestamp = new Date().toISOString();
+        const lastDispatchAtMs = freshTask.lastDispatchAt ? Date.parse(freshTask.lastDispatchAt) : Number.NaN;
+        const priorDispatchWithinWindow = Number.isFinite(lastDispatchAtMs)
+          && Date.now() - lastDispatchAtMs <= dispatchOscillationWindowMs;
+        const nextDispatchStormCount = priorDispatchWithinWindow
+          ? (freshTask.dispatchStormCount ?? 0) + 1
+          : 1;
+
+        if (nextDispatchStormCount > dispatchOscillationThreshold) {
+          const oscillationError = freshTask.error
+            ?? `DISPATCH_OSCILLATION: detected ${nextDispatchStormCount} todo↔in-progress cycles within ${dispatchOscillationWindowMs}ms. Task auto-paused for operator review.`;
+          await this.store.updateTask(task.id, {
+            dispatchStormCount: nextDispatchStormCount,
+            lastDispatchAt: dispatchTimestamp,
+            paused: true,
+            pausedReason: "dispatch-oscillation",
+            status: freshTask.status ?? "queued",
+            error: oscillationError,
+          });
+          await this.store.logEntry(
+            task.id,
+            `Dispatch oscillation auto-paused after ${nextDispatchStormCount} cycles within ${dispatchOscillationWindowMs}ms`,
+          );
+          await this.store.appendAgentLog?.(
+            task.id,
+            "Dispatch oscillation detected — task auto-paused for operator review",
+            "text",
+            `cycleCount=${nextDispatchStormCount} windowMs=${dispatchOscillationWindowMs}`,
+          );
+          await this.store.recordRunAuditEvent?.({
+            taskId: task.id,
+            agentId: "scheduler",
+            runId: generateSyntheticRunId("scheduler-dispatch-oscillation", task.id),
+            domain: "database",
+            mutationType: "task:dispatch-oscillation-terminalized",
+            target: task.id,
+            metadata: {
+              taskId: task.id,
+              cycleCount: nextDispatchStormCount,
+              windowMs: dispatchOscillationWindowMs,
+              lastMoveSource: recentEngineTodoMovedAt ? "engine" : "scheduler",
+            },
+          });
+          schedulerLog.warn(`Task ${task.id} auto-paused after dispatch oscillation threshold ${dispatchOscillationThreshold} was exceeded (${nextDispatchStormCount} cycles)`);
+          continue;
+        }
+
         schedulerLog.log(`Starting ${task.id}: ${task.title || task.id} (deps satisfied)`);
         await this.store.updateTask(task.id, {
           status: null,
@@ -1902,9 +2007,15 @@ export class Scheduler {
           mergeRetries: 0,
         });
         await this.store.moveTask(task.id, "in-progress", {
+          moveSource: "scheduler",
           allocateWorktree: (reservedNames) =>
             this.planWorktreePath(task, settings.worktreeNaming, reservedNames, settings),
         });
+        await this.store.updateTask(task.id, {
+          dispatchStormCount: nextDispatchStormCount,
+          lastDispatchAt: dispatchTimestamp,
+        });
+        this.recentEngineTodoRequeues.delete(task.id);
         this.wasNodeBlocked.delete(task.id);
         this.wasNodeDispatchValidationBlocked.delete(task.id);
         this.wasPermanentAgentUnavailable.delete(task.id);

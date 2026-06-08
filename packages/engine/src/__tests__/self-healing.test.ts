@@ -7951,15 +7951,21 @@ describe("SelfHealingManager reclaimSelfOwnedBranchConflicts", () => {
     expect(store.updateTask).not.toHaveBeenCalled();
   });
 
-  it("skips checked out tasks", async () => {
+  it("skips checked out tasks and emits no-action telemetry", async () => {
     (store.listTasks as any)
       .mockResolvedValueOnce([{ id: "FN-501", checkedOutBy: "agent-1", branch: "fusion/fn-501", worktree: "/tmp/fn-501" }])
+      .mockResolvedValueOnce([])
       .mockResolvedValueOnce([]);
     const inspectSpy = vi.spyOn(branchConflictModule, "inspectBranchConflict");
 
     const recovered = await manager.reclaimSelfOwnedBranchConflicts();
     expect(recovered).toBe(0);
     expect(inspectSpy).not.toHaveBeenCalled();
+    expect((store as any).recordRunAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+      mutationType: "task:reclaim-self-owned-branch-conflict-no-action",
+      target: "FN-501",
+      metadata: expect.objectContaining({ reason: "checked-out-lease-active" }),
+    }));
   });
 
   it("skips tasks with recent active heartbeat runs", async () => {

@@ -342,6 +342,12 @@ export const DEFAULT_PROJECT_SETTINGS = {
   specStalenessEnabled: false,
   specStalenessMaxAgeMs: 6 * 60 * 60 * 1000,
   taskStuckTimeoutMs: 600_000,
+  /** Number of rapid todo↔in-progress cycles allowed before auto-pausing the task. */
+  dispatchOscillationThreshold: 5,
+  /** Sliding time window used to count rapid todo↔in-progress cycles. */
+  dispatchOscillationWindowMs: 60_000,
+  /** Delay before scheduler may re-dispatch an engine-requeued todo task. */
+  dispatchOscillationSettleMs: 5_000,
   runtimeStopDrainMs: 2_000,
   engineActiveSinceMs: undefined,
   engineActivationGraceMs: 5 * 60_000,

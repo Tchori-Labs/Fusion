@@ -795,6 +795,100 @@ export class SelfHealingManager {
     log.log(`[${stage}] ${task.id}: triple-proof not satisfied — no action (operator-decides)`);
   }
 
+  private async listActiveHeartbeatTaskIds(): Promise<Set<string>> {
+    const activeTaskIds = new Set<string>();
+    if (!this.options.agentStore) {
+      return activeTaskIds;
+    }
+
+    try {
+      const activeRuns = await this.options.agentStore.listActiveHeartbeatRuns();
+      const activeWindowMs = RUNNING_ON_INACTIVE_TASK_STALE_RUN_MS;
+      const now = Date.now();
+      for (const run of activeRuns) {
+        const startedAtMs = Date.parse(run.startedAt ?? "");
+        if (!Number.isFinite(startedAtMs) || now - startedAtMs > activeWindowMs) continue;
+        const taskId = run.contextSnapshot && typeof run.contextSnapshot.taskId === "string"
+          ? run.contextSnapshot.taskId.toUpperCase()
+          : null;
+        if (taskId) activeTaskIds.add(taskId);
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      log.warn(`Unable to enumerate active heartbeat runs: ${message}`);
+    }
+
+    return activeTaskIds;
+  }
+
+  private getFalsePositiveRequeueSignal(task: Task, options: {
+    executingIds?: Set<string>;
+    activeHeartbeatTaskIds?: Set<string>;
+    graceMs: number;
+    includeLiveWorktreeBoundBranch?: boolean;
+    includeCheckedOutLease?: boolean;
+  }): { reason: string; metadata: Record<string, unknown> } | null {
+    const normalizedId = task.id.toUpperCase();
+    const executionStartedAtMs = task.executionStartedAt ? Date.parse(task.executionStartedAt) : Number.NaN;
+    const executionAgeMs = Number.isFinite(executionStartedAtMs) ? Math.max(0, Date.now() - executionStartedAtMs) : null;
+    const liveWorktreeBoundBranch = Boolean(
+      task.worktree
+      && typeof task.branch === "string"
+      && task.branch.trim().length > 0
+      && existsSync(task.worktree),
+    );
+    const metadata = {
+      taskId: task.id,
+      branch: task.branch ?? null,
+      worktree: task.worktree ?? null,
+      checkedOutBy: task.checkedOutBy ?? null,
+      executionStartedAt: task.executionStartedAt ?? null,
+      executionAgeMs,
+      graceMs: options.graceMs,
+      liveWorktreeBoundBranch,
+    };
+
+    if (options.executingIds?.has(task.id)) {
+      return { reason: "executor-active", metadata };
+    }
+    if (options.activeHeartbeatTaskIds?.has(normalizedId)) {
+      return { reason: "active-heartbeat-run", metadata };
+    }
+    if ((options.includeCheckedOutLease ?? false) && task.checkedOutBy) {
+      return { reason: "checked-out-lease-active", metadata };
+    }
+    if ((options.includeLiveWorktreeBoundBranch ?? true) && liveWorktreeBoundBranch) {
+      return { reason: "live-worktree-and-branch", metadata };
+    }
+    if (executionAgeMs !== null && executionAgeMs <= options.graceMs) {
+      return { reason: "recent-execution-started", metadata };
+    }
+    return null;
+  }
+
+  private async emitFalsePositiveRequeueNoAction(task: Task, stage: string, mutationType: string, reason: string, metadata: Record<string, unknown>): Promise<void> {
+    try {
+      await createRunAuditor(this.store, {
+        runId: generateSyntheticRunId(`self-healing-${stage}`, task.id),
+        agentId: "self-healing",
+        taskId: task.id,
+        taskLineageId: task.lineageId,
+        phase: stage,
+      }).database({
+        type: mutationType as DatabaseMutationType,
+        target: task.id,
+        metadata: {
+          ...metadata,
+          reason,
+        },
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      log.warn(`[${stage}] ${task.id}: false-positive no-action audit emission failed: ${message}`);
+    }
+    log.log(`[${stage}] ${task.id}: false-positive requeue suppressed (${reason})`);
+  }
+
   // ── Lifecycle ───────────────────────────────────────────────────────
 
   start(): void {
@@ -1122,11 +1216,36 @@ export class SelfHealingManager {
       }
 
       const newCount = (task.stuckKillCount ?? 0) + 1;
+      const executingIds = this.options.getExecutingTaskIds?.() ?? new Set<string>();
+      const activeHeartbeatTaskIds = await this.listActiveHeartbeatTaskIds();
 
       if (newCount > maxKills) {
         const hasIncompleteSteps = !!task.steps?.some((step) => NON_TERMINAL_STEP_STATUSES.has(step.status));
 
         if (hasIncompleteSteps) {
+          const liveExecutionSignal = this.getFalsePositiveRequeueSignal(task, {
+            executingIds,
+            activeHeartbeatTaskIds,
+            graceMs: settings.taskStuckTimeoutMs ?? ORPHANED_EXECUTION_RECOVERY_GRACE_MS,
+            includeCheckedOutLease: true,
+          });
+          if (liveExecutionSignal) {
+            await this.emitFalsePositiveRequeueNoAction(
+              task,
+              "stuck-loop-exhausted",
+              "task:stuck-loop-exhausted-no-action",
+              liveExecutionSignal.reason,
+              {
+                ...liveExecutionSignal.metadata,
+                lastReason: reason,
+                stuckKillCount: task.stuckKillCount ?? 0,
+                attemptedStuckKillCount: newCount,
+                maxStuckKills: maxKills,
+              },
+            );
+            return false;
+          }
+
           log.warn(`${taskId} exceeded stuck kill budget (${newCount}/${maxKills}, reason=${reason}) with incomplete steps — re-queueing in todo with progress preserved`);
           await this.store.updateTask(taskId, { stuckKillCount: newCount });
           try {
@@ -2389,32 +2508,31 @@ export class SelfHealingManager {
       // explicit autoMerge:true tasks recover.
       const candidates = [...todoCandidates, ...inProgressCandidates, ...inReviewPausedCandidates]
         .filter((task) => allowsAutoMergeProcessing(task, settings));
-
-      const activeTaskIds = new Set<string>();
-      if (this.options.agentStore) {
-        try {
-          const activeRuns = await this.options.agentStore.listActiveHeartbeatRuns();
-          const activeWindowMs = RUNNING_ON_INACTIVE_TASK_STALE_RUN_MS;
-          const now = Date.now();
-          for (const run of activeRuns) {
-            const startedAtMs = Date.parse(run.startedAt ?? "");
-            if (!Number.isFinite(startedAtMs) || now - startedAtMs > activeWindowMs) continue;
-            const taskId = run.contextSnapshot && typeof run.contextSnapshot.taskId === "string"
-              ? run.contextSnapshot.taskId.toUpperCase()
-              : null;
-            if (taskId) activeTaskIds.add(taskId);
-          }
-        } catch (err: unknown) {
-          const message = err instanceof Error ? err.message : String(err);
-          log.warn(`Unable to enumerate active heartbeat runs for self-owned branch reclaim sweep: ${message}`);
-        }
-      }
+      const executingIds = this.options.getExecutingTaskIds?.() ?? new Set<string>();
+      const activeTaskIds = await this.listActiveHeartbeatTaskIds();
 
       let recovered = 0;
       const integrationBranch = await resolveIntegrationBranch(this.options.rootDir, settings);
       for (const task of candidates) {
-        if (task.checkedOutBy || activeTaskIds.has(task.id.toUpperCase()) || !task.branch || !task.worktree) continue;
+        if (!task.branch || !task.worktree) continue;
         if (task.userPaused) continue;
+        const liveExecutionSignal = this.getFalsePositiveRequeueSignal(task, {
+          executingIds,
+          activeHeartbeatTaskIds: activeTaskIds,
+          graceMs: STALE_ACTIVE_BRANCH_EXECUTION_GRACE_MS,
+          includeLiveWorktreeBoundBranch: false,
+          includeCheckedOutLease: true,
+        });
+        if (liveExecutionSignal) {
+          await this.emitFalsePositiveRequeueNoAction(
+            task,
+            "reclaim-self-owned-branch-conflict",
+            "task:reclaim-self-owned-branch-conflict-no-action",
+            liveExecutionSignal.reason,
+            liveExecutionSignal.metadata,
+          );
+          continue;
+        }
         if (task.column === "todo" && task.blockedBy) {
           log.log(`[self-healing] skipping blocked todo task ${task.id} during self-owned branch reclaim (blockedBy=${task.blockedBy})`);
           continue;
@@ -7260,10 +7378,11 @@ export class SelfHealingManager {
     try {
       const tasks = await this.store.listTasks({ column: "in-progress", slim: true });
       const executingIds = this.options.getExecutingTaskIds?.() ?? new Set<string>();
+      const activeHeartbeatTaskIds = await this.listActiveHeartbeatTaskIds();
       const now = Date.now();
 
       const stranded = tasks.filter((task) => {
-        if (task.column !== "in-progress" || task.paused || executingIds.has(task.id)) {
+        if (task.column !== "in-progress" || task.paused) {
           return false;
         }
         const hasMissingWorktreePath = typeof task.worktree === "string" && task.worktree.length > 0 && !existsSync(task.worktree);
@@ -7290,13 +7409,68 @@ export class SelfHealingManager {
       let recovered = 0;
       for (const task of stranded) {
         try {
-          if (this.options.leaseManager && task.checkedOutBy) {
-            await this.options.leaseManager.recoverAbandonedLease(
-              task.id,
-              `in-progress limbo: ${describeWorktreeState(task)} + null branch`,
-              { preserveProgress: true },
+          const liveExecutionSignal = this.getFalsePositiveRequeueSignal(task, {
+            executingIds,
+            activeHeartbeatTaskIds,
+            graceMs: ORPHANED_EXECUTION_RECOVERY_GRACE_MS,
+          });
+          if (liveExecutionSignal) {
+            await this.emitFalsePositiveRequeueNoAction(
+              task,
+              "auto-recover-in-progress-limbo",
+              "task:auto-recover-in-progress-limbo-no-action",
+              liveExecutionSignal.reason,
+              liveExecutionSignal.metadata,
             );
-            await this.options.leaseManager.reconcileLeaseRow(task.id);
+            continue;
+          }
+
+          if (task.checkedOutBy) {
+            if (this.options.leaseManager) {
+              const leaseRecovered = await this.options.leaseManager.recoverAbandonedLease(
+                task.id,
+                `in-progress limbo: ${describeWorktreeState(task)} + null branch`,
+                { preserveProgress: true },
+              );
+              if (!leaseRecovered) {
+                await this.emitFalsePositiveRequeueNoAction(
+                  task,
+                  "auto-recover-in-progress-limbo",
+                  "task:auto-recover-in-progress-limbo-no-action",
+                  "checked-out-lease-active",
+                  {
+                    taskId: task.id,
+                    branch: task.branch ?? null,
+                    worktree: task.worktree ?? null,
+                    checkedOutBy: task.checkedOutBy,
+                    executionStartedAt: task.executionStartedAt ?? null,
+                    executionAgeMs: task.executionStartedAt ? Math.max(0, Date.now() - Date.parse(task.executionStartedAt)) : null,
+                    graceMs: ORPHANED_EXECUTION_RECOVERY_GRACE_MS,
+                    liveWorktreeBoundBranch: false,
+                  },
+                );
+                continue;
+              }
+              await this.options.leaseManager.reconcileLeaseRow(task.id);
+            } else {
+              await this.emitFalsePositiveRequeueNoAction(
+                task,
+                "auto-recover-in-progress-limbo",
+                "task:auto-recover-in-progress-limbo-no-action",
+                "checked-out-lease-active",
+                {
+                  taskId: task.id,
+                  branch: task.branch ?? null,
+                  worktree: task.worktree ?? null,
+                  checkedOutBy: task.checkedOutBy,
+                  executionStartedAt: task.executionStartedAt ?? null,
+                  executionAgeMs: task.executionStartedAt ? Math.max(0, Date.now() - Date.parse(task.executionStartedAt)) : null,
+                  graceMs: ORPHANED_EXECUTION_RECOVERY_GRACE_MS,
+                  liveWorktreeBoundBranch: false,
+                },
+              );
+              continue;
+            }
           }
 
           const stepStatuses = task.steps.map((step) => step.status);

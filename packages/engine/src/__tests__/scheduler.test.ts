@@ -578,13 +578,14 @@ describe("Scheduler", () => {
       expect(onMoves).toContainEqual(["FN-1", "in-progress"]);
     });
 
-    it("flag-OFF: the sweep never issues a scheduler-sourced move (legacy path byte-identical)", async () => {
+    it("flag-OFF: todo dispatch is tagged as scheduler-sourced for redispatch guards", async () => {
       const off = setupTodoStore(false);
       await off.scheduler.schedule();
       const schedulerSourcedMoves = vi
         .mocked(off.store.moveTask)
         .mock.calls.filter((c) => (c[2] as { moveSource?: string } | undefined)?.moveSource === "scheduler");
-      expect(schedulerSourcedMoves.length).toBe(0);
+      expect(schedulerSourcedMoves.length).toBe(1);
+      expect(schedulerSourcedMoves[0]?.slice(0, 2)).toEqual(["FN-1", "in-progress"]);
     });
   });
 
@@ -2466,22 +2467,23 @@ describe("Scheduler", () => {
       (scheduler as any).running = true;
       await scheduler.schedule();
 
-      expect(updateTask).toHaveBeenNthCalledWith(1, "FN-011", {
+      const dispatchPrepCalls = updateTask.mock.calls.filter(([, patch]) => Object.prototype.hasOwnProperty.call(patch, "mergeRetries"));
+      expect(dispatchPrepCalls[0]).toEqual(["FN-011", {
         status: null,
         blockedBy: null,
         executionStartBranch: undefined,
         effectiveNodeId: null,
         effectiveNodeSource: "local",
         mergeRetries: 0,
-      });
-      expect(updateTask).toHaveBeenNthCalledWith(2, "FN-012", {
+      }]);
+      expect(dispatchPrepCalls[1]).toEqual(["FN-012", {
         status: null,
         blockedBy: null,
         executionStartBranch: undefined,
         effectiveNodeId: null,
         effectiveNodeSource: "local",
         mergeRetries: 0,
-      });
+      }]);
 
       randomSpy.mockRestore();
     });

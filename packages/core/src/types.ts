@@ -3649,6 +3649,15 @@ export interface ProjectSettings {
    *  than this duration, the task is considered stuck and will be terminated and retried.
    *  Default: 600000 (10 minutes). Set to 0 to disable. */
   taskStuckTimeoutMs?: number;
+  /** Number of rapid todo↔in-progress cycles allowed before auto-pausing the task.
+   *  Default: 5. */
+  dispatchOscillationThreshold?: number;
+  /** Sliding time window in milliseconds used to count rapid todo↔in-progress cycles.
+   *  Default: 60000 (1 minute). */
+  dispatchOscillationWindowMs?: number;
+  /** Delay before scheduler may re-dispatch an engine-requeued todo task.
+   *  Default: 5000 (5 seconds). */
+  dispatchOscillationSettleMs?: number;
   /** Maximum milliseconds InProcessRuntime.stop() waits for in-flight tasks to drain
    *  AFTER aborting their AI sessions. Default: 2000. Set to 0 to skip drain waits
    *  entirely (test/CI). Set to 30000 to preserve the historical 30s grace window. */
