@@ -19,8 +19,8 @@
  */
 
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
-import { isAbsolute, join } from "node:path";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { isAbsolute, join, relative } from "node:path";
 import { Type, type Static } from "@earendil-works/pi-ai";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { executorLog } from "./logger.js";
@@ -35,6 +35,204 @@ const SIGKILL_GRACE_MS = 10_000;
 const DEFAULT_TIMEOUT_PACKAGE_SEC = 300;
 const DEFAULT_TIMEOUT_WORKSPACE_SEC = 900;
 const MAX_TIMEOUT_SEC = 1800;
+
+const packageDirCache = new Map<string, string | null>();
+
+function shellSplit(input: string): string[] | null {
+  const tokens: string[] = [];
+  let current = "";
+  let quote: "'" | "\"" | null = null;
+  let escaped = false;
+
+  for (const char of input) {
+    if (escaped) {
+      current += char;
+      escaped = false;
+      continue;
+    }
+    if (char === "\\" && quote !== "'") {
+      escaped = true;
+      continue;
+    }
+    if (quote) {
+      if (char === quote) {
+        quote = null;
+      } else {
+        current += char;
+      }
+      continue;
+    }
+    if (char === "'" || char === "\"") {
+      quote = char;
+      continue;
+    }
+    if (/\s/.test(char)) {
+      if (current.length > 0) {
+        tokens.push(current);
+        current = "";
+      }
+      continue;
+    }
+    current += char;
+  }
+
+  if (escaped) current += "\\";
+  if (quote !== null) return null;
+  if (current.length > 0) tokens.push(current);
+  return tokens;
+}
+
+function shellQuote(value: string): string {
+  if (/^[A-Za-z0-9_@%+=:,./-]+$/.test(value)) return value;
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+function findWorkspacePackageDir(rootDir: string, packageName: string): string | null {
+  const cacheKey = `${rootDir}\0${packageName}`;
+  if (packageDirCache.has(cacheKey)) return packageDirCache.get(cacheKey) ?? null;
+
+  const lastSegment = packageName.split("/").pop();
+  const candidates = [
+    lastSegment ? `packages/${lastSegment}` : "",
+    lastSegment === "fusion" ? "packages/cli" : "",
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    try {
+      const pkg = JSON.parse(readFileSync(join(rootDir, candidate, "package.json"), "utf8")) as { name?: string };
+      if (pkg.name === packageName) {
+        packageDirCache.set(cacheKey, candidate);
+        return candidate;
+      }
+    } catch {
+      // Keep looking.
+    }
+  }
+
+  const queue: Array<{ dir: string; depth: number }> = [
+    { dir: "packages", depth: 0 },
+    { dir: "plugins", depth: 0 },
+  ];
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current) break;
+    const abs = join(rootDir, current.dir);
+    let entries: import("node:fs").Dirent[];
+    try {
+      entries = readdirSync(abs, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      if (entry.name === "node_modules" || entry.name === "dist") continue;
+      const child = join(current.dir, entry.name);
+      try {
+        const pkg = JSON.parse(readFileSync(join(rootDir, child, "package.json"), "utf8")) as { name?: string };
+        if (pkg.name === packageName) {
+          packageDirCache.set(cacheKey, child);
+          return child;
+        }
+      } catch {
+        if (current.depth < 3) queue.push({ dir: child, depth: current.depth + 1 });
+      }
+    }
+  }
+
+  packageDirCache.set(cacheKey, null);
+  return null;
+}
+
+function toPackageRelativeFilter(token: string, rootDir: string, packageDir: string): string {
+  const normalizedPackageDir = packageDir.replace(/\\/g, "/");
+  const normalized = token.replace(/\\/g, "/").replace(/^\.\//, "");
+
+  if (normalized.startsWith(`${normalizedPackageDir}/`)) {
+    return normalized.slice(normalizedPackageDir.length + 1);
+  }
+
+  if (isAbsolute(token)) {
+    const rel = relative(join(rootDir, packageDir), token).replace(/\\/g, "/");
+    if (!rel.startsWith("../") && rel !== "..") return rel;
+  }
+
+  return token;
+}
+
+export function normalizeVerificationCommand(command: string, rootDir: string): { command: string; warnings: string[] } {
+  const tokens = shellSplit(command);
+  const warnings: string[] = [];
+  if (!tokens) return { command, warnings };
+  if (tokens[0] !== "pnpm") return { command, warnings };
+
+  const filterIndex = tokens.findIndex((token) => token === "--filter" || token === "-F");
+  if (filterIndex < 0 || !tokens[filterIndex + 1]) return { command, warnings };
+  const packageName = tokens[filterIndex + 1]!;
+  const separatorIndex = tokens.indexOf("--");
+  if (separatorIndex < 0) return { command, warnings };
+
+  const scriptTokens = tokens.slice(filterIndex + 2, separatorIndex);
+  const runsTestScript =
+    scriptTokens.includes("test")
+    || (scriptTokens[0] === "run" && scriptTokens[1] === "test");
+  if (!runsTestScript) return { command, warnings };
+
+  const forwarded = tokens.slice(separatorIndex + 1);
+  if (!forwarded.includes("--run")) return { command, warnings };
+
+  const packageDir = findWorkspacePackageDir(rootDir, packageName);
+  if (!packageDir) return { command, warnings };
+
+  const vitestArgs = forwarded
+    .filter((token) => token !== "--run")
+    .map((token) => (
+      token.startsWith("-")
+        ? token
+        : toPackageRelativeFilter(token, rootDir, packageDir)
+    ));
+
+  const hasReporter = vitestArgs.some((token) => token === "--reporter" || token.startsWith("--reporter="));
+  const hasSilent = vitestArgs.some((token) => token === "--silent" || token.startsWith("--silent="));
+  const pnpmGlobalFlags = tokens.slice(1, filterIndex);
+  const normalizedTokens = [
+    "pnpm",
+    ...pnpmGlobalFlags,
+    "--filter",
+    packageName,
+    "exec",
+    "vitest",
+    "run",
+    ...vitestArgs,
+    ...(hasSilent ? [] : ["--silent=passed-only"]),
+    ...(hasReporter ? [] : ["--reporter=dot"]),
+  ];
+  const normalizedCommand = normalizedTokens.map(shellQuote).join(" ");
+
+  if (normalizedCommand !== command) {
+    warnings.push(
+      "rewrote package test file filter to direct vitest execution so package test scripts do not expand into broad quality suites",
+    );
+  }
+
+  return { command: normalizedCommand, warnings };
+}
+
+function killVerificationProcess(child: ReturnType<typeof spawn>, signal: NodeJS.Signals): void {
+  if (process.platform !== "win32" && child.pid) {
+    try {
+      process.kill(-child.pid, signal);
+      return;
+    } catch {
+      // Fall back to killing the immediate child below.
+    }
+  }
+  try {
+    child.kill(signal);
+  } catch {
+    // The process may already have exited.
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Tool parameter schema
@@ -192,6 +390,7 @@ export async function runVerificationCommand(
         COREPACK_ENABLE_DOWNLOAD_PROMPT: "0",
       },
       shell: true,
+      detached: process.platform !== "win32",
     });
 
     let timedOut = false;
@@ -211,20 +410,21 @@ export async function runVerificationCommand(
     }, QUIET_HEARTBEAT_INTERVAL_MS);
 
     // ── Hard timeout ────────────────────────────────────────────────────────
+    let killTimer: ReturnType<typeof setTimeout> | null = null;
     const hardTimer = setTimeout(() => {
       if (settled) return;
       timedOut = true;
       executorLog.warn(
         `[fn_run_verification] hard timeout (${timeoutMs / 1000}s) — sending SIGTERM to: ${command}`,
       );
-      child.kill("SIGTERM");
+      killVerificationProcess(child, "SIGTERM");
 
-      setTimeout(() => {
+      killTimer = setTimeout(() => {
         if (!settled) {
           executorLog.warn(
             `[fn_run_verification] SIGTERM ignored — sending SIGKILL to: ${command}`,
           );
-          child.kill("SIGKILL");
+          killVerificationProcess(child, "SIGKILL");
           killed = true;
         }
       }, SIGKILL_GRACE_MS);
@@ -266,6 +466,7 @@ export async function runVerificationCommand(
       settled = true;
       clearInterval(quietTimer);
       clearTimeout(hardTimer);
+      if (killTimer) clearTimeout(killTimer);
 
       // Flush remainders
       if (stdoutRemainder) appendToBuffer(stdoutBuf, stdoutRemainder);
@@ -301,6 +502,7 @@ export async function runVerificationCommand(
       settled = true;
       clearInterval(quietTimer);
       clearTimeout(hardTimer);
+      if (killTimer) clearTimeout(killTimer);
       const durationMs = Date.now() - startMs;
       warnings.push(`Spawn error: ${err.message}`);
       resolve({
@@ -402,7 +604,13 @@ export function createRunVerificationTool(
       // If the command is package-scoped and the workspace has no .modules.yaml,
       // prepend a pnpm install so the agent doesn't stall on missing node_modules.
       let effectiveCommand = command;
-      if (command.trimStart().startsWith("pnpm --filter")) {
+      const normalized = normalizeVerificationCommand(effectiveCommand, rootDir);
+      if (normalized.command !== effectiveCommand) {
+        effectiveCommand = normalized.command;
+        warnings.push(...normalized.warnings);
+      }
+
+      if (effectiveCommand.trimStart().startsWith("pnpm --filter")) {
         const modulesYaml = join(rootDir, "node_modules", ".modules.yaml");
         if (!existsSync(modulesYaml)) {
           const installCmd = "pnpm install --prefer-offline";
@@ -411,7 +619,7 @@ export function createRunVerificationTool(
             `auto-prepending \`${installCmd}\` before running the command.`;
           warnings.push(msg);
           log.warn(`[fn_run_verification] ${taskId}: ${msg}`);
-          effectiveCommand = `${installCmd} && ${command}`;
+          effectiveCommand = `${installCmd} && ${effectiveCommand}`;
         }
       }
 

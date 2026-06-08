@@ -15,7 +15,7 @@ import { executorLog } from "./logger.js";
 import { WORKFLOW_INTERPRETER_DUAL_OBSERVE_FLAG } from "./workflow-parity-observer.js";
 import { WorkflowGraphTaskRunner, type WorkflowGraphTaskRunResult } from "./workflow-graph-task-runner.js";
 
-const AUTHORITATIVE_WORKFLOW_ID = "builtin:workflow-interpreter-authoritative";
+const AUTHORITATIVE_WORKFLOW_ID = "internal:workflow-interpreter-authoritative";
 
 export interface WorkflowAuthoritativeDriverStore {
   getSettings(): Promise<Settings>;

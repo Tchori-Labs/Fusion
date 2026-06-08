@@ -459,8 +459,10 @@ export class StuckTaskDetector {
     const activitySinceProgress = entry.activitySinceProgress;
     const ignoredStepUpdateCount = entry.ignoredStepUpdateCount;
 
-    // Classify the reason
-    const reason = this.classifyStuckReason(taskId, timeoutMs) ?? "inactivity";
+    // Classify the reason. If recovery is already pending or fresh progress
+    // made the task no longer stuck, do not kill it.
+    const reason = this.classifyStuckReason(taskId, timeoutMs);
+    if (reason === null) return;
 
     const elapsedMin = Math.round(inactivityMs / 60_000);
     const noProgressMin = Math.round(noProgressMs / 60_000);
@@ -529,6 +531,10 @@ export class StuckTaskDetector {
     // dispose/requeue but keep tracking alive for FN-5168 churn accounting.
     // Errors fall through to normal kill.
     if (reason === "loop" && this.onLoopDetected) {
+      // Mark recovery as pending before awaiting the callback. Compaction or
+      // steering can be slow; without this, the next poll can re-enter the same
+      // loop recovery path and spam compact-and-resume attempts for one session.
+      entry.recoveryInProgress = true;
       try {
         const handled = await this.onLoopDetected(event);
         if (handled) {
@@ -539,10 +545,11 @@ export class StuckTaskDetector {
           // Keep the task tracked so FN-5168 can keep counting ignored
           // step-update churn after recovery resumes, but suppress detector
           // polling until the executor emits fresh progress on resume.
-          entry.recoveryInProgress = true;
           return;
         }
+        entry.recoveryInProgress = false;
       } catch (err) {
+        entry.recoveryInProgress = false;
         stuckLog.error(`onLoopDetected callback failed for ${canonicalId}:`, err);
         // Fall through to normal kill path
       }

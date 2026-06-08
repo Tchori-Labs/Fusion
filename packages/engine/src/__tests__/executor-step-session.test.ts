@@ -3457,10 +3457,12 @@ describe("TaskExecutor loop recovery", () => {
     const compactRetVal = overrides && "compactResult" in overrides ? overrides.compactResult : defaultResult;
     const compact = vi.fn(async () => compactRetVal);
     const steer = vi.fn(async () => {});
+    const abort = vi.fn(async () => {});
 
     return {
       prompt: vi.fn(async () => {}),
       dispose: vi.fn(),
+      abort,
       subscribe: vi.fn(),
       setThinkingLevel: vi.fn(),
       steer,
@@ -3578,6 +3580,33 @@ describe("TaskExecutor loop recovery", () => {
     });
 
     expect(result).toBe(false);
+  });
+
+  it("handleLoopDetected returns false when compaction hangs", async () => {
+    vi.useFakeTimers();
+    const mockSession = createMockSessionForLoopRecovery({ compactResult: new Promise(() => {}) });
+    const { store, executor } = setupExecutorWithActiveSession(mockSession);
+
+    const resultPromise = executor.handleLoopDetected({
+      taskId: "FN-001",
+      reason: "loop",
+      noProgressMs: 600000,
+      inactivityMs: 0,
+      activitySinceProgress: 100,
+      ignoredStepUpdateCount: 0,
+      shouldRequeue: true,
+    });
+
+    await vi.advanceTimersByTimeAsync(60000);
+
+    await expect(resultPromise).resolves.toBe(false);
+    expect(mockSession.abort).toHaveBeenCalled();
+    expect(store.logEntry).toHaveBeenCalledWith(
+      "FN-001",
+      expect.stringContaining("Context compaction timed out"),
+    );
+
+    vi.useRealTimers();
   });
 });
 
@@ -3712,4 +3741,3 @@ describe("U2: fn_review_step RETHINK delegates to resetStepToBaseline (character
     );
   });
 });
-

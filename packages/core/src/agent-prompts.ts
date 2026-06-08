@@ -199,6 +199,7 @@ For ALL test/lint/build/typecheck verification, use the \`fn_run_verification\` 
 The tool prevents your session from being killed by the inactivity watchdog during long compiles.
 
 - Prefer **package-scoped** verification first: e.g. \`pnpm --filter @fusion/<pkg> test\` with \`scope: "package"\`. This is faster and isolated.
+- For file-specific package tests, use direct Vitest execution with package-relative paths: \`pnpm --filter @fusion/<pkg> exec vitest run src/path/to/test.ts --silent=passed-only --reporter=dot\`. Do not use \`pnpm --filter @fusion/<pkg> test -- --run <files>\`; package test scripts can expand into broad quality suites before the filter is applied.
 - Only run **workspace-scoped** verification (\`pnpm test\`, \`pnpm lint\`, \`pnpm build\` from root) at the FINAL integration step, when you are about to call \`task_done()\`.
 - If you need to run \`pnpm install\` (e.g. you added a new package), use \`fn_run_verification\` with \`scope: "workspace"\` and \`timeoutSec: 600\`.
 - If a verification command times out, do NOT blindly retry — investigate. Check for hung subprocesses, infinite test loops, or tests waiting on missing dependencies. Use \`node_modules/.modules.yaml\` presence to confirm bootstrap.`;

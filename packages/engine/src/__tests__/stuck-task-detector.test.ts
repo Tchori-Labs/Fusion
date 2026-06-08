@@ -1082,6 +1082,40 @@ describe("StuckTaskDetector", () => {
   });
 
   describe("onLoopDetected pre-kill callback", () => {
+    it("suppresses repeat loop detection while compact recovery callback is still pending", async () => {
+      let resolveLoop: (value: boolean) => void = () => {};
+      const onLoopDetected = vi.fn(() => new Promise<boolean>((resolve) => {
+        resolveLoop = resolve;
+      }));
+      const onStuck = vi.fn();
+      const customDetector = new StuckTaskDetector(store, { onLoopDetected, onStuck });
+      const session = createMockSession();
+
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      customDetector.trackTask("FN-001", session);
+      vi.advanceTimersByTime(61000);
+      for (let i = 0; i < 80; i++) {
+        customDetector.recordActivity("FN-001");
+      }
+
+      const firstDetection = customDetector.killAndRetry("FN-001", 60000);
+      await Promise.resolve();
+
+      expect(onLoopDetected).toHaveBeenCalledTimes(1);
+      expect(customDetector.classifyStuckReason("FN-001", 60000)).toBeNull();
+
+      await customDetector.killAndRetry("FN-001", 60000);
+      expect(onLoopDetected).toHaveBeenCalledTimes(1);
+      expect(session.dispose).not.toHaveBeenCalled();
+      expect(onStuck).not.toHaveBeenCalled();
+
+      resolveLoop(true);
+      await firstDetection;
+      expect(customDetector.trackedCount).toBe(1);
+
+      vi.useRealTimers();
+    });
+
     it("calls onLoopDetected before onStuck when reason is loop", async () => {
       const callOrder: string[] = [];
       const onLoopDetected = vi.fn(async () => { callOrder.push("onLoopDetected"); return false; });

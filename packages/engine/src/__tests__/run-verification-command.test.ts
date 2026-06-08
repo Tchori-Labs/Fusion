@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { tmpdir } from "node:os";
-import { runVerificationCommand, type RunVerificationOptions } from "../run-verification-tool.js";
+import { fileURLToPath } from "node:url";
+import { runVerificationCommand, normalizeVerificationCommand, type RunVerificationOptions } from "../run-verification-tool.js";
 
 // Some tests use platform-appropriate shell syntax. On Windows, sh-style
 // quoting and pipes through `printf` are different — these tests are skipped
@@ -23,6 +24,64 @@ const itPosix = onPosix ? it : it.skip;
 // so we fall back to os.tmpdir() which is always C:\Users\…\Temp there.
 describe("runVerificationCommand", { timeout: 30000 }, () => {
   const tempDir = onPosix ? "/tmp" : tmpdir();
+  const workspaceRoot = fileURLToPath(new URL("../../../../", import.meta.url));
+
+  describe("command normalization", () => {
+    it("rewrites package test -- --run filters to direct vitest with package-relative files", () => {
+      const result = normalizeVerificationCommand(
+        [
+          "pnpm --filter @fusion/dashboard test -- --run",
+          "packages/dashboard/src/__tests__/routes-tasks.test.ts",
+          "packages/dashboard/src/__tests__/routes-settings.test.ts",
+        ].join(" "),
+        workspaceRoot,
+      );
+
+      expect(result.command).toBe(
+        [
+          "pnpm --filter @fusion/dashboard exec vitest run",
+          "src/__tests__/routes-tasks.test.ts",
+          "src/__tests__/routes-settings.test.ts",
+          "--silent=passed-only --reporter=dot",
+        ].join(" "),
+      );
+      expect(result.warnings).toEqual([
+        expect.stringContaining("rewrote package test file filter"),
+      ]);
+    });
+
+    it("leaves ordinary package tests unchanged when no file filter is forwarded", () => {
+      const command = "pnpm --filter @fusion/dashboard test";
+      expect(normalizeVerificationCommand(command, workspaceRoot)).toEqual({ command, warnings: [] });
+    });
+
+    it("leaves commands with unterminated shell quotes unchanged", () => {
+      const command = "pnpm --filter @fusion/dashboard test -- --run 'src/__tests__/routes-tasks.test.ts";
+      expect(normalizeVerificationCommand(command, workspaceRoot)).toEqual({ command, warnings: [] });
+    });
+
+    it("preserves pnpm global flags that precede --filter", () => {
+      const result = normalizeVerificationCommand(
+        "pnpm -w --filter @fusion/dashboard test -- --run packages/dashboard/src/__tests__/routes-tasks.test.ts",
+        workspaceRoot,
+      );
+
+      expect(result.command).toBe(
+        "pnpm -w --filter @fusion/dashboard exec vitest run src/__tests__/routes-tasks.test.ts --silent=passed-only --reporter=dot",
+      );
+    });
+
+    it("verifies the CLI package directory through package.json before rewriting", () => {
+      const result = normalizeVerificationCommand(
+        "pnpm --filter @runfusion/fusion test -- --run packages/cli/src/__tests__/cli.test.ts",
+        workspaceRoot,
+      );
+
+      expect(result.command).toBe(
+        "pnpm --filter @runfusion/fusion exec vitest run src/__tests__/cli.test.ts --silent=passed-only --reporter=dot",
+      );
+    });
+  });
 
   describe("basic command execution", () => {
     it("executes a simple echo command and captures output", async () => {
@@ -73,6 +132,24 @@ describe("runVerificationCommand", { timeout: 30000 }, () => {
 
       expect(result.success).toBe(true);
       expect(result.exitCode).toBe(3);
+    });
+  });
+
+  describe("timeouts", () => {
+    itPosix("times out and kills a quiet long-running process group", async () => {
+      const onHeartbeat = vi.fn();
+      const opts: RunVerificationOptions = {
+        command: "sh -c 'sleep 10 & wait'",
+        cwd: tempDir,
+        timeoutMs: 100,
+        onHeartbeat,
+      };
+
+      const result = await runVerificationCommand(opts);
+
+      expect(result.success).toBe(false);
+      expect(result.timedOut).toBe(true);
+      expect(result.durationMs).toBeLessThan(5_000);
     });
   });
 

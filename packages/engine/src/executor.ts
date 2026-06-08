@@ -271,6 +271,8 @@ const MAX_TASK_DONE_REQUEUE_RETRIES = 3;
 const COMPLETED_TASK_WATCHDOG_MS = 60_000;
 /** How long to wait before retrying a workflow rerun handoff that never reached in-progress. */
 const WORKFLOW_RERUN_WATCHDOG_MS = 15_000;
+/** Upper bound for in-process loop recovery before falling through to kill/requeue. */
+const LOOP_COMPACTION_TIMEOUT_MS = 60_000;
 
 const TASK_DONE_REFUSAL_SUFFIX = "Either finish the work and resubmit, or do not call fn_task_done — exit the session and the engine will requeue.";
 
@@ -1085,6 +1087,7 @@ For ALL test/lint/build/typecheck verification, use the \`fn_run_verification\` 
 The tool prevents your session from being killed by the inactivity watchdog during long compiles.
 
 - Prefer **package-scoped** verification first: e.g. \`pnpm --filter @fusion/<pkg> test\` with \`scope: "package"\`. This is faster and isolated.
+- For file-specific package tests, use direct Vitest execution with package-relative paths: \`pnpm --filter @fusion/<pkg> exec vitest run src/path/to/test.ts --silent=passed-only --reporter=dot\`. Do not use \`pnpm --filter @fusion/<pkg> test -- --run <files>\`; package test scripts can expand into broad quality suites before the filter is applied.
 - Only run **workspace-scoped** verification (\`pnpm test\`, \`pnpm lint\`, \`pnpm build\` from root) at the FINAL integration step, when you are about to call \`fn_task_done\`.
 - If you need to run \`pnpm install\` (e.g. you added a new package), use \`fn_run_verification\` with \`scope: "workspace"\` and \`timeoutSec: 600\`.
 - If a verification command times out, do NOT blindly retry — investigate. Check for hung subprocesses, infinite test loops, or tests waiting on missing dependencies. Use \`node_modules/.modules.yaml\` presence to confirm bootstrap.
@@ -13416,10 +13419,43 @@ Backward compat fallback: if JSON is unavailable, you may still begin output wit
     executorLog.log(`${taskId} loop detected (attempt ${attempt}) — attempting compact-and-resume`);
     await this.store.logEntry(taskId, `Loop detected (${event.activitySinceProgress} events since last progress) — attempting compact-and-resume (attempt ${attempt})`);
 
-    const compactResult = await compactSessionContext(activeEntry.session);
+    let compactionTimedOut = false;
+    let compactionTimer: ReturnType<typeof setTimeout> | undefined;
+    const abortActiveSession = () => {
+      const sessionWithAbort = activeEntry.session as unknown as { abort?: () => Promise<void> };
+      if (typeof sessionWithAbort.abort === "function") {
+        void sessionWithAbort.abort().catch((err: unknown) => {
+          executorLog.warn(`${taskId} loop compaction abort after timeout failed: ${err instanceof Error ? err.message : String(err)}`);
+        });
+      }
+    };
+    let compactResult: Awaited<ReturnType<typeof compactSessionContext>> | null;
+    try {
+      compactResult = await Promise.race([
+        compactSessionContext(activeEntry.session),
+        new Promise<null>((resolve) => {
+          compactionTimer = setTimeout(() => {
+            compactionTimedOut = true;
+            abortActiveSession();
+            resolve(null);
+          }, LOOP_COMPACTION_TIMEOUT_MS);
+        }),
+      ]);
+    } finally {
+      if (compactionTimer) clearTimeout(compactionTimer);
+    }
     if (!compactResult) {
-      executorLog.log(`${taskId} compaction failed or unavailable — falling back to kill/requeue`);
-      await this.store.logEntry(taskId, "Context compaction failed or unavailable — falling back to kill/requeue");
+      const reason = compactionTimedOut
+        ? `Context compaction timed out after ${LOOP_COMPACTION_TIMEOUT_MS / 1000}s`
+        : "Context compaction failed or unavailable";
+      executorLog.log(`${taskId} ${reason.toLowerCase()} — falling back to kill/requeue`);
+      await this.store.logEntry(taskId, `${reason} — falling back to kill/requeue`);
+      return false;
+    }
+
+    if (this.activeSessions.get(taskId)?.session !== activeEntry.session) {
+      executorLog.log(`${taskId} compaction completed after session changed — falling back to kill/requeue`);
+      await this.store.logEntry(taskId, "Context compaction completed after session changed — falling back to kill/requeue");
       return false;
     }
 
