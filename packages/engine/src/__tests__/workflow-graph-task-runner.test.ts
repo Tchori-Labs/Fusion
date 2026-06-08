@@ -163,6 +163,25 @@ describe("WorkflowGraphTaskRunner (CU-U2)", () => {
     expect(result.reason).toMatch(/workflow-missing/);
   });
 
+  it("resolves built-in workflow selections without requiring the store to return a definition", async () => {
+    const calls: string[] = [];
+    const store: WorkflowGraphRunnerStore = {
+      getTaskWorkflowSelection: () => ({ workflowId: "builtin:coding", stepIds: [] }),
+      getWorkflowDefinition: async () => undefined,
+    };
+    const runner = new WorkflowGraphTaskRunner({
+      store,
+      seams: recordingSeams(calls),
+      runCustomNode: async () => ({ outcome: "success" }),
+    });
+
+    const result = await runner.run(task, flagOn);
+
+    expect(result.disposition).toBe("completed");
+    expect(calls).toEqual(["execute", "review", "merge"]);
+    expect(result.reason).toBeUndefined();
+  });
+
   it("falls back (never strands the task) when the interpreter throws", async () => {
     // Malformed graph: edge references unknown node → WorkflowIrError inside run().
     const badIr: WorkflowIr = {

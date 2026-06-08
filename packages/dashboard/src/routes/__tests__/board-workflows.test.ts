@@ -42,6 +42,9 @@ function makeStore(opts: {
     async getWorkflowDefinition(id: string) {
       return opts.defs?.[id];
     },
+    async listWorkflowDefinitions() {
+      return Object.values(opts.defs ?? {});
+    },
   };
 }
 
@@ -71,6 +74,24 @@ describe("buildBoardWorkflowsPayload", () => {
       "done",
       "archived",
     ]);
+    expect(defaultWf!.columns.map((c) => c.name)).toEqual([
+      "Triage",
+      "Todo",
+      "In Progress",
+      "In Review",
+      "Done",
+      "Archived",
+    ]);
+  });
+
+  it("includes user-defined workflows even when no visible task references them", async () => {
+    const store = makeStore({
+      flagOn: true,
+      selections: {},
+      defs: { "wf-custom": CUSTOM },
+    });
+    const payload = await buildBoardWorkflowsPayload(store as never, ["FN-1"]);
+    expect(payload.workflows.map((w) => w.id).sort()).toEqual([DEFAULT_WORKFLOW_LANE_ID, "wf-custom"]);
   });
 
   it("describes a custom workflow's columns with resolved trait flags", async () => {

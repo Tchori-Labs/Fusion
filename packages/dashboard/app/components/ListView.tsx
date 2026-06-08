@@ -2,14 +2,14 @@ import "./ListView.css";
 import { useState, useCallback, useMemo, Fragment, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
-import { ArrowUpDown, ArrowUp, ArrowDown, Link, Columns3, EyeOff, Eye, ChevronRight, Zap, Trash2, Pause, Play, Archive } from "lucide-react";
+import { ArrowUpDown, ArrowUp, ArrowDown, Link, Columns3, EyeOff, Eye, ChevronRight, Zap, Trash2, Pause, Play, Archive, Plus } from "lucide-react";
 import type { Task, TaskDetail, Column, ColumnId, TaskCreateInput, MergeResult, GithubIssueAction } from "@fusion/core";
 import { COLUMNS, DEFAULT_COLUMN, getErrorMessage, isColumn } from "@fusion/core";
 import { useColumnLabel } from "../i18n/labels";
 import { sortTasksForDisplayColumn } from "./taskSorting";
-import { batchUpdateTaskModels, fetchNodes, fetchTaskDetail } from "../api";
+import { batchUpdateTaskModels, fetchBoardWorkflows, fetchNodes, fetchTaskDetail } from "../api";
 import { TaskDetailContent } from "./TaskDetailModal";
-import type { ModelInfo, NodeInfo } from "../api";
+import type { BoardWorkflowColumn, BoardWorkflowDefinition, BoardWorkflowsPayload, ModelInfo, NodeInfo } from "../api";
 import { QuickEntryBox } from "./QuickEntryBox";
 import { CustomModelDropdown } from "./CustomModelDropdown";
 import { NodeHealthDot } from "./NodeHealthDot";
@@ -20,6 +20,7 @@ import { getScopedItem, removeScopedItem, setScopedItem } from "../utils/project
 import { getUnifiedTaskProgress } from "../utils/taskProgress";
 import { useConfirm } from "../hooks/useConfirm";
 import { extractDependencyDeleteConflict, extractLineageDeleteConflict } from "../utils/taskDelete";
+import { subscribeSse } from "../sse-bus";
 
 const COLUMN_COLOR_MAP: Record<Column, string> = {
   triage: "var(--triage)",
@@ -110,14 +111,12 @@ function readStaleOnlyFilter(projectId?: string): boolean {
   return false;
 }
 
-function readCollapsedSections(projectId?: string): Set<Column> {
+function readCollapsedSections(projectId?: string): Set<ColumnId> {
   try {
     const saved = getScopedItem("kb-dashboard-list-collapsed", projectId);
     if (saved) {
-      const parsed = JSON.parse(saved) as Column[];
-      const validColumns = parsed.filter((col): col is Column =>
-        COLUMNS.includes(col as Column)
-      );
+      const parsed = JSON.parse(saved) as unknown[];
+      const validColumns = parsed.filter((col): col is ColumnId => typeof col === "string");
       if (validColumns.length > 0) {
         return new Set(validColumns);
       }
@@ -126,7 +125,7 @@ function readCollapsedSections(projectId?: string): Set<Column> {
     // Invalid localStorage data - fall through to default
   }
 
-  return new Set<Column>();
+  return new Set<ColumnId>();
 }
 
 function readSelectedTaskIds(projectId?: string): Set<string> {
@@ -187,7 +186,7 @@ function clampSidebarWidth(width: number, containerWidth: number): number {
 
 interface ListViewProps {
   tasks: Task[];
-  onMoveTask: (id: string, column: Column, optionsOrPosition?: { preserveProgress?: boolean } | number) => Promise<Task>;
+  onMoveTask: (id: string, column: ColumnId, optionsOrPosition?: { preserveProgress?: boolean } | number) => Promise<Task>;
   onRetryTask?: (id: string) => Promise<Task>;
   onDeleteTask: (id: string, options?: {
     removeDependencyReferences?: boolean;
@@ -234,7 +233,21 @@ interface ListViewProps {
   /** Timestamp (ms) when task data was last confirmed fresh from the server. Used for freshness-aware stuck detection. */
   lastFetchTimeMs?: number;
   prAuthAvailable?: boolean;
+  onCreateWorkflow?: () => void;
 }
+
+const LEGACY_LIST_COLUMNS: BoardWorkflowColumn[] = COLUMNS.map((column) => ({
+  id: column,
+  name: column,
+  flags: {
+    intake: column === "triage",
+    countsTowardWip: column === "in-progress",
+    mergeBlocker: column === "in-review",
+    complete: column === "done",
+    archived: column === "archived",
+    hold: column === "todo",
+  },
+}));
 
 function shouldShowTaskProgress(task: Task): boolean {
   return task.status === "executing" || task.column === "in-progress";
@@ -283,14 +296,17 @@ export function ListView({
   searchQuery = "",
   lastFetchTimeMs,
   prAuthAvailable,
+  onCreateWorkflow,
 }: ListViewProps) {
   const { t } = useTranslation("app");
   const columnLabel = useColumnLabel();
   const [sortField, setSortField] = useState<SortField | null>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
   const [draggingTaskId, setDraggingTaskId] = useState<string | null>(null);
-  const [dragOverColumn, setDragOverColumn] = useState<Column | null>(null);
-  const [selectedColumn, setSelectedColumn] = useState<Column | null>(null);
+  const [dragOverColumn, setDragOverColumn] = useState<ColumnId | null>(null);
+  const [selectedColumn, setSelectedColumn] = useState<ColumnId | null>(null);
+  const [boardWorkflows, setBoardWorkflows] = useState<BoardWorkflowsPayload | null>(null);
+  const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null>(null);
   const viewportMode = useViewportMode();
   const isMobile = viewportMode === "mobile";
   const { confirm, confirmWithChoice } = useConfirm();
@@ -304,7 +320,7 @@ export function ListView({
   const [stalePausedReviewOnlyFilter, setStalePausedReviewOnlyFilter] = useState<boolean>(false);
 
   // Collapsed sections state - initialize from localStorage
-  const [collapsedSections, setCollapsedSections] = useState<Set<Column>>(() =>
+  const [collapsedSections, setCollapsedSections] = useState<Set<ColumnId>>(() =>
     readCollapsedSections(projectId),
   );
 
@@ -342,12 +358,19 @@ export function ListView({
   const [bulkEditEnabled, setBulkEditEnabled] = useState(false);
   const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(() => readSelectedTaskIds(projectId));
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(() => readSelectedTaskId(projectId));
-  const [selectedTaskSnapshot, setSelectedTaskSnapshot] = useState<Task | TaskDetail | null>(null);
+  const [selectedTaskSnapshot, setSelectedTaskSnapshot] = useState<Task | TaskDetail | null>(() => {
+    const persistedSelection = readSelectedTaskId(projectId);
+    return persistedSelection ? tasks.find((task) => task.id === persistedSelection) ?? null : null;
+  });
   const [sidebarWidth, setSidebarWidth] = useState<number>(() => readSidebarWidth(projectId));
   const splitLayoutRef = useRef<HTMLDivElement>(null);
   const splitSidebarRef = useRef<HTMLDivElement>(null);
+  const previousStorageProjectIdRef = useRef(projectId);
+  const boardWorkflowsFetchSeqRef = useRef(0);
 
   useEffect(() => {
+    if (previousStorageProjectIdRef.current === projectId) return;
+    previousStorageProjectIdRef.current = projectId;
     setVisibleColumns(readVisibleColumns(projectId));
     setHideDoneTasks(readHideDoneTasks(projectId));
     setStaleOnlyFilter(readStaleOnlyFilter(projectId));
@@ -361,6 +384,41 @@ export function ListView({
     );
     setSidebarWidth(readSidebarWidth(projectId));
   }, [projectId, tasks]);
+
+  useEffect(() => {
+    const runFetch = () => {
+      const seq = ++boardWorkflowsFetchSeqRef.current;
+      fetchBoardWorkflows(projectId)
+        .then((payload) => {
+          if (seq === boardWorkflowsFetchSeqRef.current) setBoardWorkflows(payload);
+        })
+        .catch(() => {
+          if (seq === boardWorkflowsFetchSeqRef.current) {
+            setBoardWorkflows({ flagEnabled: false, defaultWorkflowId: "builtin:coding", workflows: [], taskWorkflowIds: {} });
+          }
+        });
+    };
+    runFetch();
+    const onVisible = () => {
+      if (typeof document === "undefined" || document.visibilityState === "visible") runFetch();
+    };
+    if (typeof document !== "undefined") document.addEventListener("visibilitychange", onVisible);
+    if (typeof window !== "undefined") window.addEventListener("focus", onVisible);
+    const query = projectId ? `?projectId=${encodeURIComponent(projectId)}` : "";
+    const unsubscribe = subscribeSse(`/api/events${query}`, {
+      events: {
+        "workflow:created": runFetch,
+        "workflow:updated": runFetch,
+        "workflow:deleted": runFetch,
+      },
+    });
+    return () => {
+      boardWorkflowsFetchSeqRef.current++;
+      if (typeof document !== "undefined") document.removeEventListener("visibilitychange", onVisible);
+      if (typeof window !== "undefined") window.removeEventListener("focus", onVisible);
+      unsubscribe();
+    };
+  }, [projectId]);
 
   // Persist selection to localStorage
   useEffect(() => {
@@ -392,6 +450,7 @@ export function ListView({
       if (!previous || previous.id !== selectedTaskId) {
         return liveTask;
       }
+      if (previous === liveTask) return previous;
       return { ...previous, ...liveTask };
     });
   }, [selectedTaskId, tasks]);
@@ -488,6 +547,100 @@ export function ListView({
     });
   }, []);
 
+  const workflowMode = boardWorkflows?.flagEnabled === true && boardWorkflows.workflows.length > 0;
+  const workflowOptions = useMemo<BoardWorkflowDefinition[]>(() => {
+    if (!workflowMode || !boardWorkflows) return [];
+    return [...boardWorkflows.workflows].sort((a, b) => {
+      if (a.id === boardWorkflows.defaultWorkflowId) return -1;
+      if (b.id === boardWorkflows.defaultWorkflowId) return 1;
+      return a.name.localeCompare(b.name);
+    });
+  }, [boardWorkflows, workflowMode]);
+
+  const selectedWorkflow = useMemo<BoardWorkflowDefinition | null>(() => {
+    if (!workflowMode) return null;
+    return workflowOptions.find((workflow) => workflow.id === selectedWorkflowId)
+      ?? workflowOptions.find((workflow) => workflow.id === boardWorkflows?.defaultWorkflowId)
+      ?? workflowOptions[0]
+      ?? null;
+  }, [boardWorkflows?.defaultWorkflowId, selectedWorkflowId, workflowMode, workflowOptions]);
+
+  useEffect(() => {
+    if (!workflowMode) {
+      setSelectedWorkflowId(null);
+      return;
+    }
+    if (selectedWorkflow && selectedWorkflow.id !== selectedWorkflowId) {
+      setSelectedWorkflowId(selectedWorkflow.id);
+    }
+  }, [selectedWorkflow, selectedWorkflowId, workflowMode]);
+
+  useEffect(() => {
+    setSelectedColumn(null);
+  }, [selectedWorkflowId]);
+
+  const listColumns = useMemo<BoardWorkflowColumn[]>(() => {
+    if (!workflowMode || !selectedWorkflow) return LEGACY_LIST_COLUMNS;
+    return selectedWorkflow.columns.filter((column) => !column.flags.hiddenFromBoard);
+  }, [selectedWorkflow, workflowMode]);
+
+  const columnNameById = useMemo(() => {
+    const map = new Map<ColumnId, string>();
+    for (const column of listColumns) {
+      map.set(column.id, workflowMode ? column.name : columnLabel(column.id));
+    }
+    return map;
+  }, [columnLabel, listColumns, workflowMode]);
+
+  const columnFlagsById = useMemo(() => {
+    const map = new Map<ColumnId, BoardWorkflowColumn["flags"]>();
+    for (const column of listColumns) {
+      map.set(column.id, column.flags);
+    }
+    return map;
+  }, [listColumns]);
+
+  const getListColumnLabel = useCallback((column: ColumnId): string => {
+    return columnNameById.get(column) ?? columnLabel(column);
+  }, [columnLabel, columnNameById]);
+
+  const isArchivedColumn = useCallback((column: ColumnId): boolean => {
+    return workflowMode ? Boolean(columnFlagsById.get(column)?.archived) : column === "archived";
+  }, [columnFlagsById, workflowMode]);
+
+  const isCompleteColumn = useCallback((column: ColumnId): boolean => {
+    return workflowMode ? Boolean(columnFlagsById.get(column)?.complete) : column === "done";
+  }, [columnFlagsById, workflowMode]);
+
+  const selectedWorkflowTaskIds = useMemo(() => {
+    if (!workflowMode || !boardWorkflows || !selectedWorkflow) return null;
+    const ids = new Set<string>();
+    for (const task of tasks) {
+      const workflowId = boardWorkflows.taskWorkflowIds[task.id] ?? boardWorkflows.defaultWorkflowId;
+      if (workflowId === selectedWorkflow.id) ids.add(task.id);
+    }
+    return ids;
+  }, [boardWorkflows, selectedWorkflow, tasks, workflowMode]);
+
+  const createTargetColumn = useMemo(() => {
+    const target = listColumns.find((column) => column.flags.intake && !column.flags.archived)
+      ?? listColumns.find((column) => !column.flags.archived);
+    return target?.id;
+  }, [listColumns]);
+
+  const handleListQuickCreate = useCallback((input: TaskCreateInput) => {
+    const create = onQuickCreate ?? (async () => addToast(t("listView.taskCreationUnavailable", "Task creation not available"), "error"));
+    if (workflowMode && selectedWorkflow && createTargetColumn) {
+      const explicitWorkflowId = selectedWorkflow.id.startsWith("builtin:") ? undefined : selectedWorkflow.id;
+      return create({
+        ...input,
+        column: input.column ?? createTargetColumn,
+        workflowId: input.workflowId ?? explicitWorkflowId,
+      });
+    }
+    return create(input);
+  }, [addToast, createTargetColumn, onQuickCreate, selectedWorkflow, t, workflowMode]);
+
 
   // Column display labels
   const COLUMN_LABELS_MAP: Record<ListColumn, string> = {
@@ -509,11 +662,11 @@ export function ListView({
     setSortDirection("asc");
   }, [sortField]);
 
-  const handleColumnFilter = useCallback((column: Column) => {
+  const handleColumnFilter = useCallback((column: ColumnId) => {
     setSelectedColumn((prev) => (prev === column ? null : column));
   }, []);
 
-  const toggleSection = useCallback((column: Column) => {
+  const toggleSection = useCallback((column: ColumnId) => {
     setCollapsedSections((prev) => {
       const next = new Set(prev);
       if (next.has(column)) {
@@ -540,10 +693,20 @@ export function ListView({
         )
       : [...tasks];
 
+    if (selectedWorkflowTaskIds) {
+      filtered = filtered.filter((task) => selectedWorkflowTaskIds.has(task.id));
+    }
+
+    const hiddenCompletedColumns = new Set(
+      listColumns
+        .filter((column) => column.flags.complete || column.flags.archived)
+        .map((column) => column.id),
+    );
+
     // Then filter out done and archived tasks if hideDoneTasks is enabled
     // BUT only when no specific column is selected (strict hide semantics)
     if (hideDoneTasks && !selectedColumn) {
-      filtered = filtered.filter((t) => t.column !== "done" && t.column !== "archived");
+      filtered = filtered.filter((t) => !hiddenCompletedColumns.has(t.column));
     }
 
     // Then apply stale-only filter if selected
@@ -559,27 +722,22 @@ export function ListView({
       ? filtered.filter((t) => t.column === selectedColumn)
       : filtered;
 
-    const groups: Record<Column, Task[]> = {
-      triage: [],
-      todo: [],
-      "in-progress": [],
-      "in-review": [],
-      done: [],
-      archived: [],
-    };
+    const groups: Record<string, Task[]> = {};
+    for (const column of listColumns) groups[column.id] = [];
 
     columnFiltered.forEach((task) => {
-      const column = isColumn(task.column) ? task.column : DEFAULT_COLUMN;
-      groups[column].push(task);
+      const column = workflowMode ? task.column : (isColumn(task.column) ? task.column : DEFAULT_COLUMN);
+      if (groups[column]) groups[column].push(task);
     });
 
-    for (const column of COLUMNS) {
+    for (const column of listColumns) {
+      const columnId = column.id;
       if (!sortField) {
-        groups[column] = sortTasksForDisplayColumn(groups[column], column);
+        groups[columnId] = sortTasksForDisplayColumn(groups[columnId], columnId as Column);
         continue;
       }
 
-      groups[column] = [...groups[column]].sort((a, b) => {
+      groups[columnId] = [...groups[columnId]].sort((a, b) => {
         let comparison = 0;
         switch (sortField) {
           case "title":
@@ -599,7 +757,7 @@ export function ListView({
       });
     }
     return groups;
-  }, [tasks, searchQuery, sortField, sortDirection, hideDoneTasks, staleOnlyFilter, stalePausedReviewOnlyFilter, selectedColumn]);
+  }, [tasks, searchQuery, selectedWorkflowTaskIds, listColumns, workflowMode, hideDoneTasks, selectedColumn, staleOnlyFilter, stalePausedReviewOnlyFilter, sortField, sortDirection]);
 
   // Calculate total filtered count from groups
   const filteredCount = useMemo(() => {
@@ -608,8 +766,16 @@ export function ListView({
 
   // Calculate done and archived task counts for stats display
   const completedTaskCount = useMemo(() => {
-    return tasks.filter((t) => t.column === "done" || t.column === "archived").length;
-  }, [tasks]);
+    const completedColumns = new Set(
+      listColumns
+        .filter((column) => column.flags.complete || column.flags.archived)
+        .map((column) => column.id),
+    );
+    return tasks.filter((task) => {
+      if (selectedWorkflowTaskIds && !selectedWorkflowTaskIds.has(task.id)) return false;
+      return completedColumns.has(task.column);
+    }).length;
+  }, [listColumns, selectedWorkflowTaskIds, tasks]);
 
   // Calculate hidden done+archived tasks count
   const hiddenCompletedCount = useMemo(() => {
@@ -622,7 +788,7 @@ export function ListView({
   const toggleSelectAll = useCallback(() => {
     const visibleTaskIds = Object.values(groupedTasks)
       .flat()
-      .filter((t) => t.column !== "archived") // Can't bulk edit archived
+      .filter((t) => !isArchivedColumn(t.column)) // Can't bulk edit archived
       .map((t) => t.id);
 
     setSelectedTaskIds((prev) => {
@@ -637,26 +803,26 @@ export function ListView({
         return new Set([...prev, ...visibleTaskIds]);
       }
     });
-  }, [groupedTasks]);
+  }, [groupedTasks, isArchivedColumn]);
 
   // Check if all visible tasks are selected
   const isSelectAll = useMemo(() => {
     const visibleTaskIds = Object.values(groupedTasks)
       .flat()
-      .filter((t) => t.column !== "archived");
+      .filter((t) => !isArchivedColumn(t.column));
     if (visibleTaskIds.length === 0) return false;
     return visibleTaskIds.every((t) => selectedTaskIds.has(t.id));
-  }, [groupedTasks, selectedTaskIds]);
+  }, [groupedTasks, isArchivedColumn, selectedTaskIds]);
 
   // Check if some (but not all) visible tasks are selected
   const isSelectIndeterminate = useMemo(() => {
     const visibleTaskIds = Object.values(groupedTasks)
       .flat()
-      .filter((t) => t.column !== "archived");
+      .filter((t) => !isArchivedColumn(t.column));
     if (visibleTaskIds.length === 0) return false;
     const selectedCount = visibleTaskIds.filter((t) => selectedTaskIds.has(t.id)).length;
     return selectedCount > 0 && selectedCount < visibleTaskIds.length;
-  }, [groupedTasks, selectedTaskIds]);
+  }, [groupedTasks, isArchivedColumn, selectedTaskIds]);
 
   // Bulk edit state and handlers (must be after groupedTasks and clearSelection definition)
   const [executorModel, setExecutorModel] = useState<string>("__no_change__");
@@ -1018,7 +1184,7 @@ export function ListView({
     const selectedTasks = Array.from(selectedTaskIds)
       .map((id) => tasks.find((task) => task.id === id))
       .filter((task): task is Task => Boolean(task));
-    const actionableTasks = selectedTasks.filter((task) => task.column === "done");
+    const actionableTasks = selectedTasks.filter((task) => isCompleteColumn(task.column));
     const skippedCount = selectedTasks.length - actionableTasks.length;
 
     if (actionableTasks.length === 0) {
@@ -1092,14 +1258,14 @@ export function ListView({
       t("listView.bulkArchiveSummary", "Archived {{archived}} · {{skipped}} skipped · {{failed}} failed", { archived: archivedIds.length, skipped: skippedCount, failed: failedIds.length }),
       failedIds.length > 0 ? "error" : "success",
     );
-  }, [addToast, confirm, onArchiveTask, selectedTaskIds, tasks]);
+  }, [addToast, confirm, isCompleteColumn, onArchiveTask, selectedTaskIds, tasks]);
 
   const handleApplyBulkUpdate = useCallback(async () => {
     if (selectedTaskIds.size === 0) return;
 
     const taskIds = Array.from(selectedTaskIds).filter((id) => {
       const task = tasks.find((t) => t.id === id);
-      return task && task.column !== "archived";
+      return task && !isArchivedColumn(task.column);
     });
 
     if (taskIds.length === 0) {
@@ -1189,7 +1355,7 @@ export function ListView({
     } finally {
       setIsApplying(false);
     }
-  }, [selectedTaskIds, tasks, executorModel, validatorModel, nodeOverride, projectId, addToast, clearSelection, onTasksUpdated]);
+  }, [selectedTaskIds, tasks, executorModel, validatorModel, nodeOverride, projectId, addToast, clearSelection, isArchivedColumn, onTasksUpdated]);
 
   const handleRowClick = useCallback(
     (task: Task) => {
@@ -1326,7 +1492,7 @@ export function ListView({
   }, [isMobile, sidebarWidth]);
 
   const handleColumnDragOver = useCallback(
-    (e: React.DragEvent, column: Column) => {
+    (e: React.DragEvent, column: ColumnId) => {
       e.preventDefault();
       e.dataTransfer.dropEffect = "move";
       setDragOverColumn(column);
@@ -1339,14 +1505,14 @@ export function ListView({
   }, []);
 
   const handleColumnDrop = useCallback(
-    async (e: React.DragEvent, column: Column) => {
+    async (e: React.DragEvent, column: ColumnId) => {
       e.preventDefault();
       setDragOverColumn(null);
       const taskId = e.dataTransfer.getData("text/plain");
       if (!taskId) return;
 
       // Prevent dropping into archived column
-      if (column === "archived") {
+      if (column === "archived" || columnFlagsById.get(column)?.archived) {
         addToast(t("listView.archiveViaButton", "Tasks can only be archived via the archive button"), "error");
         return;
       }
@@ -1386,7 +1552,7 @@ export function ListView({
         addToast(getErrorMessage(err), "error");
       }
     },
-    [onMoveTask, addToast, tasks, confirm]
+    [addToast, columnFlagsById, confirm, onMoveTask, tasks, t]
   );
 
   const getSortIcon = (field: SortField) => {
@@ -1395,6 +1561,40 @@ export function ListView({
       <ArrowUp size={14} className="sort-icon active" />
     ) : (
       <ArrowDown size={14} className="sort-icon active" />
+    );
+  };
+
+  const renderWorkflowSelector = () => {
+    if (!workflowMode || workflowOptions.length <= 1 || !selectedWorkflow) return null;
+    return (
+      <div className="list-workflow-control">
+        <label className="list-workflow-selector">
+          <span>{t("listView.workflowLabel", "Workflow")}</span>
+          <select
+            className="select list-workflow-select"
+            value={selectedWorkflow.id}
+            onChange={(event) => setSelectedWorkflowId(event.target.value)}
+            aria-label={t("listView.workflowSelectLabel", "Select workflow")}
+          >
+            {workflowOptions.map((workflow) => (
+              <option key={workflow.id} value={workflow.id}>
+                {workflow.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        {onCreateWorkflow && (
+          <button
+            type="button"
+            className="btn btn-icon btn-sm list-workflow-create-btn"
+            onClick={onCreateWorkflow}
+            title={t("workflows.newWorkflow", "New workflow")}
+            aria-label={t("workflows.newWorkflow", "New workflow")}
+          >
+            <Plus size={15} />
+          </button>
+        )}
+      </div>
     );
   };
 
@@ -1447,9 +1647,12 @@ export function ListView({
         {stalePausedReviewOnlyFilter ? t("listView.showAll", "Show all") : t("listView.stalePausedReview", "Stale paused review")}
       </button>
       <div className="list-drop-zones list-drop-zones--sidebar">
-        {COLUMNS.map((column) => {
-          const totalCount = tasks.filter((t) => t.column === column).length;
-          const isCompletedColumn = column === "done" || column === "archived";
+        {listColumns.map((columnDef) => {
+          const column = columnDef.id;
+          const totalCount = selectedWorkflowTaskIds
+            ? tasks.filter((task) => task.column === column && selectedWorkflowTaskIds.has(task.id)).length
+            : tasks.filter((task) => task.column === column).length;
+          const isCompletedColumn = Boolean(columnDef.flags.complete || columnDef.flags.archived);
           const visibleCount = hideDoneTasks && isCompletedColumn ? 0 : totalCount;
           const showPartial = hideDoneTasks && isCompletedColumn && totalCount > 0;
 
@@ -1463,8 +1666,8 @@ export function ListView({
               onDrop={(e) => handleColumnDrop(e, column)}
               data-column={column}
             >
-              <span className={`list-section-dot dot-${column}`} />
-              <span className="drop-zone-label">{columnLabel(column)}</span>
+              <span className={`list-section-dot dot-${column}`} style={{ backgroundColor: columnColor(column) }} />
+              <span className="drop-zone-label">{getListColumnLabel(column)}</span>
               <span className="drop-zone-count">
                 {showPartial ? `${visibleCount} of ${totalCount}` : totalCount}
               </span>
@@ -1564,6 +1767,7 @@ export function ListView({
             <button className="btn btn-sm" onClick={toggleBulkEdit} aria-pressed={bulkEditEnabled}>
               {bulkEditEnabled ? t("listView.doneEditing", "Done Editing") : t("listView.bulkEdit", "Bulk Edit")}
             </button>
+            {renderWorkflowSelector()}
             <button
               className="btn btn-sm list-view-options-toggle"
               onClick={() => setViewOptionsOpen((prev) => !prev)}
@@ -1580,7 +1784,7 @@ export function ListView({
             ) : null}
             <div className="list-stats">
               {selectedColumn
-                ? t("listView.statsInColumn", "{{count}} of {{total}} tasks in {{column}}", { count: filteredCount, total: tasks.length, column: columnLabel(selectedColumn) })
+                ? t("listView.statsInColumn", "{{count}} of {{total}} tasks in {{column}}", { count: filteredCount, total: tasks.length, column: getListColumnLabel(selectedColumn) })
                 : t("listView.stats", "{{count}} of {{total}} tasks", { count: filteredCount, total: tasks.length })}
             </div>
           </div>
@@ -1615,13 +1819,14 @@ export function ListView({
                 <div className="list-sidebar-controls__header">
                   <p className="list-stats">
                     {selectedColumn
-                      ? t("listView.statsInColumn", "{{count}} of {{total}} tasks in {{column}}", { count: filteredCount, total: tasks.length, column: columnLabel(selectedColumn) })
+                      ? t("listView.statsInColumn", "{{count}} of {{total}} tasks in {{column}}", { count: filteredCount, total: tasks.length, column: getListColumnLabel(selectedColumn) })
                       : t("listView.stats", "{{count}} of {{total}} tasks", { count: filteredCount, total: tasks.length })}
                     {hiddenCompletedCount > 0 && !selectedColumn && (
                       <span className="list-stats-hidden"> ({t("listView.hidden", "{{count}} hidden", { count: hiddenCompletedCount })})</span>
                     )}
                   </p>
                   <div className="list-sidebar-controls__actions">
+                    {renderWorkflowSelector()}
                     <button className="btn btn-sm" onClick={toggleBulkEdit} aria-pressed={bulkEditEnabled}>
                       {bulkEditEnabled ? t("listView.doneEditing", "Done Editing") : t("listView.bulkEdit", "Bulk Edit")}
                     </button>
@@ -1634,7 +1839,7 @@ export function ListView({
                   <div className="list-sidebar-summary-chips">
                     {selectedColumn ? (
                       <button className="btn btn-sm" onClick={clearColumnFilter} aria-label={t("listView.clearColumnFilter", "Clear column filter")}>
-                        {t("listView.filterChip", "Filter: {{column}}", { column: columnLabel(selectedColumn) })}
+                        {t("listView.filterChip", "Filter: {{column}}", { column: getListColumnLabel(selectedColumn) })}
                       </button>
                     ) : null}
                     {hideDoneTasks ? <span className="list-sidebar-chip">{t("listView.doneHiddenChip", "Done hidden")}</span> : null}
@@ -1665,7 +1870,7 @@ export function ListView({
             )}
             <div className="list-quick-entry-above-table">
               <QuickEntryBox 
-                onCreate={onQuickCreate ?? (async () => addToast(t("listView.taskCreationUnavailable", "Task creation not available"), "error"))} 
+                onCreate={handleListQuickCreate}
                 addToast={addToast}
                 tasks={tasks}
                 availableModels={availableModels}
@@ -1695,9 +1900,10 @@ export function ListView({
           </div>
         ) : isMobile ? (
           <div className="list-cards">
-            {COLUMNS.map((column) => {
+            {listColumns.map((columnDef) => {
+              const column = columnDef.id;
               if (selectedColumn && column !== selectedColumn) return null;
-              if (hideDoneTasks && (column === "done" || column === "archived") && !selectedColumn) return null;
+              if (hideDoneTasks && (columnDef.flags.complete || columnDef.flags.archived) && !selectedColumn) return null;
 
               const columnTasks = groupedTasks[column];
               const isEmpty = columnTasks.length === 0;
@@ -1724,8 +1930,8 @@ export function ListView({
                       size={14}
                       className={`list-section-chevron${!isCollapsed ? " list-section-chevron--expanded" : ""}`}
                     />
-                    <span className={`list-section-dot dot-${column}`} />
-                    <span className="list-section-title">{columnLabel(column)}</span>
+                    <span className={`list-section-dot dot-${column}`} style={{ backgroundColor: columnColor(column) }} />
+                    <span className="list-section-title">{getListColumnLabel(column)}</span>
                     <span className="list-section-count">{columnTasks.length}</span>
                   </div>
 
@@ -1882,12 +2088,13 @@ export function ListView({
               </tr>
             </thead>
             <tbody>
-              {COLUMNS.map((column) => {
+              {listColumns.map((columnDef) => {
+                const column = columnDef.id;
                 // When column filter is active, only show the selected column
                 if (selectedColumn && column !== selectedColumn) return null;
                 
                 // Skip done and archived column sections when hideDoneTasks is enabled (unless it's the selected column)
-                if (hideDoneTasks && (column === "done" || column === "archived") && !selectedColumn) return null;
+                if (hideDoneTasks && (columnDef.flags.complete || columnDef.flags.archived) && !selectedColumn) return null;
 
                 const columnTasks = groupedTasks[column];
                 const isEmpty = columnTasks.length === 0;
@@ -1910,8 +2117,8 @@ export function ListView({
                           size={14}
                           className={`list-section-chevron${!isCollapsed ? " list-section-chevron--expanded" : ""}`}
                         />
-                        <span className={`list-section-dot dot-${column}`} />
-                        <span className="list-section-title">{columnLabel(column)}</span>
+                        <span className={`list-section-dot dot-${column}`} style={{ backgroundColor: columnColor(column) }} />
+                        <span className="list-section-title">{getListColumnLabel(column)}</span>
                         <span className="list-section-count">{columnTasks.length}</span>
                       </th>
                     </tr>
@@ -2019,7 +2226,7 @@ export function ListView({
                                         color: columnColor(task.column),
                                       }}
                                     >
-                                      {columnLabel(task.column)}
+                                      {getListColumnLabel(task.column)}
                                     </span>
                                   </td>
                                 )}
