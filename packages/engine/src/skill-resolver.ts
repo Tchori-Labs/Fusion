@@ -465,7 +465,7 @@ export function createSkillsOverrideFromSelection(
         ) {
           const purpose = sessionPurpose ? ` [${sessionPurpose}]` : "";
           newDiagnostics.push({
-            type: "warning",
+            type: "info" as ResourceDiagnostic["type"],
             message: `Requested skill '${requestedName}' not found in discovered skills${purpose}`,
           });
         }

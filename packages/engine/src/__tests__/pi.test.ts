@@ -443,7 +443,7 @@ describe("createFnAgent skills parameter", () => {
       allowedSkillPaths: new Set(),
       excludedSkillPaths: new Set(),
       diagnostics: [
-        { type: "warning" as const, message: 'Requested skill "nonexistent-skill" not found in discovered skills' },
+        { type: "info" as const, message: 'Requested skill "nonexistent-skill" not found in discovered skills' },
       ],
       filterActive: true,
     });
@@ -458,8 +458,8 @@ describe("createFnAgent skills parameter", () => {
 
     // The diagnostics should be logged
     expect(mockResolveSessionSkills).toHaveBeenCalled();
-    expect(piWarnSpy).toHaveBeenCalledWith(
-      expect.stringContaining("warning")
+    expect(piLogSpy).toHaveBeenCalledWith(
+      expect.stringContaining("info")
     );
   });
 });
