@@ -601,10 +601,145 @@ describe("TaskExecutor bounded recovery retries", () => {
     expect(store.handoffToReview).not.toHaveBeenCalled();
     expect(store.logEntry).toHaveBeenCalledWith(
       "FN-001",
-      "Workflow graph terminated with failure at node 'execute' (task already todo - preserving recovered lifecycle state)",
+      "Workflow graph run ended after task already advanced to 'todo' — no further action needed",
       undefined,
       undefined,
     );
+  });
+
+  it.each(["in-review", "done"] as const)(
+    "treats a graph exit after task advanced to %s as benign",
+    async (column) => {
+      const store = createMockStore();
+      const task = {
+        id: "FN-001",
+        title: "Test",
+        description: "Test",
+        column: "in-progress",
+        status: undefined,
+        dependencies: [],
+        steps: [],
+        currentStep: 0,
+        log: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      } as Task;
+      store.getTask.mockResolvedValue({
+        ...task,
+        column,
+        status: undefined,
+        error: null,
+      });
+      const warnSpy = vi.spyOn(executorLog, "warn").mockImplementation(() => undefined);
+      const executor = new TaskExecutor(store, "/tmp/test", {});
+
+      await (executor as any).handleGraphFailure(task, {
+        visitedNodeIds: ["execute"],
+      });
+
+      const expectedMessage = `Workflow graph run ended after task already advanced to '${column}' — no further action needed`;
+      expect(store.logEntry).toHaveBeenCalledWith("FN-001", expectedMessage, undefined, undefined);
+      expect(store.logEntry.mock.calls.map((call) => call[1]).join("\n")).not.toContain("terminated with failure");
+      expect(store.updateTask).not.toHaveBeenCalledWith(
+        "FN-001",
+        expect.objectContaining({ status: "failed" }),
+        expect.anything(),
+      );
+      expect(store.updateTask).not.toHaveBeenCalledWith(
+        "FN-001",
+        expect.objectContaining({ error: expect.anything() }),
+        expect.anything(),
+      );
+      expect(store.handoffToReview).not.toHaveBeenCalled();
+      expect(warnSpy).not.toHaveBeenCalledWith(expect.stringContaining("terminated with failure"));
+      warnSpy.mockRestore();
+    },
+  );
+
+  it("treats a graph exit while task is paused as benign", async () => {
+    const store = createMockStore();
+    const task = {
+      id: "FN-001",
+      title: "Test",
+      description: "Test",
+      column: "in-progress",
+      status: undefined,
+      dependencies: [],
+      steps: [],
+      currentStep: 0,
+      log: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    } as Task;
+    store.getTask.mockResolvedValue({
+      ...task,
+      column: "in-progress",
+      paused: true,
+      status: undefined,
+      error: null,
+    });
+    const executor = new TaskExecutor(store, "/tmp/test", {});
+
+    await (executor as any).handleGraphFailure(task, {
+      visitedNodeIds: ["execute"],
+    });
+
+    expect(store.logEntry).toHaveBeenCalledWith(
+      "FN-001",
+      "Workflow graph run ended while task is paused — pause state preserved",
+      undefined,
+      undefined,
+    );
+    expect(store.updateTask).not.toHaveBeenCalledWith(
+      "FN-001",
+      expect.objectContaining({ status: "failed" }),
+      expect.anything(),
+    );
+    expect(store.handoffToReview).not.toHaveBeenCalled();
+  });
+
+  it("preserves genuine in-progress graph failure handling", async () => {
+    const store = createMockStore();
+    const task = {
+      id: "FN-001",
+      title: "Test",
+      description: "Test",
+      column: "in-progress",
+      status: undefined,
+      dependencies: [],
+      steps: [],
+      currentStep: 0,
+      log: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    } as Task;
+    store.getTask.mockResolvedValue({
+      ...task,
+      column: "in-progress",
+      paused: false,
+      status: undefined,
+      error: null,
+    });
+    const warnSpy = vi.spyOn(executorLog, "warn").mockImplementation(() => undefined);
+    const executor = new TaskExecutor(store, "/tmp/test", {});
+
+    await (executor as any).handleGraphFailure(task, {
+      visitedNodeIds: [],
+    });
+
+    const message = "Workflow graph terminated with failure at node 'unknown'";
+    expect(warnSpy).toHaveBeenCalledWith(`FN-001: ${message}`);
+    expect(store.logEntry).toHaveBeenCalledWith("FN-001", message, undefined, undefined);
+    expect(store.updateTask).toHaveBeenCalledWith(
+      "FN-001",
+      { error: message, status: "failed" },
+      undefined,
+    );
+    expect(store.handoffToReview).toHaveBeenCalledWith(
+      "FN-001",
+      expect.objectContaining({ evidence: expect.objectContaining({ reason: "workflow-graph-failed" }) }),
+    );
+    warnSpy.mockRestore();
   });
 
   it("preserves step progress when requeuing stuck task by default", async () => {

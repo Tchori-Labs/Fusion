@@ -5957,9 +5957,6 @@ export class TaskExecutor {
   /** Terminal failure of a graph run: record the error and park the task in
    *  review so a human can act — never leave it invisible in in-progress. */
   private async handleGraphFailure(task: Task, result: WorkflowGraphTaskRunResult): Promise<void> {
-    const failedNode = result.visitedNodeIds[result.visitedNodeIds.length - 1];
-    const message = `Workflow graph terminated with failure at node '${failedNode ?? "unknown"}'`;
-    executorLog.warn(`${task.id}: ${message}`);
     this.clearCompletedTaskWatchdog(task.id);
     this.options.stuckTaskDetector?.untrackTask(task.id);
     try {
@@ -5967,22 +5964,20 @@ export class TaskExecutor {
       // A paused/aborted implementation is not a graph failure — leave the
       // pause machinery in charge instead of parking the task in review.
       if (live.paused || this.pausedAborted.has(task.id)) {
-        executorLog.log(`${task.id}: graph run ended while task is paused — leaving pause state untouched`);
-        await this.store.logEntry(task.id, `${message} (task paused — not parked)`, undefined, this.getRunContextFor(task.id));
+        const benignMessage = "Workflow graph run ended while task is paused — pause state preserved";
+        executorLog.log(`${task.id}: ${benignMessage}`);
+        await this.store.logEntry(task.id, benignMessage, undefined, this.getRunContextFor(task.id));
         return;
       }
       if (live.column !== "in-progress") {
-        executorLog.log(
-          `${task.id}: graph run ended after task moved to '${live.column}' - preserving recovered lifecycle state`,
-        );
-        await this.store.logEntry(
-          task.id,
-          `${message} (task already ${live.column} - preserving recovered lifecycle state)`,
-          undefined,
-          this.getRunContextFor(task.id),
-        );
+        const benignMessage = `Workflow graph run ended after task already advanced to '${live.column}' — no further action needed`;
+        executorLog.log(`${task.id}: ${benignMessage}`);
+        await this.store.logEntry(task.id, benignMessage, undefined, this.getRunContextFor(task.id));
         return;
       }
+      const failedNode = result.visitedNodeIds[result.visitedNodeIds.length - 1];
+      const message = `Workflow graph terminated with failure at node '${failedNode ?? "unknown"}'`;
+      executorLog.warn(`${task.id}: ${message}`);
       await this.store.logEntry(task.id, message, undefined, this.getRunContextFor(task.id));
       // status "failed" doubles as the self-healing exemption: review-task
       // revival sweeps skip tasks carrying a non-null status, preventing the
