@@ -1417,6 +1417,11 @@ function normalizeExistingPathForGitComparison(path: string): string {
   }
 }
 
+function isSameOrInsidePath(parentPath: string, childPath: string): boolean {
+  const rel = relative(parentPath, childPath);
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+}
+
 async function isCompleteGitWorktree(worktreePath: string): Promise<boolean> {
   try {
     const { stdout } = await execAsync("git rev-parse --show-toplevel", {
@@ -1467,25 +1472,34 @@ function isWorktreeAllowedPath(
   const worktreeResolved = resolve(worktreePath);
   const projectRootResolved = resolve(projectRoot);
   const requestedResolved = isAbsolute(requestedPath) ? resolve(requestedPath) : resolve(worktreeResolved, requestedPath);
+  const worktreeCanonical = normalizeExistingPathForGitComparison(worktreeResolved);
+  const projectRootCanonical = normalizeExistingPathForGitComparison(projectRootResolved);
+  const requestedCanonical = normalizeExistingPathForGitComparison(requestedResolved);
 
   // Check if path is inside the worktree
-  const relToWorktree = relative(worktreeResolved, requestedResolved);
-  if (!relToWorktree.startsWith("..") && !isAbsolute(relToWorktree)) {
+  if (
+    isSameOrInsidePath(worktreeResolved, requestedResolved) ||
+    isSameOrInsidePath(worktreeCanonical, requestedCanonical)
+  ) {
     return true; // Path is inside the worktree
   }
 
   // Exception: project root `.fusion/memory/` files for durable project learnings
   const relToProjectRoot = relative(projectRootResolved, requestedResolved).replace(/\\/g, "/");
+  const relToCanonicalProjectRoot = relative(projectRootCanonical, requestedCanonical).replace(/\\/g, "/");
+  const projectRelativePaths = [relToProjectRoot, relToCanonicalProjectRoot];
   if (
-    relToProjectRoot === ".fusion/memory" ||
-    relToProjectRoot === ".fusion/memory/" ||
-    relToProjectRoot.startsWith(".fusion/memory/")
+    projectRelativePaths.some((relPath) =>
+      relPath === ".fusion/memory" ||
+      relPath === ".fusion/memory/" ||
+      relPath.startsWith(".fusion/memory/")
+    )
   ) {
     return true;
   }
 
   // Exception: task attachments under `.fusion/tasks/*/attachments/*`
-  if (relToProjectRoot.match(/^\.fusion\/tasks\/[^/]+\/attachments\//)) {
+  if (projectRelativePaths.some((relPath) => relPath.match(/^\.fusion\/tasks\/[^/]+\/attachments\//))) {
     return true;
   }
 
@@ -1494,8 +1508,11 @@ function isWorktreeAllowedPath(
   // into the worktree. `glob`/`grep` are narrow enough to allow as well so
   // the agent can discover them; writes and bash remain restricted.
   const readOnlyTools = new Set(["read", "glob", "grep"]);
-  if (toolName && readOnlyTools.has(toolName) &&
-      /^\.fusion\/tasks\/[^/]+\/(PROMPT\.md|task\.json)$/.test(relToProjectRoot)) {
+  if (
+    toolName &&
+    readOnlyTools.has(toolName) &&
+    projectRelativePaths.some((relPath) => /^\.fusion\/tasks\/[^/]+\/(PROMPT\.md|task\.json)$/.test(relPath))
+  ) {
     return true;
   }
 

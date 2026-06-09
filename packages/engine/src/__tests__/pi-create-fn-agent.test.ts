@@ -20,12 +20,14 @@ const settingsManagerInMemoryMock = vi.fn(() => ({ kind: "settings-manager" }));
 const setFallbackResolverMock = vi.fn();
 const reloadMock = vi.fn(async () => {});
 const execSyncMock = vi.fn((_cmd?: any, _opts?: any) => "");
+const spawnSyncMock = vi.fn(() => ({ status: 1, stdout: "" }));
 const execFileMock = vi.fn((_file?: any, _args?: any, _opts?: any, cb?: any) => {
   const callback = typeof _opts === "function" ? _opts : cb;
   if (typeof callback === "function") callback(null, "", "");
 });
 const existsSyncMock = vi.fn((_path: PathLike) => false);
 const readFileSyncMock = vi.fn((_path?: any) => "{}");
+const realpathSyncNativeMock = vi.fn((path: PathLike) => String(path));
 const readCustomProvidersMock = vi.fn(() => []);
 const packageManagerCwdCapture = vi.fn();
 
@@ -63,7 +65,7 @@ vi.mock("node:child_process", () => {
         }
       });
     });
-  return { execSync: execSyncFn, exec: execFn, execFile: execFileMock };
+  return { execSync: execSyncFn, exec: execFn, execFile: execFileMock, spawnSync: spawnSyncMock };
 });
 
 vi.mock("node:fs", async () => {
@@ -72,6 +74,9 @@ vi.mock("node:fs", async () => {
     ...actual,
     existsSync: existsSyncMock,
     readFileSync: readFileSyncMock,
+    realpathSync: Object.assign(vi.fn((path: PathLike) => String(path)), {
+      native: realpathSyncNativeMock,
+    }),
   };
 });
 
@@ -283,6 +288,10 @@ describe("RTK bash rewrite wrapper", () => {
 describe("worktree path boundary helpers", () => {
   // Test helper functions directly by importing them
   // Note: These tests verify the boundary logic without needing a full agent session
+  beforeEach(() => {
+    spawnSyncMock.mockReturnValue({ status: 1, stdout: "" });
+    realpathSyncNativeMock.mockImplementation((path: PathLike) => String(path));
+  });
 
   describe("path boundary logic for worktree sessions", () => {
     it("wraps file tools with boundary validation when cwd is a worktree", async () => {
@@ -322,6 +331,37 @@ describe("worktree path boundary helpers", () => {
       });
       expect(mockReadTool.execute).not.toHaveBeenCalled();
     }, 15_000);
+
+    it("allows macOS-canonicalized paths inside the worktree boundary", async () => {
+      const mockBashTool = {
+        name: "bash",
+        label: "Bash",
+        description: "Run a command",
+        parameters: {},
+        execute: vi.fn().mockResolvedValue({ ok: true, content: [] }),
+      };
+      const worktreePath = "/var/folders/zp/fjh8794n7bl61c_pn1gmdt200000gn/T/fusion-ai-merge-fn-6085-2nTWPZ";
+      const canonicalWorktreePath = "/private/var/folders/zp/fjh8794n7bl61c_pn1gmdt200000gn/T/fusion-ai-merge-fn-6085-2nTWPZ";
+      realpathSyncNativeMock.mockImplementation((path: PathLike) => {
+        const text = String(path);
+        return text.startsWith("/var/folders/") ? `/private${text}` : text;
+      });
+
+      const { wrapToolsWithBoundary } = await import("../pi.js");
+      const wrapped = wrapToolsWithBoundary(
+        [mockBashTool as any],
+        worktreePath,
+        "/var/folders/zp/fjh8794n7bl61c_pn1gmdt200000gn/T/project",
+      );
+
+      const result = await (wrapped[0] as any).execute("call-1", {
+        command: "pwd",
+        cwd: canonicalWorktreePath,
+      });
+
+      expect(result).toEqual({ ok: true, content: [] });
+      expect(mockBashTool.execute).toHaveBeenCalled();
+    });
 
     it("allows project root .fusion/memory/ files from worktree session", async () => {
       const mockReadTool = {
@@ -972,8 +1012,10 @@ describe("createFnAgent", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     execSyncMock.mockReturnValue("");
+    spawnSyncMock.mockReturnValue({ status: 1, stdout: "" });
     existsSyncMock.mockReturnValue(false);
     readFileSyncMock.mockReturnValue("{}");
+    realpathSyncNativeMock.mockImplementation((path: PathLike) => String(path));
     readCustomProvidersMock.mockReturnValue([]);
     findMock.mockImplementation((provider: string, modelId: string) => ({ provider, id: modelId }));
     createBashToolMock.mockClear();

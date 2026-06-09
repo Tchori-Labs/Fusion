@@ -182,12 +182,22 @@ describe("createFnAgent prompt layer wiring", () => {
   });
 
   it("accepts macOS-canonicalized Git linked worktrees during session validation", async () => {
-    const cwd = "/var/folders/zp/fjh8794n7bl61c_pn1gmdt200000gn/T/project/.worktrees/fn-6085";
-    const projectRoot = "/var/folders/zp/fjh8794n7bl61c_pn1gmdt200000gn/T/project";
-    const canonicalCwd = "/private/var/folders/zp/fjh8794n7bl61c_pn1gmdt200000gn/T/project/.worktrees/fn-6085";
+    const canonicalProjectRoot = "/private/var/folders/zp/fjh8794n7bl61c_pn1gmdt200000gn/T/project";
+    const cwd = "/var/folders/zp/fjh8794n7bl61c_pn1gmdt200000gn/T/fusion-ai-merge-fn-6085-2nTWPZ";
+    const canonicalCwd = "/private/var/folders/zp/fjh8794n7bl61c_pn1gmdt200000gn/T/fusion-ai-merge-fn-6085-2nTWPZ";
     existsSyncMock.mockImplementation((path: PathLike) => {
       const text = String(path);
-      return text === cwd || text === `${cwd}/.git` || text === `${projectRoot}/.fusion`;
+      return text === cwd || text === `${cwd}/.git` || text === `${canonicalProjectRoot}/.fusion`;
+    });
+    spawnSyncMock.mockImplementation((_command: string, args: string[]) => {
+      const joined = args.join(" ");
+      if (joined.includes("--git-common-dir")) {
+        return { status: 0, stdout: `${canonicalProjectRoot}/.git\n` };
+      }
+      if (joined.includes("--git-dir")) {
+        return { status: 0, stdout: `${canonicalProjectRoot}/.git/worktrees/fusion-ai-merge-fn-6085-2nTWPZ\n` };
+      }
+      return { status: 1, stdout: "" };
     });
     realpathSyncNativeMock.mockImplementation((path: PathLike) => {
       const text = String(path);
