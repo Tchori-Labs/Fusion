@@ -630,6 +630,55 @@ describe("Scheduler", () => {
       expect(vi.mocked(store.listTasks).mock.calls.some(([options]) => options?.startupMemo === false)).toBe(true);
     });
 
+    it("holds workflow-column releases when maxWorktrees is exhausted", async () => {
+      vi.mocked(existsSync).mockReturnValue(true);
+      vi.mocked(readFile).mockResolvedValue("# Task\nDo something");
+
+      const tasks = new Map<string, Task>([
+        ["FN-001", createMockTask({ id: "FN-001", column: "in-progress", dependencies: [] })],
+        ["FN-002", createMockTask({ id: "FN-002", column: "in-progress", dependencies: [] })],
+        ["FN-003", createMockTask({ id: "FN-003", column: "todo", dependencies: [] })],
+        ["FN-004", createMockTask({ id: "FN-004", column: "todo", dependencies: [] })],
+        ["FN-005", createMockTask({ id: "FN-005", column: "todo", dependencies: [] })],
+      ]);
+      const movedListeners = new Set<(data: { task: object; to: string }) => void>();
+      const moveTask = vi.fn(async (taskId: string, column: Task["column"]) => {
+        const current = tasks.get(taskId);
+        if (!current) throw new Error(`missing task ${taskId}`);
+        const updated = { ...current, column } as Task;
+        tasks.set(taskId, updated);
+        for (const listener of movedListeners) {
+          listener({ task: updated, to: column });
+        }
+        return updated;
+      });
+      const store = createMockStore({
+        listTasks: vi.fn(async () => [...tasks.values()]),
+        getTask: vi.fn(async (taskId: string) => tasks.get(taskId) ?? null),
+        getSettings: vi.fn().mockResolvedValue({
+          maxConcurrent: 15,
+          maxWorktrees: 3,
+          experimentalFeatures: { workflowColumns: true },
+        }),
+        moveTask,
+        on: vi.fn((event: string, listener: (data: { task: object; to: string }) => void) => {
+          if (event === "task:moved") movedListeners.add(listener);
+        }),
+        off: vi.fn((event: string, listener: (data: { task: object; to: string }) => void) => {
+          if (event === "task:moved") movedListeners.delete(listener);
+        }),
+      });
+
+      const scheduler = new Scheduler(store);
+      (scheduler as unknown as { running: boolean }).running = true;
+      await scheduler.schedule();
+
+      const inProgress = [...tasks.values()].filter((task) => task.column === "in-progress");
+      expect(inProgress.map((task) => task.id)).toEqual(["FN-001", "FN-002", "FN-003"]);
+      expect(moveTask.mock.calls.filter((call) => call[1] === "in-progress").map((call) => call[0])).toEqual(["FN-003"]);
+      expect(schedulerLog.log).toHaveBeenCalledWith(expect.stringContaining("no reservable slot"));
+    });
+
     it("flag-OFF: todo dispatch is tagged as scheduler-sourced for redispatch guards", async () => {
       const off = setupTodoStore(false);
       await off.scheduler.schedule();

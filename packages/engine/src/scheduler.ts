@@ -1273,7 +1273,7 @@ export class Scheduler {
       // still drives todo→in-progress pickup (parity); the sweep adds custom-
       // workflow hold handling and the generalized capacity-release path.
       if (isWorkflowColumnsEnabled(settings)) {
-        await this.runHoldReleaseSweepPass();
+        await this.runHoldReleaseSweepPass(tasks, settings);
         tasks = await this.store.listTasks({ slim: true, includeArchived: false, startupMemo: false });
         settings = await this.store.getSettings();
       }
@@ -2122,24 +2122,31 @@ export class Scheduler {
    * worktree allocation into the reservation-first ordering (KTD-10). Failures
    * are isolated so a sweep error never breaks the scheduling pass.
    */
-  private async runHoldReleaseSweepPass(): Promise<void> {
+  private async runHoldReleaseSweepPass(tasks: Task[], settings: Settings): Promise<void> {
     try {
+      const maxWorktrees = settings.maxWorktrees ?? this.options.maxWorktrees ?? 4;
+      let reservedWorktreeSlots = tasks.filter((task) => task.column === "in-progress").length;
       await runHoldReleaseSweep(this.store, {
         now: () => Date.now(),
-        reserveSlot: this.options.semaphore
-          ? (): SlotReservation | null => {
-            const sem = this.options.semaphore!;
-            if (!sem.tryAcquire()) return null;
-            let released = false;
-            return {
-              release: () => {
-                if (released) return;
-                released = true;
-                sem.release();
-              },
-            };
+        reserveSlot: (): SlotReservation | null => {
+          if (Number.isFinite(maxWorktrees) && reservedWorktreeSlots >= maxWorktrees) {
+            return null;
           }
-          : undefined,
+
+          const sem = this.options.semaphore;
+          if (sem && !sem.tryAcquire()) return null;
+
+          reservedWorktreeSlots += 1;
+          let released = false;
+          return {
+            release: () => {
+              if (released) return;
+              released = true;
+              reservedWorktreeSlots = Math.max(0, reservedWorktreeSlots - 1);
+              sem?.release();
+            },
+          };
+        },
         allocateWorktree: (task, reservedNames) =>
           planTaskWorktreePath(task, this.store.getRootDir(), undefined, reservedNames, {}),
       });
