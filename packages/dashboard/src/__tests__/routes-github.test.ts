@@ -2409,6 +2409,10 @@ describe("POST /tasks/:id/review/refresh", () => {
     store = createMockStore();
   });
 
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   function buildApp() {
     const app = express();
     app.use(express.json());

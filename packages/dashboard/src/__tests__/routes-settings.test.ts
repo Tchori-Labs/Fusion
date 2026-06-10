@@ -1141,6 +1141,10 @@ describe("PUT /settings/global", () => {
     store = createMockStore();
   });
 
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   function buildApp() {
     const app = express();
     app.use(express.json());
