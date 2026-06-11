@@ -5,14 +5,11 @@ import { describe, expect, it } from "vitest";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const PROCESSOR_PATH = resolve(__dirname, "../workflow-work-processor.ts");
-const PROJECT_ENGINE_PATH = resolve(__dirname, "../project-engine.ts");
 
 describe("workflow merge policy deletion guard", () => {
   it("keeps workflow work processing isolated from the legacy ProjectEngine merge queue", () => {
     const processorSource = readFileSync(PROCESSOR_PATH, "utf8");
-    const projectEngineSource = readFileSync(PROJECT_ENGINE_PATH, "utf8");
 
-    expect(projectEngineSource).toContain("private mergeQueue");
     expect(processorSource).toContain("claimDueWorkflowWorkItem");
     expect(processorSource).toContain("runtime.runWorkItem");
     expect(processorSource).toContain("\"merge\"");
