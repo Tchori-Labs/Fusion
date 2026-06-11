@@ -17,6 +17,7 @@ export interface WorkflowRetryPolicyInput {
   maxAttempts?: number;
   baseDelayMs?: number;
   now?: string;
+  fallbackNowMs?: number;
   lastError?: string | null;
 }
 
@@ -24,7 +25,8 @@ export function nextWorkflowRetryState(input: WorkflowRetryPolicyInput): Workflo
   const attempt = Math.max(0, Math.floor(input.attempt ?? 0)) + 1;
   const maxAttempts = Math.max(1, Math.floor(input.maxAttempts ?? 3));
   const exhausted = attempt >= maxAttempts;
-  const nowMs = Date.parse(input.now ?? new Date().toISOString());
+  const parsedNowMs = Date.parse(input.now ?? new Date().toISOString());
+  const nowMs = Number.isFinite(parsedNowMs) ? parsedNowMs : input.fallbackNowMs ?? Date.now();
   const baseDelayMs = Math.max(1_000, Math.floor(input.baseDelayMs ?? 30_000));
   const maxDelayMs = 24 * 60 * 60_000;
   const delayMs = Math.min(baseDelayMs * 2 ** Math.max(0, attempt - 1), maxDelayMs);

@@ -50,6 +50,25 @@ describe("workflow node retry policy", () => {
     });
   });
 
+  it("falls back when retry context carries a malformed now timestamp", () => {
+    const retry = nextWorkflowRetryState({
+      runId: "run-1",
+      taskId: "FN-RETRY",
+      nodeId: "merge-retry",
+      attempt: 0,
+      maxAttempts: 3,
+      baseDelayMs: 1_000,
+      now: "not-a-date",
+      fallbackNowMs: Date.parse("2026-06-09T00:00:00.000Z"),
+    });
+
+    expect(retry).toMatchObject({
+      attempt: 1,
+      exhausted: false,
+      retryAfter: "2026-06-09T00:00:01.000Z",
+    });
+  });
+
   it("routes exhausted retry state to failure without resetting other nodes", async () => {
     const handlers = createDefaultNodeHandlers(createNoopLegacySeams());
     const result = await handlers["retry-backoff"](
