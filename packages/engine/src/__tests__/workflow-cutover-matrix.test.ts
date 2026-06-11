@@ -21,6 +21,33 @@ describe("workflow-owned merge cutover matrix", () => {
     });
   });
 
+  it("classifies transient and permanent merge failures", () => {
+    expect(classifyMergePrimitiveResult({ status: "timeout" }, undefined, "failure")).toEqual({
+      outcome: "success",
+      value: "transient-failure",
+    });
+    expect(classifyMergePrimitiveResult({ status: "failed", reason: "File scope violation" }, undefined, "failure")).toEqual({
+      outcome: "failure",
+      value: "file-scope-violation",
+    });
+    expect(classifyMergePrimitiveResult({ status: "failed", reason: "Already landed on main" }, undefined, "failure")).toEqual({
+      outcome: "success",
+      value: "already-landed",
+    });
+    expect(classifyMergePrimitiveResult({ status: "failed", reason: "socket hang up" }, undefined, "failure")).toEqual({
+      outcome: "success",
+      value: "transient-failure",
+    });
+    expect(classifyMergePrimitiveResult({ status: "failed", reason: "manual conflict resolution required" }, undefined, "failure")).toEqual({
+      outcome: "success",
+      value: "manual-required",
+    });
+    expect(classifyMergePrimitiveResult({ status: "failed", reason: "branch rejected" }, undefined, "failure")).toEqual({
+      outcome: "failure",
+      value: "merge-failed",
+    });
+  });
+
   it("covers retry exhaustion", () => {
     expect(nextWorkflowRetryState({
       runId: "run-1",
