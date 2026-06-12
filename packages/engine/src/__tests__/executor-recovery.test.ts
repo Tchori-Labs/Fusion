@@ -698,6 +698,207 @@ describe("TaskExecutor bounded recovery retries", () => {
     expect(store.handoffToReview).not.toHaveBeenCalled();
   });
 
+  it("auto-retries a bounded transient resume-after-restart graph failure instead of parking", async () => {
+    const store = createMockStore();
+    const task = {
+      id: "FN-001",
+      title: "Test",
+      description: "Test",
+      column: "in-progress",
+      status: undefined,
+      dependencies: [],
+      steps: [{ name: "Step 1", status: "pending" }],
+      currentStep: 0,
+      log: [{ timestamp: new Date().toISOString(), action: "Resumed after engine restart" }],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      graphResumeRetryCount: 0,
+    } as Task;
+    store.getTask.mockResolvedValue({ ...task, paused: false, error: null });
+    const executor = new TaskExecutor(store, "/tmp/test", {});
+    const executeSpy = vi.spyOn(executor as any, "execute").mockResolvedValue(undefined);
+
+    await (executor as any).handleGraphFailure(task, {
+      disposition: "failed",
+      outcome: "failure",
+      visitedNodeIds: ["execute"],
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(store.updateTask).toHaveBeenCalledWith(
+      "FN-001",
+      { graphResumeRetryCount: 1, status: null, error: null },
+      undefined,
+    );
+    expect(store.updateTask).not.toHaveBeenCalledWith(
+      "FN-001",
+      expect.objectContaining({ status: "failed" }),
+      expect.anything(),
+    );
+    expect(store.handoffToReview).not.toHaveBeenCalled();
+    expect(executeSpy).toHaveBeenCalledWith(expect.objectContaining({ id: "FN-001" }));
+  });
+
+  it("auto-retries a bounded transient graph failure after unpause resume instead of parking", async () => {
+    const store = createMockStore();
+    const task = {
+      id: "FN-001",
+      title: "Test",
+      description: "Test",
+      column: "in-progress",
+      status: undefined,
+      dependencies: [],
+      steps: [{ name: "Step 1", status: "pending" }],
+      currentStep: 0,
+      log: [{ timestamp: new Date().toISOString(), action: "Resuming execution after unpause" }],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      graphResumeRetryCount: 0,
+    } as Task;
+    store.getTask.mockResolvedValue({ ...task, paused: false, error: null });
+    const executor = new TaskExecutor(store, "/tmp/test", {});
+    const executeSpy = vi.spyOn(executor as any, "execute").mockResolvedValue(undefined);
+
+    await (executor as any).handleGraphFailure(task, {
+      disposition: "failed",
+      outcome: "failure",
+      visitedNodeIds: ["execute"],
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(store.updateTask).toHaveBeenCalledWith(
+      "FN-001",
+      { graphResumeRetryCount: 1, status: null, error: null },
+      undefined,
+    );
+    expect(store.handoffToReview).not.toHaveBeenCalled();
+    expect(executeSpy).toHaveBeenCalledWith(expect.objectContaining({ id: "FN-001" }));
+  });
+
+  it("parks a transient resume graph failure once the retry budget is exhausted", async () => {
+    const store = createMockStore();
+    const task = {
+      id: "FN-001",
+      title: "Test",
+      description: "Test",
+      column: "in-progress",
+      status: undefined,
+      dependencies: [],
+      steps: [{ name: "Step 1", status: "pending" }],
+      currentStep: 0,
+      log: [{ timestamp: new Date().toISOString(), action: "Resumed after engine restart" }],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      graphResumeRetryCount: 2,
+    } as Task;
+    store.getTask.mockResolvedValue({ ...task, paused: false, error: null });
+    const warnSpy = vi.spyOn(executorLog, "warn").mockImplementation(() => undefined);
+    const executor = new TaskExecutor(store, "/tmp/test", {});
+    const executeSpy = vi.spyOn(executor as any, "execute").mockResolvedValue(undefined);
+
+    await (executor as any).handleGraphFailure(task, {
+      disposition: "failed",
+      outcome: "failure",
+      visitedNodeIds: ["execute"],
+    });
+
+    const message = "Workflow graph terminated with failure at node 'execute'";
+    expect(store.updateTask).toHaveBeenCalledWith("FN-001", { error: message, status: "failed" }, undefined);
+    expect(store.handoffToReview).toHaveBeenCalledWith(
+      "FN-001",
+      expect.objectContaining({ evidence: expect.objectContaining({ reason: "workflow-graph-failed" }) }),
+    );
+    expect(executeSpy).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it.each([
+    ["non-empty execute-seam reason", { result: { reason: "interpreter-error: boom", visitedNodeIds: ["execute"] } }],
+    ["settings/workflow-selection reason before node progress", { result: { reason: "settings-load-failed: boom", visitedNodeIds: [] } }],
+    ["completed step progress", { task: { steps: [{ name: "Step 1", status: "done" }] }, result: { visitedNodeIds: ["execute"] } }],
+    ["lastError", { task: { lastError: "boom" }, result: { visitedNodeIds: ["execute"] } }],
+    ["failureReason", { task: { failureReason: "boom" }, result: { visitedNodeIds: ["execute"] } }],
+  ])("preserves terminal failed handling for genuine graph failure: %s", async (_name, fixture) => {
+    const store = createMockStore();
+    const task = {
+      id: "FN-001",
+      title: "Test",
+      description: "Test",
+      column: "in-progress",
+      status: undefined,
+      dependencies: [],
+      steps: [{ name: "Step 1", status: "pending" }],
+      currentStep: 0,
+      log: [{ timestamp: new Date().toISOString(), action: "Resumed after engine restart" }],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      graphResumeRetryCount: 0,
+      ...(fixture.task ?? {}),
+    } as Task;
+    store.getTask.mockResolvedValue({ ...task, paused: false, error: null });
+    const warnSpy = vi.spyOn(executorLog, "warn").mockImplementation(() => undefined);
+    const executor = new TaskExecutor(store, "/tmp/test", {});
+    const executeSpy = vi.spyOn(executor as any, "execute").mockResolvedValue(undefined);
+
+    await (executor as any).handleGraphFailure(task, {
+      disposition: "failed",
+      outcome: "failure",
+      ...fixture.result,
+    });
+
+    const failedNode = fixture.result.visitedNodeIds.at(-1) ?? "unknown";
+    const message = `Workflow graph terminated with failure at node '${failedNode}'`;
+    expect(store.updateTask).toHaveBeenCalledWith("FN-001", { error: message, status: "failed" }, undefined);
+    expect(store.handoffToReview).toHaveBeenCalledWith(
+      "FN-001",
+      expect.objectContaining({ evidence: expect.objectContaining({ reason: "workflow-graph-failed" }) }),
+    );
+    expect(executeSpy).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  describe("transient resume-after-restart graph failure classifier", () => {
+    const makeClassifierTask = (overrides: Partial<Task> = {}) => ({
+      id: "FN-001",
+      title: "Test",
+      description: "Test",
+      column: "in-progress",
+      status: undefined,
+      dependencies: [],
+      steps: [
+        { name: "Step 1", status: "pending" },
+        { name: "Step 2", status: "pending" },
+      ],
+      currentStep: 0,
+      log: [{ timestamp: new Date().toISOString(), action: "Resumed after engine restart" }],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      ...overrides,
+    }) as Task;
+
+    const isTransient = (task: Task, result: any) => {
+      const executor = new TaskExecutor(createMockStore(), "/tmp/test", {});
+      return (executor as any).isTransientResumeAfterRestartGraphFailure(task, result);
+    };
+
+    it("accepts only the exact no-progress execute-seam post-resume signature", () => {
+      expect(isTransient(makeClassifierTask(), { visitedNodeIds: ["execute"] })).toBe(true);
+      expect(isTransient(makeClassifierTask({ log: [{ timestamp: new Date().toISOString(), action: "Resuming execution after unpause" }] }), { visitedNodeIds: ["execute"] })).toBe(true);
+      expect(isTransient(makeClassifierTask(), { visitedNodeIds: [] })).toBe(true);
+    });
+
+    it.each([
+      ["non-empty reason", makeClassifierTask(), { visitedNodeIds: ["execute"], reason: "settings-load-failed: boom" }],
+      ["non-execute failed node", makeClassifierTask(), { visitedNodeIds: ["planning"] }],
+      ["completed step progress", makeClassifierTask({ steps: [{ name: "Step 1", status: "done" }] }), { visitedNodeIds: ["execute"] }],
+      ["lastError", makeClassifierTask({ lastError: "boom" } as any), { visitedNodeIds: ["execute"] }],
+      ["failureReason", makeClassifierTask({ failureReason: "boom" } as any), { visitedNodeIds: ["execute"] }],
+      ["missing resume log", makeClassifierTask({ log: [{ timestamp: new Date().toISOString(), action: "Started execution" }] }), { visitedNodeIds: ["execute"] }],
+    ])("rejects %s as genuine/non-transient", (_name, task, result) => {
+      expect(isTransient(task as Task, result)).toBe(false);
+    });
+  });
+
   it("preserves genuine in-progress graph failure handling", async () => {
     const store = createMockStore();
     const task = {

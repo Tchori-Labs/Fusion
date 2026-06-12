@@ -2265,6 +2265,11 @@ export interface Task {
    *  Incremented by self-healing for resume-limbo detection and reset when
    *  progress is observed or recovery escalates to a fresh todo dispatch. */
   resumeLimboCount?: number;
+  /** Bounded auto-retry attempts for transient workflow-graph failures observed
+   *  immediately after engine-restart or unpause resume. Reset by manual retry
+   *  and by successful forward progress; capped by the executor before terminal
+   *  `status:"failed"` is recorded to preserve the FN-5704 anti-loop exemption. */
+  graphResumeRetryCount?: number | null;
   /** Branch tip SHA snapshot captured at the last reclaim/unpause attempt used
    *  by resume-limbo detection to determine whether commits advanced. */
   resumeLimboTipSha?: string;
