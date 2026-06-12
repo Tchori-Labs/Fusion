@@ -254,6 +254,8 @@ The built-in workflows also declare triage/spec policy settings that were **not*
 | `triageNoCommitsDecisionVerbs` | all seven built-ins | Decision-only verbs: Decide, Evaluate, Verify, Confirm, Audit, Review whether, Investigate and report. |
 | `triageDecisionOnlyWorkflowId` | `builtin:quick-fix` | Preferred workflow for decision-only/no-commit tasks. |
 | `triageDefaultWorkflowId` | `builtin:coding` | Default workflow for standard coding tasks. |
+| `leanPlanning` | `false` | Workflow-native fast-mode policy: select the lean `planning-fast` prompt variant instead of the full triage spec prompt. |
+| `autoApproveSpec` | `false` | Workflow-native fast-mode policy: auto-approve generated specs and skip the independent spec reviewer. |
 
 In the dashboard Settings modal, Project Models now exposes Plan/Triage, Executor,
 and Reviewer dropdown controls for the default workflow. The modal's primary

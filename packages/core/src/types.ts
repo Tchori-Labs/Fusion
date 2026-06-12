@@ -4151,6 +4151,10 @@ export interface Settings extends GlobalSettings, ProjectSettings {
   /** Whether PR authentication is currently available (read-only, set by server).
    *  True when authenticated gh CLI access is available or token fallback exists. */
   prAuthAvailable?: boolean;
+  /** Use the lean fast-path planning prompt variant instead of the full triage spec prompt. */
+  leanPlanning?: boolean;
+  /** Auto-approve generated specs and skip the independent spec reviewer. */
+  autoApproveSpec?: boolean;
   /** Index signature for dynamic settings access */
   [key: string]: unknown;
 }

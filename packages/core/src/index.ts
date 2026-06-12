@@ -113,6 +113,11 @@ export {
   renderTriagePolicyPlaceholders,
 } from "./builtin-workflow-settings.js";
 export {
+  BUILTIN_SEAM_PROMPTS,
+  builtinPromptConfig,
+  builtinSeamPrompt,
+} from "./builtin-workflow-prompts.js";
+export {
   MOVED_SETTINGS_KEYS,
   SETTINGS_MIGRATION_VERSION,
   SETTINGS_MIGRATION_MARKER_KEY,
