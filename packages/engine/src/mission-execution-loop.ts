@@ -315,18 +315,50 @@ export class MissionExecutionLoop extends EventEmitter {
                 }
               }
 
-              // Features marked "done" but stranded in "implementing" with no
-              // linked task can never validate on their own: the branches above
-              // only re-drive features that still carry a taskId. Meanwhile the
-              // slice-completion gate (MissionStore.computeSliceStatus) refuses
-              // to count an assertion-linked "done" feature until its validator
-              // passes — so the slice, milestone, and mission can never
-              // auto-progress. Re-drive validation directly so the gate can
-              // resolve. Validation is a read-only judge (no board task, no code
-              // changes); on pass the feature becomes legitimately complete, on
-              // fail the normal fix-feature flow takes over.
+              // Features marked "done" but stranded with no linked task can never
+              // validate on their own: the branches above only re-drive features
+              // that still carry a taskId. Meanwhile the slice-completion gate
+              // (MissionStore.computeSliceStatus) refuses to count an
+              // assertion-linked "done" feature until its validator passes — so
+              // the slice, milestone, and mission can never auto-progress.
+              //
+              // Several ways a task-less done feature lands stranded here:
+              //   1. loopState="implementing" + null lastValidatorStatus — the
+              //      original stranded-orphan case (FN-5715 / the autopilot-stall
+              //      learning): validation was never driven.
+              //   2. loopState="validating" + null lastValidatorStatus — a
+              //      *reaped* run. `startValidatorRun` flips the feature to
+              //      "validating"; `MissionStore.reapValidatorRun` resolves the
+              //      stale run to status="error" but, by design, leaves a *done*
+              //      feature's loopState untouched (its `shouldUpdateFeature`
+              //      guard skips done features). So a reaped validation-only
+              //      feature (no board task) is left "validating" forever: the
+              //      "validating" branch above only re-drives features that carry
+              //      a taskId, and `computeSliceStatus` never counts a "validating"
+              //      done feature — the U7 reaper→slice deadlock (P0).
+              //   3. loopState="needs_fix" + lastValidatorStatus="error" — a
+              //      reaped run on a *non-done* feature that later moved to done,
+              //      or a reaped manual run; "error" is likewise never accepted by
+              //      computeSliceStatus and the needs_fix branch above only
+              //      re-drives features with a taskId.
+              //
+              // The common shape is: a task-less, done, assertion-linked feature
+              // that has not reached a *passed* validator status and is not
+              // currently being validated. Re-drive it directly regardless of the
+              // exact stranded loopState so it reaches a terminal verdict instead
+              // of livelocking on "validating"/"error".
+              //
+              // Validation is bounded (verification wall-clock is provably under
+              // the reaper stale window — see VALIDATOR_RUN_STALE_MAX_AGE_MS vs the
+              // aggregate verification timeout) and non-mutating: on pass the
+              // feature becomes legitimately complete; on fail the normal
+              // fix-feature flow takes over; on inconclusive it routes to
+              // needs-attention without minting remediation. Either way the
+              // feature reaches a terminal verdict rather than re-driving forever.
               if (
-                feature.loopState === "implementing"
+                (feature.loopState === "implementing"
+                  || feature.loopState === "validating"
+                  || (feature.loopState === "needs_fix" && feature.lastValidatorStatus === "error"))
                 && !feature.taskId
                 && feature.status === "done"
                 && feature.lastValidatorStatus !== "passed"
@@ -336,6 +368,7 @@ export class MissionExecutionLoop extends EventEmitter {
                 if (
                   currentFeature.loopState === "passed"
                   || currentFeature.lastValidatorStatus === "passed"
+                  || this.activeValidations.has(feature.id)
                 ) {
                   continue;
                 }
