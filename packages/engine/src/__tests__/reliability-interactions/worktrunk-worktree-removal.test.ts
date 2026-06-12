@@ -89,7 +89,7 @@ describe("reliability interactions: worktrunk worktree removal routing", () => {
       "git worktree list --porcelain",
     ]);
     expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining("post-merge worktree cleanup remove failed, but no registered worktree remains after prune"),
+      expect.stringContaining("post-merge worktree cleanup classified harmless"),
     );
   });
 

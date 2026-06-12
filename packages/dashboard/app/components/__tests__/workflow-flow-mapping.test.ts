@@ -208,7 +208,18 @@ describe("workflow-flow-mapping v2 round-trip", () => {
         { id: "gate", kind: "merge-gate", column: "in-progress", config: { name: "Gate" } },
         { id: "attempt", kind: "merge-attempt", column: "in-progress" },
         { id: "hold", kind: "manual-merge-hold", column: "in-progress", config: { release: "manual" } },
-        { id: "retry", kind: "retry-backoff", column: "in-progress", config: { maxIterations: 2, template: { nodes: [], edges: [] } } },
+        {
+          id: "retry",
+          kind: "retry-backoff",
+          column: "in-progress",
+          config: {
+            maxIterations: 2,
+            template: {
+              nodes: [{ id: "retry-step", kind: "prompt", config: { prompt: "try again" } }],
+              edges: [{ from: "retry-step", to: "retry-step", condition: "retry", kind: "rework" }],
+            },
+          },
+        },
       ] as WorkflowDefinition["ir"]["nodes"],
       edges: [],
     };
@@ -222,9 +233,18 @@ describe("workflow-flow-mapping v2 round-trip", () => {
     if (out.version !== "v2") throw new Error("expected v2");
     const byId = Object.fromEntries(out.nodes.map((node) => [node.id, node]));
     expect(byId.gate.kind).toBe("merge-gate");
+    expect(byId.gate.config?.name).toBe("Gate");
     expect(byId.attempt.kind).toBe("merge-attempt");
     expect(byId.hold.kind).toBe("manual-merge-hold");
+    expect(byId.hold.config?.release).toBe("manual");
     expect(byId.retry.kind).toBe("retry-backoff");
+    expect(byId.retry.config).toEqual({
+      maxIterations: 2,
+      template: {
+        nodes: [{ id: "retry-step", kind: "prompt", config: { prompt: "try again" } }],
+        edges: [{ from: "retry-step", to: "retry-step", condition: "retry", kind: "rework" }],
+      },
+    });
   });
 
   it("emits swimlane band group nodes that flowToIr strips back out", () => {

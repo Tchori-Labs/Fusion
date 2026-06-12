@@ -967,7 +967,7 @@ export async function removeWorktree(input: {
   liveOwnerProbe?: LiveBindingProbe;
   processActiveProbe?: ProcessActiveProbe;
   reconcileMinIdleMs?: number;
-}): Promise<void | WorktreeRemoveOutcome> {
+}): Promise<WorktreeRemoveOutcome> {
   const logger = {
     log: (_message: string): void => {},
     warn: (_message: string): void => {},

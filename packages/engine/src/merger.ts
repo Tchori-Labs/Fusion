@@ -7312,6 +7312,7 @@ async function removePostMergeWorktree(
   postMergeWorktree: string,
   taskId: string,
   settings: Partial<Settings>,
+  audit?: RunAuditor,
 ): Promise<void> {
   try {
     const outcome = await removeWorktree({
@@ -7320,9 +7321,10 @@ async function removePostMergeWorktree(
       settings,
       taskId,
       reason: RemovalReason.MergerPostMerge,
+      audit,
     });
-    if (outcome && "harmless" in outcome && outcome.harmless) {
-      mergerLog.warn(`${taskId}: post-merge worktree cleanup remove failed, but no registered worktree remains after prune for ${postMergeWorktree}: ${outcome.message}`);
+    if ("harmless" in outcome && outcome.harmless) {
+      mergerLog.warn(`${taskId}: post-merge worktree cleanup classified harmless for ${postMergeWorktree}: ${outcome.message}`);
     }
   } catch (err: unknown) {
     mergerLog.warn(`${taskId}: failed to remove post-merge worktree ${postMergeWorktree}: ${getCommandErrorMessage(err)}`);
@@ -10520,7 +10522,7 @@ export async function aiMergeTask(
       // Non-fatal — task still moves to done
     } finally {
       if (postMergeWorktree) {
-        await removePostMergeWorktree(rootDir, postMergeWorktree, taskId, settings);
+        await removePostMergeWorktree(rootDir, postMergeWorktree, taskId, settings, audit);
       }
     }
   }
@@ -10580,10 +10582,10 @@ export async function aiMergeTask(
             audit,
             reason: RemovalReason.MergerCleanup,
           });
-          if (outcome && "harmless" in outcome && outcome.harmless) {
-            mergerLog.warn(`${taskId}: merge worktree cleanup remove failed, but no registered worktree remains after prune for ${worktreePath}: ${outcome.message}`);
+          if ("harmless" in outcome && outcome.harmless) {
+            mergerLog.warn(`${taskId}: merge worktree cleanup classified harmless for ${worktreePath}: ${outcome.message}`);
           }
-          result.worktreeRemoved = outcome?.removed ?? true;
+          result.worktreeRemoved = outcome.removed || ("harmless" in outcome && outcome.harmless);
         }
         if (result.worktreeRemoved) {
           try {
