@@ -48,6 +48,13 @@ import { matchesAgentMentionFilter } from "./mentionMatching";
 import { useNavigationHistoryContext } from "../hooks/useNavigationHistory";
 import { linkifyFilePaths, linkifyReactChildren } from "../utils/filePathLinkify";
 import { recordResumeEvent } from "../utils/resumeInstrumentation";
+import {
+  CHAT_INPUT_MAX_HEIGHT_PX,
+  TABLET_INPUT_MAX_HEIGHT_PX,
+  clampChatInputHeight,
+  resolveChatInputOverflowY,
+} from "../utils/chatInputAutosize";
+export { clampChatInputHeight, resolveChatInputOverflowY } from "../utils/chatInputAutosize";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 
@@ -57,27 +64,9 @@ export interface ChatViewProps {
   experimentalFeatures?: Record<string, boolean>;
 }
 
-// Keep a generous cap so pasted multi-paragraph text stays visible while
-// still preventing the composer from overtaking the message pane on short viewports.
-const CHAT_INPUT_MAX_HEIGHT_PX = 640;
-const TABLET_INPUT_MAX_HEIGHT_PX = 200;
 /** Canonical definition lives in packages/dashboard/src/chat.ts (ROOM_SKIP_SENTINEL). */
 const ROOM_SKIP_SENTINEL = "__SKIP__";
 let chatViewWasPreviouslyInactive = false;
-
-export function resolveChatInputOverflowY(
-  scrollHeight: number,
-  maxHeight: number = CHAT_INPUT_MAX_HEIGHT_PX,
-): "auto" | "hidden" {
-  return scrollHeight > maxHeight ? "auto" : "hidden";
-}
-
-export function clampChatInputHeight(scrollHeight: number, maxHeight: number = CHAT_INPUT_MAX_HEIGHT_PX): number {
-  // Floor matches QuickChat (clampQuickChatInputHeight) and the CSS min-height,
-  // so a 0-scrollHeight measurement (e.g. before layout) still yields a
-  // sensible inline height instead of collapsing the composer to 0.
-  return Math.max(40, Math.min(scrollHeight, maxHeight));
-}
 
 function formatRelativeTime(dateStr: string, t: TFunction<"app">): string {
   const date = new Date(dateStr);
