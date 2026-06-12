@@ -652,6 +652,26 @@ export class CeOrchestrator {
   }
 
   /**
+   * Cancel a session: stop any live in-process handle but keep the persisted row
+   * for inspection/resume by marking it `interrupted`. Unlike discard(), cancel
+   * preserves the conversation and progress; discard stops the handle AND deletes
+   * the row. Terminal sessions are idempotent no-ops.
+   */
+  cancel(sessionId: string): CeSession | undefined {
+    const session = this.store.get(sessionId);
+    if (!session) return undefined;
+    if (session.status === "completed" || session.status === "error" || session.status === "interrupted") {
+      return session;
+    }
+
+    // Preserve no-silent-loss ordering: interruptSession flushes live activity
+    // before disposeLive clears the transient buffers (same as runTurn failure).
+    const interrupted = this.interruptSession(sessionId, new Error("Cancelled by user"));
+    this.disposeLive(sessionId);
+    return interrupted;
+  }
+
+  /**
    * Discard a session: dispose any live in-process handle (so an in-flight
    * agent doesn't keep running unobserved) and delete the persisted row.
    * Returns false when the session doesn't exist. Pipeline-link rows are NOT

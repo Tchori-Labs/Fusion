@@ -177,6 +177,18 @@
     width: 100%;
     padding: var(--space-sm);
   }
+
+  .ce-session-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .ce-session-cancel,
+  .ce-session-discard,
+  .ce-flow-cancel,
+  .ce-flow-close {
+    margin-left: 0;
+  }
 }
 
 /* --- Stage launcher (U6) --- */
@@ -228,8 +240,12 @@
   color: var(--text-muted);
   text-transform: capitalize;
 }
+.ce-flow-cancel,
 .ce-flow-close {
   margin-left: auto;
+}
+.ce-flow-cancel + .ce-flow-close {
+  margin-left: 0;
 }
 .ce-flow-transcript {
   list-style: none;
@@ -424,6 +440,10 @@
   margin-left: auto;
   font-size: 0.72rem;
   color: var(--text-dim);
+}
+.ce-session-cancel,
+.ce-session-discard {
+  flex: none;
 }
 
 /* ── Q&A transcript bubbles ────────────────────────────────────────────── */

@@ -105,6 +105,17 @@ export function createSessionRoutes(): PluginRouteDefinition[] {
       },
     },
     {
+      method: "POST",
+      path: "/sessions/:id/cancel",
+      description: "Cancel an in-flight CE session (stops the agent, keeps the row as interrupted).",
+      handler: async (req: unknown, ctx: PluginContext): Promise<PluginRouteResponse> => {
+        const id = (req as RouteRequest).params.id;
+        const session = getOrchestrator(ctx).cancel(id);
+        if (!session) return { status: 404, body: { error: `Session ${id} not found` } };
+        return { status: 200, body: { session } };
+      },
+    },
+    {
       method: "GET",
       path: "/sessions/:id",
       description: "Get current session state, including in-flight working output (liveActivity).",

@@ -74,9 +74,16 @@ activity; from there you can:
 - **switch** between sessions — the panel stays visible while a flow is open,
   and a session you switch away from keeps running server-side,
 - **resume** an `interrupted`/`error` session from where it stopped,
+- **cancel** an in-flight (`launching`/`active`/`awaiting_input`) session via
+  `POST /sessions/:id/cancel`, which stops any live in-process handle, flushes
+  live progress into history, and keeps the row as `interrupted` with a
+  `Cancelled by user` marker for inspection/resume,
 - **discard** a settled (completed/error/interrupted) session via
   `DELETE /sessions/:id`, which disposes any live handle before deleting the
   row (pipeline-link rows are kept — board-task provenance survives).
+
+Cancel and discard are intentionally different: cancel stops work but preserves
+conversation/progress; discard removes the row entirely.
 
 The list refreshes on any CE push event and falls back to polling
 `GET /sessions` while any session has a turn in flight.
@@ -85,7 +92,9 @@ The list refreshes on any CE push event and falls back to polling
 
 Turn execution is **detached**: `POST /sessions`, `/answer`, and `/resume`
 return as soon as the session row reflects the request, with the agent turn
-running in the background. While it runs:
+running in the background. Closing the flow does not cancel the server-side
+agent; use `POST /sessions/:id/cancel` (or the dashboard Cancel button) to stop
+an in-flight turn while preserving the session as `interrupted`. While it runs:
 
 - The engine streams **live progress** through the seam's `onProgress` option
   (thinking/text deltas + tool start/end markers — a host capability any

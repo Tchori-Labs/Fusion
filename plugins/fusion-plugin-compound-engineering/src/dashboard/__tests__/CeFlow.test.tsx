@@ -419,6 +419,26 @@ describe("CeFlow — lifecycle surfaces", () => {
     expect(screen.getByTestId("ce-activity-tool")).toHaveTextContent("Grep");
   });
 
+  it.each(["launching", "active", "awaiting_input"] as const)("offers cancel on a %s session", (status) => {
+    const onCancel = vi.fn();
+    render(<CeFlow session={makeSession({ status, currentQuestion: null })} onAnswer={vi.fn()} onCancel={onCancel} />);
+
+    fireEvent.click(screen.getByTestId("ce-flow-cancel"));
+    expect(onCancel).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["completed", "error", "interrupted"] as const)("hides cancel on a terminal %s session", (status) => {
+    render(<CeFlow session={makeSession({ status, currentQuestion: null })} onAnswer={vi.fn()} onCancel={vi.fn()} />);
+
+    expect(screen.queryByTestId("ce-flow-cancel")).not.toBeInTheDocument();
+  });
+
+  it("disables cancel while busy", () => {
+    render(<CeFlow session={makeSession({ status: "active", currentQuestion: null })} busy onAnswer={vi.fn()} onCancel={vi.fn()} />);
+
+    expect(screen.getByTestId("ce-flow-cancel")).toBeDisabled();
+  });
+
   it("offers resume on an interrupted session", () => {
     const onResume = vi.fn();
     render(

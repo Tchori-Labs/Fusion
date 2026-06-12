@@ -48,6 +48,7 @@ describe("session routes (polling transport)", () => {
         "POST /sessions",
         "POST /sessions/:id/answer",
         "POST /sessions/:id/resume",
+        "POST /sessions/:id/cancel",
         "GET /sessions/:id",
         "GET /sessions",
         "DELETE /sessions/:id",
@@ -68,6 +69,40 @@ describe("session routes (polling transport)", () => {
     expect(deleted.status).toBe(200);
     expect(store.get(drop.id)).toBeUndefined();
     expect(store.get(keep.id)).toBeDefined();
+  });
+
+  it("POST /sessions/:id/cancel interrupts an in-flight session", async () => {
+    const { getCeSessionStore } = await import("../session/session-store.js");
+    const store = getCeSessionStore(h.ctx);
+    const created = store.update(store.create({ stage: "brainstorm" }).id, { status: "active" })!;
+
+    const res = await call("POST", "/sessions/:id/cancel", { params: { id: created.id } }, h.ctx);
+
+    expect(res.status).toBe(200);
+    const session = (res.body as { session: { status: string; error: string | null } }).session;
+    expect(session.status).toBe("interrupted");
+    expect(session.error).toBe("Cancelled by user");
+  });
+
+  it("POST /sessions/:id/cancel returns 404 for an unknown session", async () => {
+    const res = await call("POST", "/sessions/:id/cancel", { params: { id: "nope" } }, h.ctx);
+
+    expect(res.status).toBe(404);
+    expect((res.body as { error: string }).error).toMatch(/not found/i);
+  });
+
+  it("POST /sessions/:id/cancel is idempotent for terminal sessions", async () => {
+    const { getCeSessionStore } = await import("../session/session-store.js");
+    const store = getCeSessionStore(h.ctx);
+    const created = store.update(store.create({ stage: "brainstorm" }).id, { status: "completed" })!;
+
+    const res = await call("POST", "/sessions/:id/cancel", { params: { id: created.id } }, h.ctx);
+
+    expect(res.status).toBe(200);
+    const session = (res.body as { session: { status: string; error: string | null } }).session;
+    expect(session.status).toBe("completed");
+    expect(session.error).toBeNull();
+    expect(store.get(created.id)!.status).toBe("completed");
   });
 
   it("GET /sessions lists every session so a client can manage multiple concurrently", async () => {
