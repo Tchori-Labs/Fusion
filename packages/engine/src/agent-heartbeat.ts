@@ -271,6 +271,39 @@ function resolveAutoClaimCandidatesInPromptLimit(agent: Agent, settings?: Settin
   return Math.max(0, Math.min(10, integer));
 }
 
+function resolveEngineerBacklogAutoClaim(agent: Agent, settings?: Settings): boolean {
+  const runtimeConfig = (agent.runtimeConfig ?? {}) as AgentHeartbeatConfig;
+  const perAgent = runtimeConfig.engineerBacklogAutoClaim;
+  const projectValue = settings?.engineerBacklogAutoClaim;
+  return typeof perAgent === "boolean" ? perAgent : (typeof projectValue === "boolean" ? projectValue : false);
+}
+
+function formatBacklogAutoClaimRoleStatus(agent: Agent, allowEngineer: boolean): string {
+  if (agent.role === "engineer") {
+    return allowEngineer
+      ? "enabled"
+      : "enabled (no role-compatible candidates; engineerBacklogAutoClaim disabled)";
+  }
+  return allowEngineer
+    ? "enabled (no role-compatible candidates; executor or opted-in engineer role required)"
+    : "enabled (no role-compatible candidates; executor role required)";
+}
+
+function formatBacklogAutoClaimRoleGuidance(agent: Agent, allowEngineer: boolean, candidateCount: number): string[] {
+  if (agent.role === "engineer" && !allowEngineer) {
+    return [
+      `- Snapshot found ${candidateCount} eligible Todo task(s), but this engineer-role agent is not opted into backlog auto-claim.`,
+      "- Backlog auto-claim is executor-only by default; set project settings.engineerBacklogAutoClaim or per-agent runtimeConfig.engineerBacklogAutoClaim to true to opt engineer agents in.",
+    ];
+  }
+  return [
+    `- Snapshot found ${candidateCount} eligible Todo task(s), but this agent role cannot auto-claim implementation work.`,
+    allowEngineer
+      ? "- Backlog auto-claim allows executor-role agents and engineer-role agents with engineerBacklogAutoClaim enabled; use delegation or create coordination follow-up instead of assuming the board is empty."
+      : "- Backlog auto-claim is restricted to executor-role agents by default; use delegation or create coordination follow-up instead of assuming the board is empty.",
+  ];
+}
+
 type RelevanceScorableTask = { title?: string | null; description: string };
 
 const agentSoulWordsCache = new Map<string, { soulSnapshot: string; words: readonly string[] }>();
@@ -1947,8 +1980,10 @@ export class HeartbeatMonitor {
 
         // Pause governance: globalPause blocks all heartbeat sources;
         // enginePaused is a soft pause that only blocks timer ticks.
+        let heartbeatModelSettings: Settings | undefined;
         try {
-          const settings = await taskStore.getSettings();
+          heartbeatModelSettings = await taskStore.getSettings();
+          const settings = heartbeatModelSettings;
           if (settings.globalPause) {
             heartbeatLog.log(`Agent ${agentId} heartbeat skipped — global pause active (source=${source})`);
             await this.completeRun(agentId, run.id, {
@@ -2050,16 +2085,17 @@ export class HeartbeatMonitor {
         let autoClaimSnapshotCandidateCount = 0;
         let autoClaimRoleFilteredCount = 0;
         const autoClaimEnabled = isAutoClaimRelevantTasksEnabled(agent);
+        const engineerBacklogAutoClaim = resolveEngineerBacklogAutoClaim(agent, heartbeatModelSettings);
         if (!taskId && canRunNoTaskHeartbeat && autoClaimEnabled && this.snapshotManager) {
           try {
             const snapshot = await this.snapshotManager.getSnapshot();
             autoClaimSnapshotCandidateCount = snapshot.tasks.length;
-            const roleCompatibleCandidates = snapshot.tasks.filter((candidate) => canAgentTakeImplementationTask(agent, candidate));
+            const roleCompatibleCandidates = snapshot.tasks.filter((candidate) => canAgentTakeImplementationTask(agent, candidate, { allowEngineer: engineerBacklogAutoClaim }));
             const skippedIncompatibleCount = snapshot.tasks.length - roleCompatibleCandidates.length;
             autoClaimRoleFilteredCount = skippedIncompatibleCount;
             if (skippedIncompatibleCount > 0) {
               heartbeatLog.log(
-                `Agent ${agentId} (role=${agent.role}) skipped auto-claim of ${skippedIncompatibleCount} implementation task(s) — only executor agents may claim implementation work`,
+                `Agent ${agentId} (role=${agent.role}) skipped auto-claim of ${skippedIncompatibleCount} implementation task(s) — ${engineerBacklogAutoClaim ? "only executor agents or engineer agents opted into engineerBacklogAutoClaim may claim implementation work" : "only executor agents may claim implementation work by default"}`,
               );
             }
 
@@ -2493,11 +2529,12 @@ export class HeartbeatMonitor {
           });
         };
 
-        let heartbeatModelSettings: Settings | undefined;
-        try {
-          heartbeatModelSettings = await taskStore.getSettings();
-        } catch (settingsErr) {
-          heartbeatLog.warn(`Failed to read heartbeat model settings for ${agentId}: ${settingsErr instanceof Error ? settingsErr.message : String(settingsErr)}`);
+        if (!heartbeatModelSettings) {
+          try {
+            heartbeatModelSettings = await taskStore.getSettings();
+          } catch (settingsErr) {
+            heartbeatLog.warn(`Failed to read heartbeat model settings for ${agentId}: ${settingsErr instanceof Error ? settingsErr.message : String(settingsErr)}`);
+          }
         }
 
         let sessionCwd = rootDir;
@@ -2722,18 +2759,16 @@ export class HeartbeatMonitor {
             }
 
             const promptCandidateLimit = resolveAutoClaimCandidatesInPromptLimit(agent, heartbeatModelSettings);
+            const hasOnlyRoleIncompatibleAutoClaimCandidates = autoClaimCandidates.length === 0 && autoClaimSnapshotCandidateCount > 0 && autoClaimRoleFilteredCount > 0;
             const autoClaimStatus = autoClaimEnabled
               ? (promptCandidateLimit === 0
                 ? "disabled (prompt-suppressed)"
-                : (autoClaimCandidates.length === 0 && autoClaimSnapshotCandidateCount > 0 && autoClaimRoleFilteredCount > 0
-                  ? "enabled (no role-compatible candidates; executor role required)"
+                : (hasOnlyRoleIncompatibleAutoClaimCandidates
+                  ? formatBacklogAutoClaimRoleStatus(agent, engineerBacklogAutoClaim)
                   : "enabled"))
               : "disabled";
-            const noRoleCompatibleCandidateLines = autoClaimCandidates.length === 0 && autoClaimSnapshotCandidateCount > 0 && autoClaimRoleFilteredCount > 0
-              ? [
-                `- Snapshot found ${autoClaimSnapshotCandidateCount} eligible Todo task(s), but this agent role cannot auto-claim implementation work.`,
-                "- Backlog auto-claim is restricted to executor-role agents; use delegation or create coordination follow-up instead of assuming the board is empty.",
-              ]
+            const noRoleCompatibleCandidateLines = hasOnlyRoleIncompatibleAutoClaimCandidates
+              ? formatBacklogAutoClaimRoleGuidance(agent, engineerBacklogAutoClaim, autoClaimSnapshotCandidateCount)
               : [];
             const candidateLines = promptCandidateLimit > 0
               ? [

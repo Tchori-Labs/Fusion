@@ -3326,6 +3326,8 @@ export interface ProjectSettings {
   heartbeatMultiplier?: number;
   /** Number of auto-claim candidates rendered in no-task heartbeat prompts. Range: 0-10. Default: 5. */
   autoClaimCandidatesInPrompt?: number;
+  /** Opt engineer-role agents into no-task backlog auto-claim. Default: false. */
+  engineerBacklogAutoClaim?: boolean;
   /** Sticky window for intake duplicate checks against soft-deleted tasks.
    * Unit: days. Default: 7. Set to 0 to disable tombstone-window widening. */
   tombstoneStickyWindowDays?: number;
@@ -6268,6 +6270,8 @@ export interface AgentHeartbeatConfig {
   autoClaimRelevantTasks?: boolean;
   /** Number of auto-claim candidates to inject into no-task heartbeat prompts. Default: 5, range: 0-10. */
   autoClaimCandidatesInPrompt?: number;
+  /** Per-agent override for opting engineer-role agents into no-task backlog auto-claim. Default: project setting or false. */
+  engineerBacklogAutoClaim?: boolean;
   /** Polling interval in ms (default: 30000). Min: 1000 */
   heartbeatIntervalMs?: number;
   /** Heartbeat timeout in ms (default: 60000). Min: 5000 */

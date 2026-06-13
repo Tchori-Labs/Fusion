@@ -511,6 +511,7 @@ The `runtimeConfig` field on agents supports the following options:
 | `enabled` | `boolean` | `true` | Whether heartbeat triggers are enabled for this agent |
 | `heartbeatIntervalMs` | `number` | — | How often the agent should wake up for heartbeat checks (ms) |
 | `autoClaimRelevantTasks` | `boolean` | `true` | During no-task heartbeats, opportunistically claim unowned relevant todo tasks that align with the agent's role/soul |
+| `engineerBacklogAutoClaim` | `boolean` | inherits project (`false`) | Opt this engineer-role agent into no-task backlog auto-claim for implementation tasks. Executor-role agents remain eligible by default; explicit routing/delegation is unchanged. |
 | `autoClaimCandidatesInPrompt` | `number` | `5` | Per-agent override for no-task candidate lines rendered in prompts. Integer `0-10`; `0` suppresses candidate injection. |
 | `heartbeatTimeoutMs` | `number` | — | Time without heartbeat before agent is considered unresponsive (ms) |
 | `maxConcurrentRuns` | `number` | `1` | Max concurrent heartbeat runs for this agent |
@@ -558,6 +559,8 @@ When an identity-bearing, non-ephemeral agent wakes with no assigned task and `r
 Guardrails:
 - Only unpaused, unassigned, unchecked-out todo tasks with satisfied dependencies are considered
 - Claims are rejected for terminal/paused/owned/conflicting tasks
+- Implementation-task backlog pickup is executor-only by default. Engineer-role agents may opt in through project setting `engineerBacklogAutoClaim` or per-agent `runtimeConfig.engineerBacklogAutoClaim`; the per-agent value overrides the project default in both directions.
+- Explicit task routing/delegation is not affected by the backlog auto-claim opt-in gate.
 - Checkout safety is preserved (`checkout_conflict` paths are non-fatal skips)
 - On successful claim, the same heartbeat run switches into task-scoped execution (no nested run re-entry)
 

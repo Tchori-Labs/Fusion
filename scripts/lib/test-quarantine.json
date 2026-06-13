@@ -30,6 +30,26 @@
       "file": "packages/engine/src/__tests__/sandbox/bubblewrap-backend.test.ts",
       "reason": "Flake observed during FN-6294 verification: `attempts bwrap execution when available` timed out in the broad and narrow engine runs, while the file passed standalone during FN-6319. The test mocks detectBwrap as available with path `bwrap` and then invokes real bwrap execution, making it host/environment sensitive when a real bwrap binary is unavailable or behaves differently under suite load.",
       "quarantinedAt": "2026-06-12"
+    },
+    {
+      "file": "packages/core/src/__tests__/soft-delete-tasks.test.ts",
+      "reason": "Flake observed during FN-6324 verification: broad `pnpm test` failed with `ENOENT: no such file or directory, mkdtemp .../fusion-test-workers-.../redir-.../kb-store-test-XXXXXX`, alongside a leaked fusion-test-workers temp root. The task only changed agent role policy/settings/heartbeat routing, so this temp redirect failure is unrelated suite-order/concurrency sensitivity.",
+      "quarantinedAt": "2026-06-12"
+    },
+    {
+      "file": "packages/core/src/__tests__/store-get-task-columns.test.ts",
+      "reason": "Flake observed during FN-6324 verification: broad `pnpm test` failed with `ENOENT` renaming a task.json temp file under the redirected fusion-test-workers temp root after the temp tree disappeared. The task only changed agent role policy/settings/heartbeat routing, so this is unrelated temp redirect suite-order/concurrency sensitivity.",
+      "quarantinedAt": "2026-06-12"
+    },
+    {
+      "file": "packages/core/src/__tests__/task-dependency-mutation.test.ts",
+      "reason": "Flake observed during FN-6324 verification: broad `pnpm test` failed with `ENOENT` reading task.json under a redirected fusion-test-workers temp root that had disappeared. The task only changed agent role policy/settings/heartbeat routing, so this is unrelated temp redirect suite-order/concurrency sensitivity.",
+      "quarantinedAt": "2026-06-12"
+    },
+    {
+      "file": "packages/core/src/__tests__/task-node-override.test.ts",
+      "reason": "Flake observed during FN-6324 verification: broad `pnpm test` failed with `Task FN-001 not found` after temp-root disappearance symptoms in adjacent core tests, alongside a leaked fusion-test-workers temp root. The task only changed agent role policy/settings/heartbeat routing, so this is unrelated temp redirect suite-order/concurrency sensitivity.",
+      "quarantinedAt": "2026-06-12"
     }
   ]
 }
