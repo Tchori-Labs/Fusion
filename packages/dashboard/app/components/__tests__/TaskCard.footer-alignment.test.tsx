@@ -125,7 +125,7 @@ describe("FN-4598 TaskCard footer chip alignment", () => {
     }
   });
 
-  it("keeps github, retry, and timer as a single right-aligned cluster with token gap", () => {
+  it("keeps github and retry right-aligned while timer joins card meta badges", () => {
     const { container } = render(
       <TaskCard
         task={{
@@ -146,13 +146,14 @@ describe("FN-4598 TaskCard footer chip alignment", () => {
     const rightCluster = footerRow.querySelector(":scope > .card-footer-row-right") as HTMLElement;
     const githubChip = rightCluster.querySelector(":scope > .card-github-tracking-chip") as HTMLElement;
     const retryChip = rightCluster.querySelector(":scope > .card-retry-badge") as HTMLElement;
-    const timerChip = rightCluster.querySelector(":scope > .card-time-indicator") as HTMLElement;
+    const timerChip = container.querySelector(".card-meta-badges > .card-time-indicator") as HTMLElement;
 
     expect(footerRow).toBeTruthy();
     expect(rightCluster).toBeTruthy();
     expect(githubChip).toBeTruthy();
     expect(retryChip).toBeTruthy();
     expect(timerChip).toBeTruthy();
+    expect(rightCluster.contains(timerChip)).toBe(false);
 
     expect(getComputedStyle(rightCluster).marginLeft).toBe("auto");
 
@@ -182,7 +183,7 @@ describe("FN-4598 TaskCard footer chip alignment", () => {
     const rightCluster = footerRow.querySelector(":scope > .card-footer-row-right") as HTMLElement;
     const retryChip = rightCluster.querySelector(":scope > .card-retry-badge") as HTMLElement;
     const githubChip = rightCluster.querySelector(":scope > .card-github-tracking-chip") as HTMLElement;
-    const timerChip = rightCluster.querySelector(":scope > .card-time-indicator") as HTMLElement;
+    const timerChip = container.querySelector(".card-meta-badges > .card-time-indicator") as HTMLElement;
 
     expect(footerRow).toBeTruthy();
     expect(sourceChip).toBeTruthy();
@@ -190,13 +191,13 @@ describe("FN-4598 TaskCard footer chip alignment", () => {
     expect(retryChip).toBeTruthy();
     expect(githubChip).toBeTruthy();
     expect(timerChip).toBeTruthy();
+    expect(rightCluster.contains(timerChip)).toBe(false);
 
     expect(getComputedStyle(sourceChip).marginLeft).not.toBe("auto");
     expect(getComputedStyle(rightCluster).marginLeft).toBe("auto");
     expect(Array.from(rightCluster.children).map((node) => (node as HTMLElement).className)).toEqual([
       "card-github-tracking-chip card-github-tracking-link",
       expect.stringContaining("card-retry-badge"),
-      "card-time-indicator",
     ]);
   });
 });

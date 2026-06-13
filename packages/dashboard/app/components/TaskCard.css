@@ -64,10 +64,19 @@
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--space-xs);
   row-gap: var(--space-xs);
   min-width: 0;
   margin-bottom: var(--space-xs);
+}
+
+.card-meta-badges {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+  row-gap: var(--space-xs);
+  min-width: 0;
 }
 
 .card-id {
@@ -1496,6 +1505,11 @@
     min-height: var(--card-chip-height-mobile);
   }
 
+
+  .card-meta-badges {
+    gap: calc(var(--space-xs) / 2);
+    row-gap: var(--space-xs);
+  }
 
   /* Card: smaller status badges for 280px width */
   .card-status-badge,

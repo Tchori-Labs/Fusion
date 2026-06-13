@@ -59,8 +59,8 @@ Features:
 - Inline quick entry creation
 - The quick-entry GitHub icon is a per-task tracking override: leave it untouched to use the project default, turn it on to opt the next task into tracking when the default is off, or turn it off to opt the next task out when the default is on.
 - PR/issue badges with live updates
-- GitHub provenance marker on task cards imported from GitHub (`sourceType: github_import`), shown alongside existing footer metadata like timers
-- Agent-created provenance badge in task card headers for agent-originated tasks (`sourceType: agent_heartbeat` or `sourceType: automation`, or legacy tasks with `sourceAgentId`), with labels preferring `sourceMetadata.agentName` over raw agent IDs
+- GitHub provenance marker on task cards imported from GitHub (`sourceType: github_import`), shown in the footer with other external-source metadata
+- Task card header meta badges group priority, fast mode, agent-created provenance, and elapsed/created-time chips into one wrapping row; agent labels prefer `sourceMetadata.agentName` over raw agent IDs
 - Column ordering semantics: `todo` mirrors scheduler pickup order (priority descending, then oldest `createdAt`, then task ID); `triage`, `in-progress`, `in-review`, and `archived` remain priority-first with task-ID tie-breaks; `done` is ordered by most recent completion first (`columnMovedAt`, then `updatedAt`, then `createdAt` fallback)
 - On mobile, both default and workflow-mode boards fill the project viewport while the column strip remains the internal horizontal scroller with contained edge overscroll.
 

@@ -1787,6 +1787,10 @@ function TaskCardComponent({
     && filesChangedButton == null
     && showTrackingIndicator
     && Boolean(githubTrackedIssue);
+  const hasCardMetaBadges = showPriorityBadge
+    || task.executionMode === "fast"
+    || isAgentCreated
+    || timeIndicator != null;
 
   if (isEditing) {
     return (
@@ -1980,31 +1984,45 @@ function TaskCardComponent({
             </button>
           )
         )}
-        {isAgentCreated && (
-          <span
-            className="card-agent-created-badge"
-            title={agentCreatedTitle}
-            aria-label={agentCreatedTitle}
-          >
-            <Bot size={11} aria-hidden="true" />
-            <span className="visually-hidden">{agentCreatedTitle}</span>
-            <span aria-hidden="true">{agentCreatedVisibleLabel}</span>
-          </span>
-        )}
-        {showPriorityBadge && (
-          <span className={`card-priority-badge card-priority-badge--${normalizedPriority}`}>
-            {normalizedPriority}
-          </span>
-        )}
-        {task.executionMode === "fast" && (
-          <span
-            className="card-execution-mode-badge card-execution-mode-badge--fast"
-            title={t("tasks.fastMode", "Fast mode")}
-            aria-label={t("tasks.fastMode", "Fast mode")}
-          >
-            <Zap aria-hidden="true" />
-            <span className="visually-hidden">{t("tasks.fastMode", "Fast mode")}</span>
-          </span>
+        {hasCardMetaBadges && (
+          <div className="card-meta-badges" data-testid="card-meta-badges">
+            {showPriorityBadge && (
+              <span className={`card-priority-badge card-priority-badge--${normalizedPriority}`}>
+                {normalizedPriority}
+              </span>
+            )}
+            {task.executionMode === "fast" && (
+              <span
+                className="card-execution-mode-badge card-execution-mode-badge--fast"
+                title={t("tasks.fastMode", "Fast mode")}
+                aria-label={t("tasks.fastMode", "Fast mode")}
+              >
+                <Zap aria-hidden="true" />
+                <span className="visually-hidden">{t("tasks.fastMode", "Fast mode")}</span>
+              </span>
+            )}
+            {isAgentCreated && (
+              <span
+                className="card-agent-created-badge"
+                title={agentCreatedTitle}
+                aria-label={agentCreatedTitle}
+              >
+                <Bot size={11} aria-hidden="true" />
+                <span className="visually-hidden">{agentCreatedTitle}</span>
+                <span aria-hidden="true">{agentCreatedVisibleLabel}</span>
+              </span>
+            )}
+            {timeIndicator && (
+              <span
+                className="card-time-indicator"
+                title={timeIndicator.title}
+                aria-label={timeIndicator.ariaLabel}
+              >
+                <Clock size={12} />
+                <span>{timeIndicator.label}</span>
+              </span>
+            )}
+          </div>
         )}
         {task.noCommitsExpected === true && (
           <span className="card-no-commits-expected-badge" title={t("tasks.decisionOnlyTitle", "Decision-only task")}>{t("tasks.decisionOnly", "decision-only")}</span>
@@ -2271,7 +2289,7 @@ function TaskCardComponent({
           </>
         );
       })()}
-      {(filesChangedButton || isGitHubImportedTask || showNearDuplicateChip || ((showTrackingIndicator || showLinkedIssueChipForImport) && githubTrackedIssue) || (task.retrySummary?.total ?? 0) > 0 || timeIndicator) && (
+      {(filesChangedButton || isGitHubImportedTask || showNearDuplicateChip || ((showTrackingIndicator || showLinkedIssueChipForImport) && githubTrackedIssue) || (task.retrySummary?.total ?? 0) > 0) && (
         <div className={`card-footer-row${chipFarRight ? " card-footer-row--chip-far-right" : ""}`}>
           {filesChangedButton}
           {isGitHubImportedTask && !showLinkedIssueChipForImport && (
@@ -2283,7 +2301,7 @@ function TaskCardComponent({
               <ProviderIcon provider="github" size="sm" />
             </span>
           )}
-          {(showNearDuplicateChip || ((showTrackingIndicator || showLinkedIssueChipForImport) && githubTrackedIssue) || (task.retrySummary?.total ?? 0) > 0 || timeIndicator) && (
+          {(showNearDuplicateChip || ((showTrackingIndicator || showLinkedIssueChipForImport) && githubTrackedIssue) || (task.retrySummary?.total ?? 0) > 0) && (
             <div className="card-footer-row-right">
               {showNearDuplicateChip && (
                 <>
@@ -2356,16 +2374,6 @@ function TaskCardComponent({
                     <span>{`#${githubTrackedIssue.number}`}</span>
                   </a>
                 )}
-              {timeIndicator && (
-                <span
-                  className="card-time-indicator"
-                  title={timeIndicator.title}
-                  aria-label={timeIndicator.ariaLabel}
-                >
-                  <Clock size={12} />
-                  <span>{timeIndicator.label}</span>
-                </span>
-              )}
             </div>
           )}
         </div>
