@@ -3217,12 +3217,14 @@ describe("Database.recoverIfCorrupt startup guard", () => {
     const db = new Database(fusionDir);
     db.init();
     // Span many pages so mid-file corruption lands on a B-tree page.
-    for (let i = 0; i < 3000; i++) {
-      db.prepare("INSERT INTO activityLog (id, timestamp, type, details) VALUES (?, ?, 'test', '{}')").run(
-        `row-${i}`,
-        new Date().toISOString(),
-      );
-    }
+    db.transaction(() => {
+      for (let i = 0; i < 3000; i++) {
+        db.prepare("INSERT INTO activityLog (id, timestamp, type, details) VALUES (?, ?, 'test', '{}')").run(
+          `row-${i}`,
+          new Date().toISOString(),
+        );
+      }
+    });
     db.walCheckpoint("TRUNCATE");
     db.close();
 
