@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -189,9 +189,9 @@ describe("TaskChatTab", () => {
     expect(screen.getByLabelText("Reviewer messages")).toBeTruthy();
   });
 
-  it("renders thinking and tool entries legibly", () => {
+  it("collapses consecutive tool entries into one expandable summary", async () => {
+    const user = userEvent.setup();
     mockLogs([
-      makeEntry({ agent: "triage", type: "thinking", text: "I am considering options" }),
       makeEntry({ agent: "executor", type: "tool", text: "bash", detail: "pnpm test" }),
       makeEntry({ agent: "executor", type: "tool_result", text: "done", detail: "ok" }),
       makeEntry({ agent: "executor", type: "tool_error", text: "failed", detail: "stderr" }),
@@ -199,24 +199,94 @@ describe("TaskChatTab", () => {
 
     render(<TaskChatTab task={makeTask()} active addToast={vi.fn()} />);
 
-    expect(screen.getByText("Thinking")).toBeTruthy();
-    expect(screen.getByText("Tool call")).toBeTruthy();
-    expect(screen.getByText("Tool result")).toBeTruthy();
-    expect(screen.getByText("Tool error")).toBeTruthy();
-    expect(screen.getByText("stderr")).toBeTruthy();
+    const toolGroup = screen.getByTestId("task-chat-tool-group");
+    expect(toolGroup).not.toHaveAttribute("open");
+    expect(screen.getByText("3 tool calls")).toBeVisible();
+    expect(screen.getByText("1 call")).toBeVisible();
+    expect(screen.getByText("1 result")).toBeVisible();
+    expect(screen.getByText("1 error")).toBeVisible();
+    expect(screen.getByText("stderr")).not.toBeVisible();
+
+    await user.click(within(toolGroup).getByText("3 tool calls"));
+
+    expect(toolGroup).toHaveAttribute("open");
+    expect(screen.getByText("Tool call")).toBeVisible();
+    expect(screen.getByText("Tool result")).toBeVisible();
+    expect(screen.getByText("Tool error")).toBeVisible();
+    expect(screen.getByText("stderr")).toBeVisible();
   });
 
-  it("appends newly streamed entries from the hook", () => {
+  it("renders a single tool entry as one collapsed group and tolerates missing detail", () => {
+    mockLogs([
+      makeEntry({ agent: "executor", type: "tool", text: "bash", detail: undefined }),
+    ]);
+
+    render(<TaskChatTab task={makeTask()} active addToast={vi.fn()} />);
+
+    const toolGroup = screen.getByTestId("task-chat-tool-group");
+    expect(toolGroup).not.toHaveAttribute("open");
+    expect(screen.getByText("1 tool call")).toBeVisible();
+    expect(screen.getByText("bash")).not.toBeVisible();
+  });
+
+  it("renders thinking in an expanded-by-default collapsible block", async () => {
+    const user = userEvent.setup();
+    mockLogs([
+      makeEntry({ agent: "triage", type: "thinking", text: "I am considering options" }),
+    ]);
+
+    render(<TaskChatTab task={makeTask()} active addToast={vi.fn()} />);
+
+    const thinking = screen.getByTestId("task-chat-thinking");
+    expect(thinking).toHaveAttribute("open");
+    expect(screen.getByText("Thinking")).toBeVisible();
+    expect(screen.getByText("I am considering options")).toBeVisible();
+
+    await user.click(within(thinking).getByText("Thinking"));
+
+    expect(thinking).not.toHaveAttribute("open");
+    expect(screen.getByText("I am considering options")).not.toBeVisible();
+  });
+
+  it("creates distinct tool segments when text or thinking entries are interleaved", () => {
+    mockLogs([
+      makeEntry({ agent: "executor", type: "tool", text: "first tool", detail: "first detail" }),
+      makeEntry({ agent: "executor", text: "plain response" }),
+      makeEntry({ agent: "executor", type: "thinking", text: "thinking between tools" }),
+      makeEntry({ agent: "executor", type: "tool_result", text: "second tool", detail: "second detail" }),
+    ]);
+
+    render(<TaskChatTab task={makeTask()} active addToast={vi.fn()} />);
+
+    const toolGroups = screen.getAllByTestId("task-chat-tool-group");
+    expect(toolGroups).toHaveLength(2);
+    expect(toolGroups[0]).not.toHaveAttribute("open");
+    expect(toolGroups[1]).not.toHaveAttribute("open");
+    expect(screen.getAllByText("1 tool call")).toHaveLength(2);
+    expect(screen.getByText("plain response")).toBeVisible();
+    expect(screen.getByText("thinking between tools")).toBeVisible();
+  });
+
+  it("appends newly streamed entries from the hook without auto-opening tool groups", () => {
     const firstEntries = [makeEntry({ agent: "executor", text: "first live chunk" })];
-    const secondEntries = [...firstEntries, makeEntry({ agent: "executor", text: "second live chunk", timestamp: "2026-06-12T00:00:01.000Z" })];
+    const secondEntries = [
+      ...firstEntries,
+      makeEntry({ agent: "executor", type: "tool", text: "streamed tool", detail: "streamed detail", timestamp: "2026-06-12T00:00:01.000Z" }),
+      makeEntry({ agent: "executor", text: "second live chunk", timestamp: "2026-06-12T00:00:02.000Z" }),
+    ];
     mockedUseAgentLogs.mockReturnValueOnce({ entries: firstEntries, loading: false, clear: vi.fn(), loadMore: vi.fn(), hasMore: false, total: 1, loadingMore: false });
-    mockedUseAgentLogs.mockReturnValueOnce({ entries: secondEntries, loading: false, clear: vi.fn(), loadMore: vi.fn(), hasMore: false, total: 2, loadingMore: false });
+    mockedUseAgentLogs.mockReturnValueOnce({ entries: secondEntries, loading: false, clear: vi.fn(), loadMore: vi.fn(), hasMore: false, total: 3, loadingMore: false });
 
     const { rerender } = render(<TaskChatTab task={makeTask()} active addToast={vi.fn()} />);
-    expect(screen.getByText("first live chunk")).toBeTruthy();
+    expect(screen.getByText("first live chunk")).toBeVisible();
 
     rerender(<TaskChatTab task={makeTask()} active addToast={vi.fn()} />);
-    expect(screen.getByText("second live chunk")).toBeTruthy();
+
+    const toolGroup = screen.getByTestId("task-chat-tool-group");
+    expect(toolGroup).not.toHaveAttribute("open");
+    expect(screen.getByText("1 tool call")).toBeVisible();
+    expect(screen.getByText("streamed detail")).not.toBeVisible();
+    expect(screen.getByText("second live chunk")).toBeVisible();
   });
 
   it.each([
@@ -478,10 +548,12 @@ describe("TaskChatTab", () => {
     });
   });
 
-  it("keeps mobile breakpoint scaffolding for the transcript and composer", () => {
+  it("keeps mobile breakpoint scaffolding for the transcript, composer, and collapsible groups", () => {
     const css = readFileSync(resolve(__dirname, "../TaskChatTab.css"), "utf8");
     expect(css).toContain("@media (max-width: 768px)");
     expect(css).toContain(".task-chat-transcript");
     expect(css).toContain(".task-chat-composer-row");
+    expect(css).toContain(".task-chat-tool-group-summary");
+    expect(css).toContain(".task-chat-thinking-summary");
   });
 });

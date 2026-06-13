@@ -28,6 +28,11 @@ interface AgentLogGroup {
   entries: AgentLogEntry[];
 }
 
+type TaskChatSegment =
+  | { kind: "tool"; entries: AgentLogEntry[]; startIndex: number }
+  | { kind: "thinking"; entries: AgentLogEntry[]; startIndex: number }
+  | { kind: "text"; entry: AgentLogEntry; index: number };
+
 const STEERING_BLOCKED_STATUSES = new Set([
   "paused",
   "awaiting-user-input",
@@ -99,6 +104,10 @@ function isActiveAgentSession(task: Task | TaskDetail): boolean {
     && !task.userPaused;
 }
 
+function isToolLikeEntry(entry: AgentLogEntry): boolean {
+  return entry.type === "tool" || entry.type === "tool_result" || entry.type === "tool_error";
+}
+
 function formatEntryLabel(entry: AgentLogEntry): string {
   switch (entry.type) {
     case "tool":
@@ -114,27 +123,51 @@ function formatEntryLabel(entry: AgentLogEntry): string {
   }
 }
 
-function TaskChatEntry({ entry }: { entry: AgentLogEntry }) {
-  const isToolEntry = entry.type === "tool" || entry.type === "tool_result" || entry.type === "tool_error";
-  const className = [
-    "task-chat-entry",
-    `task-chat-entry--${entry.type.replace("_", "-")}`,
-    isToolEntry ? "task-chat-entry--tool" : "",
-  ].filter(Boolean).join(" ");
+function formatToolCallCount(count: number): string {
+  return count === 1 ? "1 tool call" : `${count} tool calls`;
+}
 
-  if (isToolEntry) {
-    return (
-      <article className={className} data-testid={`task-chat-entry-${entry.type}`}>
-        <div className="task-chat-entry-kicker">{formatEntryLabel(entry)}</div>
-        <div className="task-chat-entry-text">{entry.text}</div>
-        {entry.detail ? <pre className="task-chat-tool-detail">{linkifyFilePaths(entry.detail)}</pre> : null}
-      </article>
-    );
+function segmentGroupEntries(entries: AgentLogEntry[]): TaskChatSegment[] {
+  const segments: TaskChatSegment[] = [];
+  let index = 0;
+
+  while (index < entries.length) {
+    const entry = entries[index];
+    if (isToolLikeEntry(entry)) {
+      const startIndex = index;
+      const toolEntries: AgentLogEntry[] = [];
+      while (index < entries.length && isToolLikeEntry(entries[index])) {
+        toolEntries.push(entries[index]);
+        index += 1;
+      }
+      segments.push({ kind: "tool", entries: toolEntries, startIndex });
+      continue;
+    }
+
+    if (entry.type === "thinking") {
+      const startIndex = index;
+      const thinkingEntries: AgentLogEntry[] = [];
+      while (index < entries.length && entries[index].type === "thinking") {
+        thinkingEntries.push(entries[index]);
+        index += 1;
+      }
+      segments.push({ kind: "thinking", entries: thinkingEntries, startIndex });
+      continue;
+    }
+
+    segments.push({ kind: "text", entry, index });
+    index += 1;
   }
 
+  return segments;
+}
+
+function TaskChatTextEntry({ entry }: { entry: AgentLogEntry }) {
   return (
-    <article className={className} data-testid={`task-chat-entry-${entry.type}`}>
-      {entry.type === "thinking" ? <div className="task-chat-entry-kicker">{formatEntryLabel(entry)}</div> : null}
+    <article
+      className={`task-chat-entry task-chat-entry--${entry.type.replace("_", "-")}`}
+      data-testid={`task-chat-entry-${entry.type}`}
+    >
       <div className="markdown-body task-chat-markdown">
         <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
           {entry.text}
@@ -142,6 +175,88 @@ function TaskChatEntry({ entry }: { entry: AgentLogEntry }) {
       </div>
     </article>
   );
+}
+
+function TaskChatToolEntry({ entry }: { entry: AgentLogEntry }) {
+  return (
+    <article
+      className={`task-chat-tool-entry task-chat-tool-entry--${entry.type.replace("_", "-")}`}
+      data-testid={`task-chat-entry-${entry.type}`}
+    >
+      <div className="task-chat-entry-kicker">{formatEntryLabel(entry)}</div>
+      <div className="task-chat-entry-text">{entry.text}</div>
+      {entry.detail ? <pre className="task-chat-tool-detail">{linkifyFilePaths(entry.detail)}</pre> : null}
+    </article>
+  );
+}
+
+function TaskChatToolGroup({ entries }: { entries: AgentLogEntry[] }) {
+  const callCount = entries.filter((entry) => entry.type === "tool").length;
+  const resultCount = entries.filter((entry) => entry.type === "tool_result").length;
+  const errorCount = entries.filter((entry) => entry.type === "tool_error").length;
+
+  return (
+    <details className="task-chat-tool-group" data-testid="task-chat-tool-group">
+      <summary className="task-chat-tool-group-summary">
+        <span className="task-chat-tool-group-count">{formatToolCallCount(entries.length)}</span>
+        <span className="task-chat-tool-group-status" aria-label="Tool status breakdown">
+          {callCount > 0 ? (
+            <span className="task-chat-tool-group-status-part task-chat-tool-group-status-part--call">
+              {callCount === 1 ? "1 call" : `${callCount} calls`}
+            </span>
+          ) : null}
+          {resultCount > 0 ? (
+            <span className="task-chat-tool-group-status-part">
+              {resultCount === 1 ? "1 result" : `${resultCount} results`}
+            </span>
+          ) : null}
+          {errorCount > 0 ? (
+            <span className="task-chat-tool-group-status-part task-chat-tool-group-status-part--error">
+              {errorCount === 1 ? "1 error" : `${errorCount} errors`}
+            </span>
+          ) : null}
+        </span>
+      </summary>
+      <div className="task-chat-tool-group-entries">
+        {entries.map((entry, entryIndex) => (
+          <TaskChatToolEntry key={getEntryKey(entry, entryIndex)} entry={entry} />
+        ))}
+      </div>
+    </details>
+  );
+}
+
+function TaskChatThinking({ entries }: { entries: AgentLogEntry[] }) {
+  return (
+    <details className="task-chat-thinking" data-testid="task-chat-thinking" open>
+      <summary className="task-chat-thinking-summary">
+        {entries.length === 1 ? "Thinking" : `${entries.length} thinking entries`}
+      </summary>
+      <div className="task-chat-thinking-body">
+        {entries.map((entry, entryIndex) => (
+          <div
+            className="markdown-body task-chat-markdown task-chat-thinking-markdown"
+            data-testid="task-chat-entry-thinking"
+            key={getEntryKey(entry, entryIndex)}
+          >
+            <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+              {entry.text}
+            </ReactMarkdown>
+          </div>
+        ))}
+      </div>
+    </details>
+  );
+}
+
+function TaskChatSegmentView({ segment }: { segment: TaskChatSegment }) {
+  if (segment.kind === "tool") {
+    return <TaskChatToolGroup entries={segment.entries} />;
+  }
+  if (segment.kind === "thinking") {
+    return <TaskChatThinking entries={segment.entries} />;
+  }
+  return <TaskChatTextEntry entry={segment.entry} />;
 }
 
 export function TaskChatTab({ task, projectId, active, addToast }: TaskChatTabProps) {
@@ -261,6 +376,7 @@ export function TaskChatTab({ task, projectId, active, addToast }: TaskChatTabPr
               name: group.label,
               icon: getRoleIcon(group.role),
             };
+            const segments = segmentGroupEntries(group.entries);
             return (
               <section className="task-chat-group" key={`${group.role ?? "agent"}-${groupIndex}`} aria-label={`${group.label} messages`}>
                 <header className="task-chat-group-header">
@@ -271,9 +387,12 @@ export function TaskChatTab({ task, projectId, active, addToast }: TaskChatTabPr
                   </div>
                 </header>
                 <div className="task-chat-group-bubbles">
-                  {group.entries.map((entry, entryIndex) => (
-                    <TaskChatEntry key={getEntryKey(entry, entryIndex)} entry={entry} />
-                  ))}
+                  {segments.map((segment) => {
+                    const segmentKey = segment.kind === "text"
+                      ? `text-${getEntryKey(segment.entry, segment.index)}`
+                      : `${segment.kind}-${segment.startIndex}-${segment.entries.length}`;
+                    return <TaskChatSegmentView key={segmentKey} segment={segment} />;
+                  })}
                 </div>
               </section>
             );
