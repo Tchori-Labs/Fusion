@@ -339,6 +339,7 @@ export function TaskChatTab({ task, projectId, active, addToast }: TaskChatTabPr
   const previousEntryCountRef = useRef(0);
   const previousScrollHeightRef = useRef(0);
   const previousActiveRef = useRef(false);
+  const anchorFrameRef = useRef<number | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const groups = useMemo(() => groupEntriesByAgent(entries), [entries]);
@@ -359,6 +360,49 @@ export function TaskChatTab({ task, projectId, active, addToast }: TaskChatTabPr
     resizeComposer();
   }, [draft, resizeComposer]);
 
+  const cancelAnchorTranscriptFrame = useCallback(() => {
+    if (anchorFrameRef.current === null) return;
+    window.cancelAnimationFrame(anchorFrameRef.current);
+    anchorFrameRef.current = null;
+  }, []);
+
+  const anchorTranscriptToBottom = useCallback((container: HTMLElement) => {
+    cancelAnchorTranscriptFrame();
+    if (!container.isConnected) return;
+
+    let frame = 0;
+    let stableFrames = 0;
+    let lastScrollHeight = -1;
+    const maxFrames = 6;
+
+    const writeBottom = () => {
+      anchorFrameRef.current = null;
+      if (!container.isConnected) return;
+
+      container.scrollTop = container.scrollHeight;
+      previousScrollHeightRef.current = container.scrollHeight;
+      if (container.scrollHeight === lastScrollHeight) {
+        stableFrames += 1;
+      } else {
+        stableFrames = 0;
+        lastScrollHeight = container.scrollHeight;
+      }
+
+      frame += 1;
+      if (frame >= maxFrames || stableFrames >= 2) {
+        return;
+      }
+
+      anchorFrameRef.current = window.requestAnimationFrame(writeBottom);
+    };
+
+    writeBottom();
+  }, [cancelAnchorTranscriptFrame]);
+
+  useLayoutEffect(() => () => {
+    cancelAnchorTranscriptFrame();
+  }, [cancelAnchorTranscriptFrame]);
+
   useLayoutEffect(() => {
     const container = transcriptRef.current;
     const wasActive = previousActiveRef.current;
@@ -369,10 +413,14 @@ export function TaskChatTab({ task, projectId, active, addToast }: TaskChatTabPr
     const receivedInitialEntries = previousEntryCountRef.current === 0;
     if (!becameActive && !receivedInitialEntries) return;
 
-    container.scrollTop = container.scrollHeight;
+    anchorTranscriptToBottom(container);
     previousEntryCountRef.current = entries.length;
     previousScrollHeightRef.current = container.scrollHeight;
-  }, [active, entries.length]);
+
+    return () => {
+      cancelAnchorTranscriptFrame();
+    };
+  }, [active, anchorTranscriptToBottom, cancelAnchorTranscriptFrame, entries.length]);
 
   useLayoutEffect(() => {
     const container = transcriptRef.current;

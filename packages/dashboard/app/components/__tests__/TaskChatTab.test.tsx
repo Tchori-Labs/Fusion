@@ -21,6 +21,8 @@ const mockedAddSteeringComment = vi.mocked(addSteeringComment);
 const originalScrollTopDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollTop");
 const originalScrollHeightDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollHeight");
 const originalClientHeightDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientHeight");
+const originalRequestAnimationFrame = window.requestAnimationFrame;
+const originalCancelAnimationFrame = window.cancelAnimationFrame;
 
 function makeTask(overrides: Partial<Task> = {}): Task {
   return {
@@ -134,6 +136,47 @@ function mockMatchMedia(matches: boolean) {
   });
 }
 
+function mockRequestAnimationFrame() {
+  let nextId = 1;
+  const callbacks = new Map<number, FrameRequestCallback>();
+  const requestAnimationFrame = vi.fn((callback: FrameRequestCallback) => {
+    const id = nextId;
+    nextId += 1;
+    callbacks.set(id, callback);
+    return id;
+  });
+  const cancelAnimationFrame = vi.fn((id: number) => {
+    callbacks.delete(id);
+  });
+
+  Object.defineProperty(window, "requestAnimationFrame", {
+    configurable: true,
+    writable: true,
+    value: requestAnimationFrame,
+  });
+  Object.defineProperty(window, "cancelAnimationFrame", {
+    configurable: true,
+    writable: true,
+    value: cancelAnimationFrame,
+  });
+
+  return {
+    requestAnimationFrame,
+    cancelAnimationFrame,
+    flushNext() {
+      const next = callbacks.entries().next();
+      if (next.done) return false;
+      const [id, callback] = next.value;
+      callbacks.delete(id);
+      callback(performance.now());
+      return true;
+    },
+    get pendingCount() {
+      return callbacks.size;
+    },
+  };
+}
+
 describe("TaskChatTab", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -144,6 +187,16 @@ describe("TaskChatTab", () => {
     restoreMetricDescriptor("scrollTop", originalScrollTopDescriptor);
     restoreMetricDescriptor("scrollHeight", originalScrollHeightDescriptor);
     restoreMetricDescriptor("clientHeight", originalClientHeightDescriptor);
+    Object.defineProperty(window, "requestAnimationFrame", {
+      configurable: true,
+      writable: true,
+      value: originalRequestAnimationFrame,
+    });
+    Object.defineProperty(window, "cancelAnimationFrame", {
+      configurable: true,
+      writable: true,
+      value: originalCancelAnimationFrame,
+    });
   });
 
   it("subscribes to live agent logs only when active", () => {
@@ -410,6 +463,61 @@ describe("TaskChatTab", () => {
     rerender(<TaskChatTab task={makeTask()} active addToast={vi.fn()} />);
 
     expect(metrics.scrollTop).toBe(metrics.scrollHeight);
+  });
+
+  it("FN-6337: re-pins populated transcripts to the bottom after async height growth", () => {
+    const raf = mockRequestAnimationFrame();
+    const metrics = mockTranscriptMetrics({ scrollHeight: 600, clientHeight: 240, initialScrollTop: 0 });
+    mockLogs([
+      makeEntry({ agent: "executor", text: "older output" }),
+      makeEntry({ agent: "executor", type: "thinking", text: "expanded thinking", timestamp: "2026-06-12T00:00:01.000Z" }),
+      makeEntry({ agent: "executor", type: "tool", text: "bash", detail: "pnpm test", timestamp: "2026-06-12T00:00:02.000Z" }),
+    ]);
+
+    render(<TaskChatTab task={makeTask()} active addToast={vi.fn()} />);
+
+    expect(metrics.scrollTop).toBe(600);
+    metrics.scrollHeight = 900;
+    expect(raf.flushNext()).toBe(true);
+    expect(metrics.scrollTop).toBe(900);
+
+    metrics.scrollHeight = 1200;
+    expect(raf.flushNext()).toBe(true);
+    expect(metrics.scrollTop).toBe(1200);
+
+    expect(raf.flushNext()).toBe(true);
+    expect(metrics.scrollTop).toBe(1200);
+    expect(raf.flushNext()).toBe(true);
+    expect(metrics.scrollTop).toBe(metrics.scrollHeight);
+    expect(raf.pendingCount).toBe(0);
+  });
+
+  it("FN-6337: bounds and cleans up the settle loop", () => {
+    const raf = mockRequestAnimationFrame();
+    const metrics = mockTranscriptMetrics({ scrollHeight: 500, clientHeight: 240, initialScrollTop: 0 });
+    mockLogs([makeEntry({ agent: "executor", text: "output" })]);
+
+    const { unmount } = render(<TaskChatTab task={makeTask()} active addToast={vi.fn()} />);
+
+    for (let frame = 0; frame < 5; frame += 1) {
+      metrics.scrollHeight += 100;
+      expect(raf.flushNext()).toBe(true);
+    }
+    expect(metrics.scrollTop).toBe(1000);
+    expect(raf.pendingCount).toBe(0);
+
+    metrics.scrollHeight = 1300;
+    mockLogs([makeEntry({ agent: "executor", text: "output after remount" })]);
+    const mountedAgain = render(<TaskChatTab task={makeTask()} active addToast={vi.fn()} />);
+    expect(raf.pendingCount).toBe(1);
+    mountedAgain.unmount();
+    expect(raf.cancelAnimationFrame).toHaveBeenCalled();
+    expect(raf.pendingCount).toBe(0);
+
+    metrics.scrollHeight = 1600;
+    expect(raf.flushNext()).toBe(false);
+    expect(metrics.scrollTop).toBe(1300);
+    unmount();
   });
 
   it("does not mutate scroll position for an empty transcript", () => {
