@@ -9,9 +9,10 @@ import express from "express";
 import { mkdtempSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { setImmediate } from "node:timers";
 import { join } from "node:path";
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
-import { TaskStore } from "@fusion/core";
+import { Database, TaskStore } from "@fusion/core";
 import { createApiRoutes } from "../routes.js";
 import { request, get } from "../test-request.js";
 import { AiSessionStore, type AiSessionRow } from "../ai-session-store.js";
@@ -42,6 +43,8 @@ const { mockCreateFnAgent } = vi.hoisted(() => ({
 
 vi.mock("@fusion/engine", () => ({
   listCliAdapterDescriptors: () => [],
+  // FNXC:DashboardSessionTests 2026-06-14-09:06: planning.ts spreads createWorkflowAuthoringTools into agent customTools; this focused engine mock must export it to keep AI-session tests aligned with production planning setup.
+  createWorkflowAuthoringTools: vi.fn(() => []),
   createFnAgent: mockCreateFnAgent,
   createResolvedAgentSession: vi.fn(async () => ({
     session: { state: { messages: [] }, prompt: vi.fn(), dispose: vi.fn() },
@@ -99,6 +102,7 @@ function extractEventId(body: string, eventName: string): number {
 describe("session reconnect + replay", () => {
   let tmpRoot: string;
   let store: TaskStore;
+  let db: Database;
   let aiSessionStore: AiSessionStore;
   let app: express.Express;
 
@@ -111,7 +115,13 @@ describe("session reconnect + replay", () => {
     tmpRoot = mkdtempSync(join(tmpdir(), "kb-session-reconnect-"));
     store = new TaskStore(tmpRoot, join(tmpRoot, ".fusion-global-settings"), { inMemoryDb: true });
     await store.init();
-    aiSessionStore = new AiSessionStore(store.getDatabase());
+    /*
+    FNXC:DashboardSessionTests 2026-06-14-09:10:
+    Reconnect tests exercise persisted SSE replay through AiSessionStore; use a dedicated Database handle outside TaskStore's .fusion directory and close it before tmpRoot cleanup so session SQLite files are not removed while writers are still open.
+    */
+    db = new Database(join(tmpRoot, ".fusion-ai-sessions"));
+    db.init();
+    aiSessionStore = new AiSessionStore(db);
 
     setPlanningAiSessionStore(aiSessionStore);
     setSubtaskAiSessionStore(aiSessionStore);
@@ -133,6 +143,13 @@ describe("session reconnect + replay", () => {
     } catch {
       // no-op
     }
+    try {
+      db.close();
+    } catch {
+      // no-op
+    }
+    // FNXC:DashboardSessionTests 2026-06-14-09:20: TaskStore.close() closes watcher/database handles synchronously but their filesystem close callbacks settle on the next event-loop turn; drain that turn before deleting .fusion.
+    await new Promise<void>((resolve) => setImmediate(resolve));
     await rm(tmpRoot, { recursive: true, force: true });
   });
 

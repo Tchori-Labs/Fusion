@@ -38,22 +38,6 @@
       "reason": "pre-existing failure (orphaned from curated gate, never previously executed in CI; tracked as FN-6444)"
     },
     {
-      "file": "packages/dashboard/src/__tests__/session-cross-tab.test.ts",
-      "reason": "pre-existing failure (orphaned from curated gate, never previously executed in CI; tracked as FN-6443)"
-    },
-    {
-      "file": "packages/dashboard/src/__tests__/session-error-recovery.test.ts",
-      "reason": "pre-existing failure (orphaned from curated gate, never previously executed in CI; tracked as FN-6443)"
-    },
-    {
-      "file": "packages/dashboard/src/__tests__/session-persistence-roundtrip.test.ts",
-      "reason": "pre-existing failure (orphaned from curated gate, never previously executed in CI; tracked as FN-6443)"
-    },
-    {
-      "file": "packages/dashboard/src/__tests__/session-reconnect.test.ts",
-      "reason": "pre-existing failure (orphaned from curated gate, never previously executed in CI; tracked as FN-6443)"
-    },
-    {
       "file": "packages/dashboard/src/__tests__/chat-manager.test.ts",
       "reason": "pre-existing exclusion from dashboard-api-quality-backfill; tracked for rescue in FN-6444"
     },
