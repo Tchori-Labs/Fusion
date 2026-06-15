@@ -207,3 +207,25 @@ Keychain access; the ACP bridge's `claude` inherits the same session and authent
 **R17 is satisfied for the supported (login-session) daemon.** Residual (documented, not blocking):
 detached/headless launchd daemons would still need a credential-delivery solution — out of scope
 for the supported setup. **Route A (U10–U13) is cleared to build.**
+
+### U11 tool-flow verification PASSED (2026-06-15): enablement gate cleared
+
+Live run against pinned `claude-code-cli-acp` 0.1.1 in an authenticated session,
+returning `cancelled` to every `session/request_permission` (what `streamViaAcp`
+does). Two tests, fresh session each:
+
+- **Forwarded MCP tool (`fn_task_list`):** Claude fired `ToolSearch` first
+  (internal, completed), then `mcp__custom-tools__fn_task_list` — a permission
+  request fired, we cancelled, the call went to `failed`, and the schema server's
+  `tools/call` was NEVER reached (no execution marker). Forwarded tools do not
+  execute when cancelled.
+- **Native Bash:** permission request fired, we cancelled, `Bash` went to
+  `failed`, the side-effect file was never created. Native tools do not execute
+  when cancelled.
+
+Conclusion: the bridge gates tool execution BEHIND `session/request_permission`
+(no TOCTOU window); `streamViaAcp`'s deny-by-default handler + break-early on
+pi-known tools is SAFE. Also validated: the bridged `claude` authenticates only
+with the richer env allow-list (HOME/PATH + USER/SHELL/LANG/XDG_*) that
+`streamViaAcp` forwards — a thin {HOME,PATH} env fails with "Not logged in".
+The Route A enablement gate is CLEARED. Harness: /tmp/acp-toolflow/verify2.mjs.
