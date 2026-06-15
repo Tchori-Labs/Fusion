@@ -383,6 +383,15 @@ plugins/fusion-plugin-acp-runtime/src/
 - Model id selected in settings is forwarded to the ACP session.
 - Characterization tests for the prior `-p` behavior are updated, not left asserting the old transport.
 
+**Implementation notes (design-confirmed 2026-06-15, ready to execute):**
+- **Contract to match:** `streamViaCli(model, context, options): AssistantMessageEventStream` (from `@earendil-works/pi-ai`). The new `streamViaAcp` must return the same `AssistantMessageEventStream` and push the same event shapes: streamed `text`/`thinking` deltas, `ToolCall` events, and a terminal `{ type: "done", reason, message }` (an `AssistantMessage` with `content:[]` on error — pi's `extractResult` crashes on `error`-typed events, so end with `done` even on failure, mirroring `endStreamWithError` at `provider.ts:181-198`).
+- **Branch point:** in `index.ts` `streamSimple` (lines 222-235), dispatch on the kill-switch: `useAcpBridge() ? streamViaAcp(model, context, {...options, mcpServers, bridgePath}) : streamViaCli(...)`. Kill-switch OFF by default (R14) — e.g. `FUSION_CLAUDE_ACP==="1"` or a `useClaudeCliAcp` global setting — so the live `-p` path is untouched until soak.
+- **KTD10 injection seam:** add `@agentclientprotocol/sdk` as a `pi-claude-cli` dependency (vendored package — allowed) so the extension speaks ACP without importing `@fusion/engine`. The **bridge binary path** is injected via `streamSimple` options the same way `mcpConfigPath` is today (engine resolves it from the acp-runtime plugin bundle at `registerExtensionProviders`, `pi.ts:1366-1422`, and threads it in) — the extension never reaches into the plugin's `node_modules` itself.
+- **MCP servers:** reuse the tool list `ensureMcpConfig` already assembles (`index.ts:223-230`) to build the `AcpMcpServer[]` (`{name:"custom-tools",command:"node",args:[schemaServer,schemaFile],env:[]}`) — the same shape U9 proved and U10 forwards.
+- **Prompt (R13):** always `buildPrompt(context)` (full flattened history) — never the `buildResumePrompt` latest-turn-only branch (`provider.ts:115-124`), since the ACP path has no `--resume`.
+- **ACP→pi event translation** parallels `plugins/fusion-plugin-acp-runtime/src/event-bridge.ts` (ACP `session/update` → callbacks) but targets pi's `AssistantMessageEventStream` instead of Fusion callbacks; reuse `tool-mapping.ts` for Claude↔pi tool names.
+- **Verification:** drive the live bridge exactly as the U9 harness did (`/tmp/acp-u9-*/spike.mjs`) but asserting pi-stream output, before enabling the kill-switch in any lane.
+
 ### U12. Settings, picker, auth, and status surface
 
 **Goal:** Make the Claude-CLI toggle/picker/status reflect the ACP-backed reality without forcing user re-selection.
