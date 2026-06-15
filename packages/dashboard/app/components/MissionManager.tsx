@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback, useRef, useMemo, type ReactNode } fro
 import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { getErrorMessage } from "@fusion/core";
+import { getErrorMessage, type Goal } from "@fusion/core";
 import {
   X,
   Plus,
@@ -99,6 +99,7 @@ import {
   fetchAiSession,
   fetchMissionInterviewDrafts,
   discardMissionInterviewDraft,
+  api,
   type AiSessionSummary,
 } from "../api";
 import type { AutopilotState, MissionInterviewDraftSummary } from "./mission-types";
@@ -567,6 +568,12 @@ function getAutopilotActivitySummary(state: AutopilotState, lastActivityAt: stri
   return t("missions.autopilotLastActivation", "Last activation {{time}}", { time: getRelativeTime(lastActivityAt, t) });
 }
 
+function buildMissionScopedPath(path: string, projectId?: string): string {
+  if (!projectId) return path;
+  const separator = path.includes("?") ? "&" : "?";
+  return `${path}${separator}${new URLSearchParams({ projectId }).toString()}`;
+}
+
 function normalizeMissionHierarchy(mission: MissionWithHierarchy): MissionWithHierarchy {
   if (!Array.isArray(mission.milestones)) {
     throw new Error("Malformed mission detail response: missing milestones");
@@ -705,6 +712,11 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
   // Link task modal state
   const [linkTaskFeatureId, setLinkTaskFeatureId] = useState<string | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState("");
+
+  const [activeGoals, setActiveGoals] = useState<Goal[]>([]);
+  const [selectedGoalToLink, setSelectedGoalToLink] = useState("");
+  const [goalLinkBusy, setGoalLinkBusy] = useState(false);
+  const [unlinkingGoalId, setUnlinkingGoalId] = useState<string | null>(null);
 
   // AI Interview modal
   const [showInterviewModal, setShowInterviewModal] = useState(false);
@@ -1005,6 +1017,16 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
     }
   }, [addToast, loadMissionHealth, missionsCacheKey, projectId]);
 
+  const loadActiveGoals = useCallback(async () => {
+    try {
+      const result = await api<{ goals?: Goal[] }>(buildMissionScopedPath("/goals?status=active", projectId));
+      setActiveGoals(Array.isArray(result.goals) ? result.goals : []);
+    } catch (err) {
+      addToast(getErrorMessage(err) || t("missions.loadGoalsFailed", "Failed to load goals"), "error");
+      setActiveGoals([]);
+    }
+  }, [addToast, projectId, t]);
+
   const loadMissionDetail = useCallback(async (missionId: string) => {
     try {
       setDetailLoading(true);
@@ -1237,6 +1259,7 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
   useEffect(() => {
     if (isActive) {
       loadMissions();
+      loadActiveGoals();
       setSelectedMission(null);
       setSelectedMilestoneId(null);
       setValidationTelemetry(null);
@@ -1246,7 +1269,7 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
       setEventsFilter("all");
       setExpandedEventMetadata(new Set());
     }
-  }, [isActive, loadMissions]);
+  }, [isActive, loadActiveGoals, loadMissions]);
 
   // Auto-load target mission when specified
   const targetLoadedRef = useRef<string | null>(null);
@@ -2332,6 +2355,53 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
     }
   }, [addToast, loadMissionDetail, loadMissions, projectId]);
 
+  const linkableGoalsForSelectedMission = useMemo(() => {
+    const linkedIds = new Set((selectedMission?.linkedGoals ?? []).map((goal) => goal.id));
+    return activeGoals.filter((goal) => goal.status === "active" && !linkedIds.has(goal.id));
+  }, [activeGoals, selectedMission?.linkedGoals]);
+
+  useEffect(() => {
+    if (selectedGoalToLink && !linkableGoalsForSelectedMission.some((goal) => goal.id === selectedGoalToLink)) {
+      setSelectedGoalToLink("");
+    }
+  }, [linkableGoalsForSelectedMission, selectedGoalToLink]);
+
+  /**
+   * FNXC:Missions 2026-06-15-15:04:
+   * Mission detail is one side of the bidirectional goal-mission graph, so users must be able to link active goals and unlink existing chips without losing chip navigation.
+   * Refresh both detail and mission summaries after mutations because the sidebar unlinked indicator reads summary.linkedGoalCount.
+   */
+  const handleLinkGoalToSelectedMission = useCallback(async () => {
+    if (!selectedMission || !selectedGoalToLink) return;
+    try {
+      setGoalLinkBusy(true);
+      await api(buildMissionScopedPath(`/missions/${encodeURIComponent(selectedMission.id)}/goals/${encodeURIComponent(selectedGoalToLink)}`, projectId), { method: "POST" });
+      await loadMissionDetail(selectedMission.id);
+      await loadMissions();
+      setSelectedGoalToLink("");
+      addToast(t("missions.goalLinked", "Goal linked to mission"), "success");
+    } catch (err) {
+      addToast(getErrorMessage(err) || t("missions.goalLinkFailed", "Failed to link goal"), "error");
+    } finally {
+      setGoalLinkBusy(false);
+    }
+  }, [addToast, loadMissionDetail, loadMissions, projectId, selectedGoalToLink, selectedMission, t]);
+
+  const handleUnlinkGoalFromSelectedMission = useCallback(async (goalId: string) => {
+    if (!selectedMission) return;
+    try {
+      setUnlinkingGoalId(goalId);
+      await api(buildMissionScopedPath(`/missions/${encodeURIComponent(selectedMission.id)}/goals/${encodeURIComponent(goalId)}`, projectId), { method: "DELETE" });
+      await loadMissionDetail(selectedMission.id);
+      await loadMissions();
+      addToast(t("missions.goalUnlinked", "Goal unlinked from mission"), "success");
+    } catch (err) {
+      addToast(getErrorMessage(err) || t("missions.goalUnlinkFailed", "Failed to unlink goal"), "error");
+    } finally {
+      setUnlinkingGoalId(null);
+    }
+  }, [addToast, loadMissionDetail, loadMissions, projectId, selectedMission, t]);
+
   // ── Autopilot handlers ──
 
   const handleToggleAutopilot = useCallback(async (missionId: string, enabled: boolean) => {
@@ -2521,18 +2591,57 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
                       {t("missions.linkedCount", { count: selectedMission.linkedGoals?.length ?? 0, defaultValue_one: "{{count}} linked", defaultValue_other: "{{count}} linked" })}
                     </span>
                   </div>
+                  <div className="mission-detail__linked-goal-controls">
+                    <select
+                      className="input mission-detail__linked-goal-picker"
+                      data-testid="mission-goal-picker"
+                      value={selectedGoalToLink}
+                      onChange={(event) => setSelectedGoalToLink(event.target.value)}
+                      aria-label={t("missions.goalPicker", "Goal to link")}
+                      disabled={goalLinkBusy || linkableGoalsForSelectedMission.length === 0}
+                    >
+                      <option value="">{t("missions.selectGoal", "Select an active goal")}</option>
+                      {linkableGoalsForSelectedMission.map((goal) => (
+                        <option key={goal.id} value={goal.id}>{goal.title}</option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      className="btn btn-primary mission-detail__linked-goal-link-button"
+                      data-testid="mission-goal-link-button"
+                      disabled={!selectedGoalToLink || goalLinkBusy}
+                      onClick={handleLinkGoalToSelectedMission}
+                    >
+                      <Link size={16} aria-hidden="true" />
+                      {goalLinkBusy ? t("missions.linkingGoal", "Linking…") : t("missions.linkGoal", "Link goal")}
+                    </button>
+                  </div>
                   {(selectedMission.linkedGoals?.length ?? 0) > 0 ? (
                     <div className="mission-detail__linked-goals-list">
                       {(selectedMission.linkedGoals ?? []).map((goal) => (
-                        <button
+                        <div
                           key={goal.id}
-                          type="button"
-                          className="btn mission-detail__linked-goal-chip"
+                          className="mission-detail__linked-goal-chip"
                           data-testid={`mission-linked-goal-chip-${goal.id}`}
-                          onClick={() => onNavigateToGoal?.(goal.id)}
                         >
-                          {goal.title}
-                        </button>
+                          <button
+                            type="button"
+                            className="btn mission-detail__linked-goal-chip-link"
+                            onClick={() => onNavigateToGoal?.(goal.id)}
+                          >
+                            {goal.title}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn-icon mission-detail__linked-goal-unlink"
+                            data-testid={`mission-linked-goal-unlink-${goal.id}`}
+                            aria-label={t("missions.unlinkGoal", "Unlink goal")}
+                            disabled={unlinkingGoalId === goal.id}
+                            onClick={() => handleUnlinkGoalFromSelectedMission(goal.id)}
+                          >
+                            <X size={16} aria-hidden="true" />
+                          </button>
+                        </div>
                       ))}
                     </div>
                   ) : (

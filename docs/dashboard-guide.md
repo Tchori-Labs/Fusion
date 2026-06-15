@@ -569,7 +569,8 @@ Goals view is a strategic-goals surface backed by the Goals REST API.
 
 What it shows:
 - Header with active-goal count (`N active goals`) and an **Add Goal** action
-- Goal cards with title, optional description, and `Status: active|archived`
+- Goal cards with title, optional description, `Status: active|archived`, and a **Linked Missions** section
+- Linked-mission chips navigate to Mission Manager, each chip has an unlink control, and the card picker hides missions already linked to that goal
 - Empty state when no goals exist: `No goals yet. Add one to begin tracking strategic outcomes.`
 
 Data behavior:
@@ -578,6 +579,7 @@ Data behavior:
 - Add-form drafting: **Draft with AI** sends the typed goal title to `POST /api/ai/draft-goal-description` and drops the returned `{ description }` into the description textarea for review/editing before save
 - Edit: per-card inline form patches title/description via `PATCH /api/goals/:id`
 - Archive/unarchive: `POST /api/goals/:id/archive` and `POST /api/goals/:id/unarchive`
+- Linked missions: `GET /api/goals/:id/missions` for the reverse lookup, then `POST`/`DELETE /api/missions/:missionId/goals/:goalId` for link/unlink mutations
 
 AI drafting behavior:
 - The add-goal form enables **Draft with AI** once the title is non-empty

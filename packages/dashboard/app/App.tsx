@@ -1809,7 +1809,7 @@ function AppInner() {
       return (
         <PageErrorBoundary>
           <Suspense fallback={null}>
-            <GoalsView anchorGoalId={goalAnchorId} />
+            <GoalsView anchorGoalId={goalAnchorId} onNavigateToMission={handleOpenMission} />
           </Suspense>
         </PageErrorBoundary>
       );
