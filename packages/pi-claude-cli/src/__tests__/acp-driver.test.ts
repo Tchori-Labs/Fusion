@@ -68,14 +68,39 @@ const flush = () => new Promise((r) => setTimeout(r, 30));
 describe("streamViaAcp — ACP→pi translation (U11)", () => {
   beforeEach(() => { scriptedUpdates = []; scriptedUsage = undefined; });
 
-  it("feeds ACP token usage into the done message (item 2)", async () => {
-    scriptedUsage = { inputTokens: 11, outputTokens: 22 };
+  it("feeds ACP token usage (incl. cache tokens) into the done message (item 2)", async () => {
+    scriptedUsage = { inputTokens: 11, outputTokens: 22, cachedReadTokens: 5, cachedWriteTokens: 3 };
+    scriptedUpdates = [{ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "hi" } }];
+    const stream = streamViaAcp(MODEL, CTX, OPTS) as unknown as { _events: Array<Record<string, unknown>> };
+    await flush();
+    const done = stream._events.find((e) => e.type === "done") as { message?: { usage?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number; totalTokens?: number } } };
+    expect(done?.message?.usage?.input).toBe(11);
+    expect(done?.message?.usage?.output).toBe(22);
+    expect(done?.message?.usage?.cacheRead).toBe(5);
+    expect(done?.message?.usage?.cacheWrite).toBe(3);
+    expect(done?.message?.usage?.totalTokens).toBe(41);
+  });
+
+  it("ignores a malformed/untrusted usage payload (string/NaN/negative)", async () => {
+    scriptedUsage = { inputTokens: "99" as unknown as number, outputTokens: NaN, cachedReadTokens: -5 };
     scriptedUpdates = [{ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "hi" } }];
     const stream = streamViaAcp(MODEL, CTX, OPTS) as unknown as { _events: Array<Record<string, unknown>> };
     await flush();
     const done = stream._events.find((e) => e.type === "done") as { message?: { usage?: { input?: number; output?: number } } };
-    expect(done?.message?.usage?.input).toBe(11);
-    expect(done?.message?.usage?.output).toBe(22);
+    // Coerced to undefined → bridge leaves usage at 0; never a string/NaN.
+    expect(done?.message?.usage?.input).toBe(0);
+    expect(Number.isNaN(done?.message?.usage?.output)).toBe(false);
+  });
+
+  it("does not emit usage on a tool-use (break-early) turn", async () => {
+    scriptedUsage = { inputTokens: 11, outputTokens: 22 };
+    scriptedUpdates = [
+      { sessionUpdate: "tool_call", toolCallId: "t1", _meta: { claudeCode: { toolName: "mcp__custom-tools__fn_task_list" } }, rawInput: {} },
+    ];
+    const stream = streamViaAcp(MODEL, CTX, OPTS) as unknown as { _events: Array<Record<string, unknown>> };
+    await flush();
+    const done = stream._events.find((e) => e.type === "done") as { message?: { usage?: { input?: number } } };
+    expect(done?.message?.usage?.input ?? 0).toBe(0); // tool-use turn reports zero usage
   });
 
   it("translates agent_message_chunk text into pi text events + done(stop)", async () => {
@@ -170,9 +195,19 @@ describe("streamViaAcp — ACP→pi translation (U11)", () => {
 });
 
 describe("buildBridgeEnv — R17 auth opt-in (item 3)", () => {
-  const saved = { flag: process.env.FUSION_CLAUDE_ACP_FORWARD_AUTH, oauth: process.env.CLAUDE_CODE_OAUTH_TOKEN, key: process.env.ANTHROPIC_API_KEY };
+  const saved = {
+    flag: process.env.FUSION_CLAUDE_ACP_FORWARD_AUTH,
+    oauth: process.env.CLAUDE_CODE_OAUTH_TOKEN,
+    authTok: process.env.ANTHROPIC_AUTH_TOKEN,
+    key: process.env.ANTHROPIC_API_KEY,
+  };
   afterEach(() => {
-    for (const [k, v] of [["FUSION_CLAUDE_ACP_FORWARD_AUTH", saved.flag], ["CLAUDE_CODE_OAUTH_TOKEN", saved.oauth], ["ANTHROPIC_API_KEY", saved.key]] as const) {
+    for (const [k, v] of [
+      ["FUSION_CLAUDE_ACP_FORWARD_AUTH", saved.flag],
+      ["CLAUDE_CODE_OAUTH_TOKEN", saved.oauth],
+      ["ANTHROPIC_AUTH_TOKEN", saved.authTok],
+      ["ANTHROPIC_API_KEY", saved.key],
+    ] as const) {
       if (v === undefined) delete process.env[k]; else process.env[k] = v;
     }
   });
@@ -200,5 +235,25 @@ describe("buildBridgeEnv — R17 auth opt-in (item 3)", () => {
     const env = buildBridgeEnv({ HOME: "/h", PATH: "/b" });
     expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe("oauth-tok");
     expect(env.ANTHROPIC_API_KEY).toBeUndefined();
+  });
+
+  it("forwards ANTHROPIC_AUTH_TOKEN (middle precedence) when no OAuth token", () => {
+    process.env.FUSION_CLAUDE_ACP_FORWARD_AUTH = "1";
+    delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+    process.env.ANTHROPIC_AUTH_TOKEN = "auth-tok";
+    process.env.ANTHROPIC_API_KEY = "sk-secret";
+    const env = buildBridgeEnv({ HOME: "/h", PATH: "/b" });
+    expect(env.ANTHROPIC_AUTH_TOKEN).toBe("auth-tok");
+    expect(env.ANTHROPIC_API_KEY).toBeUndefined();
+  });
+
+  it("reads the auth token from process.env, never a caller-supplied value (no token substitution)", () => {
+    process.env.FUSION_CLAUDE_ACP_FORWARD_AUTH = "1";
+    delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+    delete process.env.ANTHROPIC_AUTH_TOKEN;
+    process.env.ANTHROPIC_API_KEY = "real-from-env";
+    // A caller trying to inject a different token via the supplied env must be ignored.
+    const env = buildBridgeEnv({ HOME: "/h", PATH: "/b", ANTHROPIC_API_KEY: "attacker" } as NodeJS.ProcessEnv);
+    expect(env.ANTHROPIC_API_KEY).toBe("real-from-env");
   });
 });

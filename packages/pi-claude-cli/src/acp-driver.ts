@@ -127,6 +127,12 @@ const BRIDGE_ENV_ALLOWLIST = [
  * authenticate non-interactively. Default OFF — no secret-bearing var ever
  * reaches the untrusted bridge otherwise. Mirrors the native claude-code
  * adapter's recognized auth vars.
+ *
+ * Security trade-off (state it where the operator opts in): once forwarded, the
+ * token is visible to the bridge subprocess AND everything it spawns (including
+ * MCP servers that inherit env). It is NOT in prompt/model context, so the model
+ * can't read it, but opting in widens exposure to the bridge process tree.
+ * Prefer a scoped/rotatable `CLAUDE_CODE_OAUTH_TOKEN` (`claude setup-token`).
  */
 const BRIDGE_AUTH_ENV_KEYS = ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"];
 
@@ -377,16 +383,21 @@ export function streamViaAcp(
       // so it lands in the `done` message. Tool-use turns break early and never
       // resolve here, so they inherently report zero usage. Zero-when-absent safe.
       if (!sawToolCall) {
-        const u = (res as { usage?: { inputTokens?: number; outputTokens?: number; cachedReadTokens?: number; cachedWriteTokens?: number } }).usage;
+        const u = (res as { usage?: Record<string, unknown> }).usage;
+        // The bridge is untrusted (see BRIDGE_ENV_ALLOWLIST): coerce its usage
+        // payload to finite, non-negative numbers only so a malformed value
+        // (string/NaN/negative) can't corrupt totalTokens / cost downstream.
+        const num = (x: unknown): number | undefined =>
+          typeof x === "number" && Number.isFinite(x) && x >= 0 ? x : undefined;
         if (u) {
           bridge.handleEvent({
             type: "message_delta",
             delta: {},
             usage: {
-              input_tokens: u.inputTokens,
-              output_tokens: u.outputTokens,
-              cache_read_input_tokens: u.cachedReadTokens ?? undefined,
-              cache_creation_input_tokens: u.cachedWriteTokens ?? undefined,
+              input_tokens: num(u.inputTokens),
+              output_tokens: num(u.outputTokens),
+              cache_read_input_tokens: num(u.cachedReadTokens),
+              cache_creation_input_tokens: num(u.cachedWriteTokens),
             },
           } as ClaudeApiEvent);
         }
