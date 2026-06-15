@@ -6310,6 +6310,26 @@ export class TaskExecutor {
       || latestAction === "Resuming execution after unpause";
   }
 
+  private graphFailureValue(result: WorkflowGraphTaskRunResult): string | undefined {
+    const failedNode = result.visitedNodeIds[result.visitedNodeIds.length - 1];
+    if (!failedNode || !result.context) return undefined;
+    const value = result.context[`node:${failedNode}:value`];
+    if (typeof value === "string") return value;
+    const foreachInstanceDelimiter = failedNode.indexOf("#");
+    if (foreachInstanceDelimiter === -1) return undefined;
+    /*
+    FNXC:WorkflowLifecycle 2026-06-15-03:23:
+    Foreach step-execute failures record instance ids in visitedNodeIds, but the graph walk stores the failed value on the foreach container context key. Check that container key before classifying execute-node failures so awaiting operator states from step-execute are preserved instead of parked as terminal graph failures.
+    */
+    const foreachContainerNode = failedNode.slice(0, foreachInstanceDelimiter);
+    const containerValue = result.context[`node:${foreachContainerNode}:value`];
+    return typeof containerValue === "string" ? containerValue : undefined;
+  }
+
+  private isAwaitingGraphFailureValue(value: string | undefined): value is "awaiting-user-input" | "awaiting-cli-approval" {
+    return value === "awaiting-user-input" || value === "awaiting-cli-approval";
+  }
+
   /** Terminal failure of a graph run: record the error and park the task in
    *  review so a human can act — never leave it invisible in in-progress. */
   private async handleGraphFailure(task: Task, result: WorkflowGraphTaskRunResult): Promise<void> {
@@ -6354,6 +6374,20 @@ export class TaskExecutor {
         return;
       }
       const failedNode = result.visitedNodeIds[result.visitedNodeIds.length - 1];
+      const failureValue = this.graphFailureValue(result);
+      if (this.isAwaitingGraphFailureValue(failureValue)) {
+        /*
+        FNXC:WorkflowLifecycle 2026-06-15-12:00:
+        Awaiting-input and awaiting-CLI-approval workflow node values are resumable operator waits, not terminal execute failures. Classify the node value before the generic graph-failure sink so a stale or partially reloaded pause flag cannot park a legitimately runnable task in review with the execute-node symptom.
+        */
+        const benignMessage = `Workflow graph run ended awaiting ${failureValue === "awaiting-cli-approval" ? "CLI approval" : "user input"} at node '${failedNode ?? "unknown"}' — awaiting state preserved`;
+        executorLog.log(`${task.id}: ${benignMessage}`);
+        await this.store.logEntry(task.id, benignMessage, undefined, this.getRunContextFor(task.id));
+        if (live.status !== failureValue || !live.paused) {
+          await this.store.updateTask(task.id, { status: failureValue, paused: true }, this.getRunContextFor(task.id));
+        }
+        return;
+      }
       if (this.isTransientResumeAfterRestartGraphFailure(live, result)) {
         const priorRetries = live.graphResumeRetryCount ?? 0;
         if (priorRetries < MAX_TRANSIENT_GRAPH_RESUME_RETRIES) {

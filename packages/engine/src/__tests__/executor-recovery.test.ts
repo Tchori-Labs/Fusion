@@ -944,6 +944,93 @@ describe("TaskExecutor bounded recovery retries", () => {
     expect(store.handoffToReview).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["plain execute", ["execute"], "awaiting-user-input", { "node:execute:value": "awaiting-user-input" }, "Workflow graph run ended awaiting user input at node 'execute' — awaiting state preserved"],
+    ["progress then execute", ["plan", "execute"], "awaiting-cli-approval", { "node:execute:value": "awaiting-cli-approval" }, "Workflow graph run ended awaiting CLI approval at node 'execute' — awaiting state preserved"],
+    ["step-execute foreach seam", ["foreach#0:step-execute"], "awaiting-user-input", { "node:foreach:value": "awaiting-user-input" }, "Workflow graph run ended awaiting user input at node 'foreach#0:step-execute' — awaiting state preserved"],
+  ] as const)(
+    "preserves awaiting graph failure values instead of terminal execute parking: %s",
+    async (_name, visitedNodeIds, value, context, message) => {
+      const store = createMockStore();
+      const task = {
+        id: "FN-001",
+        title: "Test",
+        description: "Test",
+        column: "in-progress",
+        status: undefined,
+        dependencies: [],
+        steps: [{ name: "Step 1", status: "pending" }],
+        currentStep: 0,
+        log: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      } as Task;
+      store.getTask.mockResolvedValue({
+        ...task,
+        column: "in-progress",
+        paused: false,
+        status: value,
+        error: null,
+      });
+      const warnSpy = vi.spyOn(executorLog, "warn").mockImplementation(() => undefined);
+      const executor = new TaskExecutor(store, "/tmp/test", {});
+
+      await (executor as any).handleGraphFailure(task, {
+        disposition: "failed",
+        outcome: "failure",
+        visitedNodeIds,
+        context,
+      });
+
+      expect(store.logEntry).toHaveBeenCalledWith("FN-001", message, undefined, undefined);
+      expect(store.updateTask).toHaveBeenCalledWith("FN-001", { status: value, paused: true }, undefined);
+      expect(store.logEntry.mock.calls.map((call) => call[1]).join("\n")).not.toContain("Workflow graph terminated with failure at node");
+      expect(store.updateTask).not.toHaveBeenCalledWith(
+        "FN-001",
+        expect.objectContaining({ status: "failed" }),
+        expect.anything(),
+      );
+      expect(store.handoffToReview).not.toHaveBeenCalled();
+      expect(warnSpy).not.toHaveBeenCalledWith(expect.stringContaining("Workflow graph terminated with failure at node"));
+      warnSpy.mockRestore();
+    },
+  );
+
+  it("preserves genuine step-execute-unwired failures as terminal graph failures", async () => {
+    const store = createMockStore();
+    const task = {
+      id: "FN-001",
+      title: "Test",
+      description: "Test",
+      column: "in-progress",
+      status: undefined,
+      dependencies: [],
+      steps: [{ name: "Step 1", status: "pending" }],
+      currentStep: 0,
+      log: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    } as Task;
+    store.getTask.mockResolvedValue({ ...task, column: "in-progress", paused: false, status: undefined, error: null });
+    const warnSpy = vi.spyOn(executorLog, "warn").mockImplementation(() => undefined);
+    const executor = new TaskExecutor(store, "/tmp/test", {});
+
+    await (executor as any).handleGraphFailure(task, {
+      disposition: "failed",
+      outcome: "failure",
+      visitedNodeIds: ["foreach#0:step-execute"],
+      context: { "node:foreach#0:step-execute:value": "step-execute-unwired" },
+    });
+
+    const message = "Workflow graph terminated with failure at node 'foreach#0:step-execute'";
+    expect(store.updateTask).toHaveBeenCalledWith("FN-001", { error: message, status: "failed" }, undefined);
+    expect(store.handoffToReview).toHaveBeenCalledWith(
+      "FN-001",
+      expect.objectContaining({ evidence: expect.objectContaining({ reason: "workflow-graph-failed" }) }),
+    );
+    warnSpy.mockRestore();
+  });
+
   /*
   FNXC:WorkflowLifecycle 2026-06-15-01:38:
   FN-6478 established that a workflow graph exit while paused is benign only while the task remains in-progress. If the live row already advanced to in-review or another non-execution column, the executor must preserve explicit user pauses and autoMerge:false terminal review state while surfacing an operator-actionable workflow failure instead of the generic pause-preserved log.
