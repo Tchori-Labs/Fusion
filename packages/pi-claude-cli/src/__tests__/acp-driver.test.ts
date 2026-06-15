@@ -121,17 +121,33 @@ describe("streamViaAcp — ACP→pi translation (U11)", () => {
     expect(done!.reason).toBe("toolUse");
   });
 
-  it("records the R17 auth-failure signal when the bridge turn is only 'Not logged in'", async () => {
+  it("R17 auth-signal: sets on a 'Not logged in' turn, clears on a real response, ignores long answers", async () => {
+    const run = async (text: string) => {
+      scriptedUpdates = [{ sessionUpdate: "agent_message_chunk", content: { type: "text", text } }];
+      streamViaAcp(MODEL, CTX, OPTS);
+      await flush();
+    };
+    const wroteAuthFailed = () =>
+      fsSpies.writeFileSync.mock.calls.some((c) => String(c[1]).includes('"authFailed":true'));
+
+    // Baseline: a real response leaves the signal cleared (lastAuthFailed=false).
+    await run("Here is a normal answer.");
     fsSpies.writeFileSync.mockClear();
-    scriptedUpdates = [
-      { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "Not logged in · Please run /login" } },
-    ];
-    const stream = streamViaAcp(MODEL, CTX, OPTS) as unknown as { _events: Array<Record<string, unknown>> };
-    await flush();
-    // signal file written with authFailed:true
-    const wrote = fsSpies.writeFileSync.mock.calls.find((c) => String(c[1]).includes("authFailed"));
-    expect(wrote).toBeTruthy();
-    expect(String(wrote![1])).toContain("\"authFailed\":true");
+    fsSpies.unlinkSync.mockClear();
+
+    // 1. A turn that is ONLY the bridge's "Not logged in" message → signal written.
+    await run("Not logged in · Please run /login");
+    expect(wroteAuthFailed()).toBe(true);
+
+    // 2. A real response → signal cleared (unlink).
+    fsSpies.unlinkSync.mockClear();
+    await run("Sure — here's the result you asked for.");
+    expect(fsSpies.unlinkSync).toHaveBeenCalled();
+
+    // 3. A LONG legit answer that merely mentions the phrase → NOT flagged.
+    fsSpies.writeFileSync.mockClear();
+    await run(`If you are not logged in, the CLI prompts you to authenticate. ${"detail ".repeat(20)}`);
+    expect(wroteAuthFailed()).toBe(false);
   });
 
   it("ends with done even when the turn produces no content", async () => {

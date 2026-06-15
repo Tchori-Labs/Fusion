@@ -207,12 +207,18 @@ export function streamViaAcp(
       // R17: a turn that is ONLY "Not logged in" (no tools, no real text) means
       // the bridged `claude` can't authenticate — signal it for the UI. A real
       // response (tools or non-trivial text) clears the signal.
-      const fullText = (bridge.getOutput().content ?? [])
+      const trimmedText = (bridge.getOutput().content ?? [])
         .filter((c) => (c as { type?: string }).type === "text")
         .map((c) => (c as { text?: string }).text ?? "")
-        .join("");
-      if (toolCount === 0 && NOT_LOGGED_IN_RE.test(fullText)) recordBridgeAuthState(true);
-      else if (toolCount > 0 || fullText.trim().length > 0) recordBridgeAuthState(false);
+        .join("")
+        .trim();
+      // Only treat it as an auth failure when the WHOLE turn is essentially the
+      // bridge's short "Not logged in · Please run /login" message — not when a
+      // long, legitimate answer merely mentions the phrase (avoids false positives).
+      const isAuthFailure =
+        toolCount === 0 && trimmedText.length > 0 && trimmedText.length <= 80 && NOT_LOGGED_IN_RE.test(trimmedText);
+      if (isAuthFailure) recordBridgeAuthState(true);
+      else if (toolCount > 0 || trimmedText.length > 0) recordBridgeAuthState(false);
       const effective: "stop" | "tool_use" = reason === "tool_use" && toolCount > 0 ? "tool_use" : "stop";
       bridge.handleEvent({ type: "message_delta", delta: { stop_reason: effective === "tool_use" ? "tool_use" : "end_turn" } } as ClaudeApiEvent);
       stream.push({ type: "done", reason: effective === "tool_use" ? "toolUse" : "stop", message: bridge.getOutput() });

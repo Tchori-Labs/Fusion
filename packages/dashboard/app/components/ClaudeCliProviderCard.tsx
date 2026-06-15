@@ -260,7 +260,7 @@ export function ClaudeCliProviderCard({
             </p>
             <div className="onboarding-provider-card__actions">
               <button type="button" onClick={handleFallbackToDashP} disabled={busy !== null}>
-                {busy === "disabling" && <Loader2 className="spin" size={14} />}
+                {busy === "disabling" && <Loader2 className="animate-spin" size={14} />}
                 {t("setup.claudeCli.useDashP", "Use claude -p")}
               </button>
               <button type="button" onClick={handleTest} disabled={busy !== null}>
