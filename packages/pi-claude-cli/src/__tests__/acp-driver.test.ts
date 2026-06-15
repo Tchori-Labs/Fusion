@@ -4,6 +4,7 @@ import { PassThrough } from "node:stream";
 
 // Synthetic ACP session/update sequence the mocked prompt() will replay.
 let scriptedUpdates: Array<Record<string, unknown>> = [];
+let scriptedUsage: Record<string, number> | undefined;
 
 // Driver validates the bridge path with existsSync — make the fake path "exist".
 // writeFileSync/unlinkSync back the R17 auth-failure signal (spied).
@@ -33,7 +34,7 @@ vi.mock("@agentclientprotocol/sdk", () => ({
     this.newSession = vi.fn(async () => ({ sessionId: "s1" }));
     this.prompt = vi.fn(async () => {
       for (const u of scriptedUpdates) await handler.sessionUpdate({ update: u });
-      return { stopReason: "end_turn" };
+      return { stopReason: "end_turn", usage: scriptedUsage };
     });
   }),
 }));
@@ -53,7 +54,7 @@ vi.mock("@earendil-works/pi-ai", () => ({
   calculateCost: vi.fn(),
 }));
 
-import { streamViaAcp } from "../acp-driver.js";
+import { streamViaAcp, buildBridgeEnv } from "../acp-driver.js";
 
 const MODEL = { id: "claude-sonnet-4-5", name: "Claude Sonnet 4.5" } as never;
 const CTX = { messages: [{ role: "user", content: "hi" }] } as never;
@@ -65,7 +66,17 @@ function eventsOf(stream: { _events: Array<Record<string, unknown>> }) {
 const flush = () => new Promise((r) => setTimeout(r, 30));
 
 describe("streamViaAcp — ACP→pi translation (U11)", () => {
-  beforeEach(() => { scriptedUpdates = []; });
+  beforeEach(() => { scriptedUpdates = []; scriptedUsage = undefined; });
+
+  it("feeds ACP token usage into the done message (item 2)", async () => {
+    scriptedUsage = { inputTokens: 11, outputTokens: 22 };
+    scriptedUpdates = [{ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "hi" } }];
+    const stream = streamViaAcp(MODEL, CTX, OPTS) as unknown as { _events: Array<Record<string, unknown>> };
+    await flush();
+    const done = stream._events.find((e) => e.type === "done") as { message?: { usage?: { input?: number; output?: number } } };
+    expect(done?.message?.usage?.input).toBe(11);
+    expect(done?.message?.usage?.output).toBe(22);
+  });
 
   it("translates agent_message_chunk text into pi text events + done(stop)", async () => {
     scriptedUpdates = [
@@ -155,5 +166,39 @@ describe("streamViaAcp — ACP→pi translation (U11)", () => {
     const stream = streamViaAcp(MODEL, CTX, OPTS) as unknown as { _events: Array<Record<string, unknown>> };
     await flush();
     expect(eventsOf(stream).some((e) => e.type === "done")).toBe(true);
+  });
+});
+
+describe("buildBridgeEnv — R17 auth opt-in (item 3)", () => {
+  const saved = { flag: process.env.FUSION_CLAUDE_ACP_FORWARD_AUTH, oauth: process.env.CLAUDE_CODE_OAUTH_TOKEN, key: process.env.ANTHROPIC_API_KEY };
+  afterEach(() => {
+    for (const [k, v] of [["FUSION_CLAUDE_ACP_FORWARD_AUTH", saved.flag], ["CLAUDE_CODE_OAUTH_TOKEN", saved.oauth], ["ANTHROPIC_API_KEY", saved.key]] as const) {
+      if (v === undefined) delete process.env[k]; else process.env[k] = v;
+    }
+  });
+
+  it("does NOT forward auth vars by default (secure default)", () => {
+    delete process.env.FUSION_CLAUDE_ACP_FORWARD_AUTH;
+    process.env.ANTHROPIC_API_KEY = "sk-secret";
+    const env = buildBridgeEnv({ HOME: "/h", PATH: "/b" });
+    expect(env.ANTHROPIC_API_KEY).toBeUndefined();
+    expect(env.HOME).toBe("/h");
+  });
+
+  it("forwards a single auth token when opted in", () => {
+    process.env.FUSION_CLAUDE_ACP_FORWARD_AUTH = "1";
+    delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+    process.env.ANTHROPIC_API_KEY = "sk-secret";
+    const env = buildBridgeEnv({ HOME: "/h", PATH: "/b" });
+    expect(env.ANTHROPIC_API_KEY).toBe("sk-secret");
+  });
+
+  it("prefers CLAUDE_CODE_OAUTH_TOKEN and forwards only one token", () => {
+    process.env.FUSION_CLAUDE_ACP_FORWARD_AUTH = "1";
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = "oauth-tok";
+    process.env.ANTHROPIC_API_KEY = "sk-secret";
+    const env = buildBridgeEnv({ HOME: "/h", PATH: "/b" });
+    expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe("oauth-tok");
+    expect(env.ANTHROPIC_API_KEY).toBeUndefined();
   });
 });

@@ -119,12 +119,34 @@ const BRIDGE_ENV_ALLOWLIST = [
   "TERM", "TERMINFO", "TMPDIR", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "COLORTERM",
 ];
 
-function buildBridgeEnv(supplied?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+/**
+ * R17 opt-in (detached-daemon auth): a headless daemon can't reach the macOS
+ * login Keychain, so `claude` reports "Not logged in". When an operator sets
+ * `FUSION_CLAUDE_ACP_FORWARD_AUTH=1` AND provides one of these in the launch
+ * environment, we forward it (and ONLY it) so the bridged `claude` can
+ * authenticate non-interactively. Default OFF — no secret-bearing var ever
+ * reaches the untrusted bridge otherwise. Mirrors the native claude-code
+ * adapter's recognized auth vars.
+ */
+const BRIDGE_AUTH_ENV_KEYS = ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"];
+
+export function buildBridgeEnv(supplied?: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const source = supplied ?? process.env;
   const env: NodeJS.ProcessEnv = {};
   for (const key of BRIDGE_ENV_ALLOWLIST) {
     const v = source[key];
     if (typeof v === "string") env[key] = v;
+  }
+  // Opt-in only: forward a single Claude auth token from the operator's launch
+  // env (always process.env, never the caller-supplied object).
+  if (process.env.FUSION_CLAUDE_ACP_FORWARD_AUTH === "1") {
+    for (const key of BRIDGE_AUTH_ENV_KEYS) {
+      const v = process.env[key];
+      if (typeof v === "string" && v.length > 0) {
+        env[key] = v;
+        break; // forward only the highest-preference token that's present
+      }
+    }
   }
   return env;
 }
@@ -350,8 +372,26 @@ export function streamViaAcp(
       ];
 
       // ACP ContentBlock[] — text/image shapes match; cast through unknown.
-      await conn.prompt({ sessionId: opened.sessionId, prompt: blocks as unknown as Parameters<typeof conn.prompt>[0]["prompt"] });
-      if (!sawToolCall) finish("stop");
+      const res = await conn.prompt({ sessionId: opened.sessionId, prompt: blocks as unknown as Parameters<typeof conn.prompt>[0]["prompt"] });
+      // Feed token usage (experimental ACP field) into the bridge BEFORE finish()
+      // so it lands in the `done` message. Tool-use turns break early and never
+      // resolve here, so they inherently report zero usage. Zero-when-absent safe.
+      if (!sawToolCall) {
+        const u = (res as { usage?: { inputTokens?: number; outputTokens?: number; cachedReadTokens?: number; cachedWriteTokens?: number } }).usage;
+        if (u) {
+          bridge.handleEvent({
+            type: "message_delta",
+            delta: {},
+            usage: {
+              input_tokens: u.inputTokens,
+              output_tokens: u.outputTokens,
+              cache_read_input_tokens: u.cachedReadTokens ?? undefined,
+              cache_creation_input_tokens: u.cachedWriteTokens ?? undefined,
+            },
+          } as ClaudeApiEvent);
+        }
+        finish("stop");
+      }
     } catch (err) {
       failWith(err instanceof Error ? err.message : String(err));
     }
