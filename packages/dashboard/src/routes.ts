@@ -168,6 +168,7 @@ import { registerProxyRoutes } from "./routes/register-proxy-routes.js";
 import { registerModelRoutes } from "./routes/register-model-routes.js";
 import { registerCustomProviderRoutes } from "./routes/register-custom-provider-routes.js";
 import { registerUsageRoutes } from "./routes/register-usage-routes.js";
+import { registerSignalRoutes } from "./routes/register-signal-routes.js";
 import { registerAuthRoutes } from "./routes/register-auth-routes.js";
 import { registerRuntimeProviderRoutes } from "./routes/register-runtime-provider-routes.js";
 import { registerFnBinaryRoutes } from "./routes/register-fn-binary-routes.js";
@@ -1989,6 +1990,10 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
   });
 
   registerUsageRoutes(routeContext);
+  // U11 — inbound external signal webhooks (Sentry/Datadog/PagerDuty/generic).
+  // Each route HMAC-verifies against a per-provider secret; never an
+  // unauthenticated task-creation endpoint.
+  registerSignalRoutes(routeContext);
   registerUpdateCheckRoutes(routeContext);
   registerDiagnosticsRoutes(routeContext);
   // CLI Agent Executor hook ingestion (U17) — per-session token auth, exempt from
