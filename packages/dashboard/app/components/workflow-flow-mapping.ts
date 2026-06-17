@@ -790,6 +790,21 @@ function mergedFlags(
   return { flags, capacityTraitIds, unknown };
 }
 
+/*
+FNXC:CustomWorkflows 2026-06-16-22:30:
+The workflow editor's client-side trait validator mirrors the server validator, including traitIds used to identify the exact composed traits behind blocking save errors.
+*/
+function traitIdsWithFlags(
+  traits: WorkflowIrColumn["traits"],
+  catalog: Map<string, TraitCatalogEntry>,
+  names: Array<keyof CatalogFlags>,
+): string[] {
+  return traits
+    .map((ct) => catalog.get(ct.trait))
+    .filter((def): def is TraitCatalogEntry => !!def && names.some((name) => !!def.flags[name]))
+    .map((def) => def.id);
+}
+
 /** Client mirror of core's validateColumnTraits, driven by the trait catalog. */
 export function validateColumnsClient(
   columns: WorkflowIrColumn[],
@@ -815,7 +830,7 @@ export function validateColumnsClient(
         code: "complete-with-wip",
         severity: "error",
         columnId: col.id,
-        traitIds: capacityTraitIds,
+        traitIds: traitIdsWithFlags(col.traits, byId, ["complete", "countsTowardWip"]),
         message: `Column '${col.name || col.id}' is both a completion column and counts toward WIP`,
       });
     }
@@ -833,7 +848,7 @@ export function validateColumnsClient(
         code: "complete-with-intake",
         severity: "error",
         columnId: col.id,
-        traitIds: [],
+        traitIds: traitIdsWithFlags(col.traits, byId, ["complete", "intake"]),
         message: `Column '${col.name || col.id}' is both a completion column and an intake column`,
       });
     }
@@ -842,7 +857,7 @@ export function validateColumnsClient(
         code: "archived-with-wip",
         severity: "error",
         columnId: col.id,
-        traitIds: [],
+        traitIds: traitIdsWithFlags(col.traits, byId, ["archived", "countsTowardWip"]),
         message: `Column '${col.name || col.id}' is archived but counts toward WIP`,
       });
     }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { WorkflowDefinition, WorkflowIrNodeKind } from "@fusion/core";
-import { parseWorkflowIr } from "@fusion/core";
+import { parseWorkflowIr, validateColumnTraits } from "@fusion/core";
 import type { Node as FlowNode } from "@xyflow/react";
 import {
   irToFlow,
@@ -350,6 +350,23 @@ describe("workflow-flow-mapping validation helpers", () => {
     ];
     const v = validateColumnsClient(columns, CATALOG).find((x) => x.code === "multiple-intake-columns");
     expect(v?.columnId).toBeNull();
+  });
+
+  it("mirrors server trait ids for save-blocking composition conflicts", () => {
+    const columns = [
+      { id: "complete-wip", name: "Complete WIP", traits: [{ trait: "complete" }, { trait: "wip" }] },
+      { id: "two-wip", name: "Two WIP", traits: [{ trait: "wip" }, { trait: "wip" }] },
+      { id: "done", name: "Done", traits: [{ trait: "complete" }, { trait: "intake" }] },
+      { id: "archive", name: "Archive", traits: [{ trait: "archived" }, { trait: "wip" }] },
+    ];
+    const clientViolations = validateColumnsClient(columns, CATALOG);
+    const serverViolations = validateColumnTraits(columns);
+
+    for (const code of ["complete-with-wip", "two-capacity-traits", "complete-with-intake", "archived-with-wip"] as const) {
+      expect(clientViolations.find((v) => v.code === code)?.traitIds.sort()).toEqual(
+        serverViolations.find((v) => v.code === code)?.traitIds.sort(),
+      );
+    }
   });
 
   it("reports unplaced step nodes (not start/end, not bands)", () => {
