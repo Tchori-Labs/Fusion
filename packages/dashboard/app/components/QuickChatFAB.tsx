@@ -1616,7 +1616,11 @@ export function QuickChatFAB({
       return;
     }
 
-    shouldAutoFocusComposerRef.current = window.innerWidth <= QUICK_CHAT_DESKTOP_BREAKPOINT;
+    /*
+    FNXC:QuickChat 2026-06-17-02:50:
+    Bringing up Quick Chat must focus the composer on every viewport so typing can start immediately. Mobile still claims the iOS keyboard through the stealth input first; the ready-state focus effect keeps that synchronous handoff while desktop reaches its requestAnimationFrame focus path.
+    */
+    shouldAutoFocusComposerRef.current = true;
   }, [isOpen]);
 
   useEffect(() => {

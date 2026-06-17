@@ -302,7 +302,7 @@ Quick Chat is an optional floating panel for fast, project-scoped assistant conv
 - Resume lookups still use targeted session queries instead of loading the full active-session list first
 - Tool-call summaries in the floating quick-chat panel are intentionally condensed into a single-line header row (especially on small screens) so tool name + status stay scannable without multi-line wrapping
 - Question tool calls use the same shared response card as full Chat, with compact spacing in the floating panel and read-only answered history so Quick Chat can continue agent clarification loops without exposing raw tool JSON.
-- On mobile viewports, opening Quick Chat auto-focuses the composer as soon as it is ready so the keyboard opens immediately
+- Opening Quick Chat auto-focuses the composer as soon as it is ready on desktop and mobile viewports; mobile additionally uses the stealth-input handoff so the soft keyboard opens immediately
 - FAB dragging uses pointer events with document-level move/up tracking and a 5px drag threshold so Android touch drags reposition reliably while short taps still open Quick Chat
 - Quick Chat now mirrors full Chat tail behavior: if you scroll up, live updates stop auto-following and a **Latest** jump control appears until you jump back down.
 - On mobile, Quick Chat re-anchors to the newest message whenever the panel is opened/reopened and when page visibility is restored, while still preserving the near-bottom gate so intentional scroll-away keeps **Latest** jump behavior.

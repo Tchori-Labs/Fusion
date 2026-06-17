@@ -161,6 +161,32 @@ function setQuickChatVisualViewportSample(
   });
 }
 
+function mockRequestAnimationFrames() {
+  const originalRaf = window.requestAnimationFrame;
+  const originalCancelRaf = window.cancelAnimationFrame;
+  const rafQueue: FrameRequestCallback[] = [];
+  window.requestAnimationFrame = vi.fn((cb: FrameRequestCallback) => {
+    rafQueue.push(cb);
+    return rafQueue.length;
+  });
+  window.cancelAnimationFrame = vi.fn();
+
+  return {
+    async drain() {
+      await act(async () => {
+        while (rafQueue.length > 0) {
+          const cb = rafQueue.shift();
+          cb?.(performance.now());
+        }
+      });
+    },
+    restore() {
+      window.requestAnimationFrame = originalRaf;
+      window.cancelAnimationFrame = originalCancelRaf;
+    },
+  };
+}
+
 describe("QuickChatFAB session-first UX", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -1054,6 +1080,82 @@ describe("QuickChatFAB session-first UX", () => {
 
     fireEvent.click(await screen.findByTestId("quick-chat-session-dropdown-trigger"));
     expect(screen.getByTestId("quick-chat-session-option-session-model")).toBeInTheDocument();
+  });
+
+  it("FN-6518: desktop opening Quick Chat focuses the enabled composer", async () => {
+    const raf = mockRequestAnimationFrames();
+
+    try {
+      render(<QuickChatFAB addToast={vi.fn()} projectId="proj-1" />);
+      fireEvent.click(screen.getByTestId("quick-chat-fab"));
+
+      const input = await screen.findByTestId("quick-chat-input") as HTMLTextAreaElement;
+      await waitFor(() => expect(input).not.toBeDisabled());
+      await raf.drain();
+
+      expect(document.activeElement).toBe(input);
+    } finally {
+      raf.restore();
+    }
+  });
+
+  it("FN-6518: desktop composer focuses after the session becomes ready post-open", async () => {
+    const raf = mockRequestAnimationFrames();
+    const deferredSessions = createDeferredPromise<{ sessions: ChatSession[] }>();
+    mockFetchChatSessions.mockImplementationOnce(() => deferredSessions.promise);
+
+    try {
+      render(<QuickChatFAB addToast={vi.fn()} projectId="proj-1" />);
+      fireEvent.click(screen.getByTestId("quick-chat-fab"));
+
+      const input = await screen.findByTestId("quick-chat-input") as HTMLTextAreaElement;
+      expect(input).toBeDisabled();
+      deferredSessions.resolve({ sessions: [modelSession, agentSession] });
+      await waitFor(() => expect(input).not.toBeDisabled());
+      await raf.drain();
+
+      expect(document.activeElement).toBe(input);
+    } finally {
+      raf.restore();
+    }
+  });
+
+  it("FN-6518: mobile opening Quick Chat hands focus from stealth input to composer", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+    window.dispatchEvent(new Event("resize"));
+    mockUseViewportMode.mockReturnValue("mobile");
+
+    render(<QuickChatFAB addToast={vi.fn()} projectId="proj-1" />);
+    fireEvent.click(screen.getByTestId("quick-chat-fab"));
+
+    const input = await screen.findByTestId("quick-chat-input") as HTMLTextAreaElement;
+    await waitFor(() => expect(input).not.toBeDisabled());
+
+    expect(document.activeElement).toBe(input);
+  });
+
+  it("FN-6518: auto-focus does not steal focus from an external control", async () => {
+    const raf = mockRequestAnimationFrames();
+    const externalFocusTarget = document.createElement("button");
+    externalFocusTarget.type = "button";
+    externalFocusTarget.textContent = "External focus target";
+    document.body.appendChild(externalFocusTarget);
+
+    try {
+      const { rerender } = render(<QuickChatFAB addToast={vi.fn()} projectId="proj-1" open={false} onOpenChange={vi.fn()} />);
+      externalFocusTarget.focus();
+      expect(document.activeElement).toBe(externalFocusTarget);
+
+      rerender(<QuickChatFAB addToast={vi.fn()} projectId="proj-1" open onOpenChange={vi.fn()} />);
+      const input = await screen.findByTestId("quick-chat-input") as HTMLTextAreaElement;
+      await waitFor(() => expect(input).not.toBeDisabled());
+      await raf.drain();
+
+      expect(document.activeElement).toBe(externalFocusTarget);
+    } finally {
+      externalFocusTarget.remove();
+      raf.restore();
+    }
   });
 
   it("FN-6301: iOS first tap focuses composer without canceling native focus, then sends", async () => {
