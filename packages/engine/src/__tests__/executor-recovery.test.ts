@@ -341,7 +341,7 @@ describe("TaskExecutor bounded recovery retries", () => {
 
     // Simulate: task gets paused mid-execution → abort error
     mockedCreateFnAgent.mockRejectedValue(new Error("Aborted"));
-    (executor as any).pausedAborted.add("FN-001");
+    (executor as any).markPausedAborted("FN-001", "hard-cancel");
 
     await executor.execute(task);
 
@@ -374,7 +374,7 @@ describe("TaskExecutor bounded recovery retries", () => {
 
     const executor = new TaskExecutor(store, "/tmp/test", {});
     mockedCreateFnAgent.mockRejectedValue(new Error("Aborted"));
-    (executor as any).pausedAborted.add("FN-001");
+    (executor as any).markPausedAborted("FN-001", "hard-cancel");
 
     await executor.execute({
       id: "FN-001",
@@ -944,6 +944,93 @@ describe("TaskExecutor bounded recovery retries", () => {
     expect(store.handoffToReview).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["plain execute", ["execute"], "awaiting-user-input", { "node:execute:value": "awaiting-user-input" }, "Workflow graph run ended awaiting user input at node 'execute' — awaiting state preserved"],
+    ["progress then execute", ["plan", "execute"], "awaiting-cli-approval", { "node:execute:value": "awaiting-cli-approval" }, "Workflow graph run ended awaiting CLI approval at node 'execute' — awaiting state preserved"],
+    ["step-execute foreach seam", ["foreach#0:step-execute"], "awaiting-user-input", { "node:foreach:value": "awaiting-user-input" }, "Workflow graph run ended awaiting user input at node 'foreach#0:step-execute' — awaiting state preserved"],
+  ] as const)(
+    "preserves awaiting graph failure values instead of terminal execute parking: %s",
+    async (_name, visitedNodeIds, value, context, message) => {
+      const store = createMockStore();
+      const task = {
+        id: "FN-001",
+        title: "Test",
+        description: "Test",
+        column: "in-progress",
+        status: undefined,
+        dependencies: [],
+        steps: [{ name: "Step 1", status: "pending" }],
+        currentStep: 0,
+        log: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      } as Task;
+      store.getTask.mockResolvedValue({
+        ...task,
+        column: "in-progress",
+        paused: false,
+        status: value,
+        error: null,
+      });
+      const warnSpy = vi.spyOn(executorLog, "warn").mockImplementation(() => undefined);
+      const executor = new TaskExecutor(store, "/tmp/test", {});
+
+      await (executor as any).handleGraphFailure(task, {
+        disposition: "failed",
+        outcome: "failure",
+        visitedNodeIds,
+        context,
+      });
+
+      expect(store.logEntry).toHaveBeenCalledWith("FN-001", message, undefined, undefined);
+      expect(store.updateTask).toHaveBeenCalledWith("FN-001", { status: value, paused: true }, undefined);
+      expect(store.logEntry.mock.calls.map((call) => call[1]).join("\n")).not.toContain("Workflow graph terminated with failure at node");
+      expect(store.updateTask).not.toHaveBeenCalledWith(
+        "FN-001",
+        expect.objectContaining({ status: "failed" }),
+        expect.anything(),
+      );
+      expect(store.handoffToReview).not.toHaveBeenCalled();
+      expect(warnSpy).not.toHaveBeenCalledWith(expect.stringContaining("Workflow graph terminated with failure at node"));
+      warnSpy.mockRestore();
+    },
+  );
+
+  it("preserves genuine step-execute-unwired failures as terminal graph failures", async () => {
+    const store = createMockStore();
+    const task = {
+      id: "FN-001",
+      title: "Test",
+      description: "Test",
+      column: "in-progress",
+      status: undefined,
+      dependencies: [],
+      steps: [{ name: "Step 1", status: "pending" }],
+      currentStep: 0,
+      log: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    } as Task;
+    store.getTask.mockResolvedValue({ ...task, column: "in-progress", paused: false, status: undefined, error: null });
+    const warnSpy = vi.spyOn(executorLog, "warn").mockImplementation(() => undefined);
+    const executor = new TaskExecutor(store, "/tmp/test", {});
+
+    await (executor as any).handleGraphFailure(task, {
+      disposition: "failed",
+      outcome: "failure",
+      visitedNodeIds: ["foreach#0:step-execute"],
+      context: { "node:foreach#0:step-execute:value": "step-execute-unwired" },
+    });
+
+    const message = "Workflow graph terminated with failure at node 'foreach#0:step-execute'";
+    expect(store.updateTask).toHaveBeenCalledWith("FN-001", { error: message, status: "failed" }, undefined);
+    expect(store.handoffToReview).toHaveBeenCalledWith(
+      "FN-001",
+      expect.objectContaining({ evidence: expect.objectContaining({ reason: "workflow-graph-failed" }) }),
+    );
+    warnSpy.mockRestore();
+  });
+
   /*
   FNXC:WorkflowLifecycle 2026-06-15-01:38:
   FN-6478 established that a workflow graph exit while paused is benign only while the task remains in-progress. If the live row already advanced to in-review or another non-execution column, the executor must preserve explicit user pauses and autoMerge:false terminal review state while surfacing an operator-actionable workflow failure instead of the generic pause-preserved log.
@@ -1027,7 +1114,7 @@ describe("TaskExecutor bounded recovery retries", () => {
       error: null,
     });
     const executor = new TaskExecutor(store, "/tmp/test", {});
-    (executor as any).pausedAborted.add("FN-001");
+    (executor as any).markPausedAborted("FN-001", "hard-cancel");
 
     await (executor as any).handleGraphFailure(task, {
       visitedNodeIds: ["execute"],
@@ -1075,7 +1162,7 @@ describe("TaskExecutor bounded recovery retries", () => {
       error: "Task reached in-review without calling fn_task_done",
     });
     const executor = new TaskExecutor(store, "/tmp/test", {});
-    (executor as any).pausedAborted.add("FN-001");
+    (executor as any).markPausedAborted("FN-001", "hard-cancel");
 
     await (executor as any).handleGraphFailure(task, {
       visitedNodeIds: ["execute"],
@@ -1226,6 +1313,129 @@ describe("TaskExecutor bounded recovery retries", () => {
       expect(store.handoffToReview).not.toHaveBeenCalled();
     },
   );
+
+  describe("merge-seam abort classification (FN-6568)", () => {
+    /*
+    Surface Enumeration coverage:
+    - Pause-branch classifier: merge-seam provenance bypasses operator-action pause parking; user/global pause provenance still parks.
+    - handleGraphFailure call surfaces: direct graph-failure handling for merge/requestMerge nodes plus existing execute-node hard-cancel tests.
+    - pausedAborted provenance: hard-cancel, global-pause, merge-seam, and no-provenance/clean merge failure behavior are explicit.
+    - Failed-node identity: legacy `merge` seam and graph primitive `requestMerge` are both treated as merge failures.
+    - Column/progress states: in-review merge failures retry; existing in-progress genuine pause tests preserve pause state.
+    - Data states: userPaused true, paused true, merge-seam provenance, global-pause provenance, and hard-cancel provenance are covered.
+    - autoMerge:false review parking: a genuinely paused in-review task remains parked without backward movement.
+    */
+    const makeGraphTask = (overrides: Partial<Task> = {}) => ({
+      id: "FN-001",
+      title: "Test",
+      description: "Test",
+      column: "in-progress",
+      status: undefined,
+      dependencies: [],
+      steps: [{ name: "Preflight", status: "done" }],
+      currentStep: 1,
+      log: [{ timestamp: new Date().toISOString(), action: "Resuming execution after unpause" }],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      ...overrides,
+    }) as Task;
+
+    it.each(["merge", "requestMerge"] as const)(
+      "routes non-paused merge-seam abort at %s into bounded auto-merge retry instead of pause parking",
+      async (nodeId) => {
+        const store = createMockStore();
+        const task = makeGraphTask();
+        store.getTask.mockResolvedValue({
+          ...task,
+          column: "in-review",
+          paused: false,
+          userPaused: false,
+          status: undefined,
+          error: null,
+          mergeRetries: null,
+        });
+        const executor = new TaskExecutor(store, "/tmp/test", {});
+        const mergeRequester = vi.fn(async () => ({ merged: false, noOp: false, reason: "merge-conflict" }));
+        executor.setMergeRequester(mergeRequester as any);
+        (executor as any).markPausedAborted("FN-001", "merge-seam");
+
+        await (executor as any).handleGraphFailure(task, {
+          disposition: "failed",
+          outcome: "failure",
+          visitedNodeIds: [nodeId],
+        });
+
+        const messages = store.logEntry.mock.calls.map((call) => call[1]).join("\n");
+        expect(messages).toContain(`Workflow graph merge failure at node '${nodeId}' routed to bounded auto-merge retry after merge-seam abort`);
+        expect(messages).not.toContain("engine abort during pause/resume");
+        expect(messages).not.toContain("operator action required");
+        expect(store.updateTask).not.toHaveBeenCalledWith(
+          "FN-001",
+          expect.objectContaining({ status: "failed" }),
+          expect.anything(),
+        );
+        expect(store.handoffToReview).not.toHaveBeenCalled();
+        expect(store.moveTask).not.toHaveBeenCalled();
+        expect(mergeRequester).toHaveBeenCalledWith("FN-001");
+      },
+    );
+
+    it("preserves global-pause provenance as operator-action parking for in-review graph exits", async () => {
+      const store = createMockStore();
+      const task = makeGraphTask();
+      store.getTask.mockResolvedValue({
+        ...task,
+        column: "in-review",
+        paused: false,
+        userPaused: false,
+        status: undefined,
+        error: null,
+      });
+      const executor = new TaskExecutor(store, "/tmp/test", {});
+      (executor as any).markPausedAborted("FN-001", "global-pause");
+
+      await (executor as any).handleGraphFailure(task, {
+        disposition: "failed",
+        outcome: "failure",
+        visitedNodeIds: ["merge"],
+      });
+
+      const expectedMessage = "Workflow graph failure surfaced after paused global pause in 'in-review' at node 'merge' — operator action required; retry or explicitly unpause/resume after inspecting the task";
+      const messages = store.logEntry.mock.calls.map((call) => call[1]).join("\n");
+      expect(messages).toContain("global pause");
+      expect(messages).toContain("operator action required");
+      expect(store.updateTask).toHaveBeenCalledWith("FN-001", { error: expectedMessage, status: "failed" }, undefined);
+      expect(store.moveTask).not.toHaveBeenCalled();
+      expect(store.handoffToReview).not.toHaveBeenCalled();
+    });
+
+    it("keeps autoMerge:false genuinely paused in-review tasks parked without moving backward", async () => {
+      const store = createMockStore();
+      const task = makeGraphTask({ autoMerge: false } as Partial<Task>);
+      store.getTask.mockResolvedValue({
+        ...task,
+        column: "in-review",
+        paused: true,
+        userPaused: true,
+        status: undefined,
+        error: null,
+        autoMerge: false,
+      });
+      const executor = new TaskExecutor(store, "/tmp/test", {});
+
+      await (executor as any).handleGraphFailure(task, {
+        disposition: "failed",
+        outcome: "failure",
+        visitedNodeIds: ["merge"],
+      });
+
+      const expectedMessage = "Workflow graph failure surfaced after paused explicit user pause in 'in-review' at node 'merge' — operator action required; retry or explicitly unpause/resume after inspecting the task";
+      expect(store.logEntry).toHaveBeenCalledWith("FN-001", expectedMessage, undefined, undefined);
+      expect(store.updateTask).toHaveBeenCalledWith("FN-001", { error: expectedMessage, status: "failed" }, undefined);
+      expect(store.moveTask).not.toHaveBeenCalledWith("FN-001", "todo", expect.anything());
+      expect(store.handoffToReview).not.toHaveBeenCalled();
+    });
+  });
 
   it("auto-retries a bounded transient resume-after-restart graph failure instead of parking", async () => {
     const store = createMockStore();

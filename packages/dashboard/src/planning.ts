@@ -26,6 +26,7 @@ import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import type { AiSessionStore, AiSessionRow } from "./ai-session-store.js";
 import { SessionEventBuffer, type SessionBufferedEvent } from "./sse-buffer.js";
+import { registerBeforeExitCleanup } from "./process-lifecycle.js";
 import {
   createSessionDiagnostics,
   resetDiagnosticsSink,
@@ -594,7 +595,7 @@ const cleanupInterval = setInterval(cleanupExpiredSessions, CLEANUP_INTERVAL_MS)
 cleanupInterval.unref?.();
 
 // Handle graceful shutdown
-process.on("beforeExit", () => {
+registerBeforeExitCleanup(() => {
   clearInterval(cleanupInterval);
 });
 
@@ -1340,21 +1341,54 @@ async function initializeAgent(
   customQuestionCount?: number,
 ): Promise<void> {
   try {
-    session.agent = await createPlanningAgent(
-      session,
-      rootDir,
-      store,
-      modelProvider,
-      modelId,
-      promptOverrides,
-      planningDepth,
-      customQuestionCount,
-    );
-    session.updatedAt = new Date();
+    await runGenerationWithTimeout(session, async (abortSignal) => {
+      /*
+      FNXC:PlanningSession 2026-06-16-20:23:
+      FN-6511 requires planning agent construction to be bounded before the first prompt starts. Keep createFnAgent inside the active generation timeout so model-registry or extension-discovery stalls transition the SSE session to a terminal error instead of leaving it pinned in generating.
+      */
+      const agentPromise = createPlanningAgent(
+        session,
+        rootDir,
+        store,
+        modelProvider,
+        modelId,
+        promptOverrides,
+        planningDepth,
+        customQuestionCount,
+      );
+
+      void agentPromise.then((lateAgent) => {
+        if (abortSignal.aborted) {
+          nonfatal(
+            () => lateAgent?.session?.dispose?.(),
+            diagnostics,
+            "Error disposing late-created planning agent",
+            { sessionId: session.id, operation: "dispose-late-agent" },
+          );
+        }
+      }, () => undefined);
+
+      const agent = await agentPromise;
+      if (abortSignal.aborted) {
+        nonfatal(
+          () => agent?.session?.dispose?.(),
+          diagnostics,
+          "Error disposing aborted planning agent",
+          { sessionId: session.id, operation: "dispose-aborted-agent" },
+        );
+        throw createAbortError();
+      }
+      session.agent = agent;
+      session.updatedAt = new Date();
+    });
 
     // Send initial message to get first question
     await continueAgentConversation(session, session.initialPlan);
   } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") {
+      return;
+    }
+
     const errorMessage = err instanceof Error ? err.message : "Failed to initialize AI agent";
     diagnostics.errorFromException("Agent initialization error for session", err, { sessionId: session.id, operation: "initialize-agent" });
     session.error = errorMessage;
@@ -1560,6 +1594,7 @@ async function runGenerationWithTimeout<T>(session: Session, operation: (abortSi
   const timer = setTimeout(() => {
     timeoutTriggered = true;
     setSessionError(session, "AI generation timed out. You can retry or start a new session.");
+    disposeSessionAgentForRetry(session);
     abortController.abort();
   }, GENERATION_TIMEOUT_MS);
   const generationRecord = { abortController, timer };

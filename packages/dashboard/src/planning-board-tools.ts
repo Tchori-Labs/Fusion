@@ -1,4 +1,5 @@
-import type { TaskStore } from "@fusion/core";
+import * as fusionCore from "@fusion/core";
+import { formatTaskListText, type TaskStore } from "@fusion/core";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 
 export function createPlanningBoardTools(store: TaskStore): ToolDefinition[] {
@@ -32,8 +33,15 @@ export function createPlanningBoardTools(store: TaskStore): ToolDefinition[] {
         const deps = t.dependencies.length ? ` [deps: ${t.dependencies.join(", ")}]` : "";
         return `${t.id} (${t.column}): ${desc}${deps}`;
       });
+      /*
+      FNXC:TaskListOutput 2026-06-16-17:47:
+      FN-6492 keeps dashboard planning-board duplicate checks within the shared plain-text budget so large boards stay readable to non-vision agents.
+
+      FNXC:TaskListOutput 2026-06-17-05:46:
+      FN-6570 keeps the planning-board fn_task_list surface resilient when runtime @fusion/core lacks clampTaskListText by passing the namespace binding through the defensive formatter fallback.
+      */
       return {
-        content: [{ type: "text" as const, text: lines.join("\n") }],
+        content: [{ type: "text" as const, text: formatTaskListText(lines, { clamp: fusionCore.clampTaskListText }) }],
         details: {},
       };
     },

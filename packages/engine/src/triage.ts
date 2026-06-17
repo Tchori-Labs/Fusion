@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import * as fusionCore from "@fusion/core";
 import type {
   TaskStore,
   Task,
@@ -26,6 +27,7 @@ import {
   findNearDuplicates,
   isNearDuplicateCanonicalInactive,
   applyFrontendUxCriteria,
+  formatTaskListText,
   type NearDuplicateCandidate,
 } from "@fusion/core";
 import type { ImageContent } from "@earendil-works/pi-ai";
@@ -89,6 +91,7 @@ import {
   isResearchToolSurfaceEnabled,
 } from "./tool-availability.js";
 import { runGhostBugPreflight } from "./triage-preflight.js";
+import { evaluateReleaseAuthorizationGate } from "./triage-release-authorization.js";
 import { archiveAsGhostBug } from "./self-healing.js";
 import { createRunAuditor, generateSyntheticRunId } from "./run-audit.js";
 import { resolveAndEmitGoalContext } from "./goal-injection-diagnostics.js";
@@ -1466,8 +1469,15 @@ export class TriageProcessor {
             : "";
           return `${t.id} (${t.column}): ${desc}${deps}`;
         });
+        /*
+        FNXC:TaskListOutput 2026-06-16-17:47:
+        FN-6492 keeps engine triage duplicate-detection listings bounded with the shared fn_task_list text clamp so large active boards never require attachment/image fallback.
+
+        FNXC:TaskListOutput 2026-06-17-05:47:
+        FN-6570 guards the triage fn_task_list formatter against stale @fusion/core runtime namespaces where clampTaskListText is absent, so duplicate-detection board reads degrade to bounded text instead of throwing.
+        */
         return {
-          content: [{ type: "text" as const, text: lines.join("\n") }],
+          content: [{ type: "text" as const, text: formatTaskListText(lines, { clamp: fusionCore.clampTaskListText }) }],
           details: {},
         };
       },
@@ -2300,6 +2310,56 @@ export class TriageProcessor {
       planLog.warn(`${task.id}: failed to re-read task before approved-spec transition (${message}); proceeding with original task snapshot`);
       latestTransitionTask = task;
     }
+    try {
+      /**
+       * FNXC:ReleaseAuthorizationGate 2026-06-15-02:47:
+       * FN-6469 showed that agent-authored release specs can otherwise flow from triage directly to execution and publish npm packages. FN-6481 parks release-class tasks before every final triage dispatch branch unless a user-authored source supplied the explicit authorization marker.
+       */
+      const releaseGateDecision = evaluateReleaseAuthorizationGate({
+        sourceType: latestTransitionTask?.sourceType ?? task.sourceType,
+        title: latestTransitionTask?.title ?? task.title ?? "",
+        description: latestTransitionTask?.description ?? task.description ?? "",
+        promptText: written,
+      });
+      if (releaseGateDecision.action === "block") {
+        const approvalUpdates: Record<string, unknown> = { status: "awaiting-approval" };
+        if (shouldApplyPromptDeclaredTitle && promptDeclaredTitle) {
+          approvalUpdates.title = promptDeclaredTitle;
+        }
+        const signals = releaseGateDecision.signals.length > 0
+          ? releaseGateDecision.signals.join(", ")
+          : "release intent";
+        const details = `${releaseGateDecision.reason} Matched signals: ${signals}.`;
+        await this.store.updateTask(task.id, approvalUpdates);
+        await this.store.logEntry(
+          task.id,
+          "Release authorization required — leaving task in triage awaiting manual approval",
+          details,
+        );
+        try {
+          await this.store.recordActivity({
+            type: "task:release-authorization-required",
+            taskId: task.id,
+            taskTitle: promptDeclaredTitle ?? latestTransitionTask?.title ?? task.title ?? "",
+            details,
+            metadata: {
+              reason: releaseGateDecision.reason,
+              signals: releaseGateDecision.signals,
+              sourceType: latestTransitionTask?.sourceType ?? task.sourceType ?? "unknown",
+            },
+          });
+        } catch (activityError: unknown) {
+          const message = activityError instanceof Error ? activityError.message : String(activityError);
+          planLog.warn(`${task.id}: failed to record release-authorization-required activity (${message})`);
+        }
+        planLog.log(`${task.id} release authorization required — leaving in triage awaiting manual approval (${signals})`);
+        return;
+      }
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      planLog.warn(`${task.id}: release-authorization gate failed open: ${message}`);
+    }
+
     if (latestTransitionTask?.paused === true || latestTransitionTask?.userPaused === true) {
       const restoreStatus = options.isReplan ? "needs-replan" : null;
       await this.store.updateTask(task.id, { status: restoreStatus });

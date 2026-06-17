@@ -1096,6 +1096,24 @@
   font-weight: 600;
 }
 
+.mission-detail__linked-goal-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+}
+
+.mission-detail__linked-goal-picker {
+  flex: 1 1 calc(var(--space-xl) * 10);
+  min-width: 0;
+}
+
+.mission-detail__linked-goal-link-button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
 .mission-detail__linked-goals-list {
   display: flex;
   flex-wrap: wrap;
@@ -1105,7 +1123,19 @@
 .mission-detail__linked-goal-chip {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-xs);
+  gap: calc(var(--space-xs) / 2);
+  padding: calc(var(--space-xs) / 2);
+  border: calc(var(--space-xs) / 4) solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--surface-elevated);
+}
+
+.mission-detail__linked-goal-chip-link {
+  border-radius: var(--radius-pill);
+}
+
+.mission-detail__linked-goal-unlink {
+  flex: 0 0 auto;
 }
 
 .mission-detail__linked-goals-empty {
@@ -2560,8 +2590,14 @@
   }
 
   .mission-detail__linked-goals-header,
+  .mission-detail__linked-goal-controls,
   .mission-detail__linked-goals-list {
     align-items: stretch;
+  }
+
+  .mission-detail__linked-goal-controls,
+  .mission-detail__linked-goal-link-button {
+    width: 100%;
   }
 
   .mission-detail__run-help,

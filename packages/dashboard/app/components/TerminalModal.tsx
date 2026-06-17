@@ -10,11 +10,24 @@ import {
   Minus,
   Plus,
   Keyboard,
+  Settings,
 } from "lucide-react";
 import { useTerminal } from "../hooks/useTerminal";
 import { useTerminalSessions } from "../hooks/useTerminalSessions";
 import { useModalResizePersist } from "../hooks/useModalResizePersist";
 import { getPathBasename } from "../utils/pathDisplay";
+import {
+  DEFAULT_TERMINAL_PREFERENCES,
+  MAX_TERMINAL_FONT_SIZE,
+  MIN_TERMINAL_FONT_SIZE,
+  TERMINAL_FONT_FAMILY_PRESETS,
+  clampTerminalFontSize,
+  readTerminalPreferences,
+  resolveTerminalFontFamily,
+  writeTerminalPreferences,
+  type TerminalPreferences,
+  type TerminalRenderer,
+} from "../utils/terminalPreferences";
 import "@xterm/xterm/css/xterm.css";
 
 import type { Terminal as XTerm, ITerminalAddon } from "@xterm/xterm";
@@ -24,12 +37,6 @@ import type { FitAddon } from "@xterm/addon-fit";
 const XTERM_INIT_TIMEOUT_MS = 10000;
 
 const XTERM_IMPORT_RETRY_DELAYS_MS = [500, 1500, 3000] as const;
-const TERMINAL_FONT_SIZE_KEY = "kb-terminal-font-size";
-const DEFAULT_FONT_SIZE = 14;
-const MIN_TERMINAL_FONT_SIZE = 8;
-const MAX_TERMINAL_FONT_SIZE = 32;
-const XTERM_FONT_FAMILY =
-  '"Fusion Terminal Nerd Font Symbols", "MesloLGS NF", "MesloLGM Nerd Font", "JetBrainsMono Nerd Font", "FiraCode Nerd Font", "Hack Nerd Font", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace';
 
 export function ctrlChar(key: string): string {
   if (!key) {
@@ -73,31 +80,12 @@ export const SHORTCUT_KEYS: ShortcutKey[] = [
   { label: ".", key: ".", description: "Last argument" },
 ];
 
-function clampTerminalFontSize(value: number): number {
-  return Math.min(MAX_TERMINAL_FONT_SIZE, Math.max(MIN_TERMINAL_FONT_SIZE, value));
-}
-
-function readInitialTerminalFontSize(): number {
-  if (typeof window === "undefined") {
-    return DEFAULT_FONT_SIZE;
-  }
-
-  try {
-    const savedFontSize = window.localStorage.getItem(TERMINAL_FONT_SIZE_KEY);
-    if (!savedFontSize) {
-      return DEFAULT_FONT_SIZE;
-    }
-
-    const parsed = Number.parseInt(savedFontSize, 10);
-    if (!Number.isFinite(parsed)) {
-      return DEFAULT_FONT_SIZE;
-    }
-
-    return clampTerminalFontSize(parsed);
-  } catch {
-    return DEFAULT_FONT_SIZE;
-  }
-}
+const ARROW_SHORTCUT_KEYS = [
+  { label: "↑", sequence: "\x1b[A", testId: "terminal-arrow-up", ariaLabel: "Send arrow up" },
+  { label: "↓", sequence: "\x1b[B", testId: "terminal-arrow-down", ariaLabel: "Send arrow down" },
+  { label: "←", sequence: "\x1b[D", testId: "terminal-arrow-left", ariaLabel: "Send arrow left" },
+  { label: "→", sequence: "\x1b[C", testId: "terminal-arrow-right", ariaLabel: "Send arrow right" },
+] as const;
 
 function isRetryableDynamicImportError(error: unknown): boolean {
   const message =
@@ -221,6 +209,7 @@ interface TerminalModalProps {
   isOpen: boolean;
   onClose: () => void;
   initialCommand?: string;
+  initialCommandGeneration?: number;
   projectId?: string;
 }
 
@@ -239,7 +228,7 @@ interface TerminalModalProps {
  * 
  * The terminal spawns a real shell (bash/zsh/powershell based on platform).
  */
-export function TerminalModal({ isOpen, onClose, initialCommand, projectId }: TerminalModalProps) {
+export function TerminalModal({ isOpen, onClose, initialCommand, initialCommandGeneration = 0, projectId }: TerminalModalProps) {
   const { t } = useTranslation("app");
   const [error, setError] = useState<string | null>(null);
   const [exitCode, setExitCode] = useState<number | null>(null);
@@ -248,8 +237,13 @@ export function TerminalModal({ isOpen, onClose, initialCommand, projectId }: Te
   const [openGeneration, setOpenGeneration] = useState(0);
   const [keyboardOverlap, setKeyboardOverlap] = useState(0);
   const [viewportHeight, setViewportHeight] = useState<number | null>(null);
-  const [fontSize, setFontSize] = useState<number>(() => readInitialTerminalFontSize());
+  const [terminalPreferences, setTerminalPreferences] = useState<TerminalPreferences>(() =>
+    readTerminalPreferences(),
+  );
+  const fontSize = terminalPreferences.fontSize;
+  const resolvedFontFamily = resolveTerminalFontFamily(terminalPreferences.fontFamily);
   const [showShortcuts, setShowShortcuts] = useState(false);
+  const [showPreferences, setShowPreferences] = useState(false);
   const [stickyModifier, setStickyModifier] = useState<null | "ctrl" | "alt">(null);
   const [pendingInitialCommandGeneration, setPendingInitialCommandGeneration] = useState(0);
   
@@ -260,9 +254,7 @@ export function TerminalModal({ isOpen, onClose, initialCommand, projectId }: Te
   const xtermRef = useRef<XTerm | null>(null);
   const fitAddonRef = useRef<ITerminalAddon | null>(null);
   const hasInitialCommandRun = useRef<string | false>(false);
-  const initialCommandAtOpenRef = useRef<string | null>(null);
-  const latestInitialCommandRef = useRef<string | undefined>(initialCommand);
-  const pendingInitialCommandRef = useRef<{ command: string; sessionId: string } | null>(null);
+  const pendingInitialCommandRef = useRef<{ command: string; commandKey: string; sessionId: string } | null>(null);
   const creatingInitialCommandTabRef = useRef(false);
   const xtermInitializedRef = useRef<string | false>(false);
   const resizeRef = useRef<((cols: number, rows: number) => void) | null>(null);
@@ -276,6 +268,9 @@ export function TerminalModal({ isOpen, onClose, initialCommand, projectId }: Te
   const windowResizeListenerRef = useRef<(() => void) | null>(null);
   const keyboardOverlapRef = useRef(0);
   const fontSizeRef = useRef(fontSize);
+  const terminalPreferencesRef = useRef(terminalPreferences);
+  const resolvedFontFamilyRef = useRef(resolvedFontFamily);
+  const initializedRendererRef = useRef<TerminalRenderer>(terminalPreferences.renderer);
   /** Tracks a pending requestAnimationFrame for deferred xterm re-fit. */
   const pendingFitRef = useRef<number | null>(null);
   /** Tracks the previous projectId to detect project switches and invalidate xterm. */
@@ -285,7 +280,8 @@ export function TerminalModal({ isOpen, onClose, initialCommand, projectId }: Te
   // current mobile keyboard state without forcing the init effect to re-run.
   keyboardOverlapRef.current = keyboardOverlap;
   fontSizeRef.current = fontSize;
-  latestInitialCommandRef.current = initialCommand;
+  terminalPreferencesRef.current = terminalPreferences;
+  resolvedFontFamilyRef.current = resolvedFontFamily;
 
   /**
    * Fit xterm and publish cols/rows for a specific terminal session.
@@ -327,7 +323,6 @@ export function TerminalModal({ isOpen, onClose, initialCommand, projectId }: Te
   // effect re-evaluates after a close/reopen cycle (deps may be identical).
   useEffect(() => {
     if (isOpen) {
-      initialCommandAtOpenRef.current = latestInitialCommandRef.current ?? null;
       setOpenGeneration((g) => g + 1);
     }
   }, [isOpen]);
@@ -453,17 +448,27 @@ export function TerminalModal({ isOpen, onClose, initialCommand, projectId }: Te
   resizeRef.current = resize;
   sendInputRef.current = sendInput;
 
-  useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
+  const updateTerminalPreferences = useCallback((patch: Partial<TerminalPreferences>) => {
+    setTerminalPreferences((current) => writeTerminalPreferences({ ...current, ...patch }));
+  }, []);
 
-    try {
-      window.localStorage.setItem(TERMINAL_FONT_SIZE_KEY, String(fontSize));
-    } catch {
-      // Ignore localStorage persistence errors.
-    }
-  }, [fontSize]);
+  const setFontSize = useCallback(
+    (value: number | ((current: number) => number)) => {
+      setTerminalPreferences((current) => {
+        const nextFontSize =
+          typeof value === "function" ? value(current.fontSize) : value;
+        return writeTerminalPreferences({
+          ...current,
+          fontSize: clampTerminalFontSize(nextFontSize),
+        });
+      });
+    },
+    [],
+  );
+
+  const resetTerminalPreferences = useCallback(() => {
+    setTerminalPreferences(writeTerminalPreferences(DEFAULT_TERMINAL_PREFERENCES));
+  }, []);
 
   const refitTerminal = useCallback(() => {
     const terminal = xtermRef.current;
@@ -490,7 +495,7 @@ export function TerminalModal({ isOpen, onClose, initialCommand, projectId }: Te
       }
 
       try {
-        await document.fonts.load(`${fontSizeRef.current}px ${XTERM_FONT_FAMILY}`);
+        await document.fonts.load(`${fontSizeRef.current}px ${resolvedFontFamilyRef.current}`);
         await document.fonts.ready;
       } catch {
         // Font loading support is best-effort; keep the terminal usable if the
@@ -512,7 +517,7 @@ export function TerminalModal({ isOpen, onClose, initialCommand, projectId }: Te
         // fallback font after open(); re-applying font options and fitting after
         // FontFaceSet resolution forces the DOM/canvas and WebGL renderers to
         // remeasure against the actual glyph metrics.
-        terminal.options.fontFamily = XTERM_FONT_FAMILY;
+        terminal.options.fontFamily = resolvedFontFamilyRef.current;
         terminal.options.fontSize = fontSizeRef.current;
         fitAddon.fit();
         resizeRef.current?.(terminal.cols, terminal.rows);
@@ -589,12 +594,15 @@ export function TerminalModal({ isOpen, onClose, initialCommand, projectId }: Te
 
         if (!mounted || !terminalRef.current || xtermRef.current) return;
 
+        const preferencesAtInit = terminalPreferencesRef.current;
+        const fontFamilyAtInit = resolvedFontFamilyRef.current;
+
         // Create terminal instance
         terminal = new TerminalCtor({
-          cursorBlink: true,
-          cursorStyle: "block",
-          fontSize: fontSizeRef.current,
-          fontFamily: XTERM_FONT_FAMILY,
+          cursorBlink: preferencesAtInit.cursorBlink,
+          cursorStyle: preferencesAtInit.cursorStyle,
+          fontSize: preferencesAtInit.fontSize,
+          fontFamily: fontFamilyAtInit,
           theme: {
             background: "#1e1e1e",
             foreground: "#d4d4d4",
@@ -620,10 +628,12 @@ export function TerminalModal({ isOpen, onClose, initialCommand, projectId }: Te
         const webLinksAddon = new WebLinksAddon();
         terminal.loadAddon(webLinksAddon);
 
-        // Try to load WebGL addon for better performance
-        // Skip WebGL on mobile devices to avoid rendering artifacts (e.g., garbled
-        // Unicode characters in powerline prompt symbols on iOS Safari/WebKit).
-        if (!isMobileDevice()) {
+        initializedRendererRef.current = preferencesAtInit.renderer;
+        // Try to load WebGL addon for better performance.
+        //
+        // FNXC:Terminal 2026-06-16-23:45:
+        // Renderer preference may force canvas by skipping WebGL, but mobile remains a hard WebGL-off floor because WebKit glyph artifacts make terminal prompts unreadable on touch devices.
+        if (preferencesAtInit.renderer === "auto" && !isMobileDevice()) {
           try {
             const { WebglAddon } = await import("@xterm/addon-webgl");
             const webglAddon = new WebglAddon();
@@ -818,12 +828,12 @@ export function TerminalModal({ isOpen, onClose, initialCommand, projectId }: Te
     setXtermReady(false);
     setXtermInitError(null);
     hasInitialCommandRun.current = false;
-    initialCommandAtOpenRef.current = null;
     pendingInitialCommandRef.current = null;
     creatingInitialCommandTabRef.current = false;
     setError(null);
     setExitCode(null);
     setShowShortcuts(false);
+    setShowPreferences(false);
     setStickyModifier(null);
   }, [isOpen]);
 
@@ -875,45 +885,37 @@ export function TerminalModal({ isOpen, onClose, initialCommand, projectId }: Te
   }, [xtermReady, activeTab?.sessionId, activeTab?.id, activeTab, connectionStatus, onData, onScrollback, onConnect, onExit, updateTabTitle]);
 
   // Run initial command when connected.
-  // Tracks the last command that was sent so that a new command provided
-  // while the terminal is already open (e.g., running a different script)
-  // will be executed immediately without requiring a modal close/reopen.
-  // Commands provided with a fresh modal open use the auto-created active tab;
-  // later commands create a new tab first so an existing terminal is not
-  // interrupted or overwritten by script output.
+  // Tracks the last command dispatch key so new quick-script invocations can
+  // execute immediately without requiring a modal close/reopen.
+  //
+  // FNXC:Terminal 2026-06-17-00:00:
+  // Quick scripts must always spawn a dedicated terminal tab backed by a fresh PTY session, including first-open, already-open, and same-command rerun paths. Never inject a script into the auto-created or currently active shell because that destructively reuses user context.
+  //
   // Depends on openGeneration so the command re-fires after close/reopen.
   useEffect(() => {
     if (connectionStatus !== "connected" || !initialCommand || !activeTab) {
       return;
     }
 
-    if (hasInitialCommandRun.current === initialCommand) {
+    const commandKey = `${initialCommandGeneration}:${initialCommand}`;
+
+    if (hasInitialCommandRun.current === commandKey) {
       return;
     }
 
     const pendingCommand = pendingInitialCommandRef.current;
-    if (pendingCommand?.command === initialCommand || creatingInitialCommandTabRef.current) {
+    if (pendingCommand?.commandKey === commandKey || creatingInitialCommandTabRef.current) {
       return;
     }
 
-    hasInitialCommandRun.current = initialCommand;
-
-    const commandArrivedWithThisOpen =
-      hasInitialCommandRun.current === initialCommand &&
-      initialCommandAtOpenRef.current === initialCommand;
-
-    if (commandArrivedWithThisOpen) {
-      setTimeout(() => {
-        sendInputRef.current(initialCommand + "\n");
-      }, 500);
-      return;
-    }
+    hasInitialCommandRun.current = commandKey;
 
     creatingInitialCommandTabRef.current = true;
     void createTab()
       .then((newTab) => {
         pendingInitialCommandRef.current = {
           command: initialCommand,
+          commandKey,
           sessionId: newTab.sessionId,
         };
         setPendingInitialCommandGeneration((generation) => generation + 1);
@@ -921,14 +923,14 @@ export function TerminalModal({ isOpen, onClose, initialCommand, projectId }: Te
       .catch((err) => {
         const message = getErrorMessage(err);
         setError(t("terminal.createScriptTabError", "Failed to create terminal tab for script: {{message}}", { message }));
-        if (hasInitialCommandRun.current === initialCommand) {
+        if (hasInitialCommandRun.current === commandKey) {
           hasInitialCommandRun.current = false;
         }
       })
       .finally(() => {
         creatingInitialCommandTabRef.current = false;
       });
-  }, [connectionStatus, initialCommand, activeTab, createTab, openGeneration, t]);
+  }, [connectionStatus, initialCommand, initialCommandGeneration, activeTab, createTab, openGeneration, t]);
 
   useEffect(() => {
     const pendingCommand = pendingInitialCommandRef.current;
@@ -954,10 +956,17 @@ export function TerminalModal({ isOpen, onClose, initialCommand, projectId }: Te
       return;
     }
 
-    xtermRef.current.options.fontSize = fontSize;
+    /*
+    FNXC:Terminal 2026-06-16-23:47:
+    Font and cursor preferences apply live to the active xterm so the preferences panel and status-bar zoom controls share one persisted source of truth. Renderer changes are intentionally deferred to the next terminal open because the WebGL addon is attached during xterm initialization.
+    */
+    xtermRef.current.options.fontFamily = resolvedFontFamily;
+    xtermRef.current.options.fontSize = terminalPreferences.fontSize;
+    xtermRef.current.options.cursorStyle = terminalPreferences.cursorStyle;
+    xtermRef.current.options.cursorBlink = terminalPreferences.cursorBlink;
 
     // Defer fit until the next frame so layout reflects the new font metrics
-    // before FitAddon measures rows/cols. Reuse pendingFitRef so font-size and
+    // before FitAddon measures rows/cols. Reuse pendingFitRef so font changes and
     // visualViewport-triggered fits are coalesced into a single scheduled fit.
     if (pendingFitRef.current !== null) {
       cancelAnimationFrame(pendingFitRef.current);
@@ -976,7 +985,7 @@ export function TerminalModal({ isOpen, onClose, initialCommand, projectId }: Te
         pendingFitRef.current = null;
       }
     };
-  }, [fontSize, xtermReady, refitTerminal]);
+  }, [resolvedFontFamily, terminalPreferences, xtermReady, refitTerminal]);
 
   // Handle keyboard shortcuts (zoom)
   useEffect(() => {
@@ -1002,14 +1011,14 @@ export function TerminalModal({ isOpen, onClose, initialCommand, projectId }: Te
       // Reset zoom: Ctrl/Cmd + 0
       if (e.code === "Digit0" || e.code === "Numpad0") {
         e.preventDefault();
-        setFontSize(DEFAULT_FONT_SIZE);
+        setFontSize(DEFAULT_TERMINAL_PREFERENCES.fontSize);
         return;
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, refitTerminal]);
+  }, [isOpen, setFontSize]);
 
   // Handle escape key to close
   useEffect(() => {
@@ -1203,11 +1212,22 @@ export function TerminalModal({ isOpen, onClose, initialCommand, projectId }: Te
 
   const handleIncreaseFontSize = useCallback(() => {
     setFontSize((current) => clampTerminalFontSize(current + 1));
-  }, []);
+  }, [setFontSize]);
 
   const handleDecreaseFontSize = useCallback(() => {
     setFontSize((current) => clampTerminalFontSize(current - 1));
-  }, []);
+  }, [setFontSize]);
+
+  const handlePreferenceFontSizeChange = useCallback(
+    (value: string) => {
+      const parsed = Number.parseInt(value, 10);
+      if (!Number.isFinite(parsed)) {
+        return;
+      }
+      setFontSize(parsed);
+    },
+    [setFontSize],
+  );
 
   const toggleModifier = useCallback((modifier: "ctrl" | "alt") => {
     setStickyModifier((current) => (current === modifier ? null : modifier));
@@ -1382,6 +1402,16 @@ export function TerminalModal({ isOpen, onClose, initialCommand, projectId }: Te
               <span className="terminal-action-label">{t("terminal.shortcuts", "Shortcuts")}</span>
             </button>
             <button
+              className="terminal-clear-btn terminal-clear-btn--shortcut"
+              onClick={() => setShowPreferences((current) => !current)}
+              data-testid="terminal-preferences-toggle"
+              title={t("terminal.preferences", "Preferences")}
+              aria-pressed={showPreferences}
+            >
+              <Settings size={14} />
+              <span className="terminal-action-label">{t("terminal.preferences", "Preferences")}</span>
+            </button>
+            <button
               className="terminal-close"
               onClick={onClose}
               data-testid="terminal-close-btn"
@@ -1515,6 +1545,24 @@ export function TerminalModal({ isOpen, onClose, initialCommand, projectId }: Te
                 Tab
               </button>
             </div>
+            {/*
+            FNXC:Terminal 2026-06-16-23:38:
+            Touch users need literal ANSI arrow sequences for shell history and cursor movement. These shortcuts bypass sticky Ctrl/Alt modifiers so mobile navigation matches physical keyboard arrow keys exactly.
+            */}
+            <div className="terminal-shortcut-arrow-row" aria-label="Terminal arrow keys">
+              {ARROW_SHORTCUT_KEYS.map((arrow) => (
+                <button
+                  key={arrow.testId}
+                  type="button"
+                  className="terminal-shortcut-btn"
+                  data-testid={arrow.testId}
+                  aria-label={arrow.ariaLabel}
+                  onClick={() => sendLiteralShortcut(arrow.sequence)}
+                >
+                  {arrow.label}
+                </button>
+              ))}
+            </div>
             {SHORTCUT_KEYS.map((shortcut) => (
               <button
                 key={shortcut.label}
@@ -1526,6 +1574,99 @@ export function TerminalModal({ isOpen, onClose, initialCommand, projectId }: Te
                 {shortcut.label}
               </button>
             ))}
+          </div>
+        )}
+
+        {showPreferences && (
+          <div className="terminal-preferences-panel" data-testid="terminal-preferences-panel">
+            <label className="terminal-preference-field">
+              <span>{t("terminal.preferenceFontFamily", "Font family")}</span>
+              <select
+                className="input terminal-preference-control"
+                data-testid="terminal-preference-font-family"
+                value={terminalPreferences.fontFamily}
+                onChange={(event) =>
+                  updateTerminalPreferences({
+                    fontFamily: event.target.value as TerminalPreferences["fontFamily"],
+                  })
+                }
+              >
+                {TERMINAL_FONT_FAMILY_PRESETS.map((preset) => (
+                  <option key={preset.id} value={preset.id}>
+                    {preset.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="terminal-preference-field">
+              <span>{t("terminal.preferenceFontSize", "Font size")}</span>
+              <input
+                className="input terminal-preference-control"
+                data-testid="terminal-preference-font-size"
+                type="number"
+                min={MIN_TERMINAL_FONT_SIZE}
+                max={MAX_TERMINAL_FONT_SIZE}
+                value={terminalPreferences.fontSize}
+                onChange={(event) => handlePreferenceFontSizeChange(event.target.value)}
+              />
+            </label>
+            <label className="terminal-preference-field">
+              <span>{t("terminal.preferenceCursorStyle", "Cursor style")}</span>
+              <select
+                className="input terminal-preference-control"
+                data-testid="terminal-preference-cursor-style"
+                value={terminalPreferences.cursorStyle}
+                onChange={(event) =>
+                  updateTerminalPreferences({
+                    cursorStyle: event.target.value as TerminalPreferences["cursorStyle"],
+                  })
+                }
+              >
+                <option value="block">{t("terminal.cursorBlock", "Block")}</option>
+                <option value="underline">{t("terminal.cursorUnderline", "Underline")}</option>
+                <option value="bar">{t("terminal.cursorBar", "Bar")}</option>
+              </select>
+            </label>
+            <label className="terminal-preference-field terminal-preference-field--checkbox">
+              <input
+                data-testid="terminal-preference-cursor-blink"
+                type="checkbox"
+                checked={terminalPreferences.cursorBlink}
+                onChange={(event) =>
+                  updateTerminalPreferences({ cursorBlink: event.target.checked })
+                }
+              />
+              <span>{t("terminal.preferenceCursorBlink", "Blink cursor")}</span>
+            </label>
+            <label className="terminal-preference-field">
+              <span>{t("terminal.preferenceRenderer", "Renderer")}</span>
+              <select
+                className="input terminal-preference-control"
+                data-testid="terminal-preference-renderer"
+                value={terminalPreferences.renderer}
+                onChange={(event) =>
+                  updateTerminalPreferences({
+                    renderer: event.target.value as TerminalPreferences["renderer"],
+                  })
+                }
+              >
+                <option value="auto">{t("terminal.rendererAuto", "Auto (WebGL on desktop)")}</option>
+                <option value="canvas">{t("terminal.rendererCanvas", "Canvas/DOM")}</option>
+              </select>
+              {xtermReady && terminalPreferences.renderer !== initializedRendererRef.current && (
+                <span className="terminal-preference-note" data-testid="terminal-renderer-reopen-note">
+                  {t("terminal.rendererReopenNote", "Reopen the terminal to apply renderer changes.")}
+                </span>
+              )}
+            </label>
+            <button
+              type="button"
+              className="btn terminal-preferences-reset"
+              data-testid="terminal-preferences-reset"
+              onClick={resetTerminalPreferences}
+            >
+              {t("terminal.resetPreferences", "Reset to defaults")}
+            </button>
           </div>
         )}
 

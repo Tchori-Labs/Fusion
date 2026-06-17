@@ -33,6 +33,7 @@ import type { BadgePubSub } from "./badge-pubsub.js";
 import { createBadgePubSub, type BadgePubSubMessage } from "./badge-pubsub.js";
 import { createRuntimeLogger, type RuntimeLogger } from "./runtime-logger.js";
 import { registerGithubTrackingHook } from "./github-tracking-hook.js";
+import { registerBeforeExitCleanup } from "./process-lifecycle.js";
 import { createTerminalWebSocketDiagnostics } from "./terminal-websocket-diagnostics.js";
 import {
   AiSessionStore,
@@ -150,7 +151,7 @@ function clearAiSessionCleanupInterval(): void {
   aiSessionCleanupIntervalHandle = undefined;
 }
 
-process.on("beforeExit", () => {
+registerBeforeExitCleanup(() => {
   clearAiSessionCleanupInterval();
 });
 
@@ -301,6 +302,11 @@ export interface ServerOptions {
     getPluginWorkflowStepTemplates?(): Array<{ pluginId: string; template: import("@fusion/core").WorkflowStepTemplate }>;
     getRuntimeById?(runtimeId: string): unknown;
     createRuntimeContext?(pluginId: string): Promise<unknown>;
+    /*
+    FNXC:ChatSkills 2026-06-16-19:10:
+    The dashboard passes this structural runner into ChatManager, which needs optional plugin skill discovery so chat can load enabled plugin skills such as ce-debug.
+    */
+    getPluginSkills?(): Array<{ pluginId: string; skill: { name: string; enabled?: boolean } }>;
     reloadPlugin?(pluginId: string): Promise<unknown>;
     checkPluginSetup?(pluginId: string): Promise<import("@fusion/core").PluginSetupCheckResult>;
     installPluginSetup?(pluginId: string): Promise<void | { success: boolean; error?: string }>;

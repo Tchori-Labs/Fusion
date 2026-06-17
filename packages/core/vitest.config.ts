@@ -11,6 +11,12 @@ const quarantinedCoreTests = [
 
   FNXC:CoreTests 2026-06-14-02:14:
   FN-6433 re-ran the core quarantine batch after FN-6430's shared fixture cleanup and rescued all five files without timeout or assertion changes. Keep this array empty unless a future quarantine is mirrored in scripts/lib/test-quarantine.json in the same commit.
+
+  FNXC:CoreTests 2026-06-15-03:13:
+  FN-6481 observed the disk-backed concurrent write test fail in the changed-package workspace lane with a transient SQLite BEGIN IMMEDIATE lock after the gate had already passed. Quarantine the flaky file instead of widening lock-recovery timeouts or weakening assertions.
+
+  FNXC:CoreTests 2026-06-15-07:39:
+  FN-6486 rescued store-concurrent-writes by making the transient lock helper release independent of event-loop timer scheduling, then removed the quarantine in lockstep with scripts/lib/test-quarantine.json. Keep this array empty unless a future observed flake is mirrored in the ledger in the same commit.
   */
 ];
 

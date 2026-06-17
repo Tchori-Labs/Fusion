@@ -1698,6 +1698,7 @@ function AppInner() {
               projectId={currentProject?.id}
               addToast={addToast}
               onOpenDetail={openDetailTask}
+              onSendSelectionToTask={modalManager.openNewTaskWithDescription}
             />
           </Suspense>
         </PageErrorBoundary>
@@ -1788,7 +1789,11 @@ function AppInner() {
       return (
         <PageErrorBoundary>
           <Suspense fallback={null}>
-            <MemoryView addToast={addToast} projectId={currentProject?.id} />
+            <MemoryView
+              addToast={addToast}
+              projectId={currentProject?.id}
+              onSendSelectionToTask={modalManager.openNewTaskWithDescription}
+            />
           </Suspense>
         </PageErrorBoundary>
       );
@@ -1811,7 +1816,7 @@ function AppInner() {
       return (
         <PageErrorBoundary>
           <Suspense fallback={null}>
-            <GoalsView anchorGoalId={goalAnchorId} />
+            <GoalsView anchorGoalId={goalAnchorId} onNavigateToMission={handleOpenMission} />
           </Suspense>
         </PageErrorBoundary>
       );

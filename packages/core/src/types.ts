@@ -1240,6 +1240,8 @@ export type ActivityEventType =
   | "task:auto-archived-deterministic-duplicate"
   | "task:auto-archived-near-duplicate"
   | "task:near-duplicate-flagged"
+  /** FNXC:ReleaseAuthorizationGate 2026-06-15-02:44: Release-class tasks parked by triage need a distinct activity so operators can see that explicit user approval is required before dispatch. */
+  | "task:release-authorization-required"
   | "task:auto-archived-ghost-bug"
   | "task:auto-archived-duplicate"
   | "task:merge-worktree-reacquired"
@@ -3666,6 +3668,14 @@ export interface ProjectSettings {
   /** Strategy used when a merge conflict can't be resolved by AI. See
    *  {@link MergeConflictStrategy}. Default: "smart". */
   mergeConflictStrategy?: MergeConflictStrategy;
+  /**
+   * FNXC:AutoMergeRetries 2026-06-17-04:20:
+   * The auto-merge conflict-resolution retry cap is project-configurable so operators can tune when tasks park for human visibility. Default 3 preserves the historical fixed cap; non-positive or non-finite values fall back to the default.
+   *
+   * Maximum number of auto-merge conflict-resolution retries before a task is
+   * parked as failed for manual recovery. Must be a positive integer. Default: 3.
+   */
+  maxAutoMergeRetries?: number;
   /** AI merge path configuration (FN-5633). See {@link MergerSettings}.
    *  When mode is "ai" (default), the standalone AI merge path is used and the
    *  legacy merge settings above/below it do not apply. */

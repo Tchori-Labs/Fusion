@@ -57,6 +57,25 @@ FN-6425 requires the chat expand control to stay inside the chat view as an icon
   text-align: center;
 }
 
+.task-chat-load-previous-row {
+  display: flex;
+  justify-content: center;
+  min-block-size: calc(var(--space-2xl) + var(--space-sm));
+}
+
+.task-chat-load-previous,
+.task-chat-load-previous-status {
+  min-block-size: calc(var(--space-2xl) + var(--space-sm));
+}
+
+.task-chat-load-previous-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: var(--space-xs) var(--space-sm);
+  color: var(--text-muted);
+}
+
 .task-chat-jump-to-bottom {
   position: sticky;
   right: var(--space-md);
@@ -335,7 +354,12 @@ FN-6425 requires the chat expand control to stay inside the chat view as an icon
   flex: 1 1 auto;
 }
 
+/*
+FNXC:TaskDetailChat 2026-06-16-19:45:
+FN-6507 requires the Task Detail chat send glyph to scale with the larger square touch target on desktop and mobile. Override only this button's global .btn-icon size so Send and Loader2 stay visually proportional without changing the tap box or sibling chat send buttons.
+*/
 .task-chat-send {
+  --btn-icon-size: var(--space-lg);
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
@@ -369,6 +393,15 @@ FN-6425 requires the chat expand control to stay inside the chat view as an icon
     right: var(--space-sm);
     bottom: var(--space-sm);
     min-inline-size: calc(var(--space-2xl) + var(--space-sm));
+    min-block-size: calc(var(--space-2xl) + var(--space-sm));
+  }
+
+  .task-chat-load-previous-row {
+    min-block-size: calc(var(--space-2xl) + var(--space-sm));
+  }
+
+  .task-chat-load-previous,
+  .task-chat-load-previous-status {
     min-block-size: calc(var(--space-2xl) + var(--space-sm));
   }
 
@@ -422,6 +455,7 @@ FN-6425 requires the chat expand control to stay inside the chat view as an icon
   }
 
   .task-chat-send {
+    --btn-icon-size: var(--space-lg);
     inline-size: calc(var(--space-2xl) + var(--space-sm));
     min-inline-size: calc(var(--space-2xl) + var(--space-sm));
   }

@@ -32,6 +32,7 @@ import { existsSync } from "node:fs";
 import { join, resolve, relative } from "node:path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { SessionEventBuffer } from "./sse-buffer.js";
+import { formatChatAttachmentContents, readChatAttachmentContents } from "./chat-attachment-content.js";
 
 import {
   createFnAgent as engineCreateFnAgent,
@@ -39,6 +40,7 @@ import {
   promptWithFallback as enginePromptWithFallback,
   extractRuntimeHint,
   extractRuntimeModel,
+  buildSessionSkillContextSync,
   createSendMessageTool,
   createReadMessagesTool,
   createWorkflowAuthoringTools,
@@ -716,6 +718,11 @@ export class ChatManager {
     private pluginRunner?: {
       getRuntimeById?(runtimeId: string): unknown;
       createRuntimeContext?(pluginId: string): Promise<unknown>;
+      /*
+      FNXC:ChatSkills 2026-06-16-19:10:
+      Agent chat receives the project plugin runner through this narrow structural type, so expose enabled plugin skill contributions here without requiring dashboard code to depend on the full engine runner class.
+      */
+      getPluginSkills?(): Array<{ pluginId: string; skill: { name: string; enabled?: boolean } }>;
     },
     private getSettings?: () => Promise<Pick<Settings,
       | "fallbackProvider"
@@ -740,6 +747,12 @@ export class ChatManager {
     // don't author workflows keep working.
     private taskStore?: TaskStore,
   ) {}
+
+  private getPluginRunnerForSkillSelection(): Parameters<typeof buildSessionSkillContextSync>[3] {
+    return this.pluginRunner?.getPluginSkills
+      ? (this.pluginRunner as unknown as Parameters<typeof buildSessionSkillContextSync>[3])
+      : undefined;
+  }
 
   /**
    * Runner for CLI-agent-backed chat sessions (CLI Agent Executor). When a chat
@@ -1203,6 +1216,7 @@ export class ChatManager {
           roomName: room.name,
           content: trimmedContent,
           latestUserMessageId: userMessage.id,
+          attachments,
           mentions,
           responder,
           modelProvider,
@@ -1259,6 +1273,7 @@ export class ChatManager {
     roomName: string;
     content: string;
     latestUserMessageId: string;
+    attachments?: ChatAttachment[];
     mentions: ChatMention[];
     responder: Agent;
     modelProvider?: string;
@@ -1289,7 +1304,14 @@ export class ChatManager {
 
     const roomCompactionSettings = await this.getRoomCompactionSettings();
     const roomMessages = this.chatStore.getRoomMessages(input.roomId, { limit: roomCompactionSettings.fetchLimit });
-    const roomPrompt = [
+    const { attachmentContents, imageContents } = await readChatAttachmentContents(
+      this.rootDir,
+      { kind: "room", roomId: input.roomId },
+      input.attachments,
+      diagnostics,
+    );
+    const attachmentContentBlock = formatChatAttachmentContents(attachmentContents);
+    const roomPromptParts = [
       `You are replying as ${input.responder.name} in room #${input.roomName}.`,
       "Reply to the latest user room message in the context of this shared room thread.",
       "Room transcript (oldest to newest, bounded):",
@@ -1299,7 +1321,11 @@ export class ChatManager {
       }),
       "Latest user message to answer:",
       input.content,
-    ].join("\n\n");
+    ];
+    if (attachmentContentBlock) {
+      roomPromptParts.push(attachmentContentBlock);
+    }
+    const roomPrompt = roomPromptParts.join("\n\n");
 
     const responderRuntimeModel = extractRuntimeModel(input.responder.runtimeConfig);
     const effectiveModelProvider = input.modelProvider ?? responderRuntimeModel.provider;
@@ -1308,10 +1334,22 @@ export class ChatManager {
     const allowFallback = !(input.modelProvider && input.modelId)
       && !(responderRuntimeModel.provider && responderRuntimeModel.modelId);
 
+    const roomSkillContext = buildSessionSkillContextSync(
+      input.responder,
+      "heartbeat",
+      this.rootDir,
+      this.getPluginRunnerForSkillSelection(),
+    );
+
     const resolvedSession = await createResolvedAgentSession({
       sessionPurpose: "heartbeat",
       pluginRunner: this.pluginRunner,
       runtimeHint: extractRuntimeHint(input.responder.runtimeConfig),
+      /*
+      FNXC:ChatSkills 2026-06-16-19:13:
+      Chat-room responder sessions must request the responder agent skills plus enabled plugin skills so chat-only agent replies can use skills such as ce-debug just like heartbeat/executor lanes.
+      */
+      ...(roomSkillContext.skillSelectionContext ? { skillSelection: roomSkillContext.skillSelectionContext } : {}),
       cwd: this.rootDir,
       systemPrompt,
       tools: "coding",
@@ -1330,7 +1368,11 @@ export class ChatManager {
     });
 
     try {
-      await enginePromptWithFallback(resolvedSession.session, roomPrompt);
+      await enginePromptWithFallback(
+        resolvedSession.session,
+        roomPrompt,
+        imageContents.length > 0 ? { images: imageContents } : undefined,
+      );
 
       type AgentMessage = { role?: string; type?: string; content?: string | Array<{ type?: string; text?: string }> };
       const messages = (resolvedSession.session.state.messages as AgentMessage[]) ?? [];
@@ -1425,6 +1467,10 @@ export class ChatManager {
     // CLI-agent-backed chat: a session that selected a cli-agent executor brokers
     // its composer sends to the live PTY (via the runner) rather than running the
     // model agent loop. The runner persists the user message + the transcript.
+    /*
+    FNXC:ChatAttachments 2026-06-16-20:00:
+    Attachment content inlining is intentionally limited to model-loop chat sessions. CLI-agent-backed chat sends to a live PTY, so changing it here would alter terminal input semantics instead of using promptWithFallback image/text options.
+    */
     if (session?.cliExecutorAdapterId && this.cliChatRunner) {
       const runner = this.cliChatRunner;
       try {
@@ -1623,12 +1669,19 @@ export class ChatManager {
           .map((attachment) => `${attachment.originalName} (${attachment.mimeType}, ${formatAttachmentSize(attachment.size)})`)
           .join(", ")}]`
         : "";
+      const { attachmentContents, imageContents } = await readChatAttachmentContents(
+        this.rootDir,
+        { kind: "session", sessionId },
+        attachments,
+        diagnostics,
+      );
+      const attachmentContentBlock = formatChatAttachmentContents(attachmentContents);
 
       // Send only the new user content. Prior turns are reloaded by the
       // pi/Claude CLI session via SessionManager.open() below — stuffing the
       // transcript back into the user message would balloon the on-disk
       // session every turn (and previously did, see chat-store.ts:setCliSessionFile).
-      const promptContent = [attachmentSummary, resolvedContent].filter(Boolean).join("\n\n");
+      const promptContent = [attachmentSummary, attachmentContentBlock, resolvedContent].filter(Boolean).join("\n\n");
 
       // Per-chat session continuity: the pi SessionManager (and, transitively,
       // the Claude CLI --resume session it owns) is keyed off the chat. On the
@@ -1748,10 +1801,21 @@ export class ChatManager {
       // `cleanupSessionResources(sessionId)` tear-down across overlapping
       // sessions opened from the same CLI session file.
       const agentRuntimeHint = agent ? extractRuntimeHint(agent.runtimeConfig) : undefined;
+      const chatSkillContext = buildSessionSkillContextSync(
+        agent ?? null,
+        "executor",
+        this.rootDir,
+        this.getPluginRunnerForSkillSelection(),
+      );
       agentResult = await createResolvedAgentSession({
         sessionPurpose: "executor",
         ...(agentRuntimeHint ? { runtimeHint: agentRuntimeHint } : {}),
         pluginRunner: this.pluginRunner,
+        /*
+        FNXC:ChatSkills 2026-06-16-19:13:
+        Regular chat and QuickChat must request bound-agent skills plus enabled plugin skills so dashboard chat loads capabilities such as ce-debug instead of creating skill-less sessions.
+        */
+        ...(chatSkillContext.skillSelectionContext ? { skillSelection: chatSkillContext.skillSelectionContext } : {}),
         ...sessionOptions,
       });
       this.activeGenerations.set(sessionId, { abortController, agentResult, generationId });
@@ -1762,7 +1826,11 @@ export class ChatManager {
       }
 
       // Send user message and get response
-      await enginePromptWithFallback(agentResult.session, promptContent);
+      await enginePromptWithFallback(
+        agentResult.session,
+        promptContent,
+        imageContents.length > 0 ? { images: imageContents } : undefined,
+      );
 
       if (abortController.signal.aborted) {
         return;

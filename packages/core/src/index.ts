@@ -20,6 +20,7 @@ export { redactSecrets } from "./redact-secrets.js";
 export { isActiveNearDuplicateColumn, isNearDuplicateCanonicalInactive } from "./near-duplicate-canonical.js";
 export type { NearDuplicateCanonicalState } from "./near-duplicate-canonical.js";
 export * from "./frontend-ux-policy.js";
+export { MAX_TASK_LIST_TEXT_CHARS, clampTaskListText, formatTaskListText } from "./task-list-format.js";
 export { MOCK_PROVIDER_ID } from "./mock-provider-constants.js";
 export type { MockProviderId, MockSessionPurpose } from "./mock-provider-constants.js";
 export {
@@ -748,6 +749,7 @@ export {
   IN_REVIEW_STALL_TERMINAL_LOG_PREFIX,
   DEFAULT_STALE_MERGING_MIN_AGE_MS,
   DEFAULT_MAX_AUTO_MERGE_RETRIES,
+  resolveMaxAutoMergeRetries,
 } from "./in-review-stall.js";
 export type { InReviewStallSignal, InReviewStallCode, ProviderErrorClassification } from "./in-review-stall.js";
 export {

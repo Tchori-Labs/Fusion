@@ -99,14 +99,22 @@ fn plugin list
 
 If the proof point uses the packaged-install path instead of `plugin dev`, run the equivalent install/enable/list loop:
 
+<!--
+FNXC:Plugins 2026-06-15-02:57:
+FN-6474 reconciles the packaged-install proof path with CLI behavior discovered in FN-6471: `fn plugin install` rejects raw tarballs as non-JS file entrypoints, so proof runs must extract the package and install the built plugin directory.
+-->
+
 ```bash
 pnpm build
 pnpm test
 pnpm pack
-fn plugin install ./fusion-plugin-proof-point-plugin-0.1.0.tgz
+tar -xzf fusion-plugin-proof-point-plugin-0.1.0.tgz
+fn plugin install ./package
 fn plugin enable fusion-plugin-proof-point-plugin
 fn plugin list
 ```
+
+Troubleshooting: FN-6471 found that `npx @runfusion/fusion@0.43.1 plugin install ./fusion-plugin-proof-point-plugin-0.1.0.tgz` fails with `Plugin entry file must end with .js, .mjs, or .cjs: <abs>/fusion-plugin-proof-point-plugin-0.1.0.tgz`. The failure is expected for a raw tarball because `fn plugin install` accepts a built plugin directory (or installed package name), not a packed `.tgz`; extract first and install from `./package`. This corrects the packaged-install snippet originally added by FN-6438.
 
 Record the exact commands actually run. Do not summarize a command as successful unless its transcript shows exit code 0 or equivalent success output.
 

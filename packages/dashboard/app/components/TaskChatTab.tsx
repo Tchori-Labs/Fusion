@@ -51,6 +51,7 @@ const STEERING_BLOCKED_STATUSES = new Set([
 ]);
 const REVIEW_STEERABLE_STATUSES = new Set(["reviewing", "merging", "merging-fix", "fixing"]);
 const BOTTOM_FOLLOW_THRESHOLD = 48;
+const TOP_LOAD_THRESHOLD = 48;
 
 function isTranscriptNearBottom(container: HTMLElement): boolean {
   return container.scrollHeight - (container.scrollTop + container.clientHeight) <= BOTTOM_FOLLOW_THRESHOLD;
@@ -410,7 +411,7 @@ function TaskChatUserMessage({ message }: { message: UserChatMessage }) {
 }
 
 export function TaskChatTab({ task, projectId, active, addToast, sessionLive, onTaskUpdated, expanded = false, onToggleExpanded }: TaskChatTabProps) {
-  const { entries, loading } = useAgentLogs(task.id, active, projectId);
+  const { entries, loading, loadMore, hasMore, loadingMore } = useAgentLogs(task.id, active, projectId);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const [optimisticMessages, setOptimisticMessages] = useState<UserChatMessage[]>([]);
@@ -418,6 +419,11 @@ export function TaskChatTab({ task, projectId, active, addToast, sessionLive, on
   const transcriptRef = useRef<HTMLDivElement>(null);
   const previousEntryCountRef = useRef(0);
   const previousScrollHeightRef = useRef(0);
+  const previousFirstEntryKeyRef = useRef<string | null>(null);
+  const previousAgentEntryCountRef = useRef(0);
+  const pendingPrependScrollHeightRef = useRef<number | null>(null);
+  const pendingPrependScrollTopRef = useRef(0);
+  const loadMoreInFlightRef = useRef(false);
   const previousActiveRef = useRef(false);
   const anchorFrameRef = useRef<number | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -428,6 +434,7 @@ export function TaskChatTab({ task, projectId, active, addToast, sessionLive, on
   );
   const transcriptItems = useMemo(() => buildTranscriptItems(entries, userMessages), [entries, userMessages]);
   const transcriptItemCount = entries.length + userMessages.length;
+  const firstEntryKey = entries[0] ? getEntryKey(entries[0], 0) : null;
   const activeSession = isActiveAgentSession(task, { sessionLive });
   const isDoneTask = task.column === "done";
   const sessionHint = isDoneTask
@@ -524,18 +531,43 @@ export function TaskChatTab({ task, projectId, active, addToast, sessionLive, on
     if (!active) {
       previousEntryCountRef.current = transcriptItemCount;
       previousScrollHeightRef.current = container.scrollHeight;
+      previousFirstEntryKeyRef.current = firstEntryKey;
+      previousAgentEntryCountRef.current = entries.length;
       return;
     }
 
     if (transcriptItemCount === 0) {
       previousEntryCountRef.current = transcriptItemCount;
       previousScrollHeightRef.current = container.scrollHeight;
+      previousFirstEntryKeyRef.current = firstEntryKey;
+      previousAgentEntryCountRef.current = entries.length;
       return;
     }
 
     const previousCount = previousEntryCountRef.current;
     const previousScrollHeight = previousScrollHeightRef.current || container.scrollHeight;
-    if (transcriptItemCount > previousCount) {
+    const previousFirstEntryKey = previousFirstEntryKeyRef.current;
+    const previousAgentEntryCount = previousAgentEntryCountRef.current;
+    const prependedOlderEntries = Boolean(
+      pendingPrependScrollHeightRef.current !== null
+        && transcriptItemCount > previousCount
+        && entries.length > previousAgentEntryCount
+        && firstEntryKey
+        && (!previousFirstEntryKey || firstEntryKey !== previousFirstEntryKey),
+    );
+
+    if (prependedOlderEntries) {
+      /*
+       * FNXC:TaskDetailChat 2026-06-16-23:03:
+       * Task-detail chat must load older paginated agent history at the top without disturbing the reader's viewport. Treat a changed first agent-log key as a prepend so bottom-follow remains reserved for live appends at the transcript tail.
+       */
+      const previousTop = pendingPrependScrollTopRef.current;
+      const previousHeight = pendingPrependScrollHeightRef.current ?? previousScrollHeight;
+      const heightDelta = container.scrollHeight - previousHeight;
+      container.scrollTop = previousTop + Math.max(0, heightDelta);
+      pendingPrependScrollHeightRef.current = null;
+      setIsTranscriptAtBottom(isTranscriptNearBottom(container));
+    } else if (transcriptItemCount > previousCount) {
       const shouldFollow = previousCount === 0 || previousScrollHeight - (container.scrollTop + container.clientHeight) <= BOTTOM_FOLLOW_THRESHOLD;
       if (shouldFollow) {
         container.scrollTop = container.scrollHeight;
@@ -543,20 +575,42 @@ export function TaskChatTab({ task, projectId, active, addToast, sessionLive, on
       } else {
         setIsTranscriptAtBottom(isTranscriptNearBottom(container));
       }
+      if (pendingPrependScrollHeightRef.current !== null) {
+        pendingPrependScrollHeightRef.current = container.scrollHeight;
+        pendingPrependScrollTopRef.current = container.scrollTop;
+      }
     } else {
       setIsTranscriptAtBottom(isTranscriptNearBottom(container));
     }
 
     previousEntryCountRef.current = transcriptItemCount;
     previousScrollHeightRef.current = container.scrollHeight;
-  }, [active, transcriptItemCount]);
+    previousFirstEntryKeyRef.current = firstEntryKey;
+    previousAgentEntryCountRef.current = entries.length;
+  }, [active, entries.length, firstEntryKey, transcriptItemCount]);
+
+  const loadPreviousMessages = useCallback(async () => {
+    const container = transcriptRef.current;
+    if (!container || !active || !hasMore || loadingMore || loadMoreInFlightRef.current) return;
+    pendingPrependScrollHeightRef.current = container.scrollHeight;
+    pendingPrependScrollTopRef.current = container.scrollTop;
+    loadMoreInFlightRef.current = true;
+    try {
+      await loadMore();
+    } finally {
+      loadMoreInFlightRef.current = false;
+    }
+  }, [active, hasMore, loadMore, loadingMore]);
 
   const handleTranscriptScroll = useCallback(() => {
     const container = transcriptRef.current;
     if (!container) return;
     previousScrollHeightRef.current = container.scrollHeight;
     setIsTranscriptAtBottom(isTranscriptNearBottom(container));
-  }, []);
+    if (container.scrollTop <= TOP_LOAD_THRESHOLD) {
+      void loadPreviousMessages();
+    }
+  }, [loadPreviousMessages]);
 
   const scrollTranscriptToBottom = useCallback(() => {
     const container = transcriptRef.current;
@@ -641,6 +695,26 @@ export function TaskChatTab({ task, projectId, active, addToast, sessionLive, on
         aria-live="polite"
         data-testid="task-chat-transcript"
       >
+        {hasMore || loadingMore ? (
+          <div className="task-chat-load-previous-row">
+            {loadingMore ? (
+              <div className="task-chat-load-previous-status" role="status" data-testid="task-chat-load-previous-loading">
+                <Loader2 className="animate-spin" aria-hidden="true" />
+                <span>Loading earlier messages…</span>
+              </div>
+            ) : (
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm task-chat-load-previous"
+                onClick={() => { void loadPreviousMessages(); }}
+                aria-label="Load previous messages"
+                data-testid="task-chat-load-previous"
+              >
+                Load previous messages
+              </button>
+            )}
+          </div>
+        ) : null}
         {loading && transcriptItemCount === 0 ? (
           <div className="task-chat-empty" role="status">
             <Loader2 className="animate-spin" aria-hidden="true" />

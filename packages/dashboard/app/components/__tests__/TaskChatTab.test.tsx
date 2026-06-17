@@ -96,7 +96,11 @@ function getCssAfter(css: string, marker: string): string {
   return markerIndex >= 0 ? css.slice(markerIndex) : "";
 }
 
-function mockLogs(entries: AgentLogEntry[] = [], loading = false) {
+function mockLogs(
+  entries: AgentLogEntry[] = [],
+  loading = false,
+  overrides: Partial<ReturnType<typeof useAgentLogs>> = {},
+) {
   mockedUseAgentLogs.mockReturnValue({
     entries,
     loading,
@@ -105,6 +109,7 @@ function mockLogs(entries: AgentLogEntry[] = [], loading = false) {
     hasMore: false,
     total: entries.length,
     loadingMore: false,
+    ...overrides,
   });
 }
 
@@ -783,6 +788,145 @@ describe("TaskChatTab", () => {
     rerender(<TaskChatTab task={makeTask()} active addToast={vi.fn()} />);
 
     expect(metrics.scrollTop).toBe(120);
+  });
+
+  it("loads previous messages on scroll-to-top and via the expanded-mode button", async () => {
+    const user = userEvent.setup();
+    const metrics = mockTranscriptMetrics({ scrollHeight: 1000, clientHeight: 240, initialScrollTop: 1000 });
+    const loadMore = vi.fn(async () => {});
+    mockLogs([makeEntry({ agent: "executor", text: "current output" })], false, { hasMore: true, loadMore });
+
+    render(<TaskChatTab task={makeTask()} active expanded onToggleExpanded={vi.fn()} addToast={vi.fn()} />);
+
+    metrics.scrollTop = 0;
+    fireEvent.scroll(screen.getByTestId("task-chat-transcript"));
+    await waitFor(() => expect(loadMore).toHaveBeenCalledTimes(1));
+
+    await user.click(screen.getByTestId("task-chat-load-previous"));
+    expect(loadMore).toHaveBeenCalledTimes(2);
+  });
+
+  it("renders load-previous affordances only for available older history", () => {
+    const loadMore = vi.fn(async () => {});
+    mockLogs([makeEntry({ agent: "executor", text: "current output" })], false, { hasMore: true, loadMore });
+    const { unmount } = render(<TaskChatTab task={makeTask()} active addToast={vi.fn()} />);
+    const button = screen.getByTestId("task-chat-load-previous");
+    expect(button).toBeVisible();
+    expect(button).toHaveAccessibleName("Load previous messages");
+    unmount();
+
+    mockLogs([makeEntry({ agent: "executor", text: "current output" })], false, { hasMore: true, loadingMore: true, loadMore });
+    const loading = render(<TaskChatTab task={makeTask()} active addToast={vi.fn()} />);
+    expect(screen.getByTestId("task-chat-load-previous-loading")).toHaveTextContent("Loading earlier messages…");
+    expect(screen.queryByTestId("task-chat-load-previous")).not.toBeInTheDocument();
+    fireEvent.scroll(screen.getByTestId("task-chat-transcript"));
+    expect(loadMore).not.toHaveBeenCalled();
+    loading.unmount();
+
+    mockLogs([makeEntry({ agent: "executor", text: "current output" })], false, { hasMore: false, loadMore });
+    render(<TaskChatTab task={makeTask()} active addToast={vi.fn()} />);
+    expect(screen.queryByTestId("task-chat-load-previous")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("task-chat-load-previous-loading")).not.toBeInTheDocument();
+    fireEvent.scroll(screen.getByTestId("task-chat-transcript"));
+    expect(loadMore).not.toHaveBeenCalled();
+  });
+
+  it("preserves scroll position when older entries are prepended", async () => {
+    const metrics = mockTranscriptMetrics({ scrollHeight: 1000, clientHeight: 240, initialScrollTop: 0 });
+    const loadMoreDeferred = deferred<void>();
+    const loadMore = vi.fn(() => loadMoreDeferred.promise);
+    const currentEntries = [
+      makeEntry({ agent: "executor", text: "current first", timestamp: "2026-06-12T00:00:02.000Z" }),
+      makeEntry({ agent: "executor", text: "current latest", timestamp: "2026-06-12T00:00:03.000Z" }),
+    ];
+    mockLogs(currentEntries, false, { hasMore: true, loadMore });
+
+    const { rerender } = render(<TaskChatTab task={makeTask()} active expanded onToggleExpanded={vi.fn()} addToast={vi.fn()} />);
+    metrics.scrollTop = 0;
+    fireEvent.scroll(screen.getByTestId("task-chat-transcript"));
+    expect(loadMore).toHaveBeenCalledTimes(1);
+
+    metrics.scrollHeight = 1400;
+    mockLogs([
+      makeEntry({ agent: "executor", text: "older history", timestamp: "2026-06-12T00:00:01.000Z" }),
+      ...currentEntries,
+    ], false, { hasMore: false, loadMore });
+    await act(async () => {
+      loadMoreDeferred.resolve();
+      await loadMoreDeferred.promise;
+    });
+    rerender(<TaskChatTab task={makeTask()} active expanded onToggleExpanded={vi.fn()} addToast={vi.fn()} />);
+
+    expect(metrics.scrollTop).toBe(400);
+    expect(metrics.scrollTop).not.toBe(metrics.scrollHeight);
+    expect(screen.getByTestId("task-chat-jump-to-bottom")).toBeVisible();
+  });
+
+  it("keeps live appends following the bottom while load-previous is in flight", async () => {
+    const user = userEvent.setup();
+    const metrics = mockTranscriptMetrics({ scrollHeight: 1000, clientHeight: 240, initialScrollTop: 0 });
+    const loadMoreDeferred = deferred<void>();
+    const loadMore = vi.fn(() => loadMoreDeferred.promise);
+    const currentEntries = [makeEntry({ agent: "executor", text: "current output", timestamp: "2026-06-12T00:00:02.000Z" })];
+    mockLogs(currentEntries, false, { hasMore: true, loadMore });
+
+    const { rerender } = render(<TaskChatTab task={makeTask()} active addToast={vi.fn()} />);
+    expect(metrics.scrollTop).toBe(1000);
+    await user.click(screen.getByTestId("task-chat-load-previous"));
+    expect(loadMore).toHaveBeenCalledTimes(1);
+
+    metrics.scrollHeight = 1300;
+    mockLogs([
+      ...currentEntries,
+      makeEntry({ agent: "executor", text: "live tail", timestamp: "2026-06-12T00:00:03.000Z" }),
+    ], false, { hasMore: true, loadMore });
+    rerender(<TaskChatTab task={makeTask()} active addToast={vi.fn()} />);
+    expect(metrics.scrollTop).toBe(1300);
+
+    metrics.scrollHeight = 1700;
+    mockLogs([
+      makeEntry({ agent: "executor", text: "older history", timestamp: "2026-06-12T00:00:01.000Z" }),
+      ...currentEntries,
+      makeEntry({ agent: "executor", text: "live tail", timestamp: "2026-06-12T00:00:03.000Z" }),
+    ], false, { hasMore: false, loadMore });
+    await act(async () => {
+      loadMoreDeferred.resolve();
+      await loadMoreDeferred.promise;
+    });
+    rerender(<TaskChatTab task={makeTask()} active addToast={vi.fn()} />);
+
+    expect(metrics.scrollTop).toBe(1700);
+    expect(screen.queryByTestId("task-chat-jump-to-bottom")).not.toBeInTheDocument();
+  });
+
+  it("preserves steering-comment ordering after older entries are prepended", async () => {
+    const metrics = mockTranscriptMetrics({ scrollHeight: 1000, clientHeight: 240, initialScrollTop: 0 });
+    const loadMoreDeferred = deferred<void>();
+    const loadMore = vi.fn(() => loadMoreDeferred.promise);
+    const currentEntries = [makeEntry({ agent: "executor", text: "newer agent output", timestamp: "2026-06-12T00:00:03.000Z" })];
+    const task = makeTask({
+      steeringComments: [makeSteeringComment({ text: "middle user guidance", createdAt: "2026-06-12T00:00:02.000Z" })],
+    });
+    mockLogs(currentEntries, false, { hasMore: true, loadMore });
+
+    const { rerender } = render(<TaskChatTab task={task} active addToast={vi.fn()} />);
+    metrics.scrollTop = 0;
+    fireEvent.scroll(screen.getByTestId("task-chat-transcript"));
+
+    metrics.scrollHeight = 1400;
+    mockLogs([
+      makeEntry({ agent: "executor", text: "older agent output", timestamp: "2026-06-12T00:00:01.000Z" }),
+      ...currentEntries,
+    ], false, { hasMore: false, loadMore });
+    await act(async () => {
+      loadMoreDeferred.resolve();
+      await loadMoreDeferred.promise;
+    });
+    rerender(<TaskChatTab task={task} active addToast={vi.fn()} />);
+
+    const transcriptText = screen.getByTestId("task-chat-transcript").textContent ?? "";
+    expect(transcriptText.indexOf("older agent output")).toBeLessThan(transcriptText.indexOf("middle user guidance"));
+    expect(transcriptText.indexOf("middle user guidance")).toBeLessThan(transcriptText.indexOf("newer agent output"));
   });
 
   it("does not render the jump-to-bottom button for loading or empty transcripts", () => {
@@ -1684,6 +1828,40 @@ describe("TaskChatTab", () => {
     expect(mobileJumpRule).toContain("right: var(--space-sm)");
     expect(mobileJumpRule).toContain("min-inline-size");
     expect(mobileJumpRule).toContain("min-block-size");
+  });
+
+  it("keeps tokenized mobile touch targets for the load-previous affordance", () => {
+    const css = readFileSync(resolve(__dirname, "../TaskChatTab.css"), "utf8");
+    const rowRule = getCssRuleBlock(css, ".task-chat-load-previous-row");
+    const mobileCss = getCssAfter(css, "@media (max-width: 768px)");
+    const mobileRowRule = getCssRuleBlock(mobileCss, ".task-chat-load-previous-row");
+    const mobileButtonRule = getCssRuleBlock(mobileCss, ".task-chat-load-previous,");
+
+    expect(rowRule).toContain("justify-content: center");
+    expect(rowRule).toContain("min-block-size: calc(var(--space-2xl) + var(--space-sm))");
+    expect(css).toContain("gap: var(--space-xs)");
+    expect(css).toContain("color: var(--text-muted)");
+    expect(rowRule).not.toContain("px");
+    expect(css).not.toContain("#");
+    expect(mobileRowRule).toContain("min-block-size: calc(var(--space-2xl) + var(--space-sm))");
+    expect(mobileButtonRule).toContain("min-block-size: calc(var(--space-2xl) + var(--space-sm))");
+  });
+
+  it("scales the task chat send glyph without shrinking the desktop or mobile touch target", () => {
+    const css = readFileSync(resolve(__dirname, "../TaskChatTab.css"), "utf8");
+    const sendRule = getCssRuleBlock(css, ".task-chat-send");
+    const mobileCss = getCssAfter(css, "@media (max-width: 768px)");
+    const mobileSendRule = getCssRuleBlock(mobileCss, ".task-chat-send");
+
+    expect(sendRule).toContain("--btn-icon-size: var(--space-lg)");
+    expect(sendRule).not.toContain("--btn-icon-size: var(--icon-size-md)");
+    expect(sendRule).toContain("inline-size: calc(var(--space-2xl) + var(--space-sm))");
+    expect(sendRule).toContain("min-inline-size: calc(var(--space-2xl) + var(--space-sm))");
+    expect(sendRule).toContain("block-size: calc(var(--space-2xl) + var(--space-sm))");
+    expect(sendRule).toContain("min-block-size: calc(var(--space-2xl) + var(--space-sm))");
+    expect(mobileSendRule).toContain("--btn-icon-size: var(--space-lg)");
+    expect(mobileSendRule).toContain("inline-size: calc(var(--space-2xl) + var(--space-sm))");
+    expect(mobileSendRule).toContain("min-inline-size: calc(var(--space-2xl) + var(--space-sm))");
   });
 
   it("keeps mobile breakpoint scaffolding for the transcript, composer, and collapsible groups", () => {

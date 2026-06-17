@@ -77,6 +77,7 @@ export interface UseChatReturn {
     input: { agentId: string; title?: string; modelProvider?: string; modelId?: string },
   ) => Promise<ChatSessionInfo>;
   archiveSession: (id: string) => Promise<void>;
+  renameSession: (id: string, title: string) => Promise<void>;
   deleteSession: (id: string) => Promise<void>;
 
   // Message operations
@@ -527,13 +528,24 @@ export function useChat(
   const attachIfGenerating = useCallback((
     sessionId: string,
     inFlightGeneration?: ChatInFlightGenerationState | null,
-    options?: { silent?: boolean },
+    options?: { silent?: boolean; priorThreadLoadAlreadyStarted?: boolean },
   ) => {
     if (streamRef.current || !sessionId) {
       return true;
     }
 
     cancelledByUserRef.current = false;
+    const currentMessages = messagesRef.current;
+    const needsPriorThreadLoad = currentMessages.length === 0 || currentMessages[0]?.sessionId !== sessionId;
+    if (needsPriorThreadLoad && !options?.priorThreadLoadAlreadyStarted) {
+      /*
+      FNXC:ChatStreaming 2026-06-16-18:10:
+      In-flight attach must keep the persisted prior thread visible while the assistant bubble streams.
+      The chat:message:added SSE echo is suppressed during streaming to avoid duplicate local bubbles, so attach has to hydrate cached history and start a thread load itself when messages are empty or from another session.
+      */
+      hydrateMessagesFromCache(sessionId);
+      void loadMessages(sessionId);
+    }
     if (inFlightGeneration) {
       setStreamingText(inFlightGeneration.streamingText);
       setStreamingThinking(inFlightGeneration.streamingThinking);
@@ -605,7 +617,7 @@ export function useChat(
         : null,
     };
     return true;
-  }, [addToast, loadMessages, projectId, flushPendingMessage]);
+  }, [addToast, hydrateMessagesFromCache, loadMessages, projectId, flushPendingMessage]);
 
   // Select a session
   const selectSession = useCallback(
@@ -663,7 +675,7 @@ export function useChat(
       // all streaming state. Showing "Connecting…" immediately tells the
       // user the AI is still working.
       if (session?.isGenerating) {
-        attachIfGenerating(session.id, session.inFlightGeneration);
+        attachIfGenerating(session.id, session.inFlightGeneration, { priorThreadLoadAlreadyStarted: true });
       }
 
       // Persist active session to localStorage
@@ -784,6 +796,52 @@ export function useChat(
       }
     },
     [activeSession, projectId],
+  );
+
+  /**
+   * FNXC:Chat 2026-06-16-22:01:
+   * Users can rename regular and quick chat sessions through existing PATCH title plumbing; update the list and active header optimistically so every visible session title reflects the new value immediately while rolling back on API failure.
+   */
+  const renameSession = useCallback(
+    async (id: string, title: string) => {
+      const normalizedTitle = title.trim() || null;
+      const previousSessions = sessions;
+      const previousActiveSession = activeSession;
+
+      setSessions((prev) => prev.map((session) => (session.id === id ? { ...session, title: normalizedTitle } : session)));
+      setActiveSession((prev) => (prev?.id === id ? { ...prev, title: normalizedTitle } : prev));
+
+      try {
+        const data = await updateChatSession(id, { title: normalizedTitle }, projectId);
+        const updatedSession = data.session;
+        setSessions((prev) =>
+          prev.map((session) =>
+            session.id === id
+              ? {
+                  ...session,
+                  title: updatedSession.title,
+                  updatedAt: updatedSession.updatedAt,
+                }
+              : session,
+          ),
+        );
+        setActiveSession((prev) =>
+          prev?.id === id
+            ? {
+                ...prev,
+                title: updatedSession.title,
+                updatedAt: updatedSession.updatedAt,
+              }
+            : prev,
+        );
+      } catch (error) {
+        setSessions(previousSessions);
+        setActiveSession(previousActiveSession);
+        addToast?.("Failed to rename conversation", "error");
+        throw error;
+      }
+    },
+    [activeSession, addToast, projectId, sessions],
   );
 
   // Delete a session
@@ -1309,6 +1367,7 @@ export function useChat(
     selectSession,
     createSession,
     archiveSession,
+    renameSession,
     deleteSession,
     sendMessage,
     stopStreaming,

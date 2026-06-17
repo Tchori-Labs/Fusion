@@ -13,12 +13,45 @@ import {
   mockConfirmWithCheckbox,
   mockUsePluginUiSlots,
   expectBaseRule,
+  getCssRuleBlock,
   readDashboardStylesSource,
   setupTaskDetailModalHooks,
 } from "./TaskDetailModal.test-helpers";
 import { TaskDetailModal, TaskDetailContent } from "../TaskDetailModal";
 
 setupTaskDetailModalHooks();
+
+function getCssAtRuleBlock(css: string, atRule: string, startAt = 0): { block: string; endIndex: number } {
+  const atRuleStart = css.indexOf(atRule, startAt);
+  expect(atRuleStart).toBeGreaterThanOrEqual(0);
+  const openingBrace = css.indexOf("{", atRuleStart);
+  expect(openingBrace).toBeGreaterThanOrEqual(0);
+
+  let depth = 0;
+  for (let index = openingBrace; index < css.length; index += 1) {
+    const char = css[index];
+    if (char === "{") depth += 1;
+    if (char === "}") depth -= 1;
+    if (depth === 0) {
+      return { block: css.slice(openingBrace + 1, index), endIndex: index + 1 };
+    }
+  }
+
+  throw new Error(`Missing closing brace for ${atRule}`);
+}
+
+function getCssAtRuleBlockContaining(css: string, atRule: string, selector: string): string {
+  let startAt = 0;
+  while (startAt < css.length) {
+    const { block, endIndex } = getCssAtRuleBlock(css, atRule, startAt);
+    if (block.includes(selector)) {
+      return block;
+    }
+    startAt = endIndex;
+  }
+
+  throw new Error(`Missing ${atRule} block containing ${selector}`);
+}
 
 describe("TaskDetailModal", () => {
   describe("mobile responsive structure", () => {
@@ -52,6 +85,37 @@ describe("TaskDetailModal", () => {
       expect(css).not.toMatch(/@media[^{]*\(max-width: 768px\)[^{]*\{[\s\S]*?\.detail-timestamps\s*\{[^}]*flex-direction:\s*column;/);
       expect(css).not.toMatch(/@media[^{]*\(max-width: 768px\)[^{]*\{[\s\S]*?\.detail-timestamp-separator\s*\{[^}]*display:\s*none;/);
     });
+    it("keeps desktop and mobile modal sizing guards unchanged", () => {
+      const css = readDashboardStylesSource();
+      const mobileBlock = getCssAtRuleBlockContaining(css, "@media (max-width: 768px)", ".modal-overlay:has(.task-detail-modal)");
+      const mobileOverlayBlock = getCssRuleBlock(mobileBlock, ".modal-overlay:has(.task-detail-modal)");
+      const mobileModalBlock = getCssRuleBlock(mobileBlock, ".modal.task-detail-modal");
+
+      expectBaseRule(css, ".modal.task-detail-modal", "width: min(95vw, 800px);");
+      expectBaseRule(css, ".modal.task-detail-modal", "height: 85vh;");
+      expect(mobileOverlayBlock).toContain("padding-top: 0;");
+      expect(mobileOverlayBlock).toContain("align-items: stretch;");
+      expect(mobileModalBlock).toContain("width: 100vw;");
+      expect(mobileModalBlock).toContain("height: 100dvh;");
+    });
+
+    it("reconciles tablet overlay offset with task-detail max-height and widens the modal", () => {
+      const css = readDashboardStylesSource();
+      const tabletBlock = getCssAtRuleBlockContaining(css, "@media (min-width: 769px) and (max-width: 1024px)", ".modal.task-detail-modal");
+      const tabletOverlayBlock = getCssRuleBlock(tabletBlock, ".modal-overlay:has(.task-detail-modal)");
+      const tabletModalBlock = getCssRuleBlock(tabletBlock, ".modal.task-detail-modal");
+      const overlayOffset = tabletOverlayBlock.match(/--overlay-padding-top:\s*([^;]+);/)?.[1]?.trim();
+      const maxHeightOffset = tabletModalBlock.match(/max-height:\s*calc\(100dvh - var\(--overlay-padding-top,\s*([^)]+)\) - var\(--space-md\)\);/)?.[1]?.trim();
+
+      expect(overlayOffset).toBeTruthy();
+      expect(maxHeightOffset).toBe(overlayOffset);
+      expect(tabletModalBlock).toContain("width: 98vw;");
+      expect(tabletModalBlock).toContain("max-width: 98vw;");
+      expect(tabletModalBlock).toContain("height: 92vh;");
+      expect(tabletModalBlock).not.toContain("width: min(96vw, 1024px);");
+      expect(tabletModalBlock).not.toContain("16px");
+    });
+
     it("renders responsive structural classes (modal-lg, overlay, spacer, tabs, detail-body)", () => {
       const { container } = render(
         <TaskDetailModal

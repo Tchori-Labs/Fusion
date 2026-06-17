@@ -7,6 +7,7 @@ import {
   fetchChatSession,
   createChatSession,
   fetchChatMessages,
+  updateChatSession,
   attachChatStream,
   streamChatResponse,
   cancelChatResponse,
@@ -64,6 +65,7 @@ export interface UseQuickChatReturn {
   selectSession: (session: EnrichedChatSession) => Promise<void>;
   startModelChat: (modelProvider: string, modelId: string) => Promise<void>;
   startFreshSession: (agentId?: string, modelProvider?: string, modelId?: string) => Promise<void>;
+  renameSession: (id: string, title: string) => Promise<void>;
   refreshSessions: () => Promise<void>;
   loadMessages: () => Promise<void>;
   reloadMessages: () => Promise<void>;
@@ -241,6 +243,8 @@ export function useQuickChat(
   // component's useEffect that depends on switchSession.
   const activeSessionRef = useRef<EnrichedChatSession | null>(activeSession);
   activeSessionRef.current = activeSession;
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
 
   // Max retries for session init to prevent infinite toast loops
   const initRetryCountRef = useRef(0);
@@ -321,6 +325,20 @@ export function useQuickChat(
     }
   }, []);
 
+  const loadMessagesForSession = useCallback(async (sessionId: string) => {
+    setMessagesLoading(true);
+    try {
+      const data = await fetchChatMessages(sessionId, { limit: 50, order: "desc" }, projectId);
+      if (activeSessionRef.current?.id === sessionId) {
+        setMessages(data.messages.slice().reverse().map(mapChatMessageToInfo));
+      }
+    } catch (err) {
+      console.error("[useQuickChat] Failed to load messages:", err);
+    } finally {
+      setMessagesLoading(false);
+    }
+  }, [projectId]);
+
   const attachIfGenerating = useCallback((
     sessionId: string,
     inFlightGeneration?: ChatInFlightGenerationState | null,
@@ -331,6 +349,16 @@ export function useQuickChat(
     }
 
     cancelledByUserRef.current = false;
+    const currentMessages = messagesRef.current;
+    const needsPriorThreadLoad = currentMessages.length === 0 || currentMessages[0]?.sessionId !== sessionId;
+    if (needsPriorThreadLoad) {
+      /*
+      FNXC:ChatStreaming 2026-06-16-18:16:
+      QuickChat has the same streaming visibility contract as the full chat view: a resumed in-flight assistant bubble must not hide prior user turns or assistant responses.
+      Because QuickChat has no message cache and streaming suppresses persisted echo handling, attach fetches the session thread directly by id instead of relying on activeSession-bound loaders that may see stale state.
+      */
+      void loadMessagesForSession(sessionId);
+    }
     if (inFlightGeneration) {
       setStreamingText(inFlightGeneration.streamingText);
       setStreamingThinking(inFlightGeneration.streamingThinking);
@@ -361,9 +389,7 @@ export function useQuickChat(
         isStreamingRef.current = false;
         streamRef.current = null;
         lastAttachedGenerationRef.current = null;
-        void fetchChatMessages(sessionId, { limit: 50, order: "desc" }, projectId).then((data) => {
-          if (activeSessionRef.current?.id === sessionId) setMessages(data.messages.slice().reverse().map(mapChatMessageToInfo));
-        }).catch(() => {});
+        void loadMessagesForSession(sessionId);
         flushPendingMessage();
       },
       onError: (data) => {
@@ -378,9 +404,7 @@ export function useQuickChat(
         if (!options?.silent) {
           addToast?.(errorMessage, "error");
         }
-        void fetchChatMessages(sessionId, { limit: 50, order: "desc" }, projectId).then((data) => {
-          if (activeSessionRef.current?.id === sessionId) setMessages(data.messages.slice().reverse().map(mapChatMessageToInfo));
-        }).catch(() => {});
+        void loadMessagesForSession(sessionId);
         flushPendingMessage();
       },
     });
@@ -397,7 +421,7 @@ export function useQuickChat(
         : null,
     };
     return true;
-  }, [addToast, projectId, flushPendingMessage]);
+  }, [addToast, loadMessagesForSession, flushPendingMessage, t, projectId]);
 
   // Fetch existing sessions and find/create one for the given target
   const initializeSession = useCallback(
@@ -456,17 +480,8 @@ export function useQuickChat(
   const loadMessages = useCallback(async () => {
     if (!activeSession) return;
 
-    setMessagesLoading(true);
-    try {
-      const sessionId = activeSession.id;
-      const data = await fetchChatMessages(sessionId, { limit: 50, order: "desc" }, projectId);
-      if (activeSessionRef.current?.id === sessionId) setMessages(data.messages.slice().reverse().map(mapChatMessageToInfo));
-    } catch (err) {
-      console.error("[useQuickChat] Failed to load messages:", err);
-    } finally {
-      setMessagesLoading(false);
-    }
-  }, [activeSession, projectId]);
+    await loadMessagesForSession(activeSession.id);
+  }, [activeSession, loadMessagesForSession]);
 
   // Load messages when session changes
   useEffect(() => {
@@ -524,17 +539,8 @@ export function useQuickChat(
   // Reload messages from server (for same-session revisit)
   const reloadMessages = useCallback(async () => {
     if (!activeSession) return;
-    setMessagesLoading(true);
-    try {
-      const sessionId = activeSession.id;
-      const data = await fetchChatMessages(sessionId, { limit: 50, order: "desc" }, projectId);
-      if (activeSessionRef.current?.id === sessionId) setMessages(data.messages.slice().reverse().map(mapChatMessageToInfo));
-    } catch (err) {
-      console.error("[useQuickChat] Failed to reload messages:", err);
-    } finally {
-      setMessagesLoading(false);
-    }
-  }, [activeSession, projectId]);
+    await loadMessagesForSession(activeSession.id);
+  }, [activeSession, loadMessagesForSession]);
 
   const resetTransientComposerState = useCallback(() => {
     cancelStreamingFlushesRef.current?.();
@@ -1172,6 +1178,52 @@ export function useQuickChat(
     };
   }, [activeSession?.id, pendingMessage, projectId, flushPendingMessage]);
 
+  /**
+   * FNXC:Chat 2026-06-16-22:20:
+   * Quick chat shares the backend session-title PATCH path with regular chat; optimistic session-list and active-session updates keep the dropdown trigger and panel title synchronized immediately after rename.
+   */
+  const renameSession = useCallback(
+    async (id: string, title: string) => {
+      const normalizedTitle = title.trim() || null;
+      const previousSessions = sessions;
+      const previousActiveSession = activeSession;
+
+      setSessions((prev) => prev.map((session) => (session.id === id ? { ...session, title: normalizedTitle } : session)));
+      setActiveSession((prev) => (prev?.id === id ? { ...prev, title: normalizedTitle } : prev));
+
+      try {
+        const response = await updateChatSession(id, { title: normalizedTitle }, projectId);
+        const updatedSession = response.session;
+        setSessions((prev) =>
+          prev.map((session) =>
+            session.id === id
+              ? {
+                  ...session,
+                  title: updatedSession.title,
+                  updatedAt: updatedSession.updatedAt,
+                }
+              : session,
+          ),
+        );
+        setActiveSession((prev) =>
+          prev?.id === id
+            ? {
+                ...prev,
+                title: updatedSession.title,
+                updatedAt: updatedSession.updatedAt,
+              }
+            : prev,
+        );
+      } catch (error) {
+        setSessions(previousSessions);
+        setActiveSession(previousActiveSession);
+        addToast?.(t("chat.failedToRenameConversation", "Failed to rename conversation"), "error");
+        throw error;
+      }
+    },
+    [activeSession, addToast, projectId, sessions, t],
+  );
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -1201,6 +1253,7 @@ export function useQuickChat(
     selectSession,
     startModelChat,
     startFreshSession,
+    renameSession,
     refreshSessions,
     loadMessages,
     reloadMessages,
@@ -1223,6 +1276,7 @@ export function useQuickChat(
     selectSession,
     startModelChat,
     startFreshSession,
+    renameSession,
     refreshSessions,
     loadMessages,
     reloadMessages,

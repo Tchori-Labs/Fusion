@@ -8,6 +8,10 @@ The Fusion dashboard is the main control plane for tasks, agents, missions, sett
 
 When Fusion detects a newer `@runfusion/fusion` release, the Settings modal footer shows the available version with **Learn more** and **Update now** actions. **Update now** installs the latest global package with npm; after it succeeds, restart Fusion to apply the new version because the already-running dashboard server is unchanged until restart.
 
+## Mobile/PWA app icons
+
+The installed mobile/PWA home-screen icons are generated from `packages/dashboard/app/public/logo.svg` by the desktop icon generator. When the Fusion brand mark changes, run `pnpm --filter @fusion/desktop generate:icons` so `packages/dashboard/app/public/icons/icon-192.png` and `packages/dashboard/app/public/icons/icon-512.png` stay aligned with the canonical logo. Also bump `CACHE_NAME` in `packages/dashboard/app/public/sw.js` whenever those icon assets change so installed PWAs refresh the cached launcher images.
+
 ## Browser Navigation
 
 The dashboard now handles browser back navigation consistently on desktop and mobile.
@@ -104,22 +108,27 @@ Behavior:
 - Nodes support manual drag repositioning with a 4px movement threshold to separate click from drag, using pointer capture and zoom-aware delta scaling for reliable tracking
 - Custom node positions persist per project in browser localStorage (`kb:${projectId}:fusion-plugin-dependency-graph:positions`) across refresh/project switches, and **Fit to graph** clears saved positions and restores auto-layout
 
-## Workflow Editor
+## Workflow Selection and Editor
 
-The workflow editor opens as a full-screen modal editor for authoring custom workflows from the board's workflow selector.
+Workflows define how a task moves through planning, execution, review, workflow steps, merge, and any custom graph policy. Most coding tasks can stay on the default Coding workflow, but task and board workflow controls can select a different built-in or custom workflow per task. For the built-in catalog and runtime semantics, see [Workflow Steps → Workflow overview](./workflow-steps.md#workflow-overview).
+
+The workflow editor opens as a full-screen modal editor for inspecting built-ins and authoring custom workflows.
 
 Navigation:
-- Open a task or board surface that shows the workflow selector, then choose **Manage…**
+- Open a task or board surface that shows the workflow selector, then choose **Manage…**.
 - From the board workflow toolbar, use the edit workflow button beside the selector to open the currently selected workflow directly when one is selected.
+- Use the global **Workflow** / **Workflows** entry point from desktop header, compact header overflow, or mobile **More** navigation to browse definitions.
+- From Settings moved-setting stubs, choose **Open workflow settings** to jump to the default workflow's settings values.
 
 Behavior:
 - Opens a workflow node editor with a workflow list/sidebar, canvas, inspector, and settings/authoring panels
 - Read-only built-in workflows are inspectable in the same canvas as custom workflows, including connected success, failure, and rework edges for their graph topology.
+- Custom workflows can be created from blank, duplicated from built-ins/custom definitions, imported/exported, AI-designed, validated, and saved from the editor.
 - The Settings panel is value-first for built-in workflows and groups workflow settings by Models, Review & Approval, Step Execution, and Advanced. Known workflow model values use the same model dropdown picker as **Settings → Project Models** so provider/model pairs are saved together; custom or non-model string values can still use typed inputs. Definitions remain available for custom workflow schema authoring.
 - The main Settings modal also exposes the default workflow's Plan/Triage, Executor, and Reviewer model lanes from **Project Models**; the modal's primary **Save** action writes those dropdown values as workflow setting values for the active default workflow.
 - On desktop, the editor uses a multi-panel canvas layout for editing the graph and adjacent workflow metadata. The **Show simple editor** toggle switches that same workflow into the graph-outline editor with dedicated **Graph**, **Add**, **Settings**, **Fields**, **Columns**, and **Actions** tabs.
 - On viewports `<=768px`, the editor switches to a full-screen mobile sheet. Global workflow entry points open to the workflow list with no workflow preselected and prompt users to select a workflow to edit; the board workflow toolbar edit button opens directly to the selected workflow editor when that selected workflow is available.
-- Simple/mobile editing uses a graph outline instead of making the canvas the primary control. The outline shows nodes, branch/rework edges, column placement, and foreach/loop template children as tappable rows and chips that open the same node and edge detail editors as desktop.
+- Simple/mobile editing uses a graph outline instead of making the canvas the primary control. The outline shows nodes, branch/rework edges, column placement, and foreach/loop template children as tappable rows and chips that open the same node and edge detail editors as desktop. The structural **start** node opens an inspector for the workflow entry column when the workflow defines columns; the **Name** field remains unavailable because the start label is structural. For custom workflows, editable outline rows also expose **Move up** and **Move down** controls that reorder steps within their current column or template parent; built-in workflows remain read-only and hide those controls.
 - Simple/mobile authoring exposes dedicated destinations for **Graph**, **Add**, **Settings**, **Fields**, **Columns**, and **Actions**. Add includes the node palette plus fragments, built-in step templates, and plugin step templates; Actions includes save, AI edit, auto-layout, export, and delete for custom workflows, plus export and duplicate for built-ins. Settings keeps the Definitions/Values tab split.
 - The create-workflow dialog and workflow AI authoring popover follow the same mobile full-screen/sheet pattern so they are not clipped by the editor canvas on narrow screens
 
@@ -235,10 +244,14 @@ Chat view provides project-scoped conversations with agents.
 - Chat message lists now track near-bottom scroll state: while you are reading older messages, live streaming/new replies do not force-scroll; a **Latest** jump control appears until you return to the tail.
 - On mobile direct-chat threads, entering a thread and restoring Chat after tab/page visibility returns re-anchors to the newest message (`scrollTop = scrollHeight`) so the view always opens at the live tail.
 - On mobile direct-chat threads, tapping the active title/identity in the thread header opens a lightweight conversation dropdown so you can switch to another direct session without backing out to the sidebar list first; long conversation titles now stay readable in the dropdown via wrapped option text and taller touch-friendly rows.
+- Direct chat sessions can be renamed from the desktop conversation context menu and from the mobile session switcher; blank rename submissions clear the custom title so the default session label is shown again.
 - On mobile (`max-width: 768px`), chat bubbles are slightly wider in full Chat for improved readability while preserving header/composer gutters.
 - Full Chat tool-call summaries now use a denser mobile layout: grouped and single-call collapsed rows keep icon + label + status on one line (Quick Chat-style scanability) while expanded details remain unchanged.
+- Assistant question tool calls now render as a shared in-chat response card instead of a generic tool-call disclosure. The card supports select, multi-select, text, and yes/no prompts, sends the formatted answer back into the same direct or room thread, and renders historical answered questions read-only.
 - The desktop Chat view toggle and mobile Chat tab now show an unread-response indicator when a live assistant reply arrives for your active chat thread after you leave Chat; opening Chat clears it immediately.
 - Agent-backed chat sessions now expose the same mailbox messaging tools (`fn_send_message`, `fn_read_messages`) used by runtime execution/heartbeat flows whenever the engine `MessageStore` is available; model-only chats continue to run without mailbox tools.
+- Chat attachments are included in agent-visible prompts for both direct sessions and rooms: supported text attachments are appended under an `Attachments` prompt section, and supported images (`png`, `jpeg`, `gif`, `webp`) are passed as image inputs to the model.
+- Chat attachments can be sent without accompanying text in both Quick Chat and Main Chat; fully empty sends with no text and no attachments are still blocked.
 
 ![Chat view](./screenshots/chat-view.png)
 
@@ -258,11 +271,13 @@ Chat Rooms are project-scoped group conversations for multiple agents. They are 
 - Submitting the room composer calls `rooms.sendRoomMessage(...)`, which immediately inserts a temporary local user message and then posts to `POST /api/chat/rooms/:id/messages`.
 - The room composer clears immediately when send is dispatched so the user gets instant feedback; on success the optimistic message is reconciled with persisted server data and the transcript is refreshed to authoritative history.
 - On mobile, room threads use the same keyboard-aware thread anchoring as direct chat, keeping the composer pinned above the soft keyboard while typing.
+- On mobile, the room composer send button uses the same touch/pointer dedupe as direct chat: one tap dispatches exactly one room send even when the browser emits pointer, touch, and click events differently across iOS and Android.
 - The dashboard backend now orchestrates room responders on that POST: mentioned members are routed as direct responders, additional ambient members may reply (up to the room ambient responder cap), and each assistant reply is persisted with `senderAgentId` via `chatStore.addRoomMessage(...)`.
 - Room responders can intentionally stay silent by returning the `__SKIP__` sentinel; that sentinel is treated as a no-op and is never persisted, emitted over SSE, or rendered in room transcripts.
 - If room replies cannot be generated (for example no resolvable responders or all responders fail), the POST fails with an API error (HTTP 502) instead of silently returning only the user message.
 - If room responders cannot be resolved or all room-reply generations fail, the POST now returns an error instead of silently succeeding with only the user message, so failures are surfaced deterministically.
 - Room responder prompt construction now keeps the most recent room messages verbatim and, when the room runs long, prepends a compacted summary of older history (span, participants, and key highlights) plus an explicit latest-user-message marker so replies stay thread-aware without unbounded prompt growth.
+- Room responder prompts include the latest room message attachments using the same direct-chat behavior: text is inlined into the prompt and supported images are forwarded as model image inputs.
 - On send failure, `useChatRooms` rolls back/reconciles optimistic state and rethrows; `ChatView` catches once, restores the exact pre-send composer text for retry/edit, and surfaces a single error toast (no duplicate hook+view notifications).
 - After each send attempt, the room transcript still re-fetches authoritative messages so persisted user/assistant replies remain visible even when SSE delivery is delayed, and `chat:room:message:*` SSE updates continue live fan-out.
 - Relationship summary: direct Chat runs one target (agent or model) per session; rooms are shared threads with multiple agent members and now use the same message contract as direct Chat; Quick Chat is still a floating panel, but when a room is selected it now reads/writes that room thread directly.
@@ -277,6 +292,7 @@ Quick Chat is an optional floating panel for fast, project-scoped assistant conv
 - Uses the same model/provider infrastructure as full Chat view
 - On small screens, compact tool-call summaries in the floating panel intentionally stay single-line (count + tool names + status) to preserve message density
 - The panel header uses a session-first flow: the main dropdown lists persisted sessions (preferring `session.title`, then falling back to deterministic `Session N` labels)
+- Quick Chat sessions can be renamed from the session dropdown, and the active title is shown in the header so custom names remain visible after the dropdown closes.
 - Selecting a session from that dropdown resumes the persisted conversation; this keeps `switchSession()` resume-oriented rather than forcing a new thread
 - Entering `/new` or `/clear` (exact match after trimming) in the Quick Chat composer clears the active thread target: direct/model targets use `startFreshSession(...)`, while room targets call `rooms.clearRoom(activeRoom.id)`.
 - The `+` action opens an inline new-session chooser (inside the panel, not a modal) with `Model` selected by default and optional switch to `Agent`
@@ -286,7 +302,8 @@ Quick Chat is an optional floating panel for fast, project-scoped assistant conv
 - Queued follow-up messages entered while a Quick Chat response is still streaming now persist per session, so closing/reopening the panel restores the queued text and flushes it once the active response completes.
 - Resume lookups still use targeted session queries instead of loading the full active-session list first
 - Tool-call summaries in the floating quick-chat panel are intentionally condensed into a single-line header row (especially on small screens) so tool name + status stay scannable without multi-line wrapping
-- On mobile viewports, opening Quick Chat auto-focuses the composer as soon as it is ready so the keyboard opens immediately
+- Question tool calls use the same shared response card as full Chat, with compact spacing in the floating panel and read-only answered history so Quick Chat can continue agent clarification loops without exposing raw tool JSON.
+- Opening Quick Chat auto-focuses the composer as soon as it is ready on desktop and mobile viewports; mobile additionally uses the stealth-input handoff so the soft keyboard opens immediately
 - FAB dragging uses pointer events with document-level move/up tracking and a 5px drag threshold so Android touch drags reposition reliably while short taps still open Quick Chat
 - Quick Chat now mirrors full Chat tail behavior: if you scroll up, live updates stop auto-following and a **Latest** jump control appears until you jump back down.
 - On mobile, Quick Chat re-anchors to the newest message whenever the panel is opened/reopened and when page visibility is restored, while still preserving the near-bottom gate so intentional scroll-away keeps **Latest** jump behavior.
@@ -323,6 +340,10 @@ Features:
 - PTY-backed shell sessions
 - Ctrl/Cmd+C copies the current terminal selection, while plain Ctrl+C with no selection still sends SIGINT
 - Ctrl/Cmd+V pastes clipboard text into the active terminal session
+- The Shortcuts panel includes Ctrl/Alt helpers, ESC/Tab, common shell shortcuts, and Up/Down/Left/Right arrow buttons that send standard ANSI cursor sequences for keyboard-less shell history and line editing
+- The Preferences panel customizes font family, font size, cursor style, cursor blink, and renderer; changes persist in browser `localStorage` under `kb-terminal-preferences`, with the legacy `kb-terminal-font-size` value migrated automatically
+- Font and cursor preferences apply live to the active xterm instance; renderer changes apply the next time the terminal opens, and mobile devices keep the WebGL renderer disabled to avoid glyph artifacts
+- Embedded CLI session terminals honor the same saved preferences for live, idle, ended, read-only, and interactive session views. Cursor blink still stays disabled for read-only/replay sessions, renderer changes apply on the next session mount, and WebGL never loads on mobile viewports.
 - Mobile-aware virtual keyboard handling and auto-refit behavior
 - Reopen/reconnect/session-recovery flows preserve single-keystroke input forwarding (no duplicate characters, no page refresh required)
 
@@ -429,6 +450,7 @@ Features:
 - Open project markdown files with inline preview
 - Jump directly from a document group to the owning task detail modal
 - Toggle between raw text and rendered markdown using the **Markdown/Plain** button
+- Highlight text in raw or rendered project-file previews, choose **Add comment**, and send the file path, selected snippet, and your comment to the **New Task** dialog
 
 ![Documents view](./screenshots/documents-view.png)
 
@@ -458,6 +480,8 @@ Documents view supports toggling between raw text and formatted markdown when vi
 - **Markdown mode**: Renders markdown with proper formatting (e.g., **bold**, headings, lists, tables)
 
 The toggle button is accessible with `aria-pressed` for screen readers. Toggle state is scoped per-document, so switching between documents resets the view to raw mode.
+
+Project-file previews also support selection comments in both raw and rendered markdown modes. Select text, click **Add comment**, enter a short note, and Fusion opens **New Task** with a seeded description containing the file path, snippet, and comment.
 
 ## Todo View
 
@@ -502,10 +526,11 @@ The Files modal provides a workspace-aware file browser and editor.
 - Use **New File** or **New Folder** in the browser header to create entries in the current folder; new files open in the editor after creation
 - Source/text editing supports a **Line #** header toggle to show or hide line numbers in the editor gutter
 - The line-number preference is saved per project and restored automatically when you switch projects
+- In editable files and markdown preview mode, highlighted text exposes **Add comment** so you can send the file path, selected snippet, best-effort line range, and your note to the **New Task** dialog without copy/paste
 
 ## Memory View
 
-Memory view provides a multi-file editor for project and daily memory files.
+Memory view provides a multi-file editor for project and daily memory files. Its file editors share the same highlighted-text **Add comment** affordance as the Files modal, so memory snippets can seed a New Task with file path, snippet, and comment context.
 
 > Available when the `experimentalFeatures.memoryView` toggle is enabled.
 
@@ -569,7 +594,8 @@ Goals view is a strategic-goals surface backed by the Goals REST API.
 
 What it shows:
 - Header with active-goal count (`N active goals`) and an **Add Goal** action
-- Goal cards with title, optional description, and `Status: active|archived`
+- Goal cards with title, optional description, `Status: active|archived`, and a **Linked Missions** section
+- Linked-mission chips navigate to Mission Manager, each chip has an unlink control, and the card picker hides missions already linked to that goal
 - Empty state when no goals exist: `No goals yet. Add one to begin tracking strategic outcomes.`
 
 Data behavior:
@@ -578,6 +604,7 @@ Data behavior:
 - Add-form drafting: **Draft with AI** sends the typed goal title to `POST /api/ai/draft-goal-description` and drops the returned `{ description }` into the description textarea for review/editing before save
 - Edit: per-card inline form patches title/description via `PATCH /api/goals/:id`
 - Archive/unarchive: `POST /api/goals/:id/archive` and `POST /api/goals/:id/unarchive`
+- Linked missions: `GET /api/goals/:id/missions` for the reverse lookup, then `POST`/`DELETE /api/missions/:missionId/goals/:goalId` for link/unlink mutations
 
 AI drafting behavior:
 - The add-goal form enables **Draft with AI** once the title is non-empty
@@ -748,7 +775,7 @@ Recommended workflow: ordinary chains stay as `Blocks N` so noise stays low, hig
 
 ### Logs → Agent Log view
 
-The **Chat** tab sits between Definition and Logs and presents a live, chat-styled transcript of task agent output. Consecutive entries are grouped by role and labeled as Planner, Executor, Reviewer, or Merger; legacy log rows without an agent role use the neutral Agent fallback. Consecutive text/message chunks inside a role group render as one continuous markdown bubble, while consecutive tool/tool-result/tool-error rows collapse into one expandable, compact tool-call summary that stays collapsed by default; the summary counts tool invocations, lists deduped tool names with overflow, and shows an error count when failures are present, while the expanded body pairs each call with its result or error in dense entry cards. Thinking entries render in a collapsible block that starts expanded. The transcript opens at the latest output whenever the tab loads or becomes active, then follows new live output when you are already near the bottom while preserving your scroll position when you review older messages. When you scroll away from the bottom of a populated transcript, a sticky **Latest** button appears inside the transcript so you can jump back to the newest message and resume live follow. For non-`done` tasks, the composer sends guidance through the same steering path used by comments, including active assigned `in-progress`/`in-review` sessions and messages queued when no session is currently live. On a `done` task, sending a Chat message starts a refinement task using the typed text as feedback and shows a success toast with the new task ID; the current task detail modal remains on the completed task. The task-detail Chat tab keeps the composer pinned and visible on mobile and desktop while the transcript scrolls internally; its textarea placeholder reads “Steer the currently executing agent” for steering mode and switches to refinement copy for completed tasks, with the same inline, icon-only send affordance to the right of the input at every breakpoint. In the composer, plain **Enter** sends, **Shift+Enter** inserts a newline, and **Cmd/Ctrl+Enter** remains a supported send shortcut.
+The **Chat** tab sits between Definition and Logs and presents a live, chat-styled transcript of task agent output. Consecutive entries are grouped by role and labeled as Planner, Executor, Reviewer, or Merger; legacy log rows without an agent role use the neutral Agent fallback. Consecutive text/message chunks inside a role group render as one continuous markdown bubble, while consecutive tool/tool-result/tool-error rows collapse into one expandable, compact tool-call summary that stays collapsed by default; the summary counts tool invocations, lists deduped tool names with overflow, and shows an error count when failures are present, while the expanded body pairs each call with its result or error in dense entry cards. Thinking entries render in a collapsible block that starts expanded. The transcript opens at the latest output whenever the tab loads or becomes active, then follows new live output when you are already near the bottom while preserving your scroll position when you review older messages. When older task-agent history exists, scrolling to the top or selecting **Load previous messages** prepends earlier transcript entries without moving the message you were reading. When you scroll away from the bottom of a populated transcript, a sticky **Latest** button appears inside the transcript so you can jump back to the newest message and resume live follow. For non-`done` tasks, the composer sends guidance through the same steering path used by comments, including active assigned `in-progress`/`in-review` sessions and messages queued when no session is currently live. On a `done` task, sending a Chat message starts a refinement task using the typed text as feedback and shows a success toast with the new task ID; the current task detail modal remains on the completed task. The task-detail Chat tab keeps the composer pinned and visible on mobile and desktop while the transcript scrolls internally; its textarea placeholder reads “Steer the currently executing agent” for steering mode and switches to refinement copy for completed tasks, with the same inline, icon-only send affordance to the right of the input at every breakpoint. In the composer, plain **Enter** sends, **Shift+Enter** inserts a newline, and **Cmd/Ctrl+Enter** remains a supported send shortcut.
 
 The **Logs** tab includes an **Agent Log** subview designed for debugging long-running and tool-heavy sessions:
 
@@ -1187,7 +1214,7 @@ The `index.html` shell is templated server-side: the server injects a per-user `
 
 `styles.css` is the source of truth for tokens (`--space-*`, `--radius-*`, `--shadow-*`, `--duration-*`, `--transition-*`, `--font-*`, `--header-height`, `--mobile-nav-height`, `--standalone-bottom-gap`, `--overlay-padding-top`) and color variables (`--bg`, `--surface`, `--card`, `--text`, `--text-muted`, status colors `--triage`/`--todo`/`--in-progress`/`--in-review`/`--done`, semantic `--color-success`/`--color-error`/`--color-warning`/`--color-info`, status backgrounds `--status-*-bg`).
 
-**Always reference tokens. Never hardcode pixels, hex, or `rgba()` in component CSS** — the only exception is inside `:root`/theme blocks where tokens are *defined*. For translucent backgrounds use `color-mix(in srgb, var(--color) X%, transparent)`, not `rgba()`.
+**Always reference tokens. Never hardcode pixels, hex, or `rgba()` in component CSS** — global/theme token CSS is also covered by `global-theme-css-no-raw-rgba.test.ts`, so raw `rgba()` belongs only in explicit `var(--token, rgba(...))` fallbacks. For translucent backgrounds use `color-mix(in srgb, var(--color) X%, transparent)`, not `rgba()`.
 
 ### Theme system
 
@@ -1230,7 +1257,7 @@ Manage project and global secrets directly inside **Settings → Project → Sec
 
 ### Lazy-Loaded Heavy Views
 
-These 19 views are lazy-loaded via `React.lazy()` with `<Suspense fallback={null}>`. `prefetchLazyViews()` warms chunks once on mount via `requestIdleCallback`. **Do not make these eager.**
+These 22 views are lazy-loaded via `React.lazy()` with `<Suspense fallback={null}>`. `prefetchLazyViews()` warms App-level chunks once on mount via `requestIdleCallback`; AppModals lazy modal imports (`SettingsModal`, `WorkflowNodeEditor`, `SetupWizardModal`) are part of the same inventory. **Do not make these eager.**
 
 - `AgentsView`
 - `NodesView`
@@ -1247,7 +1274,10 @@ These 19 views are lazy-loaded via `React.lazy()` with `<Suspense fallback={null
 - `TodoView`
 - `GoalsView`
 - `StashRecoveryView`
+- `PullRequestView`
 - `SetupWizardModal`
+- `SettingsModal`
+- `WorkflowNodeEditor`
 - `PluginManager`
 - `PiExtensionsManager`
 - `AgentDetailView`

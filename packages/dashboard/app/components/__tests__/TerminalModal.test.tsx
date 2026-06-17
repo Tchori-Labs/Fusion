@@ -5,6 +5,12 @@ FN-6441 rescued this orphaned component test after standalone dashboard-app exec
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { TerminalModal, _resetInitialViewportHeight, ctrlChar, altChar } from "../TerminalModal";
+import {
+  DEFAULT_TERMINAL_PREFERENCES,
+  LEGACY_TERMINAL_FONT_SIZE_KEY,
+  TERMINAL_PREFERENCES_KEY,
+  XTERM_FONT_FAMILY,
+} from "../../utils/terminalPreferences";
 import * as useTerminalModule from "../../hooks/useTerminal";
 import * as useTerminalSessionsModule from "../../hooks/useTerminalSessions";
 import * as apiModule from "../../api";
@@ -87,7 +93,7 @@ const mockUseTerminal = vi.mocked(useTerminalModule.useTerminal);
 const mockUseTerminalSessions = vi.mocked(useTerminalSessionsModule.useTerminalSessions);
 const mockCreateTerminalSession = vi.mocked(apiModule.createTerminalSession);
 const mockKillPtyTerminalSession = vi.mocked(apiModule.killPtyTerminalSession);
-const TERMINAL_FONT_SIZE_KEY = "kb-terminal-font-size";
+const TERMINAL_FONT_SIZE_KEY = LEGACY_TERMINAL_FONT_SIZE_KEY;
 
 describe("ctrlChar/altChar helpers", () => {
   it("maps Ctrl+C/D/Z/L and Alt sequences correctly", () => {
@@ -185,7 +191,11 @@ describe("TerminalModal", () => {
       configurable: true,
     });
     window.localStorage.removeItem(TERMINAL_FONT_SIZE_KEY);
+    window.localStorage.removeItem(TERMINAL_PREFERENCES_KEY);
+    mockTerminalInstance.options.fontFamily = XTERM_FONT_FAMILY;
     mockTerminalInstance.options.fontSize = 14;
+    mockTerminalInstance.options.cursorStyle = "block";
+    mockTerminalInstance.options.cursorBlink = true;
     mockCreateTerminalSession.mockResolvedValue({
       sessionId: "test-session-123",
       shell: "/bin/bash",
@@ -624,8 +634,7 @@ describe("TerminalModal", () => {
 
     expect(Terminal).toHaveBeenCalledWith(
       expect.objectContaining({
-        fontFamily:
-          '"Fusion Terminal Nerd Font Symbols", "MesloLGS NF", "MesloLGM Nerd Font", "JetBrainsMono Nerd Font", "FiraCode Nerd Font", "Hack Nerd Font", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace',
+        fontFamily: XTERM_FONT_FAMILY,
       }),
     );
     expect(screen.getByTestId("terminal-font-size-value").textContent).toBe("14px");
@@ -690,6 +699,24 @@ describe("TerminalModal", () => {
 
       fireEvent.click(screen.getByRole("button", { name: "Tab" }));
       expect(mockSendInput).toHaveBeenCalledWith("\t");
+    });
+
+    it("sends literal ANSI arrow sequences independent of sticky modifiers", async () => {
+      render(<TerminalModal isOpen={true} onClose={mockOnClose} />);
+
+      fireEvent.click(screen.getByTestId("terminal-shortcut-toggle"));
+      fireEvent.click(screen.getByTestId("terminal-modifier-ctrl"));
+
+      fireEvent.click(screen.getByTestId("terminal-arrow-up"));
+      fireEvent.click(screen.getByTestId("terminal-arrow-down"));
+      fireEvent.click(screen.getByTestId("terminal-arrow-left"));
+      fireEvent.click(screen.getByTestId("terminal-arrow-right"));
+
+      expect(mockSendInput).toHaveBeenNthCalledWith(1, "\x1b[A");
+      expect(mockSendInput).toHaveBeenNthCalledWith(2, "\x1b[B");
+      expect(mockSendInput).toHaveBeenNthCalledWith(3, "\x1b[D");
+      expect(mockSendInput).toHaveBeenNthCalledWith(4, "\x1b[C");
+      expect(screen.getByTestId("terminal-modifier-ctrl").getAttribute("aria-pressed")).toBe("false");
     });
 
     it("renders shortcut controls on mobile viewport", async () => {
@@ -847,6 +874,108 @@ describe("TerminalModal", () => {
     });
   });
 
+  describe("terminal preferences", () => {
+    it("toggles the preferences panel", () => {
+      render(<TerminalModal isOpen={true} onClose={mockOnClose} />);
+
+      expect(screen.queryByTestId("terminal-preferences-panel")).toBeNull();
+
+      fireEvent.click(screen.getByTestId("terminal-preferences-toggle"));
+      expect(screen.getByTestId("terminal-preferences-panel")).toBeTruthy();
+
+      fireEvent.click(screen.getByTestId("terminal-preferences-toggle"));
+      expect(screen.queryByTestId("terminal-preferences-panel")).toBeNull();
+    });
+
+    it("persists preference changes and applies live xterm options", async () => {
+      render(<TerminalModal isOpen={true} onClose={mockOnClose} />);
+
+      await waitFor(() => expect(mockTerminalInstance.open).toHaveBeenCalled());
+      fireEvent.click(screen.getByTestId("terminal-preferences-toggle"));
+
+      fireEvent.change(screen.getByTestId("terminal-preference-font-family"), {
+        target: { value: "system-mono" },
+      });
+      fireEvent.change(screen.getByTestId("terminal-preference-cursor-style"), {
+        target: { value: "underline" },
+      });
+      fireEvent.click(screen.getByTestId("terminal-preference-cursor-blink"));
+
+      await waitFor(() => {
+        expect(mockTerminalInstance.options.fontFamily).toContain("ui-monospace");
+        expect(mockTerminalInstance.options.cursorStyle).toBe("underline");
+        expect(mockTerminalInstance.options.cursorBlink).toBe(false);
+      });
+
+      const persisted = JSON.parse(window.localStorage.getItem(TERMINAL_PREFERENCES_KEY) ?? "null");
+      expect(persisted).toEqual({
+        ...DEFAULT_TERMINAL_PREFERENCES,
+        fontFamily: "system-mono",
+        cursorStyle: "underline",
+        cursorBlink: false,
+      });
+    });
+
+    it("resets preferences to defaults", async () => {
+      render(<TerminalModal isOpen={true} onClose={mockOnClose} />);
+
+      fireEvent.click(screen.getByTestId("terminal-preferences-toggle"));
+      fireEvent.change(screen.getByTestId("terminal-preference-font-size"), {
+        target: { value: "21" },
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId("terminal-font-size-value").textContent).toBe("21px");
+      });
+
+      fireEvent.click(screen.getByTestId("terminal-preferences-reset"));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("terminal-font-size-value").textContent).toBe("14px");
+        expect(screen.getByTestId("terminal-preference-font-size")).toHaveProperty("value", "14");
+      });
+      expect(JSON.parse(window.localStorage.getItem(TERMINAL_PREFERENCES_KEY) ?? "null")).toEqual(
+        DEFAULT_TERMINAL_PREFERENCES,
+      );
+    });
+
+    it("keeps panel font-size control and status-bar controls in sync", async () => {
+      render(<TerminalModal isOpen={true} onClose={mockOnClose} />);
+
+      fireEvent.click(screen.getByTestId("terminal-preferences-toggle"));
+      fireEvent.change(screen.getByTestId("terminal-preference-font-size"), {
+        target: { value: "16" },
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId("terminal-font-size-value").textContent).toBe("16px");
+      });
+
+      fireEvent.click(screen.getByTestId("terminal-font-size-increase"));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("terminal-font-size-value").textContent).toBe("17px");
+        expect(screen.getByTestId("terminal-preference-font-size")).toHaveProperty("value", "17");
+      });
+    });
+
+    it("shows renderer changes as next-open only", async () => {
+      render(<TerminalModal isOpen={true} onClose={mockOnClose} />);
+
+      await waitFor(() => expect(mockTerminalInstance.open).toHaveBeenCalled());
+      fireEvent.click(screen.getByTestId("terminal-preferences-toggle"));
+      expect(screen.queryByTestId("terminal-renderer-reopen-note")).toBeNull();
+
+      fireEvent.change(screen.getByTestId("terminal-preference-renderer"), {
+        target: { value: "canvas" },
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId("terminal-renderer-reopen-note")).toBeTruthy();
+      });
+    });
+  });
+
   it("xterm container is rendered (visible under loading overlay) while loading", async () => {
     mockUseTerminalSessions.mockReturnValue({
       ...defaultSessionState,
@@ -967,53 +1096,108 @@ describe("TerminalModal", () => {
       });
     }
 
-    it("sends initialCommand to the existing auto-created terminal on first open", async () => {
-      vi.useFakeTimers();
-      const mockCreateTab = vi.fn();
+    async function flushCreateTabPromise() {
+      await act(async () => {});
+    }
+
+    function scriptTab(id: string, sessionId: string, title = "Terminal 2") {
+      return {
+        id,
+        sessionId,
+        title,
+        isActive: true,
+        createdAt: Date.now(),
+      };
+    }
+
+    function useConnectedTerminal() {
       mockUseTerminal.mockReturnValue(
         createMockTerminalState({ connectionStatus: "connected" })
       );
+    }
+
+    function expectCommandSentAfterCreateTab(mockCreateTab: ReturnType<typeof vi.fn>) {
+      expect(mockCreateTab.mock.invocationCallOrder[0]).toBeLessThan(
+        mockSendInput.mock.invocationCallOrder.at(-1) ?? Number.MAX_SAFE_INTEGER,
+      );
+    }
+
+    it("creates a new tab before sending an initialCommand on a fresh modal open", async () => {
+      vi.useFakeTimers();
+      const newScriptTab = scriptTab("tab-script", "script-session-456");
+      const mockCreateTab = vi.fn().mockResolvedValue(newScriptTab);
+      useConnectedTerminal();
       mockUseTerminalSessions.mockReturnValue({
         ...defaultSessionState,
         createTab: mockCreateTab,
       });
 
       try {
-        render(<TerminalModal isOpen={true} onClose={mockOnClose} initialCommand="npm run build" />);
+        const { rerender } = render(
+          <TerminalModal isOpen={true} onClose={mockOnClose} initialCommand="npm run build" />
+        );
+
+        await flushCreateTabPromise();
+        expect(mockCreateTab).toHaveBeenCalledTimes(1);
+        expect(mockSendInput).not.toHaveBeenCalled();
+
+        mockUseTerminalSessions.mockReturnValue({
+          ...defaultSessionState,
+          tabs: [{ ...defaultTab, isActive: false }, newScriptTab],
+          activeTab: newScriptTab,
+          createTab: mockCreateTab,
+        });
+        rerender(
+          <TerminalModal isOpen={true} onClose={mockOnClose} initialCommand="npm run build" />
+        );
 
         await flushInitialCommandDelay();
-        expect(mockCreateTab).not.toHaveBeenCalled();
+        expect(mockUseTerminal).toHaveBeenLastCalledWith("script-session-456", undefined);
         expect(mockSendInput).toHaveBeenCalledWith("npm run build\n");
+        expectCommandSentAfterCreateTab(mockCreateTab);
       } finally {
         vi.useRealTimers();
       }
     });
 
-    it("does not send the same initialCommand twice on re-renders", async () => {
+    it("dedupes same initialCommand generation on ordinary re-renders", async () => {
       vi.useFakeTimers();
-      mockUseTerminal.mockReturnValue(
-        createMockTerminalState({ connectionStatus: "connected" })
-      );
+      const newScriptTab = scriptTab("tab-script", "script-session-456");
+      const mockCreateTab = vi.fn().mockResolvedValue(newScriptTab);
+      useConnectedTerminal();
+      mockUseTerminalSessions.mockReturnValue({
+        ...defaultSessionState,
+        createTab: mockCreateTab,
+      });
 
       try {
         const { rerender } = render(
           <TerminalModal isOpen={true} onClose={mockOnClose} initialCommand="npm run build" />
         );
 
+        await flushCreateTabPromise();
+        mockUseTerminalSessions.mockReturnValue({
+          ...defaultSessionState,
+          tabs: [{ ...defaultTab, isActive: false }, newScriptTab],
+          activeTab: newScriptTab,
+          createTab: mockCreateTab,
+        });
+        rerender(
+          <TerminalModal isOpen={true} onClose={mockOnClose} initialCommand="npm run build" />
+        );
         await flushInitialCommandDelay();
         expect(mockSendInput).toHaveBeenCalledWith("npm run build\n");
 
-        const callCount = mockSendInput.mock.calls.length;
+        const createCount = mockCreateTab.mock.calls.length;
+        const sendCount = mockSendInput.mock.calls.length;
 
-        // Re-render with same props
         rerender(
           <TerminalModal isOpen={true} onClose={mockOnClose} initialCommand="npm run build" />
         );
 
         await flushInitialCommandDelay();
-
-        // Should not send the command again
-        expect(mockSendInput).toHaveBeenCalledTimes(callCount);
+        expect(mockCreateTab).toHaveBeenCalledTimes(createCount);
+        expect(mockSendInput).toHaveBeenCalledTimes(sendCount);
       } finally {
         vi.useRealTimers();
       }
@@ -1021,17 +1205,9 @@ describe("TerminalModal", () => {
 
     it("creates a new tab before sending an initialCommand that arrives while terminal is already open", async () => {
       vi.useFakeTimers();
-      const scriptTab = {
-        id: "tab-script",
-        sessionId: "script-session-456",
-        title: "Terminal 2",
-        isActive: true,
-        createdAt: Date.now(),
-      };
-      const mockCreateTab = vi.fn().mockResolvedValue(scriptTab);
-      mockUseTerminal.mockReturnValue(
-        createMockTerminalState({ connectionStatus: "connected" })
-      );
+      const newScriptTab = scriptTab("tab-script", "script-session-456");
+      const mockCreateTab = vi.fn().mockResolvedValue(newScriptTab);
+      useConnectedTerminal();
       mockUseTerminalSessions.mockReturnValue({
         ...defaultSessionState,
         createTab: mockCreateTab,
@@ -1046,14 +1222,14 @@ describe("TerminalModal", () => {
           <TerminalModal isOpen={true} onClose={mockOnClose} initialCommand="pnpm test" />
         );
 
-        await act(async () => {});
+        await flushCreateTabPromise();
         expect(mockCreateTab).toHaveBeenCalledTimes(1);
         expect(mockSendInput).not.toHaveBeenCalledWith("pnpm test\n");
 
         mockUseTerminalSessions.mockReturnValue({
           ...defaultSessionState,
-          tabs: [{ ...defaultTab, isActive: false }, scriptTab],
-          activeTab: scriptTab,
+          tabs: [{ ...defaultTab, isActive: false }, newScriptTab],
+          activeTab: newScriptTab,
           createTab: mockCreateTab,
         });
         rerender(
@@ -1061,10 +1237,9 @@ describe("TerminalModal", () => {
         );
 
         await flushInitialCommandDelay();
+        expect(mockUseTerminal).toHaveBeenLastCalledWith("script-session-456", undefined);
         expect(mockSendInput).toHaveBeenCalledWith("pnpm test\n");
-        expect(mockCreateTab.mock.invocationCallOrder[0]).toBeLessThan(
-          mockSendInput.mock.invocationCallOrder.at(-1) ?? Number.MAX_SAFE_INTEGER,
-        );
+        expectCommandSentAfterCreateTab(mockCreateTab);
       } finally {
         vi.useRealTimers();
       }
@@ -1072,17 +1247,12 @@ describe("TerminalModal", () => {
 
     it("creates a new tab before sending a changed initialCommand while terminal remains open", async () => {
       vi.useFakeTimers();
-      const scriptTab = {
-        id: "tab-script",
-        sessionId: "script-session-456",
-        title: "Terminal 2",
-        isActive: true,
-        createdAt: Date.now(),
-      };
-      const mockCreateTab = vi.fn().mockResolvedValue(scriptTab);
-      mockUseTerminal.mockReturnValue(
-        createMockTerminalState({ connectionStatus: "connected" })
-      );
+      const firstScriptTab = scriptTab("tab-script-1", "script-session-456", "Terminal 2");
+      const secondScriptTab = scriptTab("tab-script-2", "script-session-789", "Terminal 3");
+      const mockCreateTab = vi.fn()
+        .mockResolvedValueOnce(firstScriptTab)
+        .mockResolvedValueOnce(secondScriptTab);
+      useConnectedTerminal();
       mockUseTerminalSessions.mockReturnValue({
         ...defaultSessionState,
         createTab: mockCreateTab,
@@ -1093,6 +1263,16 @@ describe("TerminalModal", () => {
           <TerminalModal isOpen={true} onClose={mockOnClose} initialCommand="npm run build" />
         );
 
+        await flushCreateTabPromise();
+        mockUseTerminalSessions.mockReturnValue({
+          ...defaultSessionState,
+          tabs: [{ ...defaultTab, isActive: false }, firstScriptTab],
+          activeTab: firstScriptTab,
+          createTab: mockCreateTab,
+        });
+        rerender(
+          <TerminalModal isOpen={true} onClose={mockOnClose} initialCommand="npm run build" />
+        );
         await flushInitialCommandDelay();
         expect(mockSendInput).toHaveBeenCalledWith("npm run build\n");
 
@@ -1100,14 +1280,14 @@ describe("TerminalModal", () => {
           <TerminalModal isOpen={true} onClose={mockOnClose} initialCommand="pnpm test" />
         );
 
-        await act(async () => {});
-        expect(mockCreateTab).toHaveBeenCalledTimes(1);
+        await flushCreateTabPromise();
+        expect(mockCreateTab).toHaveBeenCalledTimes(2);
         expect(mockSendInput).not.toHaveBeenCalledWith("pnpm test\n");
 
         mockUseTerminalSessions.mockReturnValue({
           ...defaultSessionState,
-          tabs: [{ ...defaultTab, isActive: false }, scriptTab],
-          activeTab: scriptTab,
+          tabs: [{ ...defaultTab, isActive: false }, { ...firstScriptTab, isActive: false }, secondScriptTab],
+          activeTab: secondScriptTab,
           createTab: mockCreateTab,
         });
         rerender(
@@ -1115,38 +1295,222 @@ describe("TerminalModal", () => {
         );
 
         await flushInitialCommandDelay();
+        expect(mockUseTerminal).toHaveBeenLastCalledWith("script-session-789", undefined);
         expect(mockSendInput).toHaveBeenCalledWith("pnpm test\n");
       } finally {
         vi.useRealTimers();
       }
     });
 
-    it("resends command after modal close and reopen", async () => {
+    it("creates a new tab for the same command when the runScript generation changes", async () => {
       vi.useFakeTimers();
-      mockUseTerminal.mockReturnValue(
-        createMockTerminalState({ connectionStatus: "connected" })
-      );
+      const firstScriptTab = scriptTab("tab-script-1", "script-session-456", "Terminal 2");
+      const secondScriptTab = scriptTab("tab-script-2", "script-session-789", "Terminal 3");
+      const mockCreateTab = vi.fn()
+        .mockResolvedValueOnce(firstScriptTab)
+        .mockResolvedValueOnce(secondScriptTab);
+      useConnectedTerminal();
+      mockUseTerminalSessions.mockReturnValue({
+        ...defaultSessionState,
+        createTab: mockCreateTab,
+      });
+
+      try {
+        const { rerender } = render(
+          <TerminalModal isOpen={true} onClose={mockOnClose} initialCommand="pnpm test" initialCommandGeneration={1} />
+        );
+
+        await flushCreateTabPromise();
+        mockUseTerminalSessions.mockReturnValue({
+          ...defaultSessionState,
+          tabs: [{ ...defaultTab, isActive: false }, firstScriptTab],
+          activeTab: firstScriptTab,
+          createTab: mockCreateTab,
+        });
+        rerender(
+          <TerminalModal isOpen={true} onClose={mockOnClose} initialCommand="pnpm test" initialCommandGeneration={1} />
+        );
+        await flushInitialCommandDelay();
+        expect(mockSendInput).toHaveBeenCalledTimes(1);
+
+        rerender(
+          <TerminalModal isOpen={true} onClose={mockOnClose} initialCommand="pnpm test" initialCommandGeneration={2} />
+        );
+        await flushCreateTabPromise();
+        expect(mockCreateTab).toHaveBeenCalledTimes(2);
+        expect(mockSendInput).toHaveBeenCalledTimes(1);
+
+        mockUseTerminalSessions.mockReturnValue({
+          ...defaultSessionState,
+          tabs: [{ ...defaultTab, isActive: false }, { ...firstScriptTab, isActive: false }, secondScriptTab],
+          activeTab: secondScriptTab,
+          createTab: mockCreateTab,
+        });
+        rerender(
+          <TerminalModal isOpen={true} onClose={mockOnClose} initialCommand="pnpm test" initialCommandGeneration={2} />
+        );
+
+        await flushInitialCommandDelay();
+        expect(mockUseTerminal).toHaveBeenLastCalledWith("script-session-789", undefined);
+        expect(mockSendInput).toHaveBeenCalledTimes(2);
+        expect(mockSendInput).toHaveBeenLastCalledWith("pnpm test\n");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("creates the script tab after the auto-created blank tab on a fresh open", async () => {
+      vi.useFakeTimers();
+      const autoCreatedBlankTab = {
+        ...defaultTab,
+        title: "Terminal 1",
+        isActive: true,
+      };
+      const newScriptTab = scriptTab("tab-script", "script-session-456", "Terminal 2");
+      const mockCreateTab = vi.fn().mockResolvedValue(newScriptTab);
+      useConnectedTerminal();
+      mockUseTerminalSessions.mockReturnValue({
+        ...defaultSessionState,
+        tabs: [autoCreatedBlankTab],
+        activeTab: autoCreatedBlankTab,
+        createTab: mockCreateTab,
+      });
 
       try {
         const { rerender } = render(
           <TerminalModal isOpen={true} onClose={mockOnClose} initialCommand="npm run build" />
         );
 
-        await flushInitialCommandDelay();
-        expect(mockSendInput).toHaveBeenCalledWith("npm run build\n");
+        await flushCreateTabPromise();
+        expect(mockCreateTab).toHaveBeenCalledTimes(1);
+        expect(mockSendInput).not.toHaveBeenCalled();
 
-        // Close the modal
-        rerender(
-          <TerminalModal isOpen={false} onClose={mockOnClose} initialCommand="npm run build" />
-        );
-
-        // Reopen with the same command
-        mockSendInput.mockClear();
+        mockUseTerminalSessions.mockReturnValue({
+          ...defaultSessionState,
+          tabs: [{ ...autoCreatedBlankTab, isActive: false }, newScriptTab],
+          activeTab: newScriptTab,
+          createTab: mockCreateTab,
+        });
         rerender(
           <TerminalModal isOpen={true} onClose={mockOnClose} initialCommand="npm run build" />
         );
 
         await flushInitialCommandDelay();
+        expect(mockSendInput).toHaveBeenCalledWith("npm run build\n");
+        expect(screen.getByText("Terminal 1")).toBeTruthy();
+        expect(screen.getByText("Terminal 2")).toBeTruthy();
+        expect(screen.getByText("Terminal 2").closest(".terminal-tab")?.className).toContain("active");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("creates a script tab when multiple tabs already exist", async () => {
+      vi.useFakeTimers();
+      const existingTabOne = { ...defaultTab, isActive: false, title: "Terminal 1" };
+      const existingTabTwo = {
+        id: "tab-2",
+        sessionId: "session-2",
+        title: "Terminal 2",
+        isActive: true,
+        createdAt: Date.now(),
+      };
+      const newScriptTab = scriptTab("tab-script", "script-session-456", "Terminal 3");
+      const mockCreateTab = vi.fn().mockResolvedValue(newScriptTab);
+      useConnectedTerminal();
+      mockUseTerminalSessions.mockReturnValue({
+        ...defaultSessionState,
+        tabs: [existingTabOne, existingTabTwo],
+        activeTab: existingTabTwo,
+        createTab: mockCreateTab,
+      });
+
+      try {
+        const { rerender } = render(
+          <TerminalModal isOpen={true} onClose={mockOnClose} initialCommand="pnpm lint" />
+        );
+
+        await flushCreateTabPromise();
+        expect(mockCreateTab).toHaveBeenCalledTimes(1);
+        expect(mockSendInput).not.toHaveBeenCalled();
+
+        mockUseTerminalSessions.mockReturnValue({
+          ...defaultSessionState,
+          tabs: [existingTabOne, { ...existingTabTwo, isActive: false }, newScriptTab],
+          activeTab: newScriptTab,
+          createTab: mockCreateTab,
+        });
+        rerender(
+          <TerminalModal isOpen={true} onClose={mockOnClose} initialCommand="pnpm lint" />
+        );
+
+        await flushInitialCommandDelay();
+        expect(mockUseTerminal).toHaveBeenLastCalledWith("script-session-456", undefined);
+        expect(mockSendInput).toHaveBeenCalledWith("pnpm lint\n");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("resends command after modal close and reopen by creating a new tab", async () => {
+      vi.useFakeTimers();
+      const firstScriptTab = scriptTab("tab-script-1", "script-session-456", "Terminal 2");
+      const secondScriptTab = scriptTab("tab-script-2", "script-session-789", "Terminal 2");
+      const mockCreateTab = vi.fn()
+        .mockResolvedValueOnce(firstScriptTab)
+        .mockResolvedValueOnce(secondScriptTab);
+      useConnectedTerminal();
+      mockUseTerminalSessions.mockReturnValue({
+        ...defaultSessionState,
+        createTab: mockCreateTab,
+      });
+
+      try {
+        const { rerender } = render(
+          <TerminalModal isOpen={true} onClose={mockOnClose} initialCommand="npm run build" />
+        );
+
+        await flushCreateTabPromise();
+        mockUseTerminalSessions.mockReturnValue({
+          ...defaultSessionState,
+          tabs: [{ ...defaultTab, isActive: false }, firstScriptTab],
+          activeTab: firstScriptTab,
+          createTab: mockCreateTab,
+        });
+        rerender(
+          <TerminalModal isOpen={true} onClose={mockOnClose} initialCommand="npm run build" />
+        );
+        await flushInitialCommandDelay();
+        expect(mockSendInput).toHaveBeenCalledWith("npm run build\n");
+
+        rerender(
+          <TerminalModal isOpen={false} onClose={mockOnClose} initialCommand="npm run build" />
+        );
+
+        mockSendInput.mockClear();
+        mockUseTerminalSessions.mockReturnValue({
+          ...defaultSessionState,
+          createTab: mockCreateTab,
+        });
+        rerender(
+          <TerminalModal isOpen={true} onClose={mockOnClose} initialCommand="npm run build" />
+        );
+
+        await flushCreateTabPromise();
+        expect(mockCreateTab).toHaveBeenCalledTimes(2);
+
+        mockUseTerminalSessions.mockReturnValue({
+          ...defaultSessionState,
+          tabs: [{ ...defaultTab, isActive: false }, secondScriptTab],
+          activeTab: secondScriptTab,
+          createTab: mockCreateTab,
+        });
+        rerender(
+          <TerminalModal isOpen={true} onClose={mockOnClose} initialCommand="npm run build" />
+        );
+
+        await flushInitialCommandDelay();
+        expect(mockUseTerminal).toHaveBeenLastCalledWith("script-session-789", undefined);
         expect(mockSendInput).toHaveBeenCalledWith("npm run build\n");
       } finally {
         vi.useRealTimers();

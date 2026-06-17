@@ -196,6 +196,8 @@ For full Todo View behavior (enablement, list/item actions, API routes, and stor
 Use the 🌳 button:
 
 - Generate 2–5 candidate subtasks
+- Shows live thinking/progress immediately while generation runs, before the candidate list is ready
+- Send the run to the background or close the dialog without canceling it; use the background-session indicator to resume running, waiting, or completed breakdowns
 - Drag to reorder
 - Add dependencies only on earlier items
 - Set each subtask's **Priority** (`low`, `normal`, `high`, `urgent`) before create

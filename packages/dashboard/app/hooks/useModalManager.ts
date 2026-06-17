@@ -5,6 +5,7 @@ import type { SectionId } from "../components/SettingsModal";
 import type { ToastType } from "./useToast";
 
 export type DetailTaskTab =
+  | "chat"
   | "definition"
   | "logs"
   | "changes"
@@ -27,6 +28,7 @@ interface UseModalManagerOptions {
 export interface ModalManager {
   // State
   newTaskModalOpen: boolean;
+  newTaskInitialDescription: string | null;
   isPlanningOpen: boolean;
   planningInitialPlan: string | null;
   planningResumeSessionId: string | undefined;
@@ -47,6 +49,7 @@ export interface ModalManager {
   systemStatsOpen: boolean;
   terminalOpen: boolean;
   terminalInitialCommand: string | undefined;
+  terminalInitialCommandGeneration: number;
   filesOpen: boolean;
   todosOpen: boolean;
   fileBrowserWorkspace: string;
@@ -68,6 +71,7 @@ export interface ModalManager {
 
   // Handlers
   openNewTask: () => void;
+  openNewTaskWithDescription: (description: string) => void;
   closeNewTask: () => void;
 
   openPlanning: () => void;
@@ -154,6 +158,7 @@ export function useModalManager(options: UseModalManagerOptions): ModalManager {
   const { planningSessions } = options;
 
   const [newTaskModalOpen, setNewTaskModalOpen] = useState(false);
+  const [newTaskInitialDescription, setNewTaskInitialDescription] = useState<string | null>(null);
   const [isPlanningOpen, setIsPlanningOpen] = useState(false);
   const [planningInitialPlan, setPlanningInitialPlan] = useState<string | null>(null);
   const [planningResumeSessionId, setPlanningResumeSessionId] = useState<string | undefined>(undefined);
@@ -162,7 +167,11 @@ export function useModalManager(options: UseModalManagerOptions): ModalManager {
   const [subtaskResumeSessionId, setSubtaskResumeSessionId] = useState<string | undefined>(undefined);
   // Can be Task (optimistic open) or TaskDetail (full data with prompt)
   const [detailTask, setDetailTask] = useState<(Task | TaskDetail) | null>(null);
-  const [detailTaskInitialTab, setDetailTaskInitialTab] = useState<DetailTaskTab>("definition");
+  /**
+   * FNXC:TaskDetailTabs 2026-06-17-00:00:
+   * FN-6532 makes Chat the default task-detail view whenever a task opens without an explicit tab request.
+   */
+  const [detailTaskInitialTab, setDetailTaskInitialTab] = useState<DetailTaskTab>("chat");
   const [detailTaskOrigin, setDetailTaskOrigin] = useState<DetailTaskOrigin | null>(null);
   const [groupModalGroupId, setGroupModalGroupId] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -174,6 +183,7 @@ export function useModalManager(options: UseModalManagerOptions): ModalManager {
   const [systemStatsOpen, setSystemStatsOpen] = useState(false);
   const [terminalOpen, setTerminalOpen] = useState(false);
   const [terminalInitialCommand, setTerminalInitialCommand] = useState<string | undefined>(undefined);
+  const [terminalInitialCommandGeneration, setTerminalInitialCommandGeneration] = useState(0);
   const [filesOpen, setFilesOpen] = useState(false);
   const [todosOpen, setTodosOpen] = useState(false);
   const [fileBrowserWorkspace, setFileBrowserWorkspace] = useState("project");
@@ -212,8 +222,18 @@ export function useModalManager(options: UseModalManagerOptions): ModalManager {
       modelOnboardingOpen,
   );
 
-  const openNewTask = useCallback(() => setNewTaskModalOpen(true), []);
-  const closeNewTask = useCallback(() => setNewTaskModalOpen(false), []);
+  const openNewTask = useCallback(() => {
+    setNewTaskInitialDescription(null);
+    setNewTaskModalOpen(true);
+  }, []);
+  const openNewTaskWithDescription = useCallback((description: string) => {
+    setNewTaskInitialDescription(description);
+    setNewTaskModalOpen(true);
+  }, []);
+  const closeNewTask = useCallback(() => {
+    setNewTaskModalOpen(false);
+    setNewTaskInitialDescription(null);
+  }, []);
 
   const openPlanning = useCallback(() => setIsPlanningOpen(true), []);
   const openPlanningWithInitialPlan = useCallback((initialPlan: string) => {
@@ -250,9 +270,13 @@ export function useModalManager(options: UseModalManagerOptions): ModalManager {
     setSubtaskResumeSessionId(undefined);
   }, []);
 
+  /**
+   * FNXC:TaskDetailTabs 2026-06-17-00:00:
+   * Open-detail callers that omit initialTab should land on Chat; explicit tab requests preserve caller intent.
+   */
   const openDetailTask = useCallback((
     task: Task | TaskDetail,
-    initialTab: DetailTaskTab = "definition",
+    initialTab: DetailTaskTab = "chat",
     options?: { origin?: DetailTaskOrigin },
   ) => {
     setDetailTask(task);
@@ -372,6 +396,7 @@ export function useModalManager(options: UseModalManagerOptions): ModalManager {
   const runScript = useCallback(async (_name: string, command: string) => {
     setScriptsOpen(false);
     setTerminalInitialCommand(command);
+    setTerminalInitialCommandGeneration((generation) => generation + 1);
     setTerminalOpen(true);
   }, []);
 
@@ -403,6 +428,7 @@ export function useModalManager(options: UseModalManagerOptions): ModalManager {
 
   return {
     newTaskModalOpen,
+    newTaskInitialDescription,
     isPlanningOpen,
     planningInitialPlan,
     planningResumeSessionId,
@@ -422,6 +448,7 @@ export function useModalManager(options: UseModalManagerOptions): ModalManager {
     systemStatsOpen,
     terminalOpen,
     terminalInitialCommand,
+    terminalInitialCommandGeneration,
     filesOpen,
     todosOpen,
     fileBrowserWorkspace,
@@ -438,6 +465,7 @@ export function useModalManager(options: UseModalManagerOptions): ModalManager {
     modelOnboardingOpen,
     anyModalOpen,
     openNewTask,
+    openNewTaskWithDescription,
     closeNewTask,
     openPlanning,
     openPlanningWithInitialPlan,

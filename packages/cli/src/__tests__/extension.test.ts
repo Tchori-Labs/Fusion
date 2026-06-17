@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { existsSync } from "node:fs";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
 
 /*
@@ -22,10 +24,12 @@ vi.mock("../commands/task.js", () => ({
 }));
 
 import kbExtension from "../extension.js";
-import { TaskStore, AgentStore, MANUAL_RETRY_RESET_COUNTER_KEYS, RESEARCH_RUN_STATUSES } from "@fusion/core";
+import { TaskStore, AgentStore, MANUAL_RETRY_RESET_COUNTER_KEYS, RESEARCH_RUN_STATUSES, MAX_TASK_LIST_TEXT_CHARS, formatTaskListText } from "@fusion/core";
 import type { WorkflowIr } from "@fusion/core";
 import { isGhAvailable, isGhAuthenticated, runGhJsonAsync } from "@fusion/core/gh-cli";
 import { runTaskPlan } from "../commands/task.js";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // ── Mock ExtensionAPI that captures registrations ──────────────────
 
@@ -2545,6 +2549,249 @@ describe("fn pi extension (runnable structured-output regression slice)", () => 
     expect(result.details.taskId).toMatch(/^[A-Z]+-\d+$/);
     expect(result.details.dependencies).toEqual([parent.details.taskId]);
     expect(result.content[0].text).toContain(result.details.taskId);
+  });
+
+  describe("fn_task_list", () => {
+    function expectSingleBoundedTextBlock(result: any) {
+      expect(result.content).toHaveLength(1);
+      expect(result.content[0].type).toBe("text");
+      expect(result.content[0].text).toBeTruthy();
+      expect(result.content[0].text.length).toBeLessThanOrEqual(MAX_TASK_LIST_TEXT_CHARS);
+    }
+
+    it("returns bounded text for omitted and provided column/limit params", async () => {
+      const store = new TaskStore(tmpDir);
+      await store.init();
+      try {
+        await store.createTask({ description: "Planning task one" });
+        await store.createTask({ description: "Todo task one", column: "todo" });
+      } finally {
+        store.close();
+      }
+
+      const listTool = api.tools.get("fn_task_list")!;
+      for (const [callId, params] of [
+        ["list-all-default", {}],
+        ["list-todo-default", { column: "todo" }],
+        ["list-todo-large-limit", { column: "todo", limit: 50 }],
+      ] as const) {
+        const result = await listTool.execute(callId, params, undefined, undefined, makeCtx(tmpDir));
+        expectSingleBoundedTextBlock(result);
+        expect(result.details.count).toBe(2);
+      }
+    });
+
+    it("keeps small column-filtered listings complete without the clamp marker", async () => {
+      const store = new TaskStore(tmpDir);
+      await store.init();
+      try {
+        const first = await store.createTask({ description: "Small todo task one", column: "todo" });
+        await store.createTask({ description: "Small todo task two", column: "todo", dependencies: [first.id] });
+      } finally {
+        store.close();
+      }
+
+      const listTool = api.tools.get("fn_task_list")!;
+      const result = await listTool.execute(
+        "list-small-todo",
+        { column: "todo", limit: 50 },
+        undefined,
+        undefined,
+        makeCtx(tmpDir),
+      );
+      const text = result.content[0].text;
+
+      expect(result.content).toHaveLength(1);
+      expect(result.content[0].type).toBe("text");
+      expect(result.content.some((block: any) => block.type === "image")).toBe(false);
+      expect(text).toContain("Todo (2):");
+      expect(text).toContain("FN-001");
+      expect(text).toContain("FN-002");
+      expect(text).toContain("[deps: FN-001]");
+      expect(text).not.toContain("truncated to fit; narrow with column/limit");
+      expect(result.details.count).toBe(2);
+    });
+
+    it("bounds broad listings as a single plain-text block", async () => {
+      const store = new TaskStore(tmpDir);
+      await store.init();
+      try {
+        for (let i = 1; i <= 60; i += 1) {
+          await store.createTask({
+            title: `Planning task ${String(i).padStart(3, "0")} ${"x".repeat(1_600)}`,
+            description: `Large planning task ${String(i).padStart(3, "0")}`,
+          });
+        }
+      } finally {
+        store.close();
+      }
+
+      const listTool = api.tools.get("fn_task_list")!;
+      const result = await listTool.execute(
+        "list-large-broad",
+        { limit: 10 },
+        undefined,
+        undefined,
+        makeCtx(tmpDir),
+      );
+      const text = result.content[0].text;
+
+      expect(result.content).toHaveLength(1);
+      expect(result.content[0].type).toBe("text");
+      expect(result.content.some((block: any) => block.type === "image")).toBe(false);
+      expect(text).toBeTruthy();
+      expect(text.length).toBeLessThanOrEqual(MAX_TASK_LIST_TEXT_CHARS);
+      expect(text).toContain("Planning (60):");
+      expect(text).toContain("FN-001");
+      expect(text).toContain("truncated to fit; narrow with column/limit");
+      expect(result.details.count).toBe(60);
+    });
+
+    it("bounds large column-filtered listings as a single plain-text block", async () => {
+      const store = new TaskStore(tmpDir);
+      await store.init();
+      try {
+        const first = await store.createTask({
+          title: `Todo task 001 ${"x".repeat(260)}`,
+          description: "Large todo task 001",
+          column: "todo",
+        });
+        for (let i = 2; i <= 60; i += 1) {
+          await store.createTask({
+            title: `Todo task ${String(i).padStart(3, "0")} ${"x".repeat(260)}`,
+            description: `Large todo task ${String(i).padStart(3, "0")}`,
+            column: "todo",
+            dependencies: [first.id],
+          });
+        }
+      } finally {
+        store.close();
+      }
+
+      const listTool = api.tools.get("fn_task_list")!;
+      const result = await listTool.execute(
+        "list-large-todo",
+        { column: "todo", limit: 50 },
+        undefined,
+        undefined,
+        makeCtx(tmpDir),
+      );
+      const text = result.content[0].text;
+
+      expect(result.content).toHaveLength(1);
+      expect(result.content[0].type).toBe("text");
+      expect(result.content.some((block: any) => block.type === "image")).toBe(false);
+      expect(text).toBeTruthy();
+      expect(text.length).toBeLessThanOrEqual(MAX_TASK_LIST_TEXT_CHARS);
+      expect(text).toContain("Todo (60):");
+      expect(text).toContain("FN-001");
+      expect(text).toContain("FN-002");
+      expect(text).toContain("[deps: FN-001]");
+      expect(text).toContain("truncated to fit; narrow with column/limit");
+      expect(result.details.count).toBe(60);
+    });
+
+    /**
+     * FNXC:TaskListOutput 2026-06-17-02:37:
+     * FN-6535 reproduces the heartbeat failure at the actual CLI tool surface while forcing @fusion/core to resolve through the built dist barrel. The normal CLI suite aliases @fusion/core to source, so this targeted mock is the regression guard for stale exports.import dist artifacts.
+     */
+    it.skipIf(!existsSync(resolve(__dirname, "../../../core/dist/index.js")))(
+      "executes with @fusion/core resolved through the built dist barrel",
+      async () => {
+        const distCoreIndex = resolve(__dirname, "../../../core/dist/index.js");
+        const distTaskListFormat = resolve(__dirname, "../../../core/dist/task-list-format.js");
+        expect(existsSync(distTaskListFormat)).toBe(true);
+
+        const store = new TaskStore(tmpDir);
+        await store.init();
+        try {
+          const first = await store.createTask({
+            title: `Runtime-dist todo task 001 ${"x".repeat(700)}`,
+            description: "Runtime-dist todo task 001",
+            column: "todo",
+          });
+          for (let i = 2; i <= 60; i += 1) {
+            await store.createTask({
+              title: `Runtime-dist todo task ${String(i).padStart(3, "0")} ${"x".repeat(700)}`,
+              description: `Runtime-dist todo task ${String(i).padStart(3, "0")}`,
+              column: "todo",
+              dependencies: [first.id],
+            });
+          }
+        } finally {
+          store.close();
+        }
+
+        vi.resetModules();
+        vi.doMock("@fusion/core", async () => import(pathToFileURL(distCoreIndex).href));
+        try {
+          const { default: runtimeCoreExtension } = await import("../extension.js?fn6535-runtime-core-dist");
+          const runtimeApi = createMockAPI();
+          runtimeCoreExtension(runtimeApi);
+          const listTool = runtimeApi.tools.get("fn_task_list")!;
+
+          const broadResult = await listTool.execute(
+            "list-runtime-dist-broad",
+            { limit: 20 },
+            undefined,
+            undefined,
+            makeCtx(tmpDir),
+          );
+          const broadText = broadResult.content[0].text;
+          expect(broadResult.content).toHaveLength(1);
+          expect(broadResult.content[0].type).toBe("text");
+          expect(broadText.length).toBeLessThanOrEqual(MAX_TASK_LIST_TEXT_CHARS);
+          expect(broadText).toContain("Todo (60):");
+          expect(broadText).toContain("truncated to fit; narrow with column/limit");
+
+          const todoResult = await listTool.execute(
+            "list-runtime-dist-todo",
+            { column: "todo", limit: 50 },
+            undefined,
+            undefined,
+            makeCtx(tmpDir),
+          );
+          const todoText = todoResult.content[0].text;
+          expect(todoResult.content).toHaveLength(1);
+          expect(todoResult.content[0].type).toBe("text");
+          expect(todoText.length).toBeLessThanOrEqual(MAX_TASK_LIST_TEXT_CHARS);
+          expect(todoText).toContain("Todo (60):");
+          expect(todoText).toContain("FN-001");
+          expect(todoText).toContain("[deps: FN-001]");
+          expect(todoText).toContain("truncated to fit; narrow with column/limit");
+          expect(todoResult.details.count).toBe(60);
+        } finally {
+          vi.doUnmock("@fusion/core");
+          vi.resetModules();
+        }
+      },
+    );
+
+    it("degrades to bounded text when the clamp export is unavailable", () => {
+      const boardLinesWithoutParams = [
+        "Planning (2):",
+        `  FN-001  Planning task ${"x".repeat(6_000)}`,
+        `  FN-002  Planning task ${"x".repeat(6_000)}`,
+        "",
+      ];
+      const boardLinesWithColumnAndLimit = [
+        "Todo (2):",
+        `  FN-003  Todo task ${"x".repeat(6_000)}`,
+        "  ... and 1 more",
+        "",
+      ];
+
+      /*
+      FNXC:TaskListOutput 2026-06-17-05:55:
+      FN-6570 exercises the formatter boundary called by the CLI surface because the existing extension harness imports @fusion/core before per-test mocks can safely replace only clampTaskListText with a stale-dist missing export.
+      The two line sets mirror fn_task_list with omitted params and with column/limit provided, proving the surface path now receives bounded text instead of a crashing `(0 , _core.clampTaskListText) is not a function` call.
+      */
+      for (const lines of [boardLinesWithoutParams, boardLinesWithColumnAndLimit]) {
+        const text = formatTaskListText(lines, { clamp: undefined }).trimEnd();
+        expect(text).toBeTruthy();
+        expect(text.length).toBeLessThanOrEqual(MAX_TASK_LIST_TEXT_CHARS);
+      }
+    });
   });
 
   it("returns structured details for invalid task assignment", async () => {

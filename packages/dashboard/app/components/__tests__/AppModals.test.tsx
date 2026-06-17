@@ -162,7 +162,7 @@ describe("AppModals", () => {
   const mockModalManager: ModalManager = {
     // State
     detailTask: null,
-    detailTaskInitialTab: "definition",
+    detailTaskInitialTab: "chat",
     settingsOpen: false,
     settingsInitialSection: undefined,
     githubImportOpen: false,
@@ -174,6 +174,7 @@ describe("AppModals", () => {
     subtaskResumeSessionId: undefined,
     terminalOpen: false,
     terminalInitialCommand: undefined,
+    terminalInitialCommandGeneration: 0,
     scriptsOpen: false,
     filesOpen: false,
     todosOpen: false,
