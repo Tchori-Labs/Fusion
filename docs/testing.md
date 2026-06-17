@@ -32,6 +32,8 @@ pnpm verify:workspace  # deep opt-in verification: lint -> test:full -> build (N
 
 `pnpm test` auto-runs `scripts/ensure-test-artifacts.mjs` to rebuild missing/stale dist artifacts. Dashboard and `dependency-graph` package lanes auto-bootstrap too. If you hit opaque `Failed to resolve import "./cli-spawn.js"` (or similar), treat it as bootstrap regression against FN-4605 — don't work around with a manual `pnpm build`.
 
+Public `@fusion/core` exports consumed by runtime tools should include a literal built-dist guard (for example importing `packages/core/dist/index.js`) when package test aliases otherwise resolve `@fusion/core` to source.
+
 ## Dashboard Test Lanes
 
 ```bash

@@ -2579,6 +2579,41 @@ describe("fn pi extension (runnable structured-output regression slice)", () => 
       expect(result.details.count).toBe(2);
     });
 
+    it("bounds broad listings as a single plain-text block", async () => {
+      const store = new TaskStore(tmpDir);
+      await store.init();
+      try {
+        for (let i = 1; i <= 60; i += 1) {
+          await store.createTask({
+            title: `Planning task ${String(i).padStart(3, "0")} ${"x".repeat(1_600)}`,
+            description: `Large planning task ${String(i).padStart(3, "0")}`,
+          });
+        }
+      } finally {
+        store.close();
+      }
+
+      const listTool = api.tools.get("fn_task_list")!;
+      const result = await listTool.execute(
+        "list-large-broad",
+        { limit: 10 },
+        undefined,
+        undefined,
+        makeCtx(tmpDir),
+      );
+      const text = result.content[0].text;
+
+      expect(result.content).toHaveLength(1);
+      expect(result.content[0].type).toBe("text");
+      expect(result.content.some((block: any) => block.type === "image")).toBe(false);
+      expect(text).toBeTruthy();
+      expect(text.length).toBeLessThanOrEqual(MAX_TASK_LIST_TEXT_CHARS);
+      expect(text).toContain("Planning (60):");
+      expect(text).toContain("FN-001");
+      expect(text).toContain("truncated to fit; narrow with column/limit");
+      expect(result.details.count).toBe(60);
+    });
+
     it("bounds large column-filtered listings as a single plain-text block", async () => {
       const store = new TaskStore(tmpDir);
       await store.init();

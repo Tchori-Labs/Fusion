@@ -1,5 +1,37 @@
+import { existsSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
+import {
+  clampTaskListText as sourceBarrelClampTaskListText,
+  MAX_TASK_LIST_TEXT_CHARS as SOURCE_BARREL_MAX_TASK_LIST_TEXT_CHARS,
+} from "../index.js";
 import { clampTaskListText, MAX_TASK_LIST_TEXT_CHARS } from "../task-list-format.js";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
+/**
+ * FNXC:TaskListOutput 2026-06-16-23:20:
+ * FN-6515 requires the @fusion/core dist barrel to export clampTaskListText and MAX_TASK_LIST_TEXT_CHARS because heartbeat fn_task_list and other runtime surfaces load the built dist, not src/index.ts. Source-aliased tests alone can pass while a stale or missing dist export still crashes ambient agents.
+ */
+describe("@fusion/core dist barrel export wiring (FN-6515)", () => {
+  const distIndex = resolve(__dirname, "../../dist/index.js");
+  const distTaskListFormat = resolve(__dirname, "../../dist/task-list-format.js");
+
+  it("re-exports task-list formatting helpers from the source barrel", () => {
+    expect(typeof sourceBarrelClampTaskListText).toBe("function");
+    expect(typeof SOURCE_BARREL_MAX_TASK_LIST_TEXT_CHARS).toBe("number");
+  });
+
+  it.skipIf(!existsSync(distIndex))("re-exports task-list formatting helpers from the built dist barrel", async () => {
+    expect(existsSync(distTaskListFormat)).toBe(true);
+
+    const mod = await import(pathToFileURL(distIndex).href);
+
+    expect(typeof mod.clampTaskListText).toBe("function");
+    expect(typeof mod.MAX_TASK_LIST_TEXT_CHARS).toBe("number");
+  });
+});
 
 describe("clampTaskListText", () => {
   it("returns an empty string for empty input", () => {
