@@ -56,6 +56,47 @@ function compareNodePosition(
   return Math.round(a.position.x) - Math.round(b.position.x);
 }
 
+function isEditableWorkflowNode(node: FlowNode<WorkflowFlowNodeData>): boolean {
+  return node.data.kind !== "start" && node.data.kind !== "end" && !isColumnBandNode(node.id);
+}
+
+function isSameReorderGroup(
+  target: FlowNode<WorkflowFlowNodeData>,
+  candidate: FlowNode<WorkflowFlowNodeData>,
+): boolean {
+  if (isColumnBandNode(candidate.id)) return false;
+  if (target.parentId || candidate.parentId) return target.parentId === candidate.parentId;
+  return target.data.column === candidate.data.column;
+}
+
+export type WorkflowNodeReorderDirection = "up" | "down";
+
+/**
+ * FNXC:WorkflowSimpleEditor 2026-06-17-02:55:
+ * Simple-editor order is derived from React Flow positions through compareNodePosition, so move controls must swap sibling positions instead of inventing a second ordering field. Keep moves inside the same column group for top-level nodes and inside the same parent group for template children so the re-derived outline and persisted IR stay consistent with canvas placement.
+ */
+export function reorderWorkflowNode(
+  nodes: FlowNode<WorkflowFlowNodeData>[],
+  nodeId: string,
+  direction: WorkflowNodeReorderDirection,
+): FlowNode<WorkflowFlowNodeData>[] {
+  const target = nodes.find((node) => node.id === nodeId);
+  if (!target || !isEditableWorkflowNode(target)) return nodes;
+
+  const siblings = nodes
+    .filter((node) => isSameReorderGroup(target, node))
+    .sort(compareNodePosition);
+  const targetIndex = siblings.findIndex((node) => node.id === nodeId);
+  const neighbor = siblings[targetIndex + (direction === "up" ? -1 : 1)];
+  if (!neighbor || !isEditableWorkflowNode(neighbor)) return nodes;
+
+  return nodes.map((node) => {
+    if (node.id === target.id) return { ...node, position: { ...neighbor.position } };
+    if (node.id === neighbor.id) return { ...node, position: { ...target.position } };
+    return node;
+  });
+}
+
 function buildColumnNameMap(columns: WorkflowIrColumn[], nodes: FlowNode<WorkflowFlowNodeData>[]) {
   const names = new Map(columns.map((column) => [column.id, column.name || column.id]));
   for (const node of nodes) {

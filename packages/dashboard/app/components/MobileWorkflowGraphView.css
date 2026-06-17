@@ -105,7 +105,12 @@
   font-size: 0.78rem;
 }
 
+/*
+FNXC:WorkflowSimpleEditor 2026-06-17-03:02:
+Simple-editor step order is editable on touch and compact desktop surfaces, so move controls use the same minimum touch target and focus/active treatment as existing outline buttons without creating hidden shells for read-only or structural rows.
+*/
 .mobile-wf-node-expand,
+.mobile-wf-node-move,
 .mobile-wf-connect-button {
   display: inline-flex;
   align-items: center;
@@ -122,8 +127,15 @@
     box-shadow var(--transition-fast);
 }
 
-.mobile-wf-node-expand {
+.mobile-wf-node-expand,
+.mobile-wf-node-move {
   width: var(--wf-editor-touch-target);
+}
+
+.mobile-wf-node-move:disabled {
+  cursor: not-allowed;
+  opacity: var(--opacity-disabled, 0.5);
+  transform: none;
 }
 
 .mobile-wf-connect-button {
@@ -132,11 +144,13 @@
 }
 
 .mobile-wf-node-expand:hover,
+.mobile-wf-node-move:not(:disabled):hover,
 .mobile-wf-connect-button:hover {
   background: var(--bg-tertiary);
 }
 
 .mobile-wf-node-expand:focus-visible,
+.mobile-wf-node-move:focus-visible,
 .mobile-wf-connect-button:focus-visible,
 .mobile-wf-connect-select:focus-visible {
   outline: none;
@@ -144,6 +158,7 @@
 }
 
 .mobile-wf-node-expand:active,
+.mobile-wf-node-move:not(:disabled):active,
 .mobile-wf-connect-button:active {
   transform: scale(0.97);
 }

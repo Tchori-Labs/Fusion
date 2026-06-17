@@ -47,12 +47,14 @@ describe("MobileWorkflowGraphView CSS contract", () => {
     const nodeMainActiveRule = findRule([graphCss], /\.mobile-wf-node-main:active\s*\{[^}]*\}/);
     expect(nodeMainActiveRule).toMatch(/transform\s*:\s*scale\(0\.97\)\s*;/);
 
-    const nodeExpandHoverRule = findRule([graphCss], /\.mobile-wf-node-expand:hover\s*\{[^}]*\}/);
+    const nodeExpandHoverRule = findRule([graphCss], /\.mobile-wf-node-expand:hover,\s*\.mobile-wf-node-move:not\(:disabled\):hover,\s*\.mobile-wf-connect-button:hover\s*\{[^}]*\}/);
     expect(nodeExpandHoverRule).toMatch(/background\s*:\s*var\(--bg-tertiary\)\s*;/);
-    const nodeExpandFocusRule = findRule([graphCss], /\.mobile-wf-node-expand:focus-visible\s*\{[^}]*\}/);
+    const nodeExpandFocusRule = findRule([graphCss], /\.mobile-wf-node-expand:focus-visible,\s*\.mobile-wf-node-move:focus-visible,\s*\.mobile-wf-connect-button:focus-visible,\s*\.mobile-wf-connect-select:focus-visible\s*\{[^}]*\}/);
     expect(nodeExpandFocusRule).toMatch(/box-shadow\s*:\s*var\(--focus-ring-strong\)\s*;/);
-    const nodeExpandActiveRule = findRule([graphCss], /\.mobile-wf-node-expand:active\s*\{[^}]*\}/);
+    const nodeExpandActiveRule = findRule([graphCss], /\.mobile-wf-node-expand:active,\s*\.mobile-wf-node-move:not\(:disabled\):active,\s*\.mobile-wf-connect-button:active\s*\{[^}]*\}/);
     expect(nodeExpandActiveRule).toMatch(/transform\s*:\s*scale\(0\.97\)\s*;/);
+    const nodeMoveSizeRule = findRule([graphCss], /\.mobile-wf-node-expand,\s*\.mobile-wf-node-move\s*\{[^}]*\}/);
+    expect(nodeMoveSizeRule).toMatch(/width\s*:\s*var\(--wf-editor-touch-target\)\s*;/);
 
     const edgeChipHoverRule = findRule([graphCss], /\.mobile-wf-edge-chip:hover\s*\{[^}]*\}/);
     expect(edgeChipHoverRule).toMatch(/background\s*:\s*var\(--bg-secondary\)\s*;/);

@@ -85,7 +85,12 @@ import { WorkflowSettingsPanel } from "./WorkflowSettingsPanel";
 import type { WorkflowFieldDefinition, WorkflowSettingDefinition } from "../api";
 import { CustomModelDropdown } from "./CustomModelDropdown";
 import { MobileWorkflowGraphView } from "./MobileWorkflowGraphView";
-import { buildMobileWorkflowGraph, type MobileWorkflowConnectionTarget } from "./workflow-mobile-graph";
+import {
+  buildMobileWorkflowGraph,
+  reorderWorkflowNode,
+  type MobileWorkflowConnectionTarget,
+  type WorkflowNodeReorderDirection,
+} from "./workflow-mobile-graph";
 
 type ExecutorKind = "model" | "agent" | "skill" | "cli" | "cli-agent";
 type MobileWorkflowPanel = "graph" | "add" | "settings" | "fields" | "columns" | "actions";
@@ -1276,6 +1281,17 @@ function InnerEditor({
       createConnectionEdge({ source, target, sourceHandle: null, targetHandle: null }, { selectCreatedEdge: true });
     },
     [createConnectionEdge],
+  );
+
+  /**
+   * FNXC:WorkflowSimpleEditor 2026-06-17-03:08:
+   * Custom-workflow simple editors need read-only-safe reordering without a canvas drag gesture. Swap sibling node positions through the shared mobile graph helper so built-ins stay gated, selection remains untouched, and the existing IR save path persists the new position-derived order.
+   */
+  const onMoveSimpleNode = useCallback(
+    (nodeId: string, direction: WorkflowNodeReorderDirection) => {
+      setNodes((ns) => reorderWorkflowNode(ns, nodeId, direction));
+    },
+    [setNodes],
   );
 
   // Dragging a step node into a column band sets node.column (position-based
@@ -2575,6 +2591,8 @@ function InnerEditor({
                             setSelectedNodeId(null);
                           }}
                           onCreateConnection={isBuiltin ? undefined : onCreateSimpleConnection}
+                          canReorder={!isBuiltin}
+                          onMoveNode={onMoveSimpleNode}
                         />
                       )}
 
