@@ -333,6 +333,7 @@ describe("ListView", () => {
     subscribeSseMock.mockClear();
     for (const key of Object.keys(listViewSseHandlers)) delete listViewSseHandlers[key];
     localStorage.clear();
+    showAllColumnsByDefault();
     ensureMatchMedia();
     vi.spyOn(window, "matchMedia").mockImplementation((query: string) => ({
       matches: false,
@@ -1526,6 +1527,7 @@ describe("ListView", () => {
       createMockTask({ id: "FN-002", column: "todo" }),
     ];
 
+    localStorage.clear();
     renderListView({ tasks });
     enterBulkEditMode();
 
@@ -1533,18 +1535,18 @@ describe("ListView", () => {
     const sectionHeaders = screen.getAllByRole("row").filter(r => r.className.includes("list-section-header"));
 
     // Verify each section header has colSpan that includes the checkbox column
-    // Default visible columns: title, status, column, retries (4 columns)
-    // Plus checkbox column = 5 total
+    // Default visible columns: title (1 column)
+    // Plus checkbox column = 2 total
     for (const header of sectionHeaders) {
       const th = header.querySelector("th.list-section-cell");
       expect(th).not.toBeNull();
-      expect(th!.getAttribute("colSpan")).toBe("5"); // visibleColumns.size (4) + 1 for checkbox
+      expect(th!.getAttribute("colSpan")).toBe("2"); // visibleColumns.size (1) + 1 for checkbox
     }
 
     // Also verify empty section cells span full width
     const emptyCells = screen.getAllByRole("cell").filter(c => c.className.includes("list-empty-cell"));
     for (const cell of emptyCells) {
-      expect(cell.getAttribute("colSpan")).toBe("5");
+      expect(cell.getAttribute("colSpan")).toBe("2");
     }
   });
 
@@ -1811,6 +1813,39 @@ describe("ListView Column Visibility", () => {
     expect(screen.getByLabelText("Title")).toBeDefined();
     expect(screen.getByLabelText("Status")).toBeDefined();
     expect(screen.getByLabelText("Column")).toBeDefined();
+    expect(screen.getByLabelText("Retries")).toBeDefined();
+    expect(screen.getByLabelText("Dependencies")).toBeDefined();
+    expect(screen.getByLabelText("Progress")).toBeDefined();
+  });
+
+  it("shows only the Title column by default while keeping all column toggles available", () => {
+    const tasks = [
+      createMockTask({
+        id: "FN-001",
+        title: "Title-only default task",
+        column: "triage",
+        status: "pending",
+      }),
+    ];
+
+    renderListView({ tasks });
+
+    const table = document.querySelector(".list-table");
+    expect(table).not.toBeNull();
+    const tableHeader = table?.querySelector("thead");
+    expect(tableHeader).not.toBeNull();
+    expect(within(tableHeader as HTMLElement).getByRole("columnheader", { name: /title/i })).toBeDefined();
+    expect(within(tableHeader as HTMLElement).queryByRole("columnheader", { name: /status/i })).toBeNull();
+    expect(within(tableHeader as HTMLElement).queryByRole("columnheader", { name: /column/i })).toBeNull();
+    expect(within(tableHeader as HTMLElement).queryByRole("columnheader", { name: /retries/i })).toBeNull();
+    expect(within(tableHeader as HTMLElement).queryByRole("columnheader", { name: /dependencies/i })).toBeNull();
+    expect(within(tableHeader as HTMLElement).queryByRole("columnheader", { name: /progress/i })).toBeNull();
+    expect(within(table as HTMLElement).getByText("Title-only default task")).toBeDefined();
+
+    expect(screen.getByLabelText("Title")).toBeDefined();
+    expect(screen.getByLabelText("Status")).toBeDefined();
+    expect(screen.getByLabelText("Column")).toBeDefined();
+    expect(screen.getByLabelText("Retries")).toBeDefined();
     expect(screen.getByLabelText("Dependencies")).toBeDefined();
     expect(screen.getByLabelText("Progress")).toBeDefined();
   });
@@ -1818,13 +1853,10 @@ describe("ListView Column Visibility", () => {
     const tasks = [createMockTask({ id: "FN-001", title: "Test Task" })];
     renderListView({ tasks });
 
-    // Uncheck the Title column
-    const checkboxes = screen.getAllByRole("checkbox");
-    const titleCheckbox = checkboxes.find(
-      cb => cb.parentElement?.textContent?.includes("Title")
-    );
-    expect(titleCheckbox).toBeDefined();
-    fireEvent.click(titleCheckbox!);
+    // Enable a second column first so the last-visible-column guard allows hiding Title.
+    fireEvent.click(screen.getByLabelText("Status"));
+    const titleCheckbox = screen.getByLabelText("Title");
+    fireEvent.click(titleCheckbox);
 
     // Title column should no longer be visible in the table
     const table = document.querySelector(".list-table");
@@ -1835,24 +1867,18 @@ describe("ListView Column Visibility", () => {
     const tasks = [createMockTask({ id: "FN-001", title: "Test Task" })];
     renderListView({ tasks });
 
-    // Find and uncheck the Title column
-    const checkboxes = screen.getAllByRole("checkbox");
-    const titleCheckbox = checkboxes.find(
-      cb => cb.parentElement?.textContent?.includes("Title")
-    );
-    expect(titleCheckbox).toBeDefined();
-    fireEvent.click(titleCheckbox!);
+    // Enable a second column first so the last-visible-column guard allows hiding Title.
+    fireEvent.click(screen.getByLabelText("Status"));
+    const titleCheckbox = screen.getByLabelText("Title");
+    fireEvent.click(titleCheckbox);
 
     // Verify Title is hidden
     const table = document.querySelector(".list-table");
     expect(table?.textContent).not.toContain("Test Task");
 
     // Re-check the Title column (still in the same dropdown session)
-    const titleCheckbox2 = screen.getAllByRole("checkbox").find(
-      cb => cb.parentElement?.textContent?.includes("Title")
-    );
-    expect(titleCheckbox2).toBeDefined();
-    fireEvent.click(titleCheckbox2!);
+    const titleCheckbox2 = screen.getByLabelText("Title");
+    fireEvent.click(titleCheckbox2);
 
     // Title column should be visible again
     const tableAfter = document.querySelector(".list-table");
@@ -1863,7 +1889,8 @@ describe("ListView Column Visibility", () => {
     const tasks = [createMockTask({ id: "FN-001", title: "Test Task" })];
     renderListView({ tasks });
 
-    // Uncheck Title
+    // Enable a second column first, then uncheck Title.
+    fireEvent.click(screen.getByLabelText("Status"));
     const titleCheckbox = screen.getByLabelText("Title");
     fireEvent.click(titleCheckbox);
 
@@ -1871,6 +1898,7 @@ describe("ListView Column Visibility", () => {
     const saved = localStorage.getItem(scopedStorageKey("kb-dashboard-list-columns"));
     expect(saved).toBeTruthy();
     const parsed = JSON.parse(saved!);
+    expect(parsed).toContain("status");
     expect(parsed).not.toContain("title");
   });
 
@@ -1936,20 +1964,17 @@ describe("ListView Column Visibility", () => {
     expect(rows[2].textContent).toContain("FN-003");
   });
 
-  it("shows reduced default columns when no localStorage", () => {
+  it("shows only title by default when no localStorage", () => {
     const tasks = [
       createMockTask({ id: "FN-001", title: "Test Task", status: "pending", column: "triage" }),
     ];
     renderListView({ tasks });
 
-    // Reduced default columns should be visible
+    // The title column should be the only visible first-run column.
     expect(screen.getByText("FN-001")).toBeDefined();
     expect(screen.getByText("Test Task")).toBeDefined();
-    expect(screen.getByText("pending")).toBeDefined();
-    const columnBadge = document.querySelector(".list-column-badge");
-    expect(columnBadge?.textContent).toContain("Planning");
-
-    // Optional columns should be hidden by default
+    expect(screen.queryByText("pending")).toBeNull();
+    expect(document.querySelector(".list-column-badge")).toBeNull();
     expect(document.querySelector(".list-cell-deps")).toBeNull();
     expect(document.querySelector(".list-cell-progress")).toBeNull();
   });
