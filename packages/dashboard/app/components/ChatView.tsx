@@ -32,6 +32,7 @@ import { useViewportMode } from "./Header";
 import { updateGlobalSettings, type DiscoveredSkill } from "../api";
 import type { Agent } from "@fusion/core";
 import { CustomModelDropdown } from "./CustomModelDropdown";
+import { ChatQuestionResponse } from "./ChatQuestionResponse";
 import { ProviderIcon } from "./ProviderIcon";
 import { AgentMentionPopup } from "./AgentMentionPopup";
 import { AgentAvatar } from "./AgentAvatar";
@@ -48,6 +49,7 @@ import { matchesAgentMentionFilter } from "./mentionMatching";
 import { useNavigationHistoryContext } from "../hooks/useNavigationHistory";
 import { linkifyFilePaths, linkifyReactChildren } from "../utils/filePathLinkify";
 import { recordResumeEvent } from "../utils/resumeInstrumentation";
+import { parseQuestionToolCall } from "../utils/parseQuestionToolCall";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 
@@ -258,10 +260,33 @@ function renderFailureReference(reference: FailureInfo["reference"], t: (key: st
   );
 }
 
-function renderToolCalls(toolCalls: ToolCallInfo[] | undefined, t: (key: string, defaultValue: string, opts?: Record<string, unknown>) => string): ReactNode {
+function renderToolCalls(
+  toolCalls: ToolCallInfo[] | undefined,
+  t: (key: string, defaultValue: string, opts?: Record<string, unknown>) => string,
+  options?: {
+    isAwaitingAnswer?: boolean;
+    submittedAnswer?: string;
+    onQuestionSubmit?: (answerText: string, structured: Record<string, unknown>) => void;
+  },
+): ReactNode {
   if (!toolCalls || toolCalls.length === 0) return null;
 
   const renderToolCallItem = (toolCall: ToolCallInfo, index: number) => {
+    const parsedQuestion = parseQuestionToolCall(toolCall);
+    if (parsedQuestion) {
+      const isAwaitingAnswer = options?.isAwaitingAnswer === true;
+      return (
+        <ChatQuestionResponse
+          key={`${toolCall.toolName}-${index}`}
+          parsed={parsedQuestion}
+          answered={!isAwaitingAnswer}
+          submittedAnswer={options?.submittedAnswer}
+          disabled={!isAwaitingAnswer}
+          onSubmit={(answerText, structured) => options?.onQuestionSubmit?.(answerText, structured)}
+        />
+      );
+    }
+
     const isRunning = toolCall.status === "running";
     const isError = toolCall.status === "completed" && toolCall.isError;
     const argsSummary = formatToolArgsSummary(toolCall.args);
@@ -742,6 +767,13 @@ interface ChatMessageItemProps {
   roomContext: RoomContext | null;
   copyAction?: ReactNode;
   onScrollToTop?: (messageId: string) => void;
+  isAwaitingQuestionAnswer: boolean;
+  submittedQuestionAnswer?: string;
+  onQuestionSubmit: (answerText: string, structured: Record<string, unknown>) => void;
+}
+
+function findSubmittedQuestionAnswer(messages: ChatMessageInfo[], messageIndex: number): string | undefined {
+  return messages.slice(messageIndex + 1).find((message) => message.role === "user")?.content;
 }
 
 // Renders a single chat message bubble. Memoized so the streaming bubble's
@@ -760,6 +792,9 @@ const ChatMessageItem = memo(function ChatMessageItem({
   roomContext,
   copyAction,
   onScrollToTop,
+  isAwaitingQuestionAnswer,
+  submittedQuestionAnswer,
+  onQuestionSubmit,
 }: ChatMessageItemProps) {
   const { t } = useTranslation("app");
   const isAssistantMessage = message.role === "assistant";
@@ -923,7 +958,11 @@ const ChatMessageItem = memo(function ChatMessageItem({
           )}
         </div>
       )}
-      {renderToolCalls(message.toolCalls, t)}
+      {renderToolCalls(message.toolCalls, t, {
+        isAwaitingAnswer: isAwaitingQuestionAnswer,
+        submittedAnswer: submittedQuestionAnswer,
+        onQuestionSubmit,
+      })}
       {message.thinkingOutput && (
         <details className="chat-message-thinking">
           <summary>{t("chat.thinking", "Thinking")}</summary>
@@ -2033,6 +2072,31 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
 
     handleSend();
   }, [messageInput, pendingAttachments, chatRoomsEnabled, chatScope, rooms, rooms.clearRoom, clearComposerState, addToast, handleSend]);
+
+  const handleQuestionSubmit = useCallback(async (answerText: string) => {
+    if (chatRoomsEnabled && chatScope === "rooms") {
+      if (!rooms.activeRoom) {
+        return;
+      }
+
+      try {
+        await rooms.sendRoomMessage(answerText);
+      } catch (error) {
+        const message = error instanceof Error && error.message.trim()
+          ? error.message
+          : t("chat.failedToSendRoomMessage", "Failed to send room message");
+        addToast(message, "error");
+      }
+      return;
+    }
+
+    if (!activeSession) {
+      return;
+    }
+
+    sendMessage(answerText);
+  }, [activeSession, addToast, chatRoomsEnabled, chatScope, rooms, sendMessage, t]);
+
   const handleSkillSelect = useCallback(
     (skill: DiscoveredSkill) => {
       setMessageInput((currentInput) => {
@@ -2748,7 +2812,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
       </div>
       {isStreaming ? (
         <>
-          {messages.map((message) => (
+          {messages.map((message, index) => (
             <ChatMessageItem
               key={message.id}
               message={message}
@@ -2763,6 +2827,9 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
               roomContext={null}
               copyAction={showProviderResponseCopy && message.role === "assistant" ? renderCopyAction(message.id, message.content) : undefined}
               onScrollToTop={handleScrollMessageToTop}
+              isAwaitingQuestionAnswer={message.role === "assistant" && index === messages.length - 1 && !isStreaming}
+              submittedQuestionAnswer={findSubmittedQuestionAnswer(messages, index)}
+              onQuestionSubmit={handleQuestionSubmit}
             />
           ))}
           <div className="chat-message chat-message--assistant chat-message--streaming">
@@ -2781,7 +2848,10 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
               </div>
             )}
             {showProviderResponseCopy && streamingText && renderCopyAction("__streaming__", streamingText, "chat-copy-response-streaming")}
-            {renderToolCalls(streamingToolCalls, t)}
+            {renderToolCalls(streamingToolCalls, t, {
+              isAwaitingAnswer: true,
+              onQuestionSubmit: handleQuestionSubmit,
+            })}
             {streamingThinking && (
               <details className="chat-message-thinking">
                 <summary>{t("chat.thinking", "Thinking")}</summary>
@@ -2803,7 +2873,7 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
         <div className="chat-empty-state">{t("chat.noMessagesYet", "No messages yet. Start the conversation!")}</div>
       ) : (
         <>
-          {messages.map((message) => (
+          {messages.map((message, index) => (
             <ChatMessageItem
               key={message.id}
               message={message}
@@ -2818,6 +2888,9 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
               roomContext={null}
               copyAction={showProviderResponseCopy && message.role === "assistant" ? renderCopyAction(message.id, message.content) : undefined}
               onScrollToTop={handleScrollMessageToTop}
+              isAwaitingQuestionAnswer={message.role === "assistant" && index === messages.length - 1 && !isStreaming}
+              submittedQuestionAnswer={findSubmittedQuestionAnswer(messages, index)}
+              onQuestionSubmit={handleQuestionSubmit}
             />
           ))}
         </>
@@ -3454,6 +3527,8 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
                         mentionAgentsByName={mentionAgentsByName}
                         roomContext={roomContext}
                         onScrollToTop={handleScrollMessageToTop}
+                        isAwaitingQuestionAnswer={false}
+                        onQuestionSubmit={handleQuestionSubmit}
                       />
                     );
                   })

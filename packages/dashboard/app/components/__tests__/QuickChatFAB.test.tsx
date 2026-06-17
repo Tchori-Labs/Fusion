@@ -180,6 +180,70 @@ describe("QuickChatFAB session-first UX", () => {
     ]);
   });
 
+  it("renders compact question tool calls and sends answers through quick chat", async () => {
+    mockFetchChatMessages.mockResolvedValue({
+      messages: [{
+        id: "msg-question",
+        sessionId: "session-model",
+        role: "assistant",
+        content: "Need input",
+        metadata: { toolCalls: [{ toolName: "ask_user", args: { question: "Pick?", options: ["Alpha", "Beta"] }, isError: false, status: "completed" }] },
+        createdAt: "2026-05-16T00:00:00.000Z",
+      }],
+    });
+
+    render(<QuickChatFAB addToast={vi.fn()} projectId="proj-1" />);
+    fireEvent.click(screen.getByTestId("quick-chat-fab"));
+
+    expect(await screen.findByTestId("chat-question-response")).toHaveClass("chat-question-response--compact");
+    expect(document.querySelector(".chat-tool-call")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("chat-question-response-option-q-0-opt-0"));
+    fireEvent.click(screen.getByTestId("chat-question-response-submit"));
+
+    await waitFor(() => {
+      expect(mockStreamChatResponse).toHaveBeenCalledWith(
+        "session-model",
+        "> Q: Pick?\nAlpha",
+        expect.any(Object),
+        undefined,
+        "proj-1",
+      );
+    });
+  });
+
+  it("keeps non-question quick chat tool calls generic and historical questions read-only", async () => {
+    mockFetchChatMessages.mockResolvedValue({
+      messages: [
+        {
+          id: "msg-tool",
+          sessionId: "session-model",
+          role: "assistant",
+          content: "Read file",
+          metadata: { toolCalls: [{ toolName: "read", args: { path: "foo.ts" }, isError: false, status: "completed" }] },
+          createdAt: "2026-05-16T00:00:02.000Z",
+        },
+        { id: "msg-user", sessionId: "session-model", role: "user", content: "> Q: Pick?\nBeta", createdAt: "2026-05-16T00:00:01.000Z" },
+        {
+          id: "msg-question",
+          sessionId: "session-model",
+          role: "assistant",
+          content: "Need input",
+          metadata: { toolCalls: [{ toolName: "ask_user", args: { question: "Pick?", options: ["Alpha", "Beta"] }, isError: false, status: "completed" }] },
+          createdAt: "2026-05-16T00:00:00.000Z",
+        },
+      ],
+    });
+
+    render(<QuickChatFAB addToast={vi.fn()} projectId="proj-1" />);
+    fireEvent.click(screen.getByTestId("quick-chat-fab"));
+
+    expect(await screen.findByTestId("chat-question-response")).toHaveTextContent("Answered");
+    expect(screen.getByTestId("chat-question-response-submitted-answer")).toHaveTextContent("Beta");
+    expect(screen.queryByTestId("chat-question-response-submit")).not.toBeInTheDocument();
+    expect(screen.getByText("read")).toBeInTheDocument();
+  });
+
   it("removes header mode toggle and renders session dropdown", async () => {
     render(<QuickChatFAB addToast={vi.fn()} projectId="proj-1" />);
     fireEvent.click(screen.getByTestId("quick-chat-fab"));

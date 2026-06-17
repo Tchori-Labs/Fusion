@@ -237,6 +237,7 @@ Chat view provides project-scoped conversations with agents.
 - On mobile direct-chat threads, tapping the active title/identity in the thread header opens a lightweight conversation dropdown so you can switch to another direct session without backing out to the sidebar list first; long conversation titles now stay readable in the dropdown via wrapped option text and taller touch-friendly rows.
 - On mobile (`max-width: 768px`), chat bubbles are slightly wider in full Chat for improved readability while preserving header/composer gutters.
 - Full Chat tool-call summaries now use a denser mobile layout: grouped and single-call collapsed rows keep icon + label + status on one line (Quick Chat-style scanability) while expanded details remain unchanged.
+- Assistant question tool calls now render as a shared in-chat response card instead of a generic tool-call disclosure. The card supports select, multi-select, text, and yes/no prompts, sends the formatted answer back into the same direct or room thread, and renders historical answered questions read-only.
 - The desktop Chat view toggle and mobile Chat tab now show an unread-response indicator when a live assistant reply arrives for your active chat thread after you leave Chat; opening Chat clears it immediately.
 - Agent-backed chat sessions now expose the same mailbox messaging tools (`fn_send_message`, `fn_read_messages`) used by runtime execution/heartbeat flows whenever the engine `MessageStore` is available; model-only chats continue to run without mailbox tools.
 
@@ -286,6 +287,7 @@ Quick Chat is an optional floating panel for fast, project-scoped assistant conv
 - Queued follow-up messages entered while a Quick Chat response is still streaming now persist per session, so closing/reopening the panel restores the queued text and flushes it once the active response completes.
 - Resume lookups still use targeted session queries instead of loading the full active-session list first
 - Tool-call summaries in the floating quick-chat panel are intentionally condensed into a single-line header row (especially on small screens) so tool name + status stay scannable without multi-line wrapping
+- Question tool calls use the same shared response card as full Chat, with compact spacing in the floating panel and read-only answered history so Quick Chat can continue agent clarification loops without exposing raw tool JSON.
 - On mobile viewports, opening Quick Chat auto-focuses the composer as soon as it is ready so the keyboard opens immediately
 - FAB dragging uses pointer events with document-level move/up tracking and a 5px drag threshold so Android touch drags reposition reliably while short taps still open Quick Chat
 - Quick Chat now mirrors full Chat tail behavior: if you scroll up, live updates stop auto-following and a **Latest** jump control appears until you jump back down.

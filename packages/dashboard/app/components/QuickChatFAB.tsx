@@ -19,6 +19,7 @@ import { ChevronDown, Eye, EyeOff, Hash, MessageSquare, Paperclip, Plus, Send, S
 import { attachmentBaseUrlForRoom, type Agent, type ModelInfo } from "../api";
 import type { DiscoveredSkill } from "@fusion/dashboard";
 import { CustomModelDropdown } from "./CustomModelDropdown";
+import { ChatQuestionResponse } from "./ChatQuestionResponse";
 import { ProviderIcon } from "./ProviderIcon";
 import { AgentMentionPopup } from "./AgentMentionPopup";
 import { matchesAgentMentionFilter } from "./mentionMatching";
@@ -36,6 +37,7 @@ import { useChatRooms } from "../hooks/useChatRooms";
 import { useChatUnread } from "../hooks/useChatUnread";
 import { getPersistedLastQuickChatSessionId } from "../hooks/quickChatLastSessionStorage";
 import { linkifyFilePaths, linkifyReactChildren } from "../utils/filePathLinkify";
+import { parseQuestionToolCall } from "../utils/parseQuestionToolCall";
 
 interface PendingAttachment {
   file: File;
@@ -148,10 +150,35 @@ function formatToolResultSummary(result: unknown): string | null {
   }
 }
 
-function renderToolCalls(toolCalls: ToolCallInfo[] | undefined, compact: boolean, t: TFunction<"app">): ReactNode {
+function renderToolCalls(
+  toolCalls: ToolCallInfo[] | undefined,
+  compact: boolean,
+  t: TFunction<"app">,
+  options?: {
+    isAwaitingAnswer?: boolean;
+    submittedAnswer?: string;
+    onQuestionSubmit?: (answerText: string, structured: Record<string, unknown>) => void;
+  },
+): ReactNode {
   if (!toolCalls || toolCalls.length === 0) return null;
 
   const renderToolCallItem = (toolCall: ToolCallInfo, index: number) => {
+    const parsedQuestion = parseQuestionToolCall(toolCall);
+    if (parsedQuestion) {
+      const isAwaitingAnswer = options?.isAwaitingAnswer === true;
+      return (
+        <ChatQuestionResponse
+          key={`${toolCall.toolName}-${index}`}
+          parsed={parsedQuestion}
+          compact={compact}
+          answered={!isAwaitingAnswer}
+          submittedAnswer={options?.submittedAnswer}
+          disabled={!isAwaitingAnswer}
+          onSubmit={(answerText, structured) => options?.onQuestionSubmit?.(answerText, structured)}
+        />
+      );
+    }
+
     const isRunning = toolCall.status === "running";
     const isError = toolCall.status === "completed" && toolCall.isError;
     const argsSummary = formatToolArgsSummary(toolCall.args);
@@ -795,10 +822,17 @@ interface QuickChatMessageItemProps {
   roomContext: QuickChatRoomContext | null;
   projectId?: string;
   onToggleRender: (id: string) => void;
+  isAwaitingQuestionAnswer: boolean;
+  submittedQuestionAnswer?: string;
+  onQuestionSubmit: (answerText: string, structured: Record<string, unknown>) => void;
 }
 
 // Memoized so streaming state churn doesn't re-render every prior message
 // (each one would re-run ReactMarkdown over its full content otherwise).
+function findSubmittedQuestionAnswer(messages: ChatMessageInfo[], messageIndex: number): string | undefined {
+  return messages.slice(messageIndex + 1).find((message) => message.role === "user")?.content;
+}
+
 const QuickChatMessageItem = memo(function QuickChatMessageItem({
   message,
   forcePlain,
@@ -806,6 +840,9 @@ const QuickChatMessageItem = memo(function QuickChatMessageItem({
   roomContext,
   projectId,
   onToggleRender,
+  isAwaitingQuestionAnswer,
+  submittedQuestionAnswer,
+  onQuestionSubmit,
 }: QuickChatMessageItemProps) {
   const { t } = useTranslation("app");
   const isSent = message.role === "user";
@@ -907,7 +944,11 @@ const QuickChatMessageItem = memo(function QuickChatMessageItem({
           </>
         )}
       {renderedAttachments}
-      {renderToolCalls(message.toolCalls, true, t)}
+      {renderToolCalls(message.toolCalls, true, t, {
+        isAwaitingAnswer: isAwaitingQuestionAnswer,
+        submittedAnswer: submittedQuestionAnswer,
+        onQuestionSubmit,
+      })}
     </div>
   );
 });
@@ -2122,6 +2163,25 @@ export function QuickChatFAB({
     stopStreaming,
   ]);
 
+  const handleQuestionSubmit = useCallback(async (answerText: string) => {
+    try {
+      setHelpMessageVisible(false);
+      if (chatRoomsEnabled && roomsState.activeRoom) {
+        await roomsState.sendRoomMessage(answerText);
+      } else {
+        await sendMessage(answerText);
+      }
+    } catch (error) {
+      const message = error instanceof Error && error.message.trim()
+        ? error.message
+        : (chatRoomsEnabled && roomsState.activeRoom ? t("chat.sendRoomMessageFailed", "Failed to send room message") : t("chat.sendMessageFailed", "Failed to send message"));
+      addToast(message, "error");
+    } finally {
+      focusComposerInput();
+      preserveComposerFocusRef.current = false;
+    }
+  }, [addToast, chatRoomsEnabled, focusComposerInput, roomsState, sendMessage, t]);
+
   const handleAttachmentDragEnter = useCallback((event: React.DragEvent<HTMLDivElement>) => {
     event.preventDefault();
     dragDepthRef.current += 1;
@@ -2907,7 +2967,7 @@ export function QuickChatFAB({
               <div className="quick-chat-panel-empty">{t("chat.loadingConversation", "Loading conversation…")}</div>
             ) : !roomThreadActive && isStreaming ? (
               <>
-                {displayedMessages.map((message: ChatMessageInfo) => (
+                {displayedMessages.map((message: ChatMessageInfo, index) => (
                   <QuickChatMessageItem
                     key={message.id}
                     message={message}
@@ -2916,6 +2976,9 @@ export function QuickChatFAB({
                     roomContext={roomContext}
                     projectId={projectId}
                     onToggleRender={toggleMessageRenderMode}
+                    isAwaitingQuestionAnswer={message.role === "assistant" && index === displayedMessages.length - 1 && !isStreaming}
+                    submittedQuestionAnswer={findSubmittedQuestionAnswer(displayedMessages, index)}
+                    onQuestionSubmit={handleQuestionSubmit}
                   />
                 ))}
                 {helpMessageVisible && (
@@ -2947,7 +3010,10 @@ export function QuickChatFAB({
                       {streamingThinking ? t("chat.thinkingStatus", "Thinking…") : t("chat.connectingStatus", "Connecting…")}
                     </p>
                   )}
-                  {renderToolCalls(streamingToolCalls, true, t)}
+                  {renderToolCalls(streamingToolCalls, true, t, {
+                    isAwaitingAnswer: true,
+                    onQuestionSubmit: handleQuestionSubmit,
+                  })}
                   {streamingThinking && (
                     <details className="chat-message-thinking" data-testid="quick-chat-streaming-thinking">
                       <summary>{t("chat.thinkingLabel", "Thinking")}</summary>
@@ -2962,7 +3028,7 @@ export function QuickChatFAB({
               <div className="quick-chat-panel-empty">{t("chat.noMessagesYet", "No messages yet. Start the conversation!")}</div>
             ) : (
               <>
-                {displayedMessages.map((message: ChatMessageInfo) => (
+                {displayedMessages.map((message: ChatMessageInfo, index) => (
                   <QuickChatMessageItem
                     key={message.id}
                     message={message}
@@ -2971,6 +3037,9 @@ export function QuickChatFAB({
                     roomContext={roomContext}
                     projectId={projectId}
                     onToggleRender={toggleMessageRenderMode}
+                    isAwaitingQuestionAnswer={message.role === "assistant" && index === displayedMessages.length - 1 && !isStreaming}
+                    submittedQuestionAnswer={findSubmittedQuestionAnswer(displayedMessages, index)}
+                    onQuestionSubmit={handleQuestionSubmit}
                   />
                 ))}
                 {helpMessageVisible && (
@@ -2985,7 +3054,7 @@ export function QuickChatFAB({
               <div className="quick-chat-panel-empty">{t("chat.noMessagesYet", "No messages yet. Start the conversation!")}</div>
             ) : (
               <>
-                {displayedMessages.map((message: ChatMessageInfo) => (
+                {displayedMessages.map((message: ChatMessageInfo, index) => (
                   <QuickChatMessageItem
                     key={message.id}
                     message={message}
@@ -2994,6 +3063,9 @@ export function QuickChatFAB({
                     roomContext={roomContext}
                     projectId={projectId}
                     onToggleRender={toggleMessageRenderMode}
+                    isAwaitingQuestionAnswer={message.role === "assistant" && index === displayedMessages.length - 1 && !isStreaming}
+                    submittedQuestionAnswer={findSubmittedQuestionAnswer(displayedMessages, index)}
+                    onQuestionSubmit={handleQuestionSubmit}
                   />
                 ))}
                 {helpMessageVisible && (

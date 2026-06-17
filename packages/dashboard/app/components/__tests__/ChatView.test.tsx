@@ -1039,6 +1039,57 @@ describe("ChatView", () => {
     expect(details?.querySelector(".chat-tool-call-status-text")).toHaveTextContent("completed");
   });
 
+  it("renders latest question tool calls as inline response UI and sends answers", async () => {
+    const sendMessage = vi.fn();
+    setupMockChat({
+      activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Question Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" },
+      sendMessage,
+      messages: [
+        {
+          id: "msg-001",
+          sessionId: "session-001",
+          role: "assistant",
+          content: "Need input",
+          toolCalls: [{ toolName: "ask_user", args: { question: "Pick?", options: ["Alpha", "Beta"] }, isError: false, status: "completed" }],
+          createdAt: "2026-04-08T00:00:00.000Z",
+        },
+      ],
+    });
+
+    await renderWithAct(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+
+    expect(screen.getByTestId("chat-question-response")).toBeInTheDocument();
+    expect(document.querySelector(".chat-tool-call")).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId("chat-question-response-option-q-0-opt-0"));
+    await userEvent.click(screen.getByTestId("chat-question-response-submit"));
+
+    expect(sendMessage).toHaveBeenCalledWith("> Q: Pick?\nAlpha");
+  });
+
+  it("renders historical question tool calls read-only with submitted answer", async () => {
+    setupMockChat({
+      activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Question Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" },
+      messages: [
+        {
+          id: "msg-001",
+          sessionId: "session-001",
+          role: "assistant",
+          content: "Need input",
+          toolCalls: [{ toolName: "ask_user", args: { question: "Pick?", options: ["Alpha", "Beta"] }, isError: false, status: "completed" }],
+          createdAt: "2026-04-08T00:00:00.000Z",
+        },
+        { id: "msg-002", sessionId: "session-001", role: "user", content: "> Q: Pick?\nBeta", createdAt: "2026-04-08T00:01:00.000Z" },
+      ],
+    });
+
+    await renderWithAct(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+
+    expect(screen.getByTestId("chat-question-response")).toHaveTextContent("Answered");
+    expect(screen.getByTestId("chat-question-response-submitted-answer")).toHaveTextContent("Beta");
+    expect(screen.queryByTestId("chat-question-response-submit")).not.toBeInTheDocument();
+  });
+
   it("truncates tool names when more than 5 unique", async () => {
     setupMockChat({
       activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Tool Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" },
