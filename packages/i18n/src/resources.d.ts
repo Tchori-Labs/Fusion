@@ -5602,6 +5602,8 @@ export default interface Resources {
       "generatingSubtasks": "AI is generating subtasks...",
       "groupedOnSharedBranch": "Grouped on shared branch",
       "hideThinking": "Hide thinking",
+      "keepSessionMessage": "Close this modal and keep the subtask session available from Background Tasks? Edited fields that have not been saved to the session may be reset when you resume.",
+      "keepSessionTitle": "Keep subtask session available?",
       "modalTitle": "Subtask Breakdown",
       "moveDown": "Move down",
       "moveSubtaskDownAriaLabel": "Move subtask down",
@@ -5612,6 +5614,7 @@ export default interface Resources {
       "openGroupModal": "Open group modal",
       "planningBranchModeLabel": "Planning branch mode",
       "preparingBreakdown": "Preparing to break this task into subtasks.",
+      "progressHint": "Fusion will keep working while the AI prepares subtasks.",
       "reconnecting": "Reconnecting…",
       "remove": "Remove",
       "retry": "Retry",
@@ -5625,9 +5628,11 @@ export default interface Resources {
       "sessionActiveAnotherTabTakeover": "This session is active in another tab",
       "showThinking": "Show thinking",
       "sizeLabel": "Size",
+      "startingBreakdown": "Starting subtask breakdown...",
       "takeControl": "Take Control",
       "takingControl": "Taking control...",
       "titleLabel": "Title",
+      "waitingForThinking": "Waiting for AI progress updates...",
       "untitled": "Untitled"
     },
     "syncLog": {
