@@ -664,12 +664,17 @@ The symbols-only Nerd Font is listed first in the xterm font stack so powerline 
   overflow-y: auto;
 }
 
-.terminal-shortcut-modifier-row {
+.terminal-shortcut-modifier-row,
+.terminal-shortcut-arrow-row {
   display: flex;
   align-items: center;
   gap: var(--space-xs);
   width: 100%;
   margin-bottom: var(--space-xs);
+}
+
+.terminal-shortcut-arrow-row {
+  justify-content: center;
 }
 
 .terminal-shortcut-btn {
@@ -706,6 +711,45 @@ The symbols-only Nerd Font is listed first in the xterm font stack so powerline 
   background: var(--in-progress);
   color: var(--card);
   border-color: var(--in-progress);
+}
+
+.terminal-preferences-panel {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(calc(var(--space-2xl) * 4), 1fr));
+  gap: var(--space-sm);
+  padding: var(--space-sm);
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+}
+
+.terminal-preference-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+
+.terminal-preference-field--checkbox {
+  flex-direction: row;
+  align-items: center;
+  align-self: end;
+  color: var(--text);
+}
+
+.terminal-preference-control {
+  width: 100%;
+  min-width: 0;
+}
+
+.terminal-preference-note {
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+}
+
+.terminal-preferences-reset {
+  align-self: end;
+  justify-self: start;
 }
 
 .terminal-status-bar {
@@ -980,6 +1024,17 @@ The symbols-only Nerd Font is listed first in the xterm font stack so powerline 
     min-width: calc(var(--space-xl) + var(--space-md));
     min-height: calc(var(--space-xl) + var(--space-md));
     font-size: 11px;
+  }
+
+  .terminal-preferences-panel {
+    grid-template-columns: 1fr;
+    max-height: calc(var(--space-2xl) * 8);
+    overflow-y: auto;
+  }
+
+  .terminal-preference-field--checkbox,
+  .terminal-preferences-reset {
+    align-self: stretch;
   }
 
   .terminal-font-size-btn {

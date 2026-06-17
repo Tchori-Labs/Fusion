@@ -5,6 +5,12 @@ FN-6441 rescued this orphaned component test after standalone dashboard-app exec
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { TerminalModal, _resetInitialViewportHeight, ctrlChar, altChar } from "../TerminalModal";
+import {
+  DEFAULT_TERMINAL_PREFERENCES,
+  LEGACY_TERMINAL_FONT_SIZE_KEY,
+  TERMINAL_PREFERENCES_KEY,
+  XTERM_FONT_FAMILY,
+} from "../../utils/terminalPreferences";
 import * as useTerminalModule from "../../hooks/useTerminal";
 import * as useTerminalSessionsModule from "../../hooks/useTerminalSessions";
 import * as apiModule from "../../api";
@@ -87,7 +93,7 @@ const mockUseTerminal = vi.mocked(useTerminalModule.useTerminal);
 const mockUseTerminalSessions = vi.mocked(useTerminalSessionsModule.useTerminalSessions);
 const mockCreateTerminalSession = vi.mocked(apiModule.createTerminalSession);
 const mockKillPtyTerminalSession = vi.mocked(apiModule.killPtyTerminalSession);
-const TERMINAL_FONT_SIZE_KEY = "kb-terminal-font-size";
+const TERMINAL_FONT_SIZE_KEY = LEGACY_TERMINAL_FONT_SIZE_KEY;
 
 describe("ctrlChar/altChar helpers", () => {
   it("maps Ctrl+C/D/Z/L and Alt sequences correctly", () => {
@@ -185,7 +191,11 @@ describe("TerminalModal", () => {
       configurable: true,
     });
     window.localStorage.removeItem(TERMINAL_FONT_SIZE_KEY);
+    window.localStorage.removeItem(TERMINAL_PREFERENCES_KEY);
+    mockTerminalInstance.options.fontFamily = XTERM_FONT_FAMILY;
     mockTerminalInstance.options.fontSize = 14;
+    mockTerminalInstance.options.cursorStyle = "block";
+    mockTerminalInstance.options.cursorBlink = true;
     mockCreateTerminalSession.mockResolvedValue({
       sessionId: "test-session-123",
       shell: "/bin/bash",
@@ -624,8 +634,7 @@ describe("TerminalModal", () => {
 
     expect(Terminal).toHaveBeenCalledWith(
       expect.objectContaining({
-        fontFamily:
-          '"Fusion Terminal Nerd Font Symbols", "MesloLGS NF", "MesloLGM Nerd Font", "JetBrainsMono Nerd Font", "FiraCode Nerd Font", "Hack Nerd Font", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace',
+        fontFamily: XTERM_FONT_FAMILY,
       }),
     );
     expect(screen.getByTestId("terminal-font-size-value").textContent).toBe("14px");
@@ -690,6 +699,24 @@ describe("TerminalModal", () => {
 
       fireEvent.click(screen.getByRole("button", { name: "Tab" }));
       expect(mockSendInput).toHaveBeenCalledWith("\t");
+    });
+
+    it("sends literal ANSI arrow sequences independent of sticky modifiers", async () => {
+      render(<TerminalModal isOpen={true} onClose={mockOnClose} />);
+
+      fireEvent.click(screen.getByTestId("terminal-shortcut-toggle"));
+      fireEvent.click(screen.getByTestId("terminal-modifier-ctrl"));
+
+      fireEvent.click(screen.getByTestId("terminal-arrow-up"));
+      fireEvent.click(screen.getByTestId("terminal-arrow-down"));
+      fireEvent.click(screen.getByTestId("terminal-arrow-left"));
+      fireEvent.click(screen.getByTestId("terminal-arrow-right"));
+
+      expect(mockSendInput).toHaveBeenNthCalledWith(1, "\x1b[A");
+      expect(mockSendInput).toHaveBeenNthCalledWith(2, "\x1b[B");
+      expect(mockSendInput).toHaveBeenNthCalledWith(3, "\x1b[D");
+      expect(mockSendInput).toHaveBeenNthCalledWith(4, "\x1b[C");
+      expect(screen.getByTestId("terminal-modifier-ctrl").getAttribute("aria-pressed")).toBe("false");
     });
 
     it("renders shortcut controls on mobile viewport", async () => {
@@ -843,6 +870,108 @@ describe("TerminalModal", () => {
         expect(screen.getByTestId("terminal-font-size-value").textContent).toBe("14px");
         expect(window.localStorage.getItem(TERMINAL_FONT_SIZE_KEY)).toBe("14");
         expect(mockFitAddonFit.mock.calls.length).toBeGreaterThan(afterSecondEqual);
+      });
+    });
+  });
+
+  describe("terminal preferences", () => {
+    it("toggles the preferences panel", () => {
+      render(<TerminalModal isOpen={true} onClose={mockOnClose} />);
+
+      expect(screen.queryByTestId("terminal-preferences-panel")).toBeNull();
+
+      fireEvent.click(screen.getByTestId("terminal-preferences-toggle"));
+      expect(screen.getByTestId("terminal-preferences-panel")).toBeTruthy();
+
+      fireEvent.click(screen.getByTestId("terminal-preferences-toggle"));
+      expect(screen.queryByTestId("terminal-preferences-panel")).toBeNull();
+    });
+
+    it("persists preference changes and applies live xterm options", async () => {
+      render(<TerminalModal isOpen={true} onClose={mockOnClose} />);
+
+      await waitFor(() => expect(mockTerminalInstance.open).toHaveBeenCalled());
+      fireEvent.click(screen.getByTestId("terminal-preferences-toggle"));
+
+      fireEvent.change(screen.getByTestId("terminal-preference-font-family"), {
+        target: { value: "system-mono" },
+      });
+      fireEvent.change(screen.getByTestId("terminal-preference-cursor-style"), {
+        target: { value: "underline" },
+      });
+      fireEvent.click(screen.getByTestId("terminal-preference-cursor-blink"));
+
+      await waitFor(() => {
+        expect(mockTerminalInstance.options.fontFamily).toContain("ui-monospace");
+        expect(mockTerminalInstance.options.cursorStyle).toBe("underline");
+        expect(mockTerminalInstance.options.cursorBlink).toBe(false);
+      });
+
+      const persisted = JSON.parse(window.localStorage.getItem(TERMINAL_PREFERENCES_KEY) ?? "null");
+      expect(persisted).toEqual({
+        ...DEFAULT_TERMINAL_PREFERENCES,
+        fontFamily: "system-mono",
+        cursorStyle: "underline",
+        cursorBlink: false,
+      });
+    });
+
+    it("resets preferences to defaults", async () => {
+      render(<TerminalModal isOpen={true} onClose={mockOnClose} />);
+
+      fireEvent.click(screen.getByTestId("terminal-preferences-toggle"));
+      fireEvent.change(screen.getByTestId("terminal-preference-font-size"), {
+        target: { value: "21" },
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId("terminal-font-size-value").textContent).toBe("21px");
+      });
+
+      fireEvent.click(screen.getByTestId("terminal-preferences-reset"));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("terminal-font-size-value").textContent).toBe("14px");
+        expect(screen.getByTestId("terminal-preference-font-size")).toHaveProperty("value", "14");
+      });
+      expect(JSON.parse(window.localStorage.getItem(TERMINAL_PREFERENCES_KEY) ?? "null")).toEqual(
+        DEFAULT_TERMINAL_PREFERENCES,
+      );
+    });
+
+    it("keeps panel font-size control and status-bar controls in sync", async () => {
+      render(<TerminalModal isOpen={true} onClose={mockOnClose} />);
+
+      fireEvent.click(screen.getByTestId("terminal-preferences-toggle"));
+      fireEvent.change(screen.getByTestId("terminal-preference-font-size"), {
+        target: { value: "16" },
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId("terminal-font-size-value").textContent).toBe("16px");
+      });
+
+      fireEvent.click(screen.getByTestId("terminal-font-size-increase"));
+
+      await waitFor(() => {
+        expect(screen.getByTestId("terminal-font-size-value").textContent).toBe("17px");
+        expect(screen.getByTestId("terminal-preference-font-size")).toHaveProperty("value", "17");
+      });
+    });
+
+    it("shows renderer changes as next-open only", async () => {
+      render(<TerminalModal isOpen={true} onClose={mockOnClose} />);
+
+      await waitFor(() => expect(mockTerminalInstance.open).toHaveBeenCalled());
+      fireEvent.click(screen.getByTestId("terminal-preferences-toggle"));
+      expect(screen.queryByTestId("terminal-renderer-reopen-note")).toBeNull();
+
+      fireEvent.change(screen.getByTestId("terminal-preference-renderer"), {
+        target: { value: "canvas" },
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId("terminal-renderer-reopen-note")).toBeTruthy();
       });
     });
   });
