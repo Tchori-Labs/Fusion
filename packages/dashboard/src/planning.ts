@@ -34,6 +34,7 @@ import {
 } from "./ai-session-diagnostics.js";
 import {
   buildSessionSkillContextSync,
+  createChatTaskDocumentTools,
   createFnAgent as engineCreateFnAgent,
   createWorkflowAuthoringTools,
 } from "@fusion/engine";
@@ -863,6 +864,11 @@ export async function createSession(
     customTools: [
       ...createPlanningBoardTools(store),
       ...createWorkflowAuthoringTools(store, PLANNING_NO_AMBIENT_TASK_ID, { stripApprovalFlags: true }),
+      /*
+      FNXC:PlanningTools 2026-06-18-07:11:
+      FN-6640 gives planning agents parity with chat for `fn_task_document_write` and `fn_task_document_read` after FN-6635. The planning lane has no ambient task (`PLANNING_NO_AMBIENT_TASK_ID`), so these document tools must require an explicit `task_id`, mirroring no-ambient workflow authoring tools.
+      */
+      ...createChatTaskDocumentTools(store),
     ],
     onThinking: () => {
       // Non-streaming path ignores thinking output
@@ -1455,6 +1461,7 @@ async function createPlanningAgent(
     customTools: [
       ...createPlanningBoardTools(store),
       ...createWorkflowAuthoringTools(store, PLANNING_NO_AMBIENT_TASK_ID, { stripApprovalFlags: true }),
+      ...createChatTaskDocumentTools(store),
     ],
     ...(modelProvider && modelId
       ? {

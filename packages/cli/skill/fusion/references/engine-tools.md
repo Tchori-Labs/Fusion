@@ -13,8 +13,8 @@ These tools are **not** part of the user-invokable extension surface. They are i
 |---|---|---|---|
 | `fn_task_create` | triage, executor, heartbeat | Create a follow-up task from within an agent run | `description` (string), `dependencies?` (string[]), `priority?` (`low` \| `normal` \| `high` \| `urgent`), `workflow_id?` (string) |
 | `fn_task_log` | executor, heartbeat | Write significant task log entries | `message` (string), `outcome?` (string) |
-| `fn_task_document_write` | triage, executor, heartbeat; chat (explicit `task_id`) | Save/update a named task document revision | `key` (string), `content` (string), `author?` (string); chat also requires `task_id` (string) |
-| `fn_task_document_read` | triage, executor, heartbeat; chat (explicit `task_id`) | Read one task document or list all | `key?` (string); chat also requires `task_id` (string) |
+| `fn_task_document_write` | triage, executor, heartbeat; chat/planning (explicit `task_id`) | Save/update a named task document revision | `key` (string), `content` (string), `author?` (string); chat/planning also require `task_id` (string) |
+| `fn_task_document_read` | triage, executor, heartbeat; chat/planning (explicit `task_id`) | Read one task document or list all | `key?` (string); chat/planning also require `task_id` (string) |
 | `fn_goal_list` | triage, executor, heartbeat | List goals with concise citation-ready snippets and active-goal warning details | `status?` (`active` \| `archived` \| `all`) |
 | `fn_goal_show` | triage, executor, heartbeat | Show one goal's full detail on demand, including the full description body | `id` (string) |
 | `fn_workflow_list` | executor | List the project's custom workflows (read-only built-ins plus user definitions) | none |
