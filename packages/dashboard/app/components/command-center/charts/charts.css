@@ -16,6 +16,11 @@ Chart labels and legends must use --text-muted so command-center CSS stays align
  */
 
 /*
+FNXC:CommandCenterStyling 2026-06-19-07:58:
+The Overview and area tabs should feel like a richer software-factory surface. Cycle hand-rolled chart marks through the same canonical semantic palette as the recharts wrappers, using only existing theme tokens so dark/light variants stay aligned without hardcoded colors.
+*/
+
+/*
 FNXC:CommandCenterStyling 2026-06-18-22:31:
 FN-6680 re-checked FN-6664 in a real Blink layout engine because jsdom does not compute grid/flex min-content sizes. Chart primitives and their text-bearing children need explicit logical shrink bounds so long labels cannot crush tracks or create hidden horizontal overflow inside the mobile tabpanel.
 */
@@ -75,6 +80,38 @@ FN-6680 re-checked FN-6664 in a real Blink layout engine because jsdom does not 
   transition: width var(--transition-normal);
 }
 
+.cc-bar-row:nth-child(8n + 1) .cc-bar-fill {
+  background: var(--accent);
+}
+
+.cc-bar-row:nth-child(8n + 2) .cc-bar-fill {
+  background: var(--todo);
+}
+
+.cc-bar-row:nth-child(8n + 3) .cc-bar-fill {
+  background: var(--in-progress);
+}
+
+.cc-bar-row:nth-child(8n + 4) .cc-bar-fill {
+  background: var(--in-review);
+}
+
+.cc-bar-row:nth-child(8n + 5) .cc-bar-fill {
+  background: var(--triage);
+}
+
+.cc-bar-row:nth-child(8n + 6) .cc-bar-fill {
+  background: var(--color-success);
+}
+
+.cc-bar-row:nth-child(8n + 7) .cc-bar-fill {
+  background: var(--color-warning);
+}
+
+.cc-bar-row:nth-child(8n) .cc-bar-fill {
+  background: var(--color-error);
+}
+
 .cc-bar-value {
   min-inline-size: 0;
   font-size: 0.8125rem;
@@ -132,6 +169,46 @@ FN-6680 re-checked FN-6664 in a real Blink layout engine because jsdom does not 
   display: inline-block;
 }
 
+.cc-stacked-segment:nth-child(8n + 1),
+.cc-stacked-legend-item:nth-child(8n + 1) .cc-stacked-swatch {
+  background: var(--accent);
+}
+
+.cc-stacked-segment:nth-child(8n + 2),
+.cc-stacked-legend-item:nth-child(8n + 2) .cc-stacked-swatch {
+  background: var(--todo);
+}
+
+.cc-stacked-segment:nth-child(8n + 3),
+.cc-stacked-legend-item:nth-child(8n + 3) .cc-stacked-swatch {
+  background: var(--in-progress);
+}
+
+.cc-stacked-segment:nth-child(8n + 4),
+.cc-stacked-legend-item:nth-child(8n + 4) .cc-stacked-swatch {
+  background: var(--in-review);
+}
+
+.cc-stacked-segment:nth-child(8n + 5),
+.cc-stacked-legend-item:nth-child(8n + 5) .cc-stacked-swatch {
+  background: var(--triage);
+}
+
+.cc-stacked-segment:nth-child(8n + 6),
+.cc-stacked-legend-item:nth-child(8n + 6) .cc-stacked-swatch {
+  background: var(--color-success);
+}
+
+.cc-stacked-segment:nth-child(8n + 7),
+.cc-stacked-legend-item:nth-child(8n + 7) .cc-stacked-swatch {
+  background: var(--color-warning);
+}
+
+.cc-stacked-segment:nth-child(8n),
+.cc-stacked-legend-item:nth-child(8n) .cc-stacked-swatch {
+  background: var(--color-error);
+}
+
 /* ---- Sparkline ---- */
 .cc-sparkline {
   display: flex;
@@ -146,6 +223,38 @@ FN-6680 re-checked FN-6664 in a real Blink layout engine because jsdom does not 
   background: var(--accent);
   border-radius: 1px;
   transition: height var(--transition-normal);
+}
+
+.cc-sparkline-bar:nth-child(8n + 1) {
+  background: var(--accent);
+}
+
+.cc-sparkline-bar:nth-child(8n + 2) {
+  background: var(--todo);
+}
+
+.cc-sparkline-bar:nth-child(8n + 3) {
+  background: var(--in-progress);
+}
+
+.cc-sparkline-bar:nth-child(8n + 4) {
+  background: var(--in-review);
+}
+
+.cc-sparkline-bar:nth-child(8n + 5) {
+  background: var(--triage);
+}
+
+.cc-sparkline-bar:nth-child(8n + 6) {
+  background: var(--color-success);
+}
+
+.cc-sparkline-bar:nth-child(8n + 7) {
+  background: var(--color-warning);
+}
+
+.cc-sparkline-bar:nth-child(8n) {
+  background: var(--color-error);
 }
 
 /* ---- TokenSeriesChart ---- */
@@ -449,6 +558,38 @@ ResponsiveContainer measures its direct parent. Keep the shared recharts wrapper
   background: var(--accent);
   border-radius: var(--radius-sm);
   transition: width var(--transition-normal);
+}
+
+.cc-funnel-stage:nth-child(8n + 1) .cc-funnel-fill {
+  background: var(--accent);
+}
+
+.cc-funnel-stage:nth-child(8n + 2) .cc-funnel-fill {
+  background: var(--todo);
+}
+
+.cc-funnel-stage:nth-child(8n + 3) .cc-funnel-fill {
+  background: var(--in-progress);
+}
+
+.cc-funnel-stage:nth-child(8n + 4) .cc-funnel-fill {
+  background: var(--in-review);
+}
+
+.cc-funnel-stage:nth-child(8n + 5) .cc-funnel-fill {
+  background: var(--triage);
+}
+
+.cc-funnel-stage:nth-child(8n + 6) .cc-funnel-fill {
+  background: var(--color-success);
+}
+
+.cc-funnel-stage:nth-child(8n + 7) .cc-funnel-fill {
+  background: var(--color-warning);
+}
+
+.cc-funnel-stage:nth-child(8n) .cc-funnel-fill {
+  background: var(--color-error);
 }
 
 .cc-funnel-value {
