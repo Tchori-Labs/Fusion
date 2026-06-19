@@ -57,6 +57,6 @@ Raw rgba fallbacks are replaced with byte-equivalent concrete-hex color-mix fall
   background: var(--surface-2, color-mix(in srgb, #7f7f7f 12%, transparent));
   border: 1px solid var(--border-subtle, color-mix(in srgb, #7f7f7f 25%, transparent));
   border-radius: var(--radius-sm, 4px);
-  color: var(--text-primary, #ddd);
+  color: var(--text);
   padding: var(--space-1, 0.25rem) var(--space-2, 0.5rem);
 }

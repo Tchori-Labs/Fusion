@@ -85,7 +85,7 @@ Raw rgba fallbacks are replaced with byte-equivalent concrete-hex color-mix fall
   padding: 2px 6px;
   border-radius: var(--radius-sm, 6px);
   background: var(--surface-2, color-mix(in srgb, #3b82f6 15%, transparent));
-  color: var(--text-primary, #ddd);
+  color: var(--text);
 }
 
 .cc-mc-badge.inactive {

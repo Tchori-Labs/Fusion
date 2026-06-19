@@ -72,12 +72,12 @@ System control cards sit beside chart/stat cards, so FN-6680 gives them the same
 
 .cc-system-toggle-row,
 .cc-system-threshold-row {
-  color: var(--text-primary);
+  color: var(--text);
   font-size: var(--font-size-sm);
 }
 
 .cc-system-threshold-controls input[type="range"] {
-  accent-color: var(--color-accent);
+  accent-color: var(--accent);
 }
 
 .cc-system-threshold-controls .input {

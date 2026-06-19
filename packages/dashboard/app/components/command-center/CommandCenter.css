@@ -59,12 +59,12 @@ The Command Center must remain scrollable on mobile inside the overflow-hidden .
 }
 
 .cc-tab:hover {
-  color: var(--text-primary);
+  color: var(--text);
 }
 
 .cc-tab.active {
-  color: var(--text-primary);
-  border-bottom-color: var(--color-accent);
+  color: var(--text);
+  border-bottom-color: var(--accent);
 }
 
 .cc-tabpanel {
@@ -121,7 +121,7 @@ FN-6680 standardizes the Command Center card rhythm across overview, area, table
 .cc-stat-value {
   font-size: var(--font-size-xl);
   font-variant-numeric: tabular-nums;
-  color: var(--text-primary);
+  color: var(--text);
 }
 
 .cc-stat-card--gauge {
@@ -182,9 +182,9 @@ FN-6680 keeps the FN-6664 live/chart shrink contract but replaces hardcoded trac
   border: var(--border-width) solid var(--border-subtle);
   border-radius: var(--radius-md);
   background:
-    linear-gradient(135deg, color-mix(in srgb, var(--color-accent) 14%, transparent), transparent),
+    linear-gradient(135deg, color-mix(in srgb, var(--accent) 14%, transparent), transparent),
     var(--surface-1);
-  box-shadow: 0 0 var(--space-4) color-mix(in srgb, var(--color-accent) 18%, transparent);
+  box-shadow: 0 0 var(--space-4) color-mix(in srgb, var(--accent) 18%, transparent);
   overflow: hidden;
   font-size: var(--font-size-sm);
 }
@@ -193,7 +193,7 @@ FN-6680 keeps the FN-6664 live/chart shrink contract but replaces hardcoded trac
   content: "";
   position: absolute;
   inset: 0;
-  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--color-accent) 24%, transparent), transparent);
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--accent) 24%, transparent), transparent);
   opacity: 0.45;
   transform: translateX(-100%);
   animation: cc-live-signal-sweep calc(var(--duration-slow) * 8) linear infinite;
@@ -215,7 +215,7 @@ FN-6680 keeps the FN-6664 live/chart shrink contract but replaces hardcoded trac
 }
 
 .cc-live-strip-label {
-  color: var(--text-primary);
+  color: var(--text);
   font-weight: 600;
 }
 
@@ -238,7 +238,7 @@ FN-6680 keeps the FN-6664 live/chart shrink contract but replaces hardcoded trac
 }
 
 .cc-live-metric-value {
-  color: var(--text-primary);
+  color: var(--text);
   font-size: var(--font-size-lg);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
@@ -283,7 +283,7 @@ Overview token totals now live-poll and should visibly count up on change in bot
 }
 
 .cc-live-trend .cc-sparkline-bar {
-  box-shadow: 0 0 var(--space-2) color-mix(in srgb, var(--color-accent) 28%, transparent);
+  box-shadow: 0 0 var(--space-2) color-mix(in srgb, var(--accent) 28%, transparent);
   animation: cc-live-signal-pulse calc(var(--duration-slow) * 5) ease-in-out infinite;
 }
 
@@ -337,9 +337,9 @@ Overview charts must use dashboard tokens only and keep motion decorative; anima
   border: var(--border-width) solid var(--border-subtle);
   border-radius: var(--radius-md);
   background:
-    linear-gradient(145deg, color-mix(in srgb, var(--color-accent) 10%, transparent), transparent),
+    linear-gradient(145deg, color-mix(in srgb, var(--accent) 10%, transparent), transparent),
     var(--surface-1);
-  box-shadow: 0 0 var(--space-4) color-mix(in srgb, var(--color-accent) 12%, transparent);
+  box-shadow: 0 0 var(--space-4) color-mix(in srgb, var(--accent) 12%, transparent);
   overflow: hidden;
   animation: cc-overview-chart-rise var(--duration-normal) ease-out both;
 }
@@ -352,7 +352,7 @@ Overview charts must use dashboard tokens only and keep motion decorative; anima
   content: "";
   position: absolute;
   inset: 0;
-  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--color-accent) 16%, transparent), transparent);
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--accent) 16%, transparent), transparent);
   opacity: 0;
   pointer-events: none;
   animation: cc-overview-chart-sheen calc(var(--duration-slow) * 7) ease-in-out infinite;
@@ -397,7 +397,7 @@ Overview recharts cards use token-derived height so ResponsiveContainer can rend
 
 .cc-overview-chart-card .cc-bar-fill,
 .cc-overview-chart-card .cc-sparkline-bar {
-  box-shadow: 0 0 var(--space-2) color-mix(in srgb, var(--color-accent) 30%, transparent);
+  box-shadow: 0 0 var(--space-2) color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
 @keyframes cc-overview-chart-rise {

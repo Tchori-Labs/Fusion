@@ -1255,7 +1255,7 @@ The `index.html` shell is templated server-side: the server injects a per-user `
 
 **Always reference tokens. Never hardcode pixels, hex, or `rgba()` in component CSS** — global/theme token CSS is also covered by `global-theme-css-no-raw-rgba.test.ts`, so raw `rgba()` belongs only in explicit `var(--token, rgba(...))` fallbacks. For translucent backgrounds use `color-mix(in srgb, var(--color) X%, transparent)`, not `rgba()`.
 
-Command Center chart surfaces are a stricter token-only zone: `CommandCenter.css`, `areas/areas.css`, and `charts/charts.css` should avoid raw color fallbacks and hardcoded dimensions in component rules, keep secondary copy on `--text-muted`, use `--duration-*` for animation durations, and encode mobile chart invariants with shared classes rather than one-off area styles.
+Command Center chart surfaces are a stricter token-only zone: `CommandCenter.css`, `areas/areas.css`, and `charts/charts.css` should avoid raw color fallbacks and hardcoded dimensions in component rules, keep secondary copy on `--text-muted`, use canonical `--accent` / `--text` for generic accent and primary text styling, use `--duration-*` for animation durations, and encode mobile chart invariants with shared classes rather than one-off area styles. The undefined `--color-accent` / `--text-primary` aliases are forbidden under `components/command-center/**` and guarded by `command-center-css-token-canonicalization.test.ts`.
 
 ### Theme system
 
