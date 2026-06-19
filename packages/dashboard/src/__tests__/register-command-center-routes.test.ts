@@ -310,6 +310,7 @@ describe("register-command-center-routes", () => {
     const prod = await request(app, "GET", `/api/command-center/productivity?${range}&projectId=proj-a`);
     expect(prod.status).toBe(200);
     expect(prod.body).toHaveProperty("loc");
+    expect(prod.body).toHaveProperty("hoursSaved");
     expect(prod.body).toHaveProperty("byLanguage");
 
     seedGithubIssueMetrics(dbA, { prefix: "FN-A", repo: "acme/alpha", filed: 2, fixed: 1 });

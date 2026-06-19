@@ -25,6 +25,9 @@ ProductivityAnalytics exposes a categorical language distribution but no per-day
  *
  * FNXC:CommandCenter 2026-06-19-00:00:
  * FN-6704 owns real commit diff-stat capture for LOC. Keep this sentinel honest until a persisted additions/deletions source exists; do not backfill with modified-file counts or any other proxy.
+ *
+ * FNXC:CommandCenterProductivity 2026-06-19-12:00:
+ * Human hours saved is a derived estimate from LOC. It must render the unavailable "—" sentinel, never 0, when LOC is unavailable and stay visibly labeled as an estimate rather than exact accounting.
  */
 export function ProductivityArea({ range }: { range: DateRange }) {
   const { t } = useTranslation("app");
@@ -57,6 +60,7 @@ export function ProductivityArea({ range }: { range: DateRange }) {
     (data.modifiedFiles === 0 && data.commits === 0 && data.pullRequests === 0);
 
   const locUnavailable = !data || data.loc.unavailable || data.loc.value === null;
+  const hoursSavedUnavailable = !data || data.hoursSaved.unavailable || data.hoursSaved.value === null;
 
   return (
     <AreaShell testId="productivity" isLoading={isLoading} error={error} isEmpty={isEmpty}>
@@ -70,6 +74,26 @@ export function ProductivityArea({ range }: { range: DateRange }) {
           <div className="card cc-stat-card" data-testid="cc-productivity-prs">
             <div className="cc-stat-label">{t("commandCenter.productivity.pullRequests", "Pull requests")}</div>
             <div className="cc-stat-value">{formatCount(data?.pullRequests ?? 0)}</div>
+          </div>
+          <div className="card cc-stat-card" data-testid="cc-productivity-hours-saved">
+            <div className="cc-stat-label">{t("commandCenter.productivity.hoursSaved", "Human hours saved")}</div>
+            <div className="cc-stat-value">
+              {hoursSavedUnavailable ? (
+                <span
+                  className="cc-unavailable"
+                  title={t(
+                    "commandCenter.productivity.hoursSavedUnavailable",
+                    "Estimated human hours saved is unavailable until commit diff stats exist",
+                  )}
+                  data-testid="cc-productivity-hours-saved-unavailable"
+                >
+                  —
+                </span>
+              ) : (
+                formatCount(data.hoursSaved.value ?? 0)
+              )}
+            </div>
+            <span className="cc-stat-sub">{t("commandCenter.productivity.hoursSavedEstimate", "estimate from lines changed")}</span>
           </div>
         </div>
       </div>

@@ -5,9 +5,10 @@ import {
   serializeCsv,
   tokenAnalyticsToTable,
   activityAnalyticsToTable,
+  productivityAnalyticsToTable,
   type CsvTable,
 } from "../command-center-csv.js";
-import type { ActivityAnalytics, TokenAnalytics } from "@fusion/core";
+import type { ActivityAnalytics, ProductivityAnalytics, TokenAnalytics } from "@fusion/core";
 
 describe("serializeCsv (RFC-4180)", () => {
   it("emits a header row and CRLF-terminated records", () => {
@@ -88,6 +89,32 @@ describe("activityAnalyticsToTable", () => {
     expect(table.rows).toContainEqual(["(agentRuns.active)", 3, "", "", ""]);
     expect(table.rows).toContainEqual(["(agentRuns.completed)", 4, "", "", ""]);
     expect(table.rows).toContainEqual(["(agentRuns.failed)", 2, "", "", ""]);
+  });
+});
+
+describe("productivityAnalyticsToTable", () => {
+  function result(hoursSaved: ProductivityAnalytics["hoursSaved"]): ProductivityAnalytics {
+    return {
+      from: null,
+      to: null,
+      modifiedFiles: 2,
+      byLanguage: [{ language: "ts", count: 2 }],
+      commits: 1,
+      pullRequests: 1,
+      loc: hoursSaved.unavailable ? { value: null, unavailable: true } : { value: 15, unavailable: false },
+      hoursSaved,
+    };
+  }
+
+  it("exports hours saved and preserves the unavailable sentinel as an empty cell", () => {
+    expect(productivityAnalyticsToTable(result({ value: null, unavailable: true })).rows).toContainEqual([
+      "hoursSaved",
+      "",
+    ]);
+    expect(productivityAnalyticsToTable(result({ value: 1, unavailable: false })).rows).toContainEqual([
+      "hoursSaved",
+      1,
+    ]);
   });
 });
 

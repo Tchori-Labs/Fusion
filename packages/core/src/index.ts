@@ -571,12 +571,13 @@ export type {
   MttrSummary,
   MonitorMetrics,
 } from "./activity-analytics.js";
-export { aggregateProductivityAnalytics } from "./productivity-analytics.js";
+export { aggregateProductivityAnalytics, HUMAN_LINES_PER_HOUR } from "./productivity-analytics.js";
 export type {
   ProductivityAnalytics,
   ProductivityAnalyticsQuery,
   LanguageCount,
   LocSummary,
+  HoursSavedSummary,
 } from "./productivity-analytics.js";
 export { aggregatePluginActivations } from "./plugin-activation-analytics.js";
 export type {

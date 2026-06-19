@@ -173,6 +173,7 @@ export function productivityAnalyticsToTable(
   rows.push(["commits", result.commits]);
   rows.push(["pullRequests", result.pullRequests]);
   rows.push(["loc", result.loc.value ?? ""]);
+  rows.push(["hoursSaved", result.hoursSaved.value ?? ""]);
   return { header, rows };
 }
 

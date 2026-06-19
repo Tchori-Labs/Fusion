@@ -3,7 +3,8 @@ import type { Database } from "./db.js";
 /**
  * Productivity analytics: files modified (count + language distribution) from
  * `tasks.modifiedFiles`, commit associations from `task_commit_associations`,
- * pull requests from `pull_requests`, and LOC from merge-time commit diff stats.
+ * pull requests from `pull_requests`, LOC from merge-time commit diff stats,
+ * and estimated human hours saved derived from the same LOC source.
  *
  * **LOC availability.** Fusion persists nullable `additions`/`deletions` on
  * `task_commit_associations` when merge paths can capture git shortstat output.
@@ -11,12 +12,19 @@ import type { Database } from "./db.js";
  * has non-null stats. If the range has no recorded stats, the documented
  * unavailable sentinel — `{ value: null, unavailable: true }` — is preserved,
  * **never `0`**, so missing historical data is not mistaken for "zero lines
- * changed".
+ * changed". Human-hours-saved uses the same sentinel because it is a
+ * conservative estimate over real LOC rather than an independent data source.
  *
  * Inclusivity: `from`/`to` bounds are inclusive. Tasks are filtered by
  * `updatedAt` (the last time the task — and therefore its modifiedFiles — was
  * touched); commit associations by `authoredAt`; PRs by `createdAt`.
  */
+
+/*
+FNXC:CommandCenterProductivity 2026-06-19-12:00:
+Human hours saved is intentionally a rough headline estimate from already-aggregated changed LOC. Use one conservative exported rate so dashboards, CSV exports, and docs can cite the same assumption without adding a new data source or implying precision.
+*/
+export const HUMAN_LINES_PER_HOUR = 15;
 
 export interface ProductivityAnalyticsQuery {
   /** ISO-8601 lower bound (inclusive). */
@@ -41,6 +49,16 @@ export interface LocSummary {
   unavailable: boolean;
 }
 
+/**
+ * Estimated human hours saved. `value` is an estimate in hours. It is null and
+ * `unavailable` true when the underlying LOC source is unavailable — never `0`
+ * for unknown data.
+ */
+export interface HoursSavedSummary {
+  value: number | null;
+  unavailable: boolean;
+}
+
 export interface ProductivityAnalytics {
   from: string | null;
   to: string | null;
@@ -54,6 +72,8 @@ export interface ProductivityAnalytics {
   pullRequests: number;
   /** LOC from commit association diff stats when at least one in-range row has stats. */
   loc: LocSummary;
+  /** Estimated human-hours equivalent derived from `loc` when LOC is available. */
+  hoursSaved: HoursSavedSummary;
 }
 
 interface CountRow {
@@ -157,6 +177,9 @@ export function aggregateProductivityAnalytics(
   const loc: LocSummary = commitStats.statsRows > 0
     ? { value: (commitStats.additions ?? 0) + (commitStats.deletions ?? 0), unavailable: false }
     : { value: null, unavailable: true };
+  const hoursSaved: HoursSavedSummary = loc.unavailable || loc.value === null
+    ? { value: null, unavailable: true }
+    : { value: Math.round((loc.value / HUMAN_LINES_PER_HOUR) * 10) / 10, unavailable: false };
 
   // Pull requests. `pull_requests.createdAt` is an INTEGER epoch-ms column, so
   // convert the ISO bounds to epoch ms for comparison.
@@ -185,5 +208,6 @@ export function aggregateProductivityAnalytics(
     commits,
     pullRequests,
     loc,
+    hoursSaved,
   };
 }

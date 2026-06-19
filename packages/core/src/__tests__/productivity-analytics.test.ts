@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import { Database } from "../db.js";
-import { aggregateProductivityAnalytics } from "../productivity-analytics.js";
+import { aggregateProductivityAnalytics, HUMAN_LINES_PER_HOUR } from "../productivity-analytics.js";
 
 function insertTaskWithFiles(db: Database, id: string, files: string[], updatedAt: string): void {
   db.prepare(
@@ -86,19 +86,24 @@ describe("productivity-analytics", () => {
     const result = aggregateProductivityAnalytics(db, {});
     expect(result.loc).toEqual({ value: null, unavailable: true });
     expect(result.loc.value).not.toBe(0);
+    expect(result.hoursSaved).toEqual({ value: null, unavailable: true });
+    expect(result.hoursSaved.value).not.toBe(0);
   });
 
-  it("sums additions and deletions into LOC when commit stats exist", () => {
+  it("sums additions and deletions into LOC and derives estimated hours saved when commit stats exist", () => {
     insertCommit(db, "c1", "sha1", "2026-03-01T00:00:00.000Z", { additions: 10, deletions: 5 });
-    insertCommit(db, "c2", "sha2", "2026-03-02T00:00:00.000Z", { additions: 3, deletions: 2 });
     insertCommit(db, "c-old", "sha-old", "2025-01-01T00:00:00.000Z", { additions: 100, deletions: 100 });
 
     const result = aggregateProductivityAnalytics(db, { from: "2026-03-01T00:00:00.000Z", to: "2026-03-31T00:00:00.000Z" });
-    expect(result.commits).toBe(2);
-    expect(result.loc).toEqual({ value: 20, unavailable: false });
+    expect(result.commits).toBe(1);
+    expect(result.loc).toEqual({ value: 15, unavailable: false });
+    expect(result.hoursSaved).toEqual({
+      value: Math.round((15 / HUMAN_LINES_PER_HOUR) * 10) / 10,
+      unavailable: false,
+    });
   });
 
-  it("keeps the LOC sentinel when in-range commit rows have only null stats", () => {
+  it("keeps the LOC and hours-saved sentinels when in-range commit rows have only null stats", () => {
     insertCommit(db, "c1", "sha1", "2026-03-01T00:00:00.000Z");
     insertCommit(db, "c2", "sha2", "2026-03-02T00:00:00.000Z", { additions: null, deletions: null });
 
@@ -106,9 +111,11 @@ describe("productivity-analytics", () => {
     expect(result.commits).toBe(2);
     expect(result.loc).toEqual({ value: null, unavailable: true });
     expect(result.loc.value).not.toBe(0);
+    expect(result.hoursSaved).toEqual({ value: null, unavailable: true });
+    expect(result.hoursSaved.value).not.toBe(0);
   });
 
-  it("sums only valued LOC rows while allowing partial commit-stat coverage", () => {
+  it("sums only valued LOC rows and hours saved while allowing partial commit-stat coverage", () => {
     insertCommit(db, "c-null", "sha-null", "2026-03-01T00:00:00.000Z");
     insertCommit(db, "c-additions", "sha-additions", "2026-03-02T00:00:00.000Z", { additions: 7 });
     insertCommit(db, "c-deletions", "sha-deletions", "2026-03-03T00:00:00.000Z", { deletions: 4 });
@@ -116,6 +123,10 @@ describe("productivity-analytics", () => {
     const result = aggregateProductivityAnalytics(db, { from: "2026-03-01T00:00:00.000Z", to: "2026-03-31T00:00:00.000Z" });
     expect(result.commits).toBe(3);
     expect(result.loc).toEqual({ value: 11, unavailable: false });
+    expect(result.hoursSaved).toEqual({
+      value: Math.round((11 / HUMAN_LINES_PER_HOUR) * 10) / 10,
+      unavailable: false,
+    });
   });
 
   it("empty range returns zeroed structures, not nulls", () => {
@@ -128,8 +139,10 @@ describe("productivity-analytics", () => {
     expect(result.byLanguage).toEqual([]);
     expect(result.commits).toBe(0);
     expect(result.pullRequests).toBe(0);
-    // LOC unavailable regardless of range
+    // LOC and derived hours are unavailable regardless of range.
     expect(result.loc).toEqual({ value: null, unavailable: true });
+    expect(result.hoursSaved).toEqual({ value: null, unavailable: true });
+    expect(result.hoursSaved.value).not.toBe(0);
   });
 
   it("includes a boundary task exactly at `from`", () => {

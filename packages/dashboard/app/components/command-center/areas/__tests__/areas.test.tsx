@@ -777,7 +777,7 @@ describe("ToolsArea", () => {
 });
 
 describe("ProductivityArea", () => {
-  it("renders unavailable LOC as the dash sentinel, never 0 and keeps chart geometry finite", async () => {
+  it("renders unavailable LOC and hours saved as dash sentinels, never 0 and keeps chart geometry finite", async () => {
     apiMock.mockResolvedValue({
       from: "2026-06-08",
       to: null,
@@ -786,12 +786,17 @@ describe("ProductivityArea", () => {
       commits: 4,
       pullRequests: 2,
       loc: { value: null, unavailable: true },
+      hoursSaved: { value: null, unavailable: true },
     });
     render(<ProductivityArea range={range7d} />);
     await screen.findByTestId("cc-area-productivity");
     const loc = screen.getByTestId("cc-productivity-loc-unavailable");
     expect(loc.textContent).toBe("—");
     expect(loc.getAttribute("title")).toBeTruthy();
+    const hoursSaved = screen.getByTestId("cc-productivity-hours-saved-unavailable");
+    expect(hoursSaved.textContent).toBe("—");
+    expect(hoursSaved.getAttribute("title")).toBeTruthy();
+    expect(screen.getByTestId("cc-productivity-hours-saved").textContent).not.toContain("0");
     // The commits outcome counter still shows a real number.
     expect(screen.getByTestId("cc-productivity-commits").textContent).toContain("4");
     expect(screen.getByRole("list", { name: "Files by language" })).toBeTruthy();
@@ -809,6 +814,7 @@ describe("ProductivityArea", () => {
       commits: 0,
       pullRequests: 0,
       loc: { value: null, unavailable: true },
+      hoursSaved: { value: null, unavailable: true },
     });
     const { unmount } = render(<ProductivityArea range={range7d} />);
     await screen.findByTestId("cc-area-productivity-empty");
@@ -837,6 +843,7 @@ describe("ProductivityArea", () => {
       commits: 0,
       pullRequests: 0,
       loc: { value: null, unavailable: true },
+      hoursSaved: { value: null, unavailable: true },
     });
     render(<ProductivityArea range={range7d} />);
 
