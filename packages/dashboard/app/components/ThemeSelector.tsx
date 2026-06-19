@@ -42,6 +42,7 @@ const COLOR_THEMES: { value: ColorTheme; label: string; className: string }[] = 
   { value: "silver", label: "Silver", className: "theme-swatch-silver" },
   { value: "solarized", label: "Solarized", className: "theme-swatch-solarized" },
   { value: "factory", label: "Factory", className: "theme-swatch-factory" },
+  { value: "factory-mono", label: "Factory Mono", className: "theme-swatch-factory-mono" },
   { value: "ayu", label: "Ayu", className: "theme-swatch-ayu" },
   { value: "one-dark", label: "One Dark", className: "theme-swatch-one-dark" },
   { value: "nord", label: "Nord", className: "theme-swatch-nord" },

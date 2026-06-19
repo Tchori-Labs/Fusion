@@ -491,6 +491,34 @@ describe("useTheme", () => {
     document.head.removeChild(style);
   });
 
+  it("applies factory-mono design tokens without glow effects", () => {
+    localStorageMock[COLOR_THEME_STORAGE_KEY] = "factory-mono";
+
+    renderHook(() => useTheme());
+
+    const style = document.createElement("style");
+    const baseCss = readFileSync(resolve(PACKAGE_ROOT, "app/styles.css"), "utf8");
+    const themeDataCss = readFileSync(resolve(PACKAGE_ROOT, "app/public/theme-data.css"), "utf8");
+    style.textContent = baseCss + "\n" + themeDataCss;
+    document.head.appendChild(style);
+    document.documentElement.setAttribute("data-color-theme", "factory-mono");
+
+    expect(document.documentElement.getAttribute("data-color-theme")).toBe("factory-mono");
+
+    const factoryMonoBlock = themeDataCss.match(/\[data-color-theme="factory-mono"\] \{(?<body>[\s\S]*?)\n\}/)?.groups?.body;
+    expect(factoryMonoBlock).toBeDefined();
+    expect(factoryMonoBlock).toContain("--shadow-glow: none;");
+    expect(factoryMonoBlock).toContain("--glow-success: none;");
+    expect(factoryMonoBlock).toContain("--glow-warning: none;");
+    expect(factoryMonoBlock).toContain("--glow-danger: none;");
+    expect(factoryMonoBlock).toContain("--cta-glow: none;");
+    expect(factoryMonoBlock).not.toMatch(/--(?:shadow-glow|glow-success|glow-warning|glow-danger|cta-glow):\s*0 0/);
+    expect(factoryMonoBlock).toContain("--accent: #ef4444;");
+    expect(factoryMonoBlock).toContain("--cta-border: #ef4444;");
+
+    document.head.removeChild(style);
+  });
+
   it("supports all valid theme modes", () => {
     const { result } = renderHook(() => useTheme());
 

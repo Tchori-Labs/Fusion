@@ -950,6 +950,183 @@
   font-weight: 700;
 }
 
+/*
+FNXC:Theming 2026-06-19-00:00:
+Factory Mono is a monochrome Factory variant for FN-6724: keep the industrial monospace density, uppercase controls, and 2px border system while limiting color to red accents and removing pulsing glow effects.
+*/
+[data-color-theme="factory-mono"] {
+  --bg: #0a0a0a;
+  --surface: #111111;
+  --card: #1a1a1a;
+  --card-hover: #222222;
+  --surface-hover: color-mix(in srgb, var(--surface) 90%, var(--text) 10%);
+  --border: #333333;
+
+  --text: #f5f5f5;
+  --text-muted: #a3a3a3;
+  --text-dim: #737373;
+
+  --todo: #d4d4d4;
+  --in-progress: #a3a3a3;
+  --in-progress-rgb: 163, 163, 163;
+  --in-review: #e5e5e5;
+  --triage: #737373;
+  --done: #525252;
+
+  --color-success: #e5e5e5;
+  --color-warning: #d4d4d4;
+  --color-error: #ef4444;
+  --color-muted: #737373;
+
+  --font-primary: "SF Mono", "JetBrains Mono", "Fira Code", Monaco, Consolas, monospace;
+  --font-mono: "SF Mono", "JetBrains Mono", "Fira Code", Monaco, Consolas, monospace;
+
+  --space-xs: 2px;
+  --space-sm: 4px;
+  --space-md: 8px;
+  --space-lg: 12px;
+  --space-xl: 16px;
+  --space-2xl: 24px;
+
+  --radius-sm: 2px;
+  --radius-md: 4px;
+  --radius-lg: 6px;
+  --radius-xl: 8px;
+  --radius: var(--radius-md);
+
+  --btn-padding: 6px 12px;
+  --btn-border-width: 2px;
+  --card-padding: 8px 10px;
+  --modal-padding: var(--space-md) var(--space-lg);
+  --header-padding: var(--space-sm) var(--space-lg);
+  --column-gap: var(--space-sm);
+  --board-padding: var(--space-md) var(--space-lg);
+
+  --shadow-sm: none;
+  --shadow-md: 0 1px 0 color-mix(in srgb, #000000 60%, transparent);
+  --shadow-lg: 0 1px 0 color-mix(in srgb, #000000 70%, transparent);
+  --shadow-glow: none;
+  --glow-success: none;
+  --glow-warning: none;
+  --glow-danger: none;
+  --focus-ring: 0 0 0 var(--btn-border-width) color-mix(in srgb, var(--accent) 30%, transparent);
+  --focus-ring-strong: 0 0 0 var(--btn-border-width) color-mix(in srgb, var(--accent) 45%, transparent);
+  --shadow: var(--shadow-lg);
+
+  --transition-instant: 0.05s ease;
+  --transition-fast: 0.1s ease;
+  --transition-normal: 0.15s ease;
+  --transition-slow: 0.2s ease;
+
+  --cta-bg: transparent;
+  --cta-border: #ef4444;
+  --cta-text: #ef4444;
+  --cta-bg-hover: #ef4444;
+  --cta-border-hover: #f87171;
+  --cta-glow: none;
+  --logo-accent: #ef4444;
+  --color-info: #d4d4d4;
+  --accent: #ef4444;
+  --accent-text: #0a0a0a;
+}
+
+[data-color-theme="factory-mono"][data-theme="light"] {
+  --bg: #f5f5f5;
+  --surface: #ffffff;
+  --card: #fafafa;
+  --card-hover: #f0f0f0;
+  --surface-hover: color-mix(in srgb, var(--surface) 92%, var(--text) 8%);
+  --border: #d4d4d4;
+
+  --text: #1a1a1a;
+  --text-muted: #525252;
+  --text-dim: #737373;
+
+  --todo: #525252;
+  --in-progress: #737373;
+  --in-progress-rgb: 115, 115, 115;
+  --in-review: #404040;
+  --triage: #a3a3a3;
+  --done: #8a8a8a;
+
+  --color-success: #404040;
+  --color-warning: #525252;
+  --color-error: #dc2626;
+  --color-muted: #737373;
+
+  --shadow-sm: none;
+  --shadow-md: 0 1px 0 color-mix(in srgb, var(--text) 12%, transparent);
+  --shadow-lg: 0 1px 0 color-mix(in srgb, var(--text) 18%, transparent);
+  --shadow-glow: none;
+  --glow-success: none;
+  --glow-warning: none;
+  --glow-danger: none;
+  --focus-ring: 0 0 0 var(--btn-border-width) color-mix(in srgb, var(--accent) 25%, transparent);
+  --focus-ring-strong: 0 0 0 var(--btn-border-width) color-mix(in srgb, var(--accent) 38%, transparent);
+  --shadow: var(--shadow-lg);
+
+  --cta-bg: transparent;
+  --cta-border: #dc2626;
+  --cta-text: #dc2626;
+  --cta-bg-hover: #dc2626;
+  --cta-border-hover: #ef4444;
+  --cta-glow: none;
+  --logo-accent: #dc2626;
+  --color-info: #525252;
+  --accent: #dc2626;
+  --accent-text: #ffffff;
+}
+
+[data-color-theme="factory-mono"] .card.agent-active {
+  border-color: var(--accent);
+  box-shadow: none;
+  animation: none;
+}
+
+[data-color-theme="factory-mono"][data-theme="light"] .card.agent-active {
+  border-color: var(--accent);
+  box-shadow: none;
+  animation: none;
+}
+
+[data-color-theme="factory-mono"] .btn {
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 600;
+}
+
+[data-color-theme="factory-mono"] .btn-primary,
+[data-color-theme="factory-mono"] .btn-task-create {
+  background: transparent;
+  border-color: var(--accent);
+  color: var(--accent);
+  box-shadow: none;
+}
+
+[data-color-theme="factory-mono"] .btn-primary:hover,
+[data-color-theme="factory-mono"] .btn-task-create:hover {
+  background: var(--accent);
+  color: var(--accent-text);
+  box-shadow: none;
+}
+
+[data-color-theme="factory-mono"] .card,
+[data-color-theme="factory-mono"] .column {
+  border-width: var(--btn-border-width);
+}
+
+[data-color-theme="factory-mono"] .column-header h2 {
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: 0.75rem;
+}
+
+[data-color-theme="factory-mono"] .column-count,
+[data-color-theme="factory-mono"] .card-id {
+  font-family: var(--font-mono);
+  font-weight: 700;
+}
+
 /* AYU - Popular code editor theme with dark and light variants */
 [data-color-theme="ayu"] {
   --bg: #0f1419;

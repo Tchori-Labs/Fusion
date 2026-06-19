@@ -281,6 +281,7 @@ export const COLOR_THEMES = [
   "silver",
   "solarized",
   "factory",
+  "factory-mono",
   "ayu",
   "one-dark",
   "nord",
