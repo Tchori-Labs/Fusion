@@ -2660,6 +2660,12 @@ describe("WorkflowNodeEditor — U9 palette Templates section", () => {
 
     render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
     await screen.findByTestId("wf-palette-templates");
+    /*
+     * FNXC:WorkflowNodeEditor 2026-06-19-09:02:
+     * The duplicate-merge-seam guard must prove the fragment click is the only attempted canvas mutation.
+     * Wait for the base workflow node before taking the mutation baseline so cold ReactFlow rendering cannot masquerade as insertion.
+     */
+    await screen.findByTestId("wf-node-gate");
 
     const beforeNodes = document.querySelectorAll('[data-testid^="wf-node-"]').length;
     fireEvent.click(screen.getByTestId("wf-tpl-fragment-WF-FRAG-MERGE"));

@@ -2480,12 +2480,15 @@ describe("App view switching", () => {
 
     // Open the overflow menu and click Insights
     fireEvent.click(screen.getByTestId("view-toggle-overflow-trigger"));
-    fireEvent.click(screen.getByTestId("view-overflow-insights"));
+    /*
+     * FNXC:DashboardRouting 2026-06-19-09:04:
+     * The App-level Insights routing test must wait for the overflow command that users click, not only for the trigger.
+     * This preserves the lazy-view navigation invariant while avoiding a race with async settings-driven menu commits.
+     */
+    fireEvent.click(await screen.findByTestId("view-overflow-insights"));
 
     // Insights view should be rendered (it has a insights-view container)
-    await waitFor(() => {
-      expect(document.querySelector(".insights-view")).toBeTruthy();
-    });
+    expect(await screen.findByTestId("insights-view")).toBeTruthy();
 
     // Should NOT show board, list, or agents view
     expect(document.querySelector(".board")).toBeNull();
@@ -2543,7 +2546,8 @@ describe("App view switching", () => {
     });
 
     fireEvent.click(screen.getByTestId("view-toggle-overflow-trigger"));
-    fireEvent.click(screen.getByTestId("view-overflow-insights"));
+    // FNXC:DashboardRouting 2026-06-19-09:15: Insights overflow commands are settings-driven, so task-flow coverage must await the committed command before clicking it.
+    fireEvent.click(await screen.findByTestId("view-overflow-insights"));
 
     await waitFor(() => {
       expect(screen.getByTestId("create-task-INS-1")).toBeTruthy();
@@ -2577,7 +2581,8 @@ describe("App view switching", () => {
     });
 
     fireEvent.click(screen.getByTestId("view-toggle-overflow-trigger"));
-    fireEvent.click(screen.getByTestId("view-overflow-insights"));
+    // FNXC:DashboardRouting 2026-06-19-09:15: Preference persistence exercises the same async overflow command surface as direct Insights navigation.
+    fireEvent.click(await screen.findByTestId("view-overflow-insights"));
 
     await waitFor(() => {
       expect(localStorage.getItem(taskViewStorageKey())).toBe("insights");
