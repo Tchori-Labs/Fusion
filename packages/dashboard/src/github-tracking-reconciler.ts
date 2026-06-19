@@ -132,6 +132,77 @@ export class GitHubTrackingReconciler {
     return { scanned: tasks.length, closed, skipped, errors };
   }
 
+  /**
+   * FNXC:GithubSourceIssueBackfill 2026-06-18-18:53:
+   * Historical GitHub-imported tasks need an optional one-time sweep that fills missing `sourceIssueClosedAt` from real GitHub `closed_at` values only. Keep this path decoupled from analytics so Command Center aggregation never performs network calls, and keep it idempotent by excluding already-filled tasks and never fabricating timestamps.
+   */
+  async backfillSourceIssueClosedAt(
+    store: TaskStore,
+    options?: { offset?: number; limit?: number },
+  ): Promise<{ scanned: number; filled: number; skipped: number; errors: number; hasMore: boolean }> {
+    const listedTasks = await store.listTasks({ slim: false, includeArchived: true });
+    const offset = Number.isInteger(options?.offset) && (options?.offset ?? 0) > 0 ? options?.offset ?? 0 : 0;
+    const limit = Number.isInteger(options?.limit) && (options?.limit ?? RECONCILE_SCAN_LIMIT) >= 0
+      ? Math.min(options?.limit ?? RECONCILE_SCAN_LIMIT, RECONCILE_SCAN_LIMIT)
+      : RECONCILE_SCAN_LIMIT;
+    const matchingTasks = (Array.isArray(listedTasks) ? listedTasks : [])
+      .filter((task) => (task.column === "done" || task.column === "archived")
+        && task.sourceIssue?.provider === "github"
+        && !task.sourceIssue?.closedAt);
+    const tasks = matchingTasks.slice(offset, offset + limit);
+    const hasMore = offset + limit < matchingTasks.length;
+
+    const projectSettings = ((await store.getSettings()) ?? {}) as Pick<ProjectSettings, "githubAuthMode" | "githubAuthToken">;
+    const globalSettings = (await store.getGlobalSettingsStore?.()?.getSettings?.() ?? {}) as Pick<GlobalSettings, never>;
+    const resolution = resolveGithubTrackingAuth({ projectSettings, globalSettings });
+    if (!resolution.ok) {
+      for (const task of tasks) {
+        await store.logEntry(task.id, "Skipped GitHub source issue closed-at backfill", resolution.message);
+      }
+      return { scanned: tasks.length, filled: 0, skipped: tasks.length, errors: 0, hasMore };
+    }
+
+    const client = resolution.auth.mode === "token"
+      ? new GitHubClient({ token: resolution.auth.token, forceMode: "token" })
+      : new GitHubClient({ forceMode: "gh-cli" });
+
+    let filled = 0;
+    let skipped = 0;
+    let errors = 0;
+
+    await runWithConcurrencyLimit(tasks, RECONCILE_CONCURRENCY_LIMIT, async (task) => {
+      const sourceIssue = task.sourceIssue;
+      const repository = sourceIssue?.repository ?? "";
+      const [owner, repo] = repository.split("/");
+      const issueNumber = sourceIssue?.issueNumber;
+      if (!sourceIssue || !owner || !repo || !Number.isInteger(issueNumber)) {
+        skipped += 1;
+        return;
+      }
+
+      try {
+        const linkedIssue = await client.getIssue(owner, repo, issueNumber as number);
+        const closedAt = typeof linkedIssue?.closedAt === "string" ? linkedIssue.closedAt.trim() : "";
+        if (linkedIssue?.state !== "closed" || closedAt.length === 0) {
+          skipped += 1;
+          return;
+        }
+
+        await store.updateTask(task.id, { sourceIssue: { ...sourceIssue, closedAt } });
+        filled += 1;
+      } catch (error) {
+        errors += 1;
+        await store.logEntry(
+          task.id,
+          "Failed to backfill GitHub source issue closed-at",
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+    });
+
+    return { scanned: tasks.length, filled, skipped, errors, hasMore };
+  }
+
   async reconcileDeletedAndArchived(
     store: TaskStore,
     options?: { offset?: number; limit?: number },

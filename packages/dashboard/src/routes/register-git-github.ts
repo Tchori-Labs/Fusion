@@ -2611,6 +2611,37 @@ export function registerGitGitHubRoutes(ctx: ApiRoutesContext): void {
   }
 
   /**
+   * POST /api/git/github/backfill-source-issue-closed-at
+   * FNXC:GithubSourceIssueBackfill 2026-06-18-18:53:
+   * Historical source-issue closed-at backfills are opt-in manual sweeps, not periodic reconciliation work. The route is project-scoped, accepts offset/limit pagination, clamps batches to RECONCILE_SCAN_LIMIT, and returns { scanned, filled, skipped, errors, hasMore } so callers can iterate until hasMore is false without analytics-time network calls.
+   */
+  router.post("/git/github/backfill-source-issue-closed-at", async (req, res) => {
+    try {
+      const { store: scopedStore } = await getProjectContext(req);
+      const body = (req.body ?? {}) as { offset?: unknown; limit?: unknown };
+      const offset = body.offset === undefined ? 0 : Number(body.offset);
+      const limit = body.limit === undefined ? RECONCILE_SCAN_LIMIT : Number(body.limit);
+      if (!Number.isInteger(offset) || offset < 0) {
+        throw badRequest("offset must be a non-negative integer");
+      }
+      if (!Number.isInteger(limit) || limit < 0) {
+        throw badRequest("limit must be a non-negative integer");
+      }
+
+      const result = await new GitHubTrackingReconciler().backfillSourceIssueClosedAt(scopedStore, {
+        offset,
+        limit: Math.min(limit, RECONCILE_SCAN_LIMIT),
+      });
+      res.json(result);
+    } catch (err: unknown) {
+      if (err instanceof ApiError) {
+        throw err;
+      }
+      rethrowAsApiError(err);
+    }
+  });
+
+  /**
    * GET /api/git/remotes
    * Returns GitHub remotes from the current git repository.
    * Response: Array of GitRemote objects [{ name: string, owner: string, repo: string, url: string }]
