@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { LeftSidebarNav } from "../LeftSidebarNav";
 import type { PluginDashboardViewEntry } from "../../api";
@@ -87,9 +87,16 @@ describe("LeftSidebarNav", () => {
     ]) {
       expect(screen.getByTestId(testId)).toBeDefined();
     }
+
+    const sidebar = screen.getByTestId("left-sidebar-nav");
+    const footer = screen.getByTestId("sidebar-nav-settings").closest(".left-sidebar-nav__footer");
+    expect(footer).not.toBeNull();
+    expect(footer?.parentElement).toBe(sidebar);
+    const sidebarButtons = within(sidebar).getAllByRole("button");
+    expect(sidebarButtons.at(-1)).toBe(screen.getByTestId("sidebar-nav-settings"));
   });
 
-  it("gates optional destinations on their matching feature flags and props", () => {
+  it("gates optional destinations on their matching feature flags and props while preserving bottom settings", () => {
     renderSidebar({
       showAgentsTab: false,
       showSkillsTab: false,
@@ -109,6 +116,10 @@ describe("LeftSidebarNav", () => {
     expect(screen.queryByTestId("sidebar-nav-goals")).toBeNull();
     expect(screen.queryByTestId("sidebar-nav-devserver")).toBeNull();
     expect(screen.queryByTestId("sidebar-nav-plugin-fusion-plugin-primary-primary-view")).toBeNull();
+
+    const sidebar = screen.getByTestId("left-sidebar-nav");
+    expect(screen.getByTestId("sidebar-nav-settings").closest(".left-sidebar-nav__footer")).not.toBeNull();
+    expect(within(sidebar).getAllByRole("button").at(-1)).toBe(screen.getByTestId("sidebar-nav-settings"));
   });
 
   it("renders shortened primary labels and default width", () => {
@@ -181,7 +192,7 @@ describe("LeftSidebarNav", () => {
     expect(screen.getByTestId(testId).getAttribute("aria-current")).toBe("page");
   });
 
-  it("toggles collapsed rail mode and restores it on remount", () => {
+  it("toggles collapsed rail mode, keeps bottom settings reachable, and restores it on remount", () => {
     const firstRender = renderSidebar();
     const sidebar = screen.getByTestId("left-sidebar-nav");
 
@@ -189,10 +200,13 @@ describe("LeftSidebarNav", () => {
     expect(sidebar.className).toContain("left-sidebar-nav--collapsed");
     expect(window.localStorage.getItem("fusion:left-sidebar-collapsed")).toBe("true");
     expect(screen.queryByTestId("sidebar-nav-resize-handle")).toBeNull();
+    expect(screen.getByTestId("sidebar-nav-settings").closest(".left-sidebar-nav__footer")).not.toBeNull();
+    expect(within(sidebar).getAllByRole("button").at(-1)).toBe(screen.getByTestId("sidebar-nav-settings"));
 
     firstRender.unmount();
     renderSidebar();
     expect(screen.getByTestId("left-sidebar-nav").className).toContain("left-sidebar-nav--collapsed");
+    expect(screen.getByTestId("sidebar-nav-settings")).toBeDefined();
   });
 
   it("clamps and persists drag resize width", () => {
@@ -237,5 +251,11 @@ describe("LeftSidebarNav", () => {
 
     fireEvent.click(screen.getByTestId("sidebar-nav-settings"));
     expect(onOpenSettings).toHaveBeenCalledOnce();
+  });
+
+  it("does not crash when bottom settings is clicked without a handler", () => {
+    renderSidebar({ onOpenSettings: undefined });
+
+    expect(() => fireEvent.click(screen.getByTestId("sidebar-nav-settings"))).not.toThrow();
   });
 });
