@@ -1,5 +1,5 @@
 import { mkdtempSync } from "node:fs";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -119,6 +119,24 @@ describe("TaskStore orphaned task-dir reconciliation", () => {
     expect((await store.listTasks({ includeArchived: false })).map((candidate) => candidate.id)).not.toContain(task.id);
     expect((await store.listTasks({ includeArchived: true })).map((candidate) => candidate.id)).toContain(task.id);
     expect((await store.getTask(task.id)).column).toBe("archived");
+  });
+
+  it("skips a stale orphan task dir beyond the recency window (no resurrection of old deleted tasks)", async () => {
+    // Regression: legacy hard-deletes left no tombstone, so an ancient task.json lingering
+    // on disk was silently re-imported onto the live board ("all task IDs reset" failure).
+    const orphan = await createDiskOnlyTask("FN-9110");
+    // Backdate the task.json well beyond the 7-day recency window.
+    const eightDaysAgo = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000);
+    const taskJsonPath = join(rootDir, ".fusion", "tasks", orphan.id, "task.json");
+    await utimes(taskJsonPath, eightDaysAgo, eightDaysAgo);
+
+    const result = await store.reconcileOrphanedTaskDirs();
+
+    expect(result.recovered).not.toContain(orphan.id);
+    expect(result.skipped).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: orphan.id, reason: "stale-orphan-dir-beyond-recency-window" }),
+    ]));
+    await expect(store.getTask(orphan.id)).rejects.toThrow("Task FN-9110 not found");
   });
 
   it("skips malformed task.json and directories without task.json without throwing", async () => {

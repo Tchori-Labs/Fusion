@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 import { randomUUID } from "node:crypto";
-import { mkdir, readdir, readFile, writeFile, rename, unlink } from "node:fs/promises";
+import { mkdir, readdir, readFile, stat, writeFile, rename, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { existsSync, watch, type Dirent, type FSWatcher } from "node:fs";
 import type { Task, TaskDetail, TaskCreateInput, TaskAttachment, AgentLogEntry, BoardConfig, Column, ColumnId, CheckoutClaimPrecondition, MergeResult, Settings, GlobalSettings, ProjectSettings, ActivityLogEntry, ActivityEventType, TaskDocument, TaskDocumentRevision, TaskDocumentCreateInput, TaskDocumentWithTask, InboxTask, TaskLogEntry, RunMutationContext, RunAuditEvent, RunAuditEventInput, RunAuditEventFilter, ArchivedTaskEntry, ArchiveAgentLogMode, TaskPriority, SourceType, WorkflowStepTemplate, Agent, AutostashOrphanRecord, TaskCommitAssociation, TaskCommitAssociationMatchSource, TaskCommitAssociationConfidence, GithubIssueAction, MergeQueueEntry, MergeQueueEnqueueOptions, MergeQueueAcquireOptions, MergeQueueReleaseOutcome, HandoffToReviewOptions, GoalCitation, GoalCitationFilter, GoalCitationInput, GoalCitationSurface, BranchGroup, BranchGroupCreateInput, BranchGroupUpdate, TaskBranchAssignmentMode, MergeRequestRecord, MergeRequestState, MergeRequestWorkflowProjectionOptions, CompletionHandoffMarker, WorkflowWorkItem, WorkflowWorkItemDueFilter, WorkflowWorkItemKind, WorkflowWorkItemState, WorkflowWorkItemTransitionPatch, WorkflowWorkItemUpsertInput, PrEntity, PrEntityCreateInput, PrEntityUpdate, PrEntityState, PrThreadState, PrThreadOutcome, PrConflictState, PrChecksRollup, PrReviewDecision, PluginActivation, PluginActivationInput } from "./types.js";
@@ -717,6 +717,12 @@ let taskActivityLogEntryLimit = DEFAULT_TASK_ACTIVITY_LOG_ENTRY_LIMIT;
 let taskActivityLogOutcomeLimit = DEFAULT_TASK_ACTIVITY_LOG_OUTCOME_LIMIT;
 const ARCHIVE_AGENT_LOG_SNAPSHOT_LIMIT = 25;
 const ARCHIVE_AGENT_LOG_SNIPPET_LIMIT = 160;
+// reconcileOrphanedTaskDirs only recovers task dirs whose task.json was modified within
+// this window. Bounds the sweep to genuinely-recent orphans (heartbeat races, rows lost
+// to a recent DB corruption) and prevents silent resurrection of ancient deleted-task
+// dirs that merely lingered on disk (legacy hard-deletes left no tombstone). 7 days is
+// generous enough to cover an engine that was offline for a while.
+const RECONCILE_ORPHAN_TASK_DIR_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 const storeLog = createLogger("task-store");
 const coreLog = createLogger("core");
 
@@ -3261,6 +3267,35 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
       const taskJsonPath = join(taskDir, "task.json");
       if (!existsSync(taskJsonPath)) {
         result.skipped.push({ id, reason: "missing-task-json" });
+        continue;
+      }
+
+      // FN: recency gate. This sweep exists to recover task dirs that "appear after
+      // store init" — heartbeat-created dirs that race startup, or rows lost to a
+      // recent DB corruption while their task.json survived on disk. It must NOT
+      // resurrect *ancient* deleted-task dirs that merely lingered on disk: modern
+      // deletes leave a soft-delete tombstone (taskIdExistsAnywhere catches those),
+      // but legacy hard-deletes left no tombstone, so a months-old task.json with no
+      // DB row would otherwise be silently re-imported onto the live board (the
+      // "all task IDs reset / starting over" failure). Only reconcile dirs whose
+      // task.json was modified within the recency window; older orphans are left for
+      // explicit recovery (unarchive/restore) or directory cleanup.
+      try {
+        const { mtimeMs } = await stat(taskJsonPath);
+        const ageMs = Date.now() - mtimeMs;
+        if (ageMs > RECONCILE_ORPHAN_TASK_DIR_MAX_AGE_MS) {
+          result.skipped.push({ id, reason: "stale-orphan-dir-beyond-recency-window" });
+          storeLog.warn("Skipping stale orphaned task-dir reconcile (beyond recency window)", {
+            phase: "reconcileOrphanedTaskDirs:recency",
+            taskId: id,
+            taskJsonPath,
+            ageMs,
+            maxAgeMs: RECONCILE_ORPHAN_TASK_DIR_MAX_AGE_MS,
+          });
+          continue;
+        }
+      } catch (error) {
+        result.skipped.push({ id, reason: `stat-failed: ${error instanceof Error ? error.message : String(error)}` });
         continue;
       }
 
