@@ -11,11 +11,15 @@ vi.mock("../../../api/legacy", () => ({
   api: (path: string, opts?: RequestInit) => apiMock(path, opts),
 }));
 
+/*
+FNXC:CommandCenterTesting 2026-06-19-22:14:
+This test renders the real useAppSettings hook rather than mocking it, so the ../../../api mock must export every ../api symbol the hook imports. Missing exports make mount-time refresh() call undefined functions and surface as unhandled rejections instead of a layout regression.
+*/
 vi.mock("../../../api", () => ({
   fetchSystemStats: () => Promise.resolve(systemStatsFixture()),
   fetchGlobalSettings: () => Promise.resolve({ vitestAutoKillEnabled: true, vitestKillThresholdPct: 90 }),
   fetchConfig: vi.fn().mockResolvedValue({ maxConcurrent: 2, rootDir: "/" }),
-  fetchSettings: vi.fn().mockResolvedValue({ maxConcurrent: 2, maxTriageConcurrent: 1, maxWorktrees: 5 }),
+  fetchSettings: vi.fn().mockResolvedValue({ autoMerge: false, globalPause: false, enginePaused: false }),
   killVitestProcesses: () => Promise.resolve({ killed: 0, pids: [] }),
   updateGlobalSettings: () => Promise.resolve({}),
   updateSettings: vi.fn().mockResolvedValue({}),
@@ -105,7 +109,7 @@ function populatedProductivityFixture() {
     commits: 2,
     pullRequests: 1,
     loc: { value: 42, unavailable: false },
-    hoursSaved: { value: 3, unavailable: false },
+    hoursSaved: { value: 2, unavailable: false },
     taskDuration: {
       completedTasks: 2,
       averageMs: 1_800_000,
