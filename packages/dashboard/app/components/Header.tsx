@@ -1019,26 +1019,21 @@ export function Header({
                 <Bot size={16} />
               </button>
             )}
-            {isTablet && (
-              /*
-              FNXC:Navigation 2026-06-19-12:00:
-              Tablet navigation promotes Command Center immediately after Agents while desktop keeps Command Center in the More-views overflow.
-              Documents moves to the tablet More-views overflow below to conserve horizontal space without changing desktop ordering.
-
-              FNXC:Navigation 2026-06-19-08:24:
-              FN-6725 re-verified this tablet contract after a suspected revert: Command Center remains a single inline tablet destination after Agents, Documents remains overflow-only on tablet, and desktop ordering stays unchanged.
-              */
-              <button
-                className={`view-toggle-btn${view === "command-center" ? " active" : ""}`}
-                onClick={() => onChangeView("command-center")}
-                title={t("header.commandCenterView", "Command Center")}
-                aria-label={t("header.commandCenterView", "Command Center")}
-                aria-pressed={view === "command-center"}
-                data-testid="view-toggle-command-center"
-              >
-                <Gauge size={16} />
-              </button>
-            )}
+            {/*
+            FNXC:Navigation 2026-06-19-12:00:
+            FN-6781 supersedes the prior tablet-only inline / desktop-overflow split: Command Center must remain a stable inline destination immediately after Agents on tablet and desktop so the affordance does not relocate while resizing.
+            Documents still moves to the tablet More-views overflow to conserve horizontal space without changing desktop ordering.
+            */}
+            <button
+              className={`view-toggle-btn${view === "command-center" ? " active" : ""}`}
+              onClick={() => onChangeView("command-center")}
+              title={t("header.commandCenterView", "Command Center")}
+              aria-label={t("header.commandCenterView", "Command Center")}
+              aria-pressed={view === "command-center"}
+              data-testid="view-toggle-command-center"
+            >
+              <Gauge size={16} />
+            </button>
             <button
               className={`view-toggle-btn${view === "missions" ? " active" : ""}`}
               onClick={() => onChangeView("missions")}
@@ -1113,7 +1108,7 @@ export function Header({
               <>
                 <button
                   ref={viewOverflowTriggerRef}
-                  className={`view-toggle-btn${["research", "skills", "insights", "memory", "secrets", "dev-server", "devserver", "graph", "stash-recovery"].includes(view) || (!isTablet && view === "command-center") || (isTablet && view === "documents") || (experimentalFeatures?.evalsView && view === "evals") || (experimentalFeatures?.goalsView && view === "goalsView") || (todosEnabled && todosOpen) || isPluginViewId(view) ? " active" : ""}`}
+                  className={`view-toggle-btn${["research", "skills", "insights", "memory", "secrets", "dev-server", "devserver", "graph", "stash-recovery"].includes(view) || (isTablet && view === "documents") || (experimentalFeatures?.evalsView && view === "evals") || (experimentalFeatures?.goalsView && view === "goalsView") || (todosEnabled && todosOpen) || isPluginViewId(view) ? " active" : ""}`}
                   onClick={() => setIsViewOverflowOpen((prev) => !prev)}
                   title={t("header.moreViews", "More views")}
                   aria-label={t("header.moreViews", "More views")}
@@ -1253,20 +1248,6 @@ export function Header({
                       >
                         <FileText size={14} />
                         <span>{t("header.documentsView", "Documents view")}</span>
-                      </button>
-                    )}
-                    {!isTablet && (
-                      <button
-                        className={`view-toggle-overflow-item${view === "command-center" ? " active" : ""}`}
-                        onClick={() => {
-                          onChangeView("command-center");
-                          setIsViewOverflowOpen(false);
-                        }}
-                        role="menuitem"
-                        data-testid="view-overflow-command-center"
-                      >
-                        <Gauge size={14} />
-                        <span>{t("header.commandCenterView", "Command Center")}</span>
                       </button>
                     )}
                     {experimentalFeatures?.devServerView && (

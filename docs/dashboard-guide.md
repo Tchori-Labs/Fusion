@@ -658,8 +658,8 @@ Features:
 Command Center is the combined analytics and live-operations surface for a project: it pairs historical usage, cost, throughput analytics, live system telemetry, and a live Mission Control panel.
 
 Navigation:
-- Desktop: **Header → More views → Command Center**
-- Mobile: **More** sheet → **Command Center**
+- Desktop/tablet: primary header view toggle, immediately after **Agents**
+- Mobile: bottom nav tab, immediately after **Mailbox**
 - Deep link: `?view=command-center`
 
 Features:

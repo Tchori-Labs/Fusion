@@ -113,14 +113,15 @@ describe("tablet header controls", () => {
     expect(screen.queryByTestId("view-overflow-command-center")).toBeNull();
   });
 
-  it("keeps desktop Documents inline and Command Center in overflow", () => {
+  it("keeps desktop Documents and Command Center inline without Command Center overflow", () => {
     renderDesktopHeader({ onChangeView: noop, showAgentsTab: true });
 
     expect(screen.getByTitle("Documents view")).toBeDefined();
-    expect(screen.queryByTestId("view-toggle-command-center")).toBeNull();
+    expect(screen.getByTestId("view-toggle-command-center")).toBeDefined();
+    expect(screen.getByTestId("view-toggle-command-center").previousElementSibling).toBe(screen.getByTitle("Agents view"));
 
     fireEvent.click(screen.getByTestId("view-toggle-overflow-trigger"));
-    expect(screen.getByTestId("view-overflow-command-center")).toBeDefined();
+    expect(screen.queryByTestId("view-overflow-command-center")).toBeNull();
     expect(screen.queryByTestId("view-overflow-documents")).toBeNull();
   });
 

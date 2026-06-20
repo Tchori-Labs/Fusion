@@ -299,14 +299,16 @@ describe("Header", () => {
       expect(screen.getByTestId("view-toggle-overflow-trigger")).toBeDefined();
     });
 
-    it("keeps desktop Documents inline and Command Center only in overflow", () => {
+    it("keeps desktop Documents and Command Center inline without Command Center overflow", () => {
       renderHeader({ onChangeView: noop, showAgentsTab: true }, "desktop");
 
       expect(screen.getByTitle("Documents view")).toBeInTheDocument();
-      expect(screen.queryByTestId("view-toggle-command-center")).toBeNull();
+      const agentsButton = screen.getByTitle("Agents view");
+      const commandCenterButton = screen.getByTestId("view-toggle-command-center");
+      expect(commandCenterButton.previousElementSibling).toBe(agentsButton);
 
       fireEvent.click(screen.getByTestId("view-toggle-overflow-trigger"));
-      expect(screen.getByTestId("view-overflow-command-center")).toBeInTheDocument();
+      expect(screen.queryByTestId("view-overflow-command-center")).toBeNull();
       expect(screen.queryByTestId("view-overflow-documents")).toBeNull();
     });
 
