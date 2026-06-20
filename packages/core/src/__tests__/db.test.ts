@@ -581,6 +581,72 @@ describe("Database", () => {
         vi.useRealTimers();
       }
     });
+
+    it("clears integrityCheckPending for every participant even when the check throws", async () => {
+      // Regression: the participant-clearing loop must run unconditionally
+      // (in finally). If the background check rejects, no participant may be
+      // left stuck with integrityCheckPending=true for the life of the process.
+      vi.useFakeTimers();
+      const checkSpy = vi
+        .spyOn(
+          Database.prototype as unknown as {
+            runBackgroundIntegrityCheck: () => Promise<{ ok: boolean; errors?: string[] }>;
+          },
+          "runBackgroundIntegrityCheck",
+        )
+        .mockRejectedValue(new Error("background check blew up"));
+      const freshDir = makeTmpDir();
+      const freshFusionDir = join(freshDir, ".fusion");
+      const dbA = new Database(freshFusionDir);
+      const dbB = new Database(freshFusionDir);
+
+      try {
+        dbA.init();
+        dbB.init();
+        expect(dbA.integrityCheckPending).toBe(true);
+        expect(dbB.integrityCheckPending).toBe(true);
+
+        await vi.advanceTimersByTimeAsync(60_000);
+
+        // Thrown check is treated as benign (logged via .catch), but pending
+        // MUST be cleared for all participants.
+        expect(dbA.integrityCheckPending).toBe(false);
+        expect(dbB.integrityCheckPending).toBe(false);
+        expect(dbA.integrityCheckLastRunAt).toBeTruthy();
+        expect(dbB.integrityCheckLastRunAt).toBeTruthy();
+        expect(dbA.corruptionDetected).toBe(false);
+        expect(dbB.corruptionDetected).toBe(false);
+      } finally {
+        dbA.close();
+        dbB.close();
+        removeTrackedTmpDirSync(freshDir);
+        checkSpy.mockRestore();
+        vi.useRealTimers();
+      }
+    });
+
+    it("runBackgroundIntegrityCheck returns ok without throwing on a closed instance", async () => {
+      // Guards the fallback against calling integrityCheck() (this.db.prepare)
+      // on a closed DatabaseSync, which would throw and strand other
+      // participants when the instance closes during the offload await.
+      const freshDir = makeTmpDir();
+      const freshFusionDir = join(freshDir, ".fusion");
+      const db = new Database(freshFusionDir);
+      try {
+        db.init();
+        db.close();
+
+        const run = (
+          db as unknown as {
+            runBackgroundIntegrityCheck: () => Promise<{ ok: boolean }>;
+          }
+        ).runBackgroundIntegrityCheck();
+
+        await expect(run).resolves.toEqual({ ok: true });
+      } finally {
+        removeTrackedTmpDirSync(freshDir);
+      }
+    });
   });
 
   describe("change detection", () => {
@@ -761,11 +827,15 @@ describe("Database", () => {
       const result = await integrityCheckSqliteFileAsync(join(fusionDir, "fusion.db"));
 
       // If the sqlite3 CLI is unavailable in this environment, the helper reports
-      // verified:false so the caller falls back to the in-process check.
+      // verified:false so the caller falls back to the in-process check. Assert
+      // the contract distinctly per branch so the else-branch isn't a vacuous
+      // restatement of the hardcoded fallback value.
       if (result.verified) {
-        expect(result.ok).toBe(true);
-        expect(result.errors).toBeUndefined();
+        expect(result).toEqual({ ok: true, verified: true });
       } else {
+        // CLI absent: must signal "could not verify" (ok:true is the safe
+        // fallback default, but verified:false is the load-bearing assertion).
+        expect(result.verified).toBe(false);
         expect(result.ok).toBe(true);
       }
     });

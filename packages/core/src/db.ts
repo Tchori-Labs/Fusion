@@ -1703,7 +1703,16 @@ export function quickCheckSqliteFile(dbPath: string): { ok: boolean; verified: b
  * not be opened read-only) and the caller should fall back to the in-process
  * `integrityCheck()`. Matches the non-blocking-on-failure contract of
  * `quickCheckSqliteFile`.
+ *
+ * FNXC:Database 2026-06-20-14:30:
+ * The spawn is bounded by an AbortSignal timeout so a disk-stalled / kernel-hung
+ * sqlite3 child can never leave the promise unsettled — an unsettled promise
+ * would strand the background scheduler's shared entry and pin every
+ * participant's `integrityCheckPending` true forever. AbortSignal.timeout's
+ * internal timer is unref'd, so it never keeps the process alive on shutdown.
  */
+const INTEGRITY_CHECK_TIMEOUT_MS = 5 * 60 * 1000;
+
 export function integrityCheckSqliteFileAsync(
   dbPath: string,
   limit = 100,
@@ -1718,6 +1727,13 @@ export function integrityCheckSqliteFileAsync(
     try {
       child = spawn("sqlite3", ["-readonly", dbPath, `PRAGMA integrity_check(${limit});`], {
         stdio: ["ignore", "pipe", "pipe"],
+        // Bound wall-clock time: on timeout the signal aborts, the child is
+        // killed, and the 'error' handler resolves verified:false so the caller
+        // falls back to the in-process check. Without this a hung child never
+        // settles the promise. (Note: spawn() reports ENOENT via the 'error'
+        // event, not a synchronous throw — the try/catch only guards synchronous
+        // option-validation errors, e.g. an already-aborted signal.)
+        signal: AbortSignal.timeout(INTEGRITY_CHECK_TIMEOUT_MS),
       });
     } catch {
       resolve({ ok: true, verified: false });
@@ -2084,14 +2100,29 @@ export class Database {
    * testable seam (and so the offload/fallback policy lives in one place).
    * In-memory DBs have no on-disk file to hand the CLI, so they use the
    * in-process check directly.
+   *
+   * FNXC:Database 2026-06-20-14:30:
+   * The in-process `integrityCheck()` calls `this.db.prepare(...)`, which throws
+   * on a closed `DatabaseSync`. Because the offload `await` spans seconds, the
+   * instance can be closed mid-flight; guard `this.closed` before every
+   * in-process call so a close during the await degrades to a benign {ok:true}
+   * instead of throwing out of the background scheduler (which would strand
+   * every other participant's `integrityCheckPending`).
    */
   private async runBackgroundIntegrityCheck(): Promise<{ ok: true } | { ok: false; errors: string[] }> {
+    if (this.closed) {
+      return { ok: true };
+    }
     if (this.inMemory) {
       return this.integrityCheck();
     }
     const offloaded = await integrityCheckSqliteFileAsync(this.dbPath);
     if (offloaded.verified) {
       return offloaded.ok ? { ok: true } : { ok: false, errors: offloaded.errors ?? [] };
+    }
+    // Re-check after the await: the connection may have closed while the CLI ran.
+    if (this.closed) {
+      return { ok: true };
     }
     return this.integrityCheck();
   }
@@ -5388,20 +5419,31 @@ export class Database {
       // setTimeout callbacks can't be async; errors must be swallowed here so an
       // unhandled rejection can't crash the process from a background timer.
       void (async () => {
-        const participants = [...shared.subscribers].filter((instance) => !instance.closed);
-        const primary = participants[0];
+        const primary = [...shared.subscribers].find((instance) => !instance.closed);
         const startedAt = new Date().toISOString();
 
         let integrity: ReturnType<Database["integrityCheck"]> = { ok: true };
-        if (primary) {
-          integrity = await primary.runBackgroundIntegrityCheck();
-        }
-
-        for (const participant of participants) {
-          participant.integrityCheckPending = false;
-          participant.integrityCheckLastRunAt = startedAt;
-          participant.corruptionDetected = !integrity.ok;
-          participant.integrityCheckErrors = integrity.ok ? [] : [...integrity.errors];
+        try {
+          if (primary) {
+            integrity = await primary.runBackgroundIntegrityCheck();
+          }
+        } finally {
+          // FNXC:Database 2026-06-20-14:30:
+          // Clear pending state UNCONDITIONALLY and over the CURRENT subscriber
+          // set (re-read after the await), not a pre-await snapshot. Two bugs this
+          // closes: (1) if the check throws, a pre-`finally` loop would be skipped
+          // and every participant would be stuck integrityCheckPending=true
+          // forever; (2) a Database that subscribed during the seconds-long await
+          // window was absent from any pre-await snapshot and would never be
+          // cleared. Both now resolve because we fan out here regardless of
+          // outcome and iterate live subscribers.
+          for (const participant of shared.subscribers) {
+            if (participant.closed) continue;
+            participant.integrityCheckPending = false;
+            participant.integrityCheckLastRunAt = startedAt;
+            participant.corruptionDetected = !integrity.ok;
+            participant.integrityCheckErrors = integrity.ok ? [] : [...integrity.errors];
+          }
         }
 
         if (!integrity.ok) {
