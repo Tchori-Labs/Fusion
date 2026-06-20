@@ -1,6 +1,13 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { CommandCenterControls } from "../CommandCenterControls";
+
+const commandCenterControlsCss = readFileSync(
+  join(process.cwd(), "app/components/command-center/CommandCenterControls.css"),
+  "utf8",
+);
 
 const mocks = vi.hoisted(() => ({
   fetchSettings: vi.fn(),
@@ -54,7 +61,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.appSettings.globalPaused = false;
   mocks.appSettings.enginePaused = false;
-  mocks.fetchSettings.mockResolvedValue({ maxConcurrent: 2, maxTriageConcurrent: 1, maxWorktrees: 5 });
+  mocks.fetchSettings.mockResolvedValue({ maxConcurrent: 2, maxTriageConcurrent: 2, maxWorktrees: 4 });
   mocks.fetchConfig.mockResolvedValue({ maxConcurrent: 2, rootDir: "/repo" });
   mocks.updateSettings.mockResolvedValue({});
   mocks.refresh.mockResolvedValue(undefined);
@@ -100,7 +107,7 @@ describe("CommandCenterControls", () => {
     });
 
     expect(mocks.updateSettings).toHaveBeenCalledWith(
-      { maxConcurrent: 7, maxTriageConcurrent: 1, maxWorktrees: 5 },
+      { maxConcurrent: 7, maxTriageConcurrent: 2, maxWorktrees: 4 },
       "project-a",
     );
     expect(mocks.refresh).toHaveBeenCalledTimes(1);
@@ -120,9 +127,70 @@ describe("CommandCenterControls", () => {
     });
 
     expect(mocks.updateSettings).toHaveBeenCalledWith(
-      { maxConcurrent: 2, maxTriageConcurrent: 1, maxWorktrees: 12 },
+      { maxConcurrent: 2, maxTriageConcurrent: 2, maxWorktrees: 12 },
       undefined,
     );
+  });
+
+  it("renders persisted concurrency settings without stale default drift", async () => {
+    mocks.fetchSettings.mockResolvedValueOnce({ maxConcurrent: 6, maxTriageConcurrent: 3, maxWorktrees: 9 });
+
+    renderControls("project-a");
+
+    await flushPromises();
+    const section = screen.getByTestId("cc-controls-concurrency");
+    const maxConcurrent = within(section).getByLabelText(/max concurrent tasks/i) as HTMLInputElement;
+    const maxTriageConcurrent = within(section).getByLabelText(/max triage concurrent/i) as HTMLInputElement;
+    const maxWorktrees = within(section).getByLabelText(/max worktrees/i) as HTMLInputElement;
+
+    expect(maxConcurrent.value).toBe("6");
+    expect(maxConcurrent.closest("label")).toHaveTextContent("Max concurrent tasks6");
+    expect(maxTriageConcurrent.value).toBe("3");
+    expect(maxTriageConcurrent.closest("label")).toHaveTextContent("Max triage concurrent3");
+    expect(maxWorktrees.value).toBe("9");
+    expect(maxWorktrees.closest("label")).toHaveTextContent("Max worktrees9");
+  });
+
+  it("keeps out-of-range persisted concurrency values visible instead of silently clamping", async () => {
+    mocks.fetchSettings.mockResolvedValueOnce({ maxConcurrent: 12, maxTriageConcurrent: 13, maxWorktrees: 24 });
+
+    renderControls("project-a");
+
+    await flushPromises();
+    const section = screen.getByTestId("cc-controls-concurrency");
+    const maxConcurrent = within(section).getByLabelText(/max concurrent tasks/i) as HTMLInputElement;
+    const maxTriageConcurrent = within(section).getByLabelText(/max triage concurrent/i) as HTMLInputElement;
+    const maxWorktrees = within(section).getByLabelText(/max worktrees/i) as HTMLInputElement;
+
+    expect(maxConcurrent.value).toBe("12");
+    expect(maxConcurrent.max).toBe("12");
+    expect(maxConcurrent.closest("label")).toHaveTextContent("Max concurrent tasks12");
+    expect(maxTriageConcurrent.value).toBe("13");
+    expect(maxTriageConcurrent.max).toBe("13");
+    expect(maxTriageConcurrent.closest("label")).toHaveTextContent("Max triage concurrent13");
+    expect(maxWorktrees.value).toBe("24");
+    expect(maxWorktrees.max).toBe("24");
+    expect(maxWorktrees.closest("label")).toHaveTextContent("Max worktrees24");
+  });
+
+  it("marks concurrency sliders with the mobile touch-drag affordance contract", async () => {
+    renderControls("project-a");
+
+    await flushPromises();
+    const section = screen.getByTestId("cc-controls-concurrency");
+    const sliders = [
+      within(section).getByLabelText(/max concurrent tasks/i),
+      within(section).getByLabelText(/max triage concurrent/i),
+      within(section).getByLabelText(/max worktrees/i),
+    ];
+
+    for (const slider of sliders) {
+      expect(slider).toHaveClass("cc-controls-touch-slider");
+    }
+    // jsdom cannot simulate whether a touch drag is captured by page scrolling, so this verifies the CSS contract that enables horizontal thumb drags on mobile.
+    expect(commandCenterControlsCss).toContain("touch-action: pan-y");
+    expect(commandCenterControlsCss).toContain("@media (max-width: 768px)");
+    expect(commandCenterControlsCss).toContain("min-block-size: var(--space-2xl)");
   });
 
   it("shows save error indicator when concurrency update fails", async () => {

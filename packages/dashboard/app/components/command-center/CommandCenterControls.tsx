@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Power } from "lucide-react";
-import type { ColorTheme, ThemeMode } from "@fusion/core";
+import { DEFAULT_PROJECT_SETTINGS, type ColorTheme, type ThemeMode } from "@fusion/core";
 import { fetchConfig, fetchSettings, updateSettings } from "../../api/legacy";
 import { useAppSettings } from "../../hooks/useAppSettings";
 import { ThemeDropdown } from "../ThemeDropdown";
@@ -28,9 +28,15 @@ type ConcurrencyValues = {
 
 const CONCURRENCY_SAVE_DEBOUNCE_MS = 500;
 const DEFAULT_CONCURRENCY_VALUES: ConcurrencyValues = {
-  maxConcurrent: 2,
-  maxTriageConcurrent: 1,
-  maxWorktrees: 5,
+  maxConcurrent: DEFAULT_PROJECT_SETTINGS.maxConcurrent,
+  maxTriageConcurrent: DEFAULT_PROJECT_SETTINGS.maxTriageConcurrent,
+  maxWorktrees: DEFAULT_PROJECT_SETTINGS.maxWorktrees,
+};
+
+const CONCURRENCY_SLIDER_LIMITS: Record<keyof ConcurrencyValues, { min: number; max: number }> = {
+  maxConcurrent: { min: 1, max: 10 },
+  maxTriageConcurrent: { min: 1, max: 10 },
+  maxWorktrees: { min: 1, max: 20 },
 };
 
 /*
@@ -39,6 +45,10 @@ Overview controls keep only global AI engine, Theme, and Concurrency controls. A
 */
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
+}
+
+function getConcurrencySliderMax(key: keyof ConcurrencyValues, value: number) {
+  return Math.max(CONCURRENCY_SLIDER_LIMITS[key].max, value);
 }
 
 function StatusPill({ paused, label }: { paused: boolean; label: string }) {
@@ -73,9 +83,9 @@ export function CommandCenterControls({ projectId, colorTheme, themeMode, onColo
           setConcurrencyState({
             status: "loaded",
             data: {
-              maxConcurrent: clamp(settings.maxConcurrent ?? config.maxConcurrent ?? DEFAULT_CONCURRENCY_VALUES.maxConcurrent, 1, 10),
-              maxTriageConcurrent: clamp(settings.maxTriageConcurrent ?? DEFAULT_CONCURRENCY_VALUES.maxTriageConcurrent, 1, 10),
-              maxWorktrees: clamp(settings.maxWorktrees ?? DEFAULT_CONCURRENCY_VALUES.maxWorktrees, 1, 20),
+              maxConcurrent: settings.maxConcurrent ?? config.maxConcurrent ?? DEFAULT_CONCURRENCY_VALUES.maxConcurrent,
+              maxTriageConcurrent: settings.maxTriageConcurrent ?? DEFAULT_CONCURRENCY_VALUES.maxTriageConcurrent,
+              maxWorktrees: settings.maxWorktrees ?? DEFAULT_CONCURRENCY_VALUES.maxWorktrees,
             },
             error: null,
           });
@@ -128,6 +138,9 @@ export function CommandCenterControls({ projectId, colorTheme, themeMode, onColo
   const concurrencyValues = concurrencyState.data ?? DEFAULT_CONCURRENCY_VALUES;
 
   /*
+  FNXC:CommandCenter 2026-06-20-00:20:
+  The concurrency card must reflect actual persisted scheduler settings, including values above the usual slider ranges, instead of silently clamping the readout. The slider max expands to the current persisted value so the numeric readout and input value remain truthful; user edits are still clamped into that input's current valid bounds before saving.
+
   FNXC:CommandCenter 2026-06-19-12:35:
   The Command Center concurrency sliders mutate live scheduler limits through the existing /api/settings path; after each debounced save, refresh useAppSettings so the running dashboard reflects the new scheduler capacity without local shadow state drifting.
 
@@ -203,12 +216,18 @@ export function CommandCenterControls({ projectId, colorTheme, themeMode, onColo
               </span>
               <input
                 id="cc-max-concurrent"
+                className="cc-controls-touch-slider"
                 type="range"
-                min={1}
-                max={10}
+                min={CONCURRENCY_SLIDER_LIMITS.maxConcurrent.min}
+                max={getConcurrencySliderMax("maxConcurrent", concurrencyValues.maxConcurrent)}
                 value={concurrencyValues.maxConcurrent}
                 disabled={concurrencyState.status === "loading"}
-                onChange={(event) => updateConcurrencyValue("maxConcurrent", event.target.value, 1, 10)}
+                onChange={(event) => updateConcurrencyValue(
+                  "maxConcurrent",
+                  event.target.value,
+                  CONCURRENCY_SLIDER_LIMITS.maxConcurrent.min,
+                  getConcurrencySliderMax("maxConcurrent", concurrencyValues.maxConcurrent),
+                )}
               />
             </label>
             <label className="cc-controls-slider" htmlFor="cc-max-triage-concurrent">
@@ -218,12 +237,18 @@ export function CommandCenterControls({ projectId, colorTheme, themeMode, onColo
               </span>
               <input
                 id="cc-max-triage-concurrent"
+                className="cc-controls-touch-slider"
                 type="range"
-                min={1}
-                max={10}
+                min={CONCURRENCY_SLIDER_LIMITS.maxTriageConcurrent.min}
+                max={getConcurrencySliderMax("maxTriageConcurrent", concurrencyValues.maxTriageConcurrent)}
                 value={concurrencyValues.maxTriageConcurrent}
                 disabled={concurrencyState.status === "loading"}
-                onChange={(event) => updateConcurrencyValue("maxTriageConcurrent", event.target.value, 1, 10)}
+                onChange={(event) => updateConcurrencyValue(
+                  "maxTriageConcurrent",
+                  event.target.value,
+                  CONCURRENCY_SLIDER_LIMITS.maxTriageConcurrent.min,
+                  getConcurrencySliderMax("maxTriageConcurrent", concurrencyValues.maxTriageConcurrent),
+                )}
               />
             </label>
             <label className="cc-controls-slider" htmlFor="cc-max-worktrees">
@@ -233,12 +258,18 @@ export function CommandCenterControls({ projectId, colorTheme, themeMode, onColo
               </span>
               <input
                 id="cc-max-worktrees"
+                className="cc-controls-touch-slider"
                 type="range"
-                min={1}
-                max={20}
+                min={CONCURRENCY_SLIDER_LIMITS.maxWorktrees.min}
+                max={getConcurrencySliderMax("maxWorktrees", concurrencyValues.maxWorktrees)}
                 value={concurrencyValues.maxWorktrees}
                 disabled={concurrencyState.status === "loading"}
-                onChange={(event) => updateConcurrencyValue("maxWorktrees", event.target.value, 1, 20)}
+                onChange={(event) => updateConcurrencyValue(
+                  "maxWorktrees",
+                  event.target.value,
+                  CONCURRENCY_SLIDER_LIMITS.maxWorktrees.min,
+                  getConcurrencySliderMax("maxWorktrees", concurrencyValues.maxWorktrees),
+                )}
               />
             </label>
           </div>

@@ -102,9 +102,16 @@
   font-variant-numeric: tabular-nums;
 }
 
-.cc-controls-slider input[type="range"] {
+/*
+FNXC:CommandCenter 2026-06-20-00:25:
+Mobile users must be able to drag horizontal concurrency sliders without the page scroll gesture stealing the thumb movement. Scope touch-action to these range inputs and preserve desktop accent/full-width behavior while increasing the hit area with design tokens.
+*/
+.cc-controls-slider input[type="range"],
+.cc-controls-touch-slider {
   inline-size: 100%;
+  min-block-size: var(--space-xl);
   accent-color: var(--accent);
+  touch-action: pan-y;
 }
 
 @media (max-width: 768px) {
@@ -122,6 +129,23 @@
 
   .cc-controls-sliders {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .cc-controls-slider input[type="range"],
+  .cc-controls-touch-slider {
+    min-block-size: var(--space-2xl);
+  }
+
+  .cc-controls-slider input[type="range"]::-webkit-slider-thumb,
+  .cc-controls-touch-slider::-webkit-slider-thumb {
+    inline-size: var(--space-xl);
+    block-size: var(--space-xl);
+  }
+
+  .cc-controls-slider input[type="range"]::-moz-range-thumb,
+  .cc-controls-touch-slider::-moz-range-thumb {
+    inline-size: var(--space-xl);
+    block-size: var(--space-xl);
   }
 
   .cc-controls-action {
