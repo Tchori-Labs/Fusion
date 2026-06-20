@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { createHmac } from "node:crypto";
 import { createApiRoutes } from "../routes.js";
+import { registerTaskWorkflowRoutes } from "../routes/register-task-workflow-routes.js";
 import {
   getProjectIdFromRequest as getProjectIdFromRouteRequest,
   getProjectContext as resolveRouteProjectContext,
@@ -327,6 +328,141 @@ describe("POST /tasks/:id/steer", () => {
     app.use("/api", createApiRoutes(store, heartbeatMonitor ? { heartbeatMonitor } : undefined));
     return app;
   }
+
+  it("passes the new steering comment id to the task-workflow wake dependency", async () => {
+    const scopedStore = createMockStore();
+    const updatedTask = {
+      ...FAKE_TASK_DETAIL,
+      id: "FN-001",
+      column: "in-progress" as const,
+      assignedAgentId: "agent-1",
+      steeringComments: [{ id: "steer-route-1", text: "Please continue", author: "user" as const, createdAt: "2026-06-12T00:00:00.000Z" }],
+    };
+    const triggerCommentWakeForAssignedAgent = vi.fn().mockResolvedValue(undefined);
+    (scopedStore.addSteeringComment as ReturnType<typeof vi.fn>).mockResolvedValue(updatedTask);
+    const router = express.Router();
+    registerTaskWorkflowRoutes({
+      router,
+      store: scopedStore,
+      runtimeLogger: { error: vi.fn(), warn: vi.fn() },
+      planningLogger: { error: vi.fn(), warn: vi.fn(), log: vi.fn() } as any,
+      chatLogger: { error: vi.fn(), warn: vi.fn(), log: vi.fn() } as any,
+      getProjectIdFromRequest: () => undefined,
+      getScopedStore: async () => scopedStore,
+      getProjectContext: async () => ({ store: scopedStore, projectId: undefined }),
+      prioritizeProjectsForCurrentDirectory: (projects) => projects,
+      emitRemoteRouteDiagnostic: vi.fn(),
+      emitAuthSyncAuditLog: vi.fn(),
+      parseScopeParam: () => undefined,
+      resolveAutomationStore: vi.fn() as any,
+      resolveRoutineStore: vi.fn() as any,
+      resolveRoutineRunner: vi.fn() as any,
+      registerDispose: vi.fn(),
+      dispose: vi.fn(),
+      rethrowAsApiError: (error) => { throw error; },
+    }, {
+      runtimeLogger: { error: vi.fn(), warn: vi.fn() },
+      upload: { single: vi.fn(() => (_req: unknown, _res: unknown, next: () => void) => next()) },
+      taskDetailActivityLogLimit: 100,
+      validateOptionalModelField: () => undefined,
+      normalizeModelSelectionPair: (provider, modelId) => ({ provider, modelId }),
+      runGitCommand: vi.fn(),
+      isGitRepo: vi.fn(),
+      resolveIntegrationBranch: vi.fn(),
+      trimTaskDetailActivityLog: (task) => task,
+      triggerCommentWakeForAssignedAgent,
+      resolveSelfHealingManager: () => undefined,
+    });
+    const app = express();
+    app.use(express.json());
+    app.use("/api", router);
+
+    const res = await REQUEST(app, "POST", "/api/tasks/FN-001/steer", JSON.stringify({ text: "Please continue" }), {
+      "Content-Type": "application/json",
+    });
+
+    expect(res.status).toBe(200);
+    expect(scopedStore.addSteeringComment).toHaveBeenCalledWith("FN-001", "Please continue", "user");
+    expect(triggerCommentWakeForAssignedAgent).toHaveBeenCalledOnce();
+    expect(triggerCommentWakeForAssignedAgent).toHaveBeenCalledWith(scopedStore, updatedTask, {
+      triggeringCommentType: "steering",
+      triggeringCommentIds: ["steer-route-1"],
+      triggerDetail: "steering-comment",
+    });
+  });
+
+  it("uses the newest steering comment id when waking assigned agents", async () => {
+    const scopedStore = createMockStore();
+    const updatedTask = {
+      ...FAKE_TASK_DETAIL,
+      id: "FN-001",
+      column: "in-progress" as const,
+      assignedAgentId: "agent-1",
+      steeringComments: [
+        {
+          id: "older-steer",
+          text: "Earlier guidance",
+          author: "user" as const,
+          createdAt: "2026-06-12T00:00:00.000Z",
+        },
+        {
+          id: "newest-steer",
+          text: "Newest guidance",
+          author: "user" as const,
+          createdAt: "2026-06-12T00:01:00.000Z",
+        },
+      ],
+    };
+    const triggerCommentWakeForAssignedAgent = vi.fn().mockResolvedValue(undefined);
+    (scopedStore.addSteeringComment as ReturnType<typeof vi.fn>).mockResolvedValue(updatedTask);
+    const router = express.Router();
+    registerTaskWorkflowRoutes({
+      router,
+      store: scopedStore,
+      runtimeLogger: { error: vi.fn(), warn: vi.fn() },
+      planningLogger: { error: vi.fn(), warn: vi.fn(), log: vi.fn() } as any,
+      chatLogger: { error: vi.fn(), warn: vi.fn(), log: vi.fn() } as any,
+      getProjectIdFromRequest: () => undefined,
+      getScopedStore: async () => scopedStore,
+      getProjectContext: async () => ({ store: scopedStore, projectId: undefined }),
+      prioritizeProjectsForCurrentDirectory: (projects) => projects,
+      emitRemoteRouteDiagnostic: vi.fn(),
+      emitAuthSyncAuditLog: vi.fn(),
+      parseScopeParam: () => undefined,
+      resolveAutomationStore: vi.fn() as any,
+      resolveRoutineStore: vi.fn() as any,
+      resolveRoutineRunner: vi.fn() as any,
+      registerDispose: vi.fn(),
+      dispose: vi.fn(),
+      rethrowAsApiError: (error) => { throw error; },
+    }, {
+      runtimeLogger: { error: vi.fn(), warn: vi.fn() },
+      upload: { single: vi.fn(() => (_req: unknown, _res: unknown, next: () => void) => next()) },
+      taskDetailActivityLogLimit: 100,
+      validateOptionalModelField: () => undefined,
+      normalizeModelSelectionPair: (provider, modelId) => ({ provider, modelId }),
+      runGitCommand: vi.fn(),
+      isGitRepo: vi.fn(),
+      resolveIntegrationBranch: vi.fn(),
+      trimTaskDetailActivityLog: (task) => task,
+      triggerCommentWakeForAssignedAgent,
+      resolveSelfHealingManager: () => undefined,
+    });
+    const app = express();
+    app.use(express.json());
+    app.use("/api", router);
+
+    const res = await REQUEST(app, "POST", "/api/tasks/FN-001/steer", JSON.stringify({ text: "Newest guidance" }), {
+      "Content-Type": "application/json",
+    });
+
+    expect(res.status).toBe(200);
+    expect(triggerCommentWakeForAssignedAgent).toHaveBeenCalledWith(scopedStore, updatedTask, {
+      triggeringCommentType: "steering",
+      triggeringCommentIds: ["newest-steer"],
+      triggerDetail: "steering-comment",
+    });
+  });
 
   it("records user steering comments and wakes the assigned immediate-response agent", async () => {
     const updatedTask = {

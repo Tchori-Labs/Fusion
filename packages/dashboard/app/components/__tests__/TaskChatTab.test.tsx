@@ -332,9 +332,14 @@ describe("TaskChatTab", () => {
     expect(mockedUseAgentLogs).toHaveBeenCalledWith("FN-001", false, "project-1");
   });
 
-  it("renders empty state when no agent output exists", () => {
+  it("renders empty state without timestamp shells when no transcript messages exist", () => {
     render(<TaskChatTab task={makeTask()} active addToast={vi.fn()} />);
-    expect(screen.getByText(/No agent output yet/)).toBeTruthy();
+
+    const transcript = screen.getByTestId("task-chat-transcript");
+    expect(within(transcript).getByText(/No agent output yet/)).toBeTruthy();
+    expect(within(transcript).queryByTestId("task-chat-group-time")).not.toBeInTheDocument();
+    expect(within(transcript).queryByTestId("task-chat-user-time")).not.toBeInTheDocument();
+    expect(transcript).not.toHaveTextContent(/NaN|Invalid Date/);
   });
 
   it("renders the collapsed icon-only expand toggle inside the chat view and calls the toggle handler", () => {
@@ -459,6 +464,65 @@ describe("TaskChatTab", () => {
     expect(groupMeta).not.toBeNull();
     expect(within(groupMeta as HTMLElement).getByText("2 entries")).toBeVisible();
     expect(within(groupMeta as HTMLElement).getByTestId("task-chat-group-time")).toHaveTextContent("2m ago");
+  });
+
+  it("keeps agent and user timestamp parity in the inline chat surface", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-17T15:00:00.000Z"));
+    mockLogs([
+      makeEntry({ agent: "executor", text: "inline agent response", timestamp: "2026-06-17T14:58:30.000Z" }),
+    ]);
+
+    render(
+      <TaskChatTab
+        task={makeTask({
+          steeringComments: [makeSteeringComment({ id: "inline-user", text: "inline user guidance", createdAt: "2026-06-17T14:57:00.000Z" })],
+        })}
+        active
+        expanded={false}
+        addToast={vi.fn()}
+      />,
+    );
+
+    const transcript = screen.getByTestId("task-chat-transcript");
+    expect(within(transcript).getByText("inline agent response")).toBeVisible();
+    expect(within(transcript).getByText("inline user guidance")).toBeVisible();
+    expect(within(transcript).getByTestId("task-chat-group-time")).toHaveTextContent("1m ago");
+    expect(within(transcript).getByTestId("task-chat-user-time")).toHaveTextContent("3m ago");
+  });
+
+  it("keeps agent and user timestamp parity in the expanded chat surface", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-17T15:00:00.000Z"));
+    mockLogs([
+      makeEntry({ agent: "executor", text: "expanded single entry", timestamp: "2026-06-17T14:59:30.000Z" }),
+      makeEntry({ agent: "reviewer", text: "expanded older reviewer entry", timestamp: "2026-06-17T14:53:00.000Z" }),
+      makeEntry({ agent: "reviewer", text: "expanded latest reviewer entry", timestamp: "2026-06-17T14:55:00.000Z" }),
+    ]);
+
+    render(
+      <TaskChatTab
+        task={makeTask({
+          steeringComments: [makeSteeringComment({ id: "expanded-user", text: "expanded user guidance", createdAt: "2026-06-17T14:57:00.000Z" })],
+        })}
+        active
+        expanded
+        onToggleExpanded={vi.fn()}
+        addToast={vi.fn()}
+      />,
+    );
+
+    const executorMeta = screen.getByLabelText("Executor messages").querySelector(".task-chat-group-meta");
+    const reviewerMeta = screen.getByLabelText("Reviewer messages").querySelector(".task-chat-group-meta");
+    const userHeader = screen.getByText("You").closest(".task-chat-user-header");
+    expect(executorMeta).not.toBeNull();
+    expect(reviewerMeta).not.toBeNull();
+    expect(userHeader).not.toBeNull();
+    expect(within(executorMeta as HTMLElement).getByText("1 entry")).toBeVisible();
+    expect(within(executorMeta as HTMLElement).getByTestId("task-chat-group-time")).toHaveTextContent("just now");
+    expect(within(reviewerMeta as HTMLElement).getByText("2 entries")).toBeVisible();
+    expect(within(reviewerMeta as HTMLElement).getByTestId("task-chat-group-time")).toHaveTextContent("5m ago");
+    expect(within(userHeader as HTMLElement).getByTestId("task-chat-user-time")).toHaveTextContent("3m ago");
   });
 
   it("renders a single text entry as one text bubble", () => {
@@ -2098,6 +2162,17 @@ describe("TaskChatTab", () => {
     expect(mobileSendRule).toContain("block-size: calc(var(--space-2xl) + var(--space-lg))");
     expect(mobileSendRule).toContain("min-block-size: calc(var(--space-2xl) + var(--space-lg))");
     expect(mobileInputRule).toContain("min-height: calc(var(--space-2xl) + var(--space-lg))");
+  });
+
+  it("keeps TaskDetailModal inline and expanded chat on the canonical TaskChatTab renderer", () => {
+    const source = readFileSync(resolve(__dirname, "../TaskDetailModal.tsx"), "utf8");
+    const taskChatMounts = source.match(/<TaskChatTab\b/g) ?? [];
+
+    expect(source).toContain('import { TaskChatTab } from "./TaskChatTab"');
+    expect(taskChatMounts).toHaveLength(1);
+    expect(source).toContain("const isChatExpanded = chatExpanded && activeTab === \"chat\" && !isEditing");
+    expect(source).toContain("task-detail-content--chat-expanded");
+    expect(source).toContain("expanded={chatExpanded}");
   });
 
   it("keeps task chat timestamp styling tokenized and mobile-safe", () => {

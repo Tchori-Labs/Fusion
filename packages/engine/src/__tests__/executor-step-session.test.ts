@@ -3090,7 +3090,13 @@ describe("Real-time steering injection", () => {
   it("injects new steering comments via active StepSessionExecutor on task:updated", async () => {
     const store = createMockStore();
     const executor = new TaskExecutor(store, "/tmp/test");
-    const steerActiveSessions = vi.fn().mockResolvedValue(1);
+    const seenIds = new Set<string>();
+    const updateSteeringComments = vi.fn();
+    const steerActiveSessions = vi.fn().mockImplementation(async () => {
+      expect(updateSteeringComments).toHaveBeenCalledWith([newComment]);
+      expect(seenIds.has(newComment.id)).toBe(true);
+      return 1;
+    });
     const markSteeringCommentsDelivered = vi.fn();
     const newComment = {
       id: "step-session-comment",
@@ -3099,8 +3105,12 @@ describe("Real-time steering injection", () => {
       author: "user" as const,
     };
 
-    (executor as any).activeStepExecutors.set("FN-001", { steerActiveSessions, markSteeringCommentsDelivered });
-    (executor as any).activeStepExecutorSeenSteeringIds.set("FN-001", new Set());
+    (executor as any).activeStepExecutors.set("FN-001", {
+      steerActiveSessions,
+      markSteeringCommentsDelivered,
+      updateSteeringComments,
+    });
+    (executor as any).activeStepExecutorSeenSteeringIds.set("FN-001", seenIds);
 
     await (store as any)._triggerAsync("task:updated", {
       id: "FN-001",
@@ -3116,6 +3126,7 @@ describe("Real-time steering injection", () => {
       updatedAt: new Date().toISOString(),
     });
 
+    expect(updateSteeringComments).toHaveBeenCalledOnce();
     expect(steerActiveSessions).toHaveBeenCalledOnce();
     expect(steerActiveSessions.mock.calls[0][0]).toContain("📣 **New feedback**");
     expect(steerActiveSessions.mock.calls[0][0]).toContain("Please adjust the active step");
@@ -3130,33 +3141,37 @@ describe("Real-time steering injection", () => {
   it("queues step-session steering comments for the next prompt when no step session is active", async () => {
     const store = createMockStore();
     const executor = new TaskExecutor(store, "/tmp/test");
-    const steerActiveSessions = vi.fn().mockResolvedValue(0);
-    const updateSteeringComments = vi.fn();
-    const markSteeringCommentsDelivered = vi.fn();
     const newComment = {
       id: "step-session-queued-comment",
       text: "Please apply this in the next step prompt",
       createdAt: new Date().toISOString(),
       author: "user" as const,
     };
-
-    (executor as any).activeStepExecutors.set("FN-001", {
-      steerActiveSessions,
-      updateSteeringComments,
-      markSteeringCommentsDelivered,
+    const { StepSessionExecutor: ActualStepSessionExecutor } = await vi.importActual<typeof import("../step-session-executor.js")>("../step-session-executor.js");
+    const stepExecutor = new ActualStepSessionExecutor({
+      taskDetail: makeSteeringTask() as any,
+      worktreePath: "/tmp/test",
+      rootDir: "/tmp",
+      settings: {} as any,
     });
+    const markSteeringCommentsDelivered = vi.spyOn(stepExecutor, "markSteeringCommentsDelivered");
+
+    (executor as any).activeStepExecutors.set("FN-001", stepExecutor);
     (executor as any).activeStepExecutorSeenSteeringIds.set("FN-001", new Set());
 
     await (store as any)._triggerAsync("task:updated", makeSteeringTask([newComment]));
 
-    expect(steerActiveSessions).toHaveBeenCalledOnce();
-    expect(updateSteeringComments).toHaveBeenCalledWith([newComment]);
     expect(markSteeringCommentsDelivered).not.toHaveBeenCalled();
     expect(store.logEntry).toHaveBeenCalledWith(
       "FN-001",
       expect.stringContaining("Comment received mid-execution"),
       "by user",
     );
+
+    const nextPromptTask = (stepExecutor as any).consumeTaskDetailForStepPrompt();
+    expect(nextPromptTask.steeringComments).toEqual([newComment]);
+    const laterPromptTask = (stepExecutor as any).consumeTaskDetailForStepPrompt();
+    expect(laterPromptTask.steeringComments).toBeUndefined();
   });
 
   it("injects new steering comments via active workflow step session on task:updated", async () => {
@@ -3190,6 +3205,52 @@ describe("Real-time steering injection", () => {
     expect(steer).toHaveBeenCalledOnce();
     expect(steer.mock.calls[0][0]).toContain("📣 **New feedback**");
     expect(steer.mock.calls[0][0]).toContain("Please adjust the workflow step");
+    expect(store.logEntry).toHaveBeenCalledWith(
+      "FN-001",
+      expect.stringContaining("Comment received mid-execution"),
+      "by user",
+    );
+  });
+
+  it("marks new comments seen before injecting and logs once across simultaneous surfaces", async () => {
+    const store = createMockStore();
+    const executor = new TaskExecutor(store, "/tmp/test");
+    const newComment = {
+      id: "shared-surface-comment",
+      text: "Please reach every live surface once",
+      createdAt: new Date().toISOString(),
+      author: "user" as const,
+    };
+    const legacySeen = new Set<string>();
+    const stepSeen = new Set<string>();
+    const workflowSeen = new Set<string>();
+    const legacySteer = vi.fn().mockImplementation(async () => {
+      expect(legacySeen.has(newComment.id)).toBe(true);
+    });
+    const stepSteerActiveSessions = vi.fn().mockImplementation(async () => {
+      expect(stepSeen.has(newComment.id)).toBe(true);
+      return 1;
+    });
+    const workflowSteer = vi.fn().mockImplementation(async () => {
+      expect(workflowSeen.has(newComment.id)).toBe(true);
+    });
+    const markSteeringCommentsDelivered = vi.fn();
+
+    setLegacyActiveSession(executor, legacySteer, legacySeen);
+    (executor as any).activeStepExecutors.set("FN-001", { steerActiveSessions: stepSteerActiveSessions, markSteeringCommentsDelivered });
+    (executor as any).activeStepExecutorSeenSteeringIds.set("FN-001", stepSeen);
+    (executor as any).activeWorkflowStepSessions.set("FN-001", { steer: workflowSteer });
+    (executor as any).activeWorkflowStepSessionSeenSteeringIds.set("FN-001", workflowSeen);
+
+    await (store as any)._triggerAsync("task:updated", makeSteeringTask([newComment]));
+    await (store as any)._triggerAsync("task:updated", makeSteeringTask([newComment]));
+
+    expect(legacySteer).toHaveBeenCalledOnce();
+    expect(stepSteerActiveSessions).toHaveBeenCalledOnce();
+    expect(workflowSteer).toHaveBeenCalledOnce();
+    expect(markSteeringCommentsDelivered).toHaveBeenCalledOnce();
+    expect(markSteeringCommentsDelivered).toHaveBeenCalledWith([newComment.id]);
+    expect(store.logEntry).toHaveBeenCalledTimes(1);
     expect(store.logEntry).toHaveBeenCalledWith(
       "FN-001",
       expect.stringContaining("Comment received mid-execution"),
@@ -3261,6 +3322,35 @@ describe("Real-time steering injection", () => {
     await (store as any)._triggerAsync("task:updated", makeSteeringTask([comment]));
 
     expect(steerFn).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not inject or log when active surfaces receive empty or undefined steering comments", async () => {
+    const store = createMockStore();
+    const executor = new TaskExecutor(store, "/tmp/test");
+    const legacySteer = vi.fn().mockResolvedValue(undefined);
+    const stepSteerActiveSessions = vi.fn().mockResolvedValue(1);
+    const workflowSteer = vi.fn().mockResolvedValue(undefined);
+
+    setLegacyActiveSession(executor, legacySteer);
+    (executor as any).activeStepExecutors.set("FN-001", {
+      steerActiveSessions: stepSteerActiveSessions,
+      updateSteeringComments: vi.fn(),
+    });
+    (executor as any).activeStepExecutorSeenSteeringIds.set("FN-001", new Set());
+    (executor as any).activeWorkflowStepSessions.set("FN-001", { steer: workflowSteer });
+    (executor as any).activeWorkflowStepSessionSeenSteeringIds.set("FN-001", new Set());
+
+    await (store as any)._triggerAsync("task:updated", { ...makeSteeringTask(), steeringComments: undefined });
+    await (store as any)._triggerAsync("task:updated", makeSteeringTask([]));
+
+    expect(legacySteer).not.toHaveBeenCalled();
+    expect(stepSteerActiveSessions).not.toHaveBeenCalled();
+    expect(workflowSteer).not.toHaveBeenCalled();
+    expect(store.logEntry).not.toHaveBeenCalledWith(
+      "FN-001",
+      expect.stringContaining("Comment received mid-execution"),
+      expect.anything(),
+    );
   });
 
   it("does not inject steering comments for tasks without an active injection target", async () => {
