@@ -160,4 +160,24 @@ describe("reapLeakedConcurrencySlots", () => {
     expect(reaped).toBe(1);
     expect(clearPhantomExecutorBinding).toHaveBeenCalledWith("FN-ghost");
   });
+
+  // FNXC:WorkflowLifecycle coderabbit Major (PR #1687): a holder that starts
+  // executing AFTER the pre-loop snapshot but BEFORE the release must be spared
+  // by the fresh executing-set re-check.
+  it("does NOT release a holder that starts executing mid-sweep", async () => {
+    (store.getTask as ReturnType<typeof vi.fn>).mockResolvedValue(taskRow("FN-6760", "todo"));
+    let call = 0;
+    const manager = new SelfHealingManager(store, {
+      rootDir: "/tmp/test-project",
+      listWorktreeHolders: () => [{ taskId: "FN-6760", worktreePath: "/wt/calm-iris" }],
+      // Pre-loop snapshot is empty; by the fresh re-check the task is executing.
+      getExecutingTaskIds: () => new Set<string>(call++ === 0 ? [] : ["FN-6760"]),
+      clearPhantomExecutorBinding: clearPhantomExecutorBinding as (taskId: string) => boolean | void,
+    });
+
+    const reaped = await manager.reapLeakedConcurrencySlots();
+
+    expect(reaped).toBe(0);
+    expect(clearPhantomExecutorBinding).not.toHaveBeenCalled();
+  });
 });

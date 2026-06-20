@@ -8114,6 +8114,15 @@ export class SelfHealingManager {
           if (Number.isFinite(since) && now - since < LEAKED_WORKTREE_SLOT_GRACE_MS) continue;
         }
 
+        // FNXC:WorkflowLifecycle 2026-06-20-00:00: re-check execution ownership
+        // against a FRESH executing set immediately before releasing — the outer
+        // `executingIds` snapshot predates this holder's `getTask` await, so a
+        // task that started executing mid-sweep must not have its slot pulled
+        // (coderabbit Major, PR #1687). clearPhantomExecutorBinding's live-session
+        // refusal is the last line of defense, but this avoids racing it at all.
+        const latestExecutingIds = this.options.getExecutingTaskIds?.() ?? new Set<string>();
+        if (latestExecutingIds.has(taskId)) continue;
+
         const released = this.options.clearPhantomExecutorBinding?.(taskId);
         // false = executor refused (live session surface); undefined = not wired.
         if (released !== true) continue;
