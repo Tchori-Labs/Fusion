@@ -5,6 +5,7 @@ import { Column } from "./Column";
 import "./Lane.css";
 import type { ToastType } from "../hooks/useToast";
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import { Pencil, Plus } from "lucide-react";
 import { fetchWorkflowSteps, fetchBoardWorkflows, promoteTask, type ModelInfo, type BoardWorkflowDefinition, type BoardWorkflowsPayload } from "../api";
 import { useBlockerFanout } from "../hooks/useBlockerFanout";
@@ -124,6 +125,7 @@ function areWorkflowNameLookupsEqual(previous: ReadonlyMap<string, string>, next
 }
 
 export function Board({ tasks, projectId, maxConcurrent, onMoveTask, onPauseTask, onOpenDetail, onOpenGroupModal, addToast, onQuickCreate, onNewTask, autoMerge, onToggleAutoMerge, globalPaused, onUpdateTask, onRetryTask, onArchiveTask, onUnarchiveTask, onDeleteTask, onArchiveAllDone, onLoadArchivedTasks, searchQuery = "", availableModels, onPlanningMode, onSubtaskBreakdown, onOpenDetailWithTab, favoriteProviders, favoriteModels, onToggleFavorite, onToggleModelFavorite, taskStuckTimeoutMs, onOpenMission, staleHighFanoutBlockerAgeThresholdMs, lastFetchTimeMs, prAuthAvailable, onOpenWorkflowEditor, onCreateWorkflow }: BoardProps) {
+  const { t } = useTranslation("app");
   const [archivedCollapsed, setArchivedCollapsed] = useState(true);
   const archivedLoadedRef = useRef(false);
   const [workflowStepNameLookup, setWorkflowStepNameLookup] = useState<ReadonlyMap<string, string>>(EMPTY_WORKFLOW_STEP_NAME_LOOKUP);
@@ -527,8 +529,8 @@ export function Board({ tasks, projectId, maxConcurrent, onMoveTask, onPauseTask
                 type="button"
                 className="btn btn-icon btn-sm board-workflow-edit-btn"
                 onClick={() => onOpenWorkflowEditor(selectedWorkflow.id)}
-                title="Edit workflows"
-                aria-label="Edit workflows"
+                title={t("board.workflow.edit", "Edit workflows")}
+                aria-label={t("board.workflow.edit", "Edit workflows")}
               >
                 <Pencil size={15} />
               </button>
@@ -538,8 +540,8 @@ export function Board({ tasks, projectId, maxConcurrent, onMoveTask, onPauseTask
                 type="button"
                 className="btn btn-icon btn-sm board-workflow-create-btn"
                 onClick={onCreateWorkflow}
-                title="New workflow"
-                aria-label="New workflow"
+                title={t("board.workflow.new", "New workflow")}
+                aria-label={t("board.workflow.new", "New workflow")}
               >
                 <Plus size={15} />
               </button>

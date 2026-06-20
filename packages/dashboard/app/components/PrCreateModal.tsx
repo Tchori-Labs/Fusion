@@ -488,7 +488,7 @@ export function PrCreateModal({
           <>
             <section className="pr-create-modal__section">
               <h3 className="pr-create-modal__section-title">{t("pr.preflightChecks", "Pre-flight checks")}</h3>
-              {preflightLoading ? <div className="pr-create-modal__loading pr-create-modal__section-loading"><span className="status-dot status-dot--pending" aria-hidden="true" />Loading pre-flight checks…</div> : null}
+              {preflightLoading ? <div className="pr-create-modal__loading pr-create-modal__section-loading"><span className="status-dot status-dot--pending" aria-hidden="true" />{t("pr.loadingPreflight", "Loading pre-flight checks…")}</div> : null}
               {preflightError ? <div className="form-error pr-error" role="alert"><p>{preflightError}</p></div> : null}
               {!preflightLoading && !preflightError ? (
                 <>
@@ -511,8 +511,8 @@ export function PrCreateModal({
                   {!preflight?.branchOnRemote ? (
                     <div className="card pr-create-modal__preflight-remediation">
                       <div className="pr-create-modal__conflict-copy">
-                        <p className="pr-create-modal__conflict-title">Push branch to remote</p>
-                        <p className="pr-create-modal__conflict-message">Fusion will push this task&apos;s branch to origin so the PR can be created.</p>
+                        <p className="pr-create-modal__conflict-title">{t("pr.pushBranch.title", "Push branch to remote")}</p>
+                        <p className="pr-create-modal__conflict-message">{t("pr.pushBranch.message", "Fusion will push this task's branch to origin so the PR can be created.")}</p>
                       </div>
                       <button
                         type="button"
@@ -521,15 +521,15 @@ export function PrCreateModal({
                         disabled={pushingBranch || preflightLoading || !baseBranch}
                       >
                         {pushingBranch ? <RefreshCw size={14} className="spin" /> : null}
-                        Push branch to remote
+                        {t("pr.pushBranch.button", "Push branch to remote")}
                       </button>
                     </div>
                   ) : null}
                   {preflight?.conflictsWithBase ? (
                     <div className="card pr-create-modal__conflict-resolution">
                       <div className="pr-create-modal__conflict-copy">
-                        <p className="pr-create-modal__conflict-title">Resolve conflicts with AI</p>
-                        <p className="pr-create-modal__conflict-message">Fusion will use AI to resolve conflicts on this branch and push it.</p>
+                        <p className="pr-create-modal__conflict-title">{t("pr.resolveConflicts.title", "Resolve conflicts with AI")}</p>
+                        <p className="pr-create-modal__conflict-message">{t("pr.resolveConflicts.message", "Fusion will use AI to resolve conflicts on this branch and push it.")}</p>
                       </div>
                       <button
                         type="button"
@@ -538,7 +538,7 @@ export function PrCreateModal({
                         disabled={resolvingConflicts || preflightLoading || !baseBranch}
                       >
                         {resolvingConflicts ? <RefreshCw size={14} className="spin" /> : null}
-                        Resolve conflicts with AI
+                        {t("pr.resolveConflicts.button", "Resolve conflicts with AI")}
                       </button>
                     </div>
                   ) : null}
@@ -554,7 +554,7 @@ export function PrCreateModal({
                   {userEditedTitle && <button type="button" className="btn btn-sm" onClick={() => { setTitle(aiTitle); setUserEditedTitle(false); }}>{t("pr.revertToAi", "Revert to AI version")}</button>}
                 </div>
               </div>
-              {metadataLoading ? <div className="pr-create-modal__loading pr-create-modal__section-loading"><span className="status-dot status-dot--pending" aria-hidden="true" />Generating AI title…</div> : null}
+              {metadataLoading ? <div className="pr-create-modal__loading pr-create-modal__section-loading"><span className="status-dot status-dot--pending" aria-hidden="true" />{t("pr.generatingTitle", "Generating AI title…")}</div> : null}
               {metadataError ? <div className="form-error pr-error" role="alert"><p>{metadataError}</p></div> : null}
               <input id="pr-create-modal-title" className="input" value={title} onChange={(event) => { setTitle(event.target.value); setUserEditedTitle(true); }} />
             </section>
@@ -567,7 +567,7 @@ export function PrCreateModal({
                   {userEditedBody && <button type="button" className="btn btn-sm" onClick={() => { setBody(aiBody); setUserEditedBody(false); }}>{t("pr.revertToAi", "Revert to AI version")}</button>}
                 </div>
               </div>
-              {metadataLoading ? <div className="pr-create-modal__loading pr-create-modal__section-loading"><span className="status-dot status-dot--pending" aria-hidden="true" />Generating AI body…</div> : null}
+              {metadataLoading ? <div className="pr-create-modal__loading pr-create-modal__section-loading"><span className="status-dot status-dot--pending" aria-hidden="true" />{t("pr.generatingBody", "Generating AI body…")}</div> : null}
               <textarea id="pr-create-modal-body" className="input pr-create-modal__body-input" value={body} onChange={(event) => { setBody(event.target.value); setUserEditedBody(true); }} rows={8} />
               {templateUsed && <p className="pr-create-template-hint">{t("pr.usingTemplate", "Using <code>.github/pull_request_template.md</code>")}</p>}
             </section>
@@ -575,7 +575,7 @@ export function PrCreateModal({
             <section className="pr-create-modal__section pr-create-modal__grid-two">
               <div>
                 <label className="pr-create-modal__label" htmlFor="pr-create-modal-base">{t("pr.baseBranch", "Base branch")}</label>
-                {optionsLoading ? <div className="pr-create-modal__loading pr-create-modal__section-loading"><span className="status-dot status-dot--pending" aria-hidden="true" />Loading PR options…</div> : null}
+                {optionsLoading ? <div className="pr-create-modal__loading pr-create-modal__section-loading"><span className="status-dot status-dot--pending" aria-hidden="true" />{t("pr.loadingOptions", "Loading PR options…")}</div> : null}
                 {optionsError ? <div className="form-error pr-error" role="alert"><p>{optionsError}</p></div> : null}
                 <select id="pr-create-modal-base" className="select" value={baseBranch} onChange={(event) => void handleBaseChange(event.target.value)} disabled={optionsLoading || Boolean(optionsError) || (options?.baseBranches?.length ?? 0) === 0}>
                   {(options?.baseBranches ?? []).map((branch) => <option key={branch} value={branch}>{branch}</option>)}
@@ -588,7 +588,7 @@ export function PrCreateModal({
             </section>
 
             <OptionChips
-              label="Reviewers"
+              label={t("pr.reviewers", "Reviewers")}
               options={options?.reviewers ?? []}
               selected={reviewers}
               onChange={setReviewers}
@@ -596,7 +596,7 @@ export function PrCreateModal({
               getLabel={(option) => option.name ? `${option.name} (@${option.login})` : `@${option.login}`}
             />
             <OptionChips
-              label="Assignees"
+              label={t("pr.assignees", "Assignees")}
               options={options?.assignees ?? []}
               selected={assignees}
               onChange={setAssignees}
@@ -604,7 +604,7 @@ export function PrCreateModal({
               getLabel={(option) => option.name ? `${option.name} (@${option.login})` : `@${option.login}`}
             />
             <OptionChips
-              label="Labels"
+              label={t("pr.labels", "Labels")}
               options={options?.labels ?? []}
               selected={labels}
               onChange={setLabels}
@@ -617,7 +617,7 @@ export function PrCreateModal({
               <summary>{t("pr.previewTitle", "Diff & commit preview")}</summary>
               <div className="pr-create-modal__preview">
                 <h4>{t("pr.commitsLabel", "Commits")}</h4>
-                {!preflightLoading && !preflightError && (preflight?.commits?.length ?? 0) === 0 ? <p className="pr-create-template-hint">No commits found.</p> : null}
+                {!preflightLoading && !preflightError && (preflight?.commits?.length ?? 0) === 0 ? <p className="pr-create-template-hint">{t("pr.noCommits", "No commits found.")}</p> : null}
                 {(preflight?.commits ?? []).map((commit) => (
                   <div className="pr-create-modal__commit-row" key={commit.sha}>
                     <code>{commit.sha.slice(0, 7)}</code>
@@ -626,7 +626,7 @@ export function PrCreateModal({
                   </div>
                 ))}
                 <h4>{t("pr.changedFilesLabel", "Changed files")}</h4>
-                {!preflightLoading && !preflightError && (preflight?.changedFiles?.length ?? 0) === 0 ? <p className="pr-create-template-hint">No changed files detected.</p> : null}
+                {!preflightLoading && !preflightError && (preflight?.changedFiles?.length ?? 0) === 0 ? <p className="pr-create-template-hint">{t("pr.noChangedFiles", "No changed files detected.")}</p> : null}
                 {(preflight?.changedFiles ?? []).map((file) => (
                   <div className="pr-create-modal__file-row" key={file.path}>
                     <span>{file.path}</span>
@@ -641,7 +641,7 @@ export function PrCreateModal({
               <div className="form-error pr-error" role="alert">
                 <p>{pushBranchError}</p>
                 <div className="pr-error__actions">
-                  <button type="button" className="btn btn-sm pr-error__dismiss" onClick={() => setPushBranchError(null)} aria-label="Dismiss push branch error">×</button>
+                  <button type="button" className="btn btn-sm pr-error__dismiss" onClick={() => setPushBranchError(null)} aria-label={t("pr.dismissPushBranchError", "Dismiss push branch error")}>×</button>
                 </div>
               </div>
             ) : null}
@@ -650,7 +650,7 @@ export function PrCreateModal({
               <div className="form-error pr-error" role="alert">
                 <p>{resolveConflictError}</p>
                 <div className="pr-error__actions">
-                  <button type="button" className="btn btn-sm pr-error__dismiss" onClick={() => setResolveConflictError(null)} aria-label="Dismiss conflict resolution error">×</button>
+                  <button type="button" className="btn btn-sm pr-error__dismiss" onClick={() => setResolveConflictError(null)} aria-label={t("pr.dismissConflictResolutionError", "Dismiss conflict resolution error")}>×</button>
                 </div>
               </div>
             ) : null}
@@ -660,8 +660,8 @@ export function PrCreateModal({
                 <p>{submitError}</p>
                 {lastGhError?.hint ? <p className="pr-error__hint">{lastGhError.hint}</p> : null}
                 <div className="pr-error__actions">
-                  {lastGhError?.action?.kind === "shell" ? <p>Action: run <code>{lastGhError.action.command}</code></p> : null}
-                  {lastGhError?.action?.kind === "open" ? <p>Action: open <a href={lastGhError.action.url} target="_blank" rel="noreferrer">docs</a></p> : null}
+                  {lastGhError?.action?.kind === "shell" ? <p>{t("pr.error.actionRun", "Action: run")} <code>{lastGhError.action.command}</code></p> : null}
+                  {lastGhError?.action?.kind === "open" ? <p>{t("pr.error.actionOpen", "Action: open")} <a href={lastGhError.action.url} target="_blank" rel="noreferrer">{t("pr.error.docs", "docs")}</a></p> : null}
                   {lastGhError?.retryable ? <button type="button" className="btn btn-sm pr-error__retry" onClick={() => void submit()}>{t("actions.retry", "Retry")}</button> : null}
                   <button type="button" className="btn btn-sm pr-error__dismiss" onClick={() => { setLastGhError(null); setSubmitError(null); }} aria-label={t("pr.dismissError", "Dismiss PR error")}>×</button>
                 </div>

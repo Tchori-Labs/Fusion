@@ -6,23 +6,8 @@ import {
 
 
 const DEFERRED_I18N_LINT_FILES = [
-  // FNXC:i18n-LintBaseline 2026-06-19-00:00:
-  // These exact files still carry pre-existing user-facing copy debt after FN-6749 restored the guardrail scope and token suppression.
-  // Keep the deferral file-scoped and remove entries as those follow-ups localize each cluster.
   // FNXC:i18n-LintBaseline 2026-06-20-00:00:
-  // FN-6771 localized the settings/sections cluster, so those files are no longer deferred and must stay covered by i18n lint.
-  "packages/dashboard/app/components/WorkflowSelector.tsx",
-  "packages/dashboard/app/components/WorkflowResultsTab.tsx",
-  "packages/dashboard/app/components/WorkflowNodeEditor.tsx",
-  "packages/dashboard/app/components/TaskDetailModal.tsx",
-  "packages/dashboard/app/components/TaskComments.tsx",
-  "packages/dashboard/app/components/TaskChatTab.tsx",
-  "packages/dashboard/app/components/SetupWizardModal.tsx",
-  "packages/dashboard/app/components/SettingsModal.tsx",
-  "packages/dashboard/app/components/PullRequestView.tsx",
-  "packages/dashboard/app/components/PrPanel.tsx",
-  "packages/dashboard/app/components/PrCreateModal.tsx",
-  "packages/dashboard/app/components/Board.tsx",
+  // FN-6770 and FN-6771 localized the remaining workflow/task/setup/PR and settings/sections clusters, so no dashboard component files remain deferred from hardcoded-string lint.
 ] as const;
 
 /**

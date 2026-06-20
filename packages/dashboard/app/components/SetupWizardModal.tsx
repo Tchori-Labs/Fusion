@@ -152,14 +152,14 @@ export function SetupWizardModal({
         {/* Header */}
         <div className="setup-wizard-header">
           <div className="setup-wizard-heading">
-            <div className="setup-wizard-brand" aria-label="Fusion">
+            <div className="setup-wizard-brand" aria-label={t("setup.brandName", "Fusion")}>
               <svg
                 className="setup-wizard-brand-logo"
                 width={28}
                 height={28}
                 viewBox="0 0 128 128"
                 fill="none"
-                aria-label="Fusion logo"
+                aria-label={t("setup.brandLogo", "Fusion logo")}
                 role="img"
               >
                 <circle
@@ -174,12 +174,12 @@ export function SetupWizardModal({
                   fill="currentColor"
                 />
               </svg>
-              <span className="setup-wizard-brand-name">Fusion</span>
+              <span className="setup-wizard-brand-name">{t("setup.brandName", "Fusion")}</span>
             </div>
             <h2 id="wizard-title" className="setup-wizard-title">
               {state.step === "auth" && t("setup.setAuthToken", "Set Auth Token")}
               {state.step === "manual" && t("setup.welcomeToFusion", "Welcome to Fusion")}
-              {state.step === "complete" && t("setup.setupComplete", "Setup Complete!")}
+              {state.step === "complete" && t("setup.setupCompleteTitle", "Setup Complete!")}
             </h2>
           </div>
           {state.step !== "complete" && (

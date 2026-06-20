@@ -1181,7 +1181,11 @@
       "workflowMismatch": ""
     },
     "todo": "À faire",
-    "triage": "Triage"
+    "triage": "Triage",
+    "workflow": {
+      "edit": "",
+      "new": ""
+    }
   },
   "branchGroup": {
     "abandonGroup": "",
@@ -1810,7 +1814,8 @@
     "heading": "Commentaires",
     "placeholder": "Ajouter un commentaire",
     "postingButton": "Publication en cours…",
-    "updatedSuccess": "Commentaire mis à jour"
+    "updatedSuccess": "Commentaire mis à jour",
+    "aiGuidance": ""
   },
   "commit": {
     "filesChanged_one": "",
@@ -4686,7 +4691,60 @@
     "rerunPreflight": "Relancer les vérifications de pré-vol",
     "revertToAi": "Revenir à la version IA",
     "titleLabel": "Titre",
-    "usingTemplate": "Utilisation de <code>.github/pull_request_template.md</code>"
+    "usingTemplate": "Utilisation de <code>.github/pull_request_template.md</code>",
+    "assignees": "",
+    "dismissConflictResolutionError": "",
+    "dismissPushBranchError": "",
+    "error": {
+      "actionOpen": "",
+      "actionRun": "",
+      "docs": ""
+    },
+    "generatingBody": "",
+    "generatingTitle": "",
+    "labels": "",
+    "loadingOptions": "",
+    "loadingPreflight": "",
+    "noChangedFiles": "",
+    "noCommits": "",
+    "pushBranch": {
+      "button": "",
+      "message": "",
+      "title": ""
+    },
+    "resolveConflicts": {
+      "button": "",
+      "message": "",
+      "title": ""
+    },
+    "reviewers": "",
+    "view": {
+      "agentDisagreed": "",
+      "agentReplyFix": "",
+      "approve": "",
+      "autoMerge": "",
+      "close": "",
+      "confirmMerge": "",
+      "creating": "",
+      "creationFailed": "",
+      "loading": "",
+      "merge": "",
+      "mergeableLabel": "",
+      "mergeDisabledUntilVerified": "",
+      "none": "",
+      "noReviewThreads": "",
+      "requestRetry": "",
+      "resolveConflictsBeforeMerge": "",
+      "resolveConflictsOnGithub": "",
+      "responseAlreadyInProgress": "",
+      "responsePending_one": "",
+      "responsePending_other": "",
+      "retryCreation": "",
+      "reviewLabel": "",
+      "threadFixed": "",
+      "threadPending": "",
+      "verifyingGithub": ""
+    }
   },
   "preview": {
     "blockedDescription": "Vous pouvez afficher l'aperçu dans un onglet du navigateur séparé.",
@@ -5553,7 +5611,8 @@
       "totalSize": "",
       "view": "",
       "whenEnabledProjectAndAgentMemoryFilesAre": "",
-      "whenEnabledTheDatabaseIsBackedUpAutomatically": ""
+      "whenEnabledTheDatabaseIsBackedUpAutomatically": "",
+      "createFailed": ""
     },
     "clearToDefault": "",
     "cliAgents": {
@@ -5597,7 +5656,9 @@
     },
     "footer": {
       "help": "Aide",
-      "version": "Version {{version}}"
+      "version": "Version {{version}}",
+      "checkUpdates": "",
+      "helpDiscussions": ""
     },
     "general": {
       "25": "",
@@ -5746,7 +5807,10 @@
       "whenEnabledStartupRefreshesModelsThroughTheLocal": ""
     },
     "header": {
-      "discord": "Discord"
+      "discord": "Discord",
+      "joinDiscord": "",
+      "star": "",
+      "starFusion": ""
     },
     "importExport": {
       "confirmImport": "Confirmer l'importation",
@@ -5756,7 +5820,35 @@
       "importing": "Importation…",
       "importTitle": "Importer les paramètres",
       "loadingFile": "Chargement…",
-      "reviewPrompt": "Vérifiez les paramètres à importer :"
+      "reviewPrompt": "Vérifiez les paramètres à importer :",
+      "counts": {
+        "global_one": "",
+        "global_other": "",
+        "project_one": "",
+        "project_other": "",
+        "workflowSettings_one": "",
+        "workflowSettings_other": ""
+      },
+      "exported": "",
+      "exportFailed": "",
+      "globalSettings": "",
+      "imported": "",
+      "importFailed": "",
+      "importFailedDetailed": "",
+      "importScope": "",
+      "importTitleAttr": "",
+      "invalidJson": "",
+      "mergeExisting": "",
+      "projectSettings": "",
+      "replaceWarning": "",
+      "scopeBoth": "",
+      "scopeGlobal": "",
+      "scopeLabel": {
+        "all": "",
+        "global": "",
+        "project": ""
+      },
+      "scopeProject": ""
     },
     "jsonPlaceholder": "Entrez une valeur JSON...",
     "keepLocal": "Garder la version locale",
@@ -5806,7 +5898,10 @@
       "searchMemoryWithQmd": "",
       "testing": "Test en cours…",
       "testRetrieval": "Tester la récupération",
-      "turnsDailyNotesIntoDREAMSMdAndPromotes": ""
+      "turnsDailyNotesIntoDREAMSMdAndPromotes": "",
+      "qmdInstalled": "",
+      "qmdInstallFailed": "",
+      "qmdInstallUnavailable": ""
     },
     "merge": {
       "abort": "",
@@ -6155,7 +6250,8 @@
       "uRLAndQRGenerationUseTheSelectedToken": "",
       "uRLNoHostnameOrPortConfigurationNeeded": "",
       "useExisting": "Utiliser l'existant",
-      "usingQuickTunnel": ""
+      "usingQuickTunnel": "",
+      "installationFailed": ""
     },
     "researchGlobal": {
       "advancedExternalSearchProviders": "",
@@ -6275,7 +6371,9 @@
       "timeoutInMinutesForDetectingStuckTasksWhen": "",
       "whenEnabledTasksThatModifyTheSameFiles": "",
       "whenEnabledTasksWithStalePlansPROMPTMd": "",
-      "whenTheStuckDetectorKillsAndReQueues": ""
+      "whenTheStuckDetectorKillsAndReQueues": "",
+      "browseWorkspacePath": "",
+      "overlapPickerNote": ""
     },
     "scope": {
       "globalBanner": "Ces paramètres sont partagés entre tous vos projets Fusion.",
@@ -6335,7 +6433,12 @@
       "worktrunk": "",
       "worktrunkBinaryPath": "",
       "worktrunkFailureBehavior": "",
-      "worktrunkIntegration": ""
+      "worktrunkIntegration": "",
+      "worktreesPickerNote": ""
+    },
+    "fileBrowser": {
+      "currentDirectory": "",
+      "projectRoot": ""
     }
   },
   "setup": {
@@ -6655,7 +6758,10 @@
     "withoutGitHub1": "Créer des tâches manuellement",
     "withoutGitHub2": "Décrire le travail pour les agents IA",
     "withoutGitHub3": "Suivre la progression sur le tableau",
-    "withoutGitHubHeading": "Sans GitHub (disponible maintenant) :"
+    "withoutGitHubHeading": "Sans GitHub (disponible maintenant) :",
+    "brandLogo": "",
+    "brandName": "",
+    "setupCompleteTitle": ""
   },
   "shell": {
     "activePill": "Actif",
@@ -7201,7 +7307,8 @@
       "mergingFixes": "Fusion des corrections…",
       "mergingPr": "Fusion du PR…",
       "startPrReview": "Démarrer la révision du PR",
-      "statusRefreshed": "Statut du PR actualisé"
+      "statusRefreshed": "Statut du PR actualisé",
+      "label": ""
     },
     "priority": {
       "ariaLabel": "Priorité de la tâche",
@@ -7216,7 +7323,8 @@
     },
     "provenance": {
       "createdBy": "Créé par",
-      "createdVia": "Créé via"
+      "createdVia": "Créé via",
+      "parentTaskOf": ""
     },
     "recoveryState": "État de récupération",
     "refine": {
@@ -7955,7 +8063,43 @@
     "switchToMarkdown": "Basculer vers Markdown",
     "switchToPlain": "Basculer vers texte brut",
     "thinkingLevel": "",
-    "workflowName": ""
+    "workflowName": "",
+    "aggregateAdvisory": "",
+    "aggregateAllPassed": "",
+    "aggregateInProgress": "",
+    "aggregateNoResults": "",
+    "approveAndRun": "",
+    "approveCommandError": "",
+    "approving": "",
+    "awaitingInputTitle": "",
+    "cliApprovalRejectHint": "",
+    "cliApprovalTitle": "",
+    "cliApprovalWarning": "",
+    "customWorkflowFallback": "",
+    "customWorkflowLabel": "",
+    "defaultWorkflow": "",
+    "executionAwaitingCliApproval": "",
+    "executionAwaitingInput": "",
+    "executionCompleted": "",
+    "executionNotStarted": "",
+    "executionPaused": "",
+    "executionPostMerge": "",
+    "executionPreMerge": "",
+    "inputPlaceholder": "",
+    "modelDefault": "",
+    "postMerge": "",
+    "preMerge": "",
+    "replyInComments": "",
+    "resumeTaskError": "",
+    "resuming": "",
+    "statusAdvisory": "",
+    "statusFailed": "",
+    "statusPassed": "",
+    "statusRunning": "",
+    "statusSkipped": "",
+    "submitAndResume": "",
+    "submitting": "",
+    "waitingForOutput": ""
   },
   "workflowColumns": {
     "add": "",
@@ -8007,7 +8151,30 @@
     },
     "collapsePrompt": "",
     "editingPrompt": "",
-    "expandPrompt": ""
+    "expandPrompt": "",
+    "agent": "",
+    "agentsLoadFailed": "",
+    "autoApproveRequests": "",
+    "autoApproveRequestsNote": "",
+    "cliCommandNote": "",
+    "cliMode": "",
+    "cliScript": "",
+    "command": "",
+    "executor": "",
+    "maxRetries": "",
+    "model": "",
+    "modelsLoadFailed": "",
+    "namedScript": "",
+    "namedScriptNote": "",
+    "prompt": "",
+    "scriptName": "",
+    "selectAgent": "",
+    "selectSkill": "",
+    "skill": "",
+    "skillsLoadFailed": "",
+    "skipFirstRunApproval": "",
+    "waitForUserInput": "",
+    "waitForUserInputNote": ""
   },
   "workflowFields": {
     "add": "Ajouter un champ",
@@ -8141,7 +8308,11 @@
     "templatesPluginSteps": "Étapes de plugin",
     "templatesSection": "Modèles",
     "timeoutMs": "",
-    "trivialGraphHint": "Ce workflow ne fait qu'exécuter début → fin. Ajoutez des étapes depuis la palette ci-dessus pour le développer."
+    "trivialGraphHint": "Ce workflow ne fait qu'exécuter début → fin. Ajoutez des étapes depuis la palette ci-dessus pour le développer.",
+    "conditionFailure": "",
+    "conditionSuccess": "",
+    "nodeInspector": "",
+    "readOnlyDuplicateToEdit": ""
   },
   "workflows": {
     "aiEdit": "Concevoir avec l'IA",
@@ -8204,13 +8375,27 @@
     "templateNodeCount_other": "{{count}} nœuds",
     "templatePickerLabel": "Partir de",
     "templateSectionBuiltin": "Workflows intégrés",
-    "templateSectionYours": "Vos workflows"
+    "templateSectionYours": "Vos workflows",
+    "closeEditor": "",
+    "duplicatedEditable": "",
+    "duplicateFailed": "",
+    "loadFailed": "",
+    "loading": "",
+    "noneYet": "",
+    "title": ""
   },
   "workflowSelector": {
     "switchActiveMessage": "",
     "switchActiveTitle": "",
     "switchCancel": "",
-    "switchConfirm": ""
+    "switchConfirm": "",
+    "applyFailed": "",
+    "defaultCleared": "",
+    "defaultSet": "",
+    "defaultWorkflowLabel": "",
+    "loadFailed": "",
+    "manage": "",
+    "none": ""
   },
   "workflowSettings": {
     "add": "",
@@ -8288,5 +8473,50 @@
     "installRequestTitle": "Demande d'installation de Worktrunk",
     "sha256": "SHA-256",
     "version": "Version"
+  },
+  "taskChat": {
+    "activePlaceholder": "",
+    "activeSessionHint": "",
+    "agentMessages": "",
+    "arguments": "",
+    "collapseChat": "",
+    "donePlaceholder": "",
+    "doneSessionHint": "",
+    "emptyAgentOutput": "",
+    "entryCount_one": "",
+    "entryCount_other": "",
+    "error": "",
+    "errorCount_one": "",
+    "errorCount_other": "",
+    "expandChat": "",
+    "idleSessionHint": "",
+    "jumpToLatestMessage": "",
+    "latest": "",
+    "loadingAgentOutput": "",
+    "loadingEarlierMessages": "",
+    "loadPreviousMessages": "",
+    "message": "",
+    "messageActiveAgentSession": "",
+    "moreTools_one": "",
+    "moreTools_other": "",
+    "result": "",
+    "roles": {
+      "agent": "",
+      "executor": "",
+      "merger": "",
+      "planner": "",
+      "reviewer": ""
+    },
+    "sending": "",
+    "thinking": "",
+    "toolCall": "",
+    "toolCallCount_one": "",
+    "toolCallCount_other": "",
+    "toolCallTo": "",
+    "toolError": "",
+    "toolNames": "",
+    "toolResult": "",
+    "you": "",
+    "youMessage": ""
   }
 }

@@ -71,14 +71,20 @@ interface ModelSelection {
 
 const ACTIVE_STATUSES = new Set(["planning", "researching", "executing", "finalizing", "merging", "merging-fix"]);
 const STALE_PAUSED_REVIEW_LOG_REGEX = /^Stale paused review surfaced \[([^\]]+)\]/;
+const EMPTY_MARKDOWN_CHILD_SEPARATOR = "";
+const STRING_OBJECT_TAG = "[object String]";
+
+function isStringValue(value: unknown): value is string {
+  return Object.prototype.toString.call(value) === STRING_OBJECT_TAG;
+}
 
 const markdownLinkifyComponents: Components = {
   p: ({ children, ...props }) => <p {...props}>{linkifyReactChildren(children)}</p>,
   li: ({ children, ...props }) => <li {...props}>{linkifyReactChildren(children)}</li>,
   code: ({ children, ...props }) => {
-    const text = typeof children === "string" ? children : React.Children.toArray(children).join("");
+    const text = React.Children.toArray(children).join(EMPTY_MARKDOWN_CHILD_SEPARATOR);
     const linkedChildren = linkifyFilePaths(text);
-    if (linkedChildren.length === 1 && typeof linkedChildren[0] === "string") {
+    if (linkedChildren.length === 1 && linkedChildren[0]?.constructor === String) {
       return <code {...props}>{children}</code>;
     }
     return <code {...props}>{linkedChildren}</code>;
@@ -92,25 +98,25 @@ const markdownLinkifyComponents: Components = {
  */
 function extractExecutorModelFromLog(entries: AgentLogEntry[]): { provider: string; modelId: string } | null {
   let result: { provider: string; modelId: string } | null = null;
-  for (const entry of entries) {
-    if (entry.agent !== "executor" || entry.type !== "text") continue;
+  entries.forEach((entry) => {
+    if (entry.agent !== "executor" || entry.type !== "text") return;
     const match = entry.text.match(/^Executor using model: (.+?)\/(.+)$/);
     if (match) {
       result = { provider: match[1], modelId: match[2] };
     }
-  }
+  });
   return result;
 }
 
 function extractReviewerModelFromLog(entries: AgentLogEntry[]): { provider: string; modelId: string } | null {
   let result: { provider: string; modelId: string } | null = null;
-  for (const entry of entries) {
-    if (entry.agent !== "reviewer" || entry.type !== "text") continue;
+  entries.forEach((entry) => {
+    if (entry.agent !== "reviewer" || entry.type !== "text") return;
     const match = entry.text.match(/^Reviewer using model: (.+?)\/(.+)$/);
     if (match) {
       result = { provider: match[1], modelId: match[2] };
     }
-  }
+  });
   return result;
 }
 
@@ -129,7 +135,7 @@ function hasUsableTrackingTitle(task: { title?: string | null; description?: str
 
 function extractAssignedRuntimeModel(agent: Agent | null | undefined): ModelSelection {
   const runtimeConfig = (agent?.runtimeConfig ?? undefined) as Record<string, unknown> | undefined;
-  const model = typeof runtimeConfig?.model === "string" ? runtimeConfig.model.trim() : "";
+  const model = isStringValue(runtimeConfig?.model) ? runtimeConfig.model.trim() : "";
   if (model) {
     const slashIdx = model.indexOf("/");
     if (slashIdx > 0 && slashIdx < model.length - 1) {
@@ -140,8 +146,8 @@ function extractAssignedRuntimeModel(agent: Agent | null | undefined): ModelSele
     }
   }
 
-  const provider = typeof runtimeConfig?.modelProvider === "string" ? runtimeConfig.modelProvider.trim() : "";
-  const modelId = typeof runtimeConfig?.modelId === "string" ? runtimeConfig.modelId.trim() : "";
+  const provider = isStringValue(runtimeConfig?.modelProvider) ? runtimeConfig.modelProvider.trim() : "";
+  const modelId = isStringValue(runtimeConfig?.modelId) ? runtimeConfig.modelId.trim() : "";
   return {
     provider: provider || undefined,
     modelId: modelId || undefined,
@@ -209,13 +215,13 @@ function resolveEffectiveValidator(
 function extractPlanningModelFromLog(entries: AgentLogEntry[]): { provider: string; modelId: string } | null {
   // Iterate in chronological order; last match wins
   let result: { provider: string; modelId: string } | null = null;
-  for (const entry of entries) {
-    if (entry.agent !== "triage" || entry.type !== "text") continue;
+  entries.forEach((entry) => {
+    if (entry.agent !== "triage" || entry.type !== "text") return;
     const match = entry.text.match(/^Triage using model: (.+?)\/(.+)$/);
     if (match) {
       result = { provider: match[1], modelId: match[2] };
     }
-  }
+  });
   return result;
 }
 
@@ -431,7 +437,7 @@ function normalizeSourceIssueUrl(value: string): string | undefined {
 }
 
 function normalizeTaskPriorityValue(priority: Task["priority"]): TaskPriority {
-  return typeof priority === "string" && (TASK_PRIORITIES as readonly string[]).includes(priority)
+  return isStringValue(priority) && (TASK_PRIORITIES as readonly string[]).includes(priority)
     ? (priority as TaskPriority)
     : DEFAULT_TASK_PRIORITY;
 }
@@ -456,7 +462,7 @@ interface ProvenanceLabelOptions {
 
 function getIssueUrlFromMetadata(metadata: Task["sourceMetadata"]): string | undefined {
   const issueUrl = metadata?.issueUrl;
-  return typeof issueUrl === "string" && issueUrl.length > 0 ? issueUrl : undefined;
+  return isStringValue(issueUrl) && issueUrl.length > 0 ? issueUrl : undefined;
 }
 
 function parseGithubIssueLabel(url: string): { label: string; href: string } | null {
@@ -474,12 +480,12 @@ function parseGithubIssueLabel(url: string): { label: string; href: string } | n
 
 function getResearchContextInfo(metadata: Task["sourceMetadata"]): string | undefined {
   const findingLabel = metadata?.findingLabel;
-  if (typeof findingLabel === "string" && findingLabel.length > 0) {
+  if (isStringValue(findingLabel) && findingLabel.length > 0) {
     return findingLabel;
   }
 
   const runId = metadata?.runId;
-  return typeof runId === "string" && runId.length > 0 ? runId : undefined;
+  return isStringValue(runId) && runId.length > 0 ? runId : undefined;
 }
 
 const AgentDetailView = lazy(() => import("./AgentDetailView").then((m) => ({ default: m.AgentDetailView })));
@@ -659,7 +665,7 @@ export function TaskDetailContent({
     (task.stuckKillCount ?? 0) > 0 ||
     (task.recoveryRetryCount ?? 0) > 0 ||
     Boolean(task.nextRecoveryAt);
-  const nearDuplicateOf = typeof workingTask.sourceMetadata?.nearDuplicateOf === "string"
+  const nearDuplicateOf = isStringValue(workingTask.sourceMetadata?.nearDuplicateOf)
     ? workingTask.sourceMetadata.nearDuplicateOf
     : null;
   const nearDuplicateCanonical = nearDuplicateOf
@@ -810,11 +816,11 @@ export function TaskDetailContent({
         setCustomFieldValues(updated.customFields ?? {});
         onTaskUpdated?.(updated);
       } catch (err) {
-        if (err instanceof ApiRequestError && err.details && typeof err.details.fieldId === "string") {
+        if (err instanceof ApiRequestError && err.details && isStringValue(err.details.fieldId)) {
           setCustomFieldError({
             code: (err.details.code as CustomFieldRejection["code"]) ?? "type-mismatch",
             fieldId: err.details.fieldId,
-            detail: typeof err.details.detail === "string" ? err.details.detail : err.message,
+            detail: isStringValue(err.details.detail) ? err.details.detail : err.message,
           });
           return;
         }
@@ -909,7 +915,7 @@ export function TaskDetailContent({
     tabId: `plugin-${entry.pluginId}-${index}` as TabId,
   }));
   const activePluginTab =
-    typeof activeTab === "string" && activeTab.startsWith("plugin-")
+    isStringValue(activeTab) && activeTab.startsWith("plugin-")
       ? pluginTabs.find((tab) => tab.tabId === activeTab) ?? null
       : null;
 
@@ -2981,7 +2987,7 @@ export function TaskDetailContent({
                       )}
                       {provenanceDisplay.parentTaskId && (
                         <>
-                          {" "}of{" "}
+                          {" "}{t("taskDetail.provenance.parentTaskOf", "of")}{" "}
                           <button
                             type="button"
                             className="detail-provenance-link"
@@ -3021,7 +3027,7 @@ export function TaskDetailContent({
                   <div className="detail-provenance detail-pr-link-row">
                     <GitBranch aria-hidden="true" />
                     <span>
-                      PR{" "}
+                      {t("taskDetail.pr.label", "PR")} {" "}
                       {task.prInfo?.url ? (
                         <a
                           className="detail-provenance-link"

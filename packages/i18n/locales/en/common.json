@@ -1,4 +1,7 @@
 {
+  "actions": {
+    "send": "Send"
+  },
   "agents": {
     "ratings": {
       "trendDeclining": "↓ Declining",
@@ -77,6 +80,9 @@
     "error": "Error",
     "offline": "Offline",
     "online": "Online"
+  },
+  "labels": {
+    "name": "Name"
   },
   "merge": {
     "unknown": "Unknown"
@@ -213,28 +219,6 @@
     "refreshSourceBackground": "Background",
     "refreshSourceInitialLoad": "Initial load",
     "refreshSourceManual": "Manual"
-  },
-  "workflow": {
-    "aggregateAllPassed": "All passed",
-    "aggregateInProgress": "In progress",
-    "aggregateNoResults": "No results",
-    "customWorkflowFallback": "Custom workflow",
-    "defaultWorkflow": "Default",
-    "executionAwaitingCliApproval": "Awaiting CLI approval",
-    "executionAwaitingInput": "Awaiting input",
-    "executionCompleted": "Completed",
-    "executionNotStarted": "Not started",
-    "executionPaused": "Paused",
-    "executionPostMerge": "Post-merge steps running",
-    "executionPreMerge": "Pre-merge steps running",
-    "postMerge": "Post-merge",
-    "preMerge": "Pre-merge",
-    "statusAdvisory": "Advisory failure",
-    "statusFailed": "Failed",
-    "statusPassed": "Passed",
-    "statusRunning": "Running…",
-    "statusSkipped": "Skipped",
-    "waitingForOutput": "Waiting for agent output…"
   },
   "workflowNodes": {
     "summaryAwaitInput": "Waits for user input",

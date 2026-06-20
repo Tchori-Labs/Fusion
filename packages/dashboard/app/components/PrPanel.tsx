@@ -238,7 +238,7 @@ function PrCard({
           <div>{lastGhError.message}</div>
           {lastGhError.hint ? <div className="pr-error__hint">{lastGhError.hint}</div> : null}
           <div className="pr-error__actions">
-            {lastGhError.action?.kind === "shell" ? <div>Action: run <code>{lastGhError.action.command}</code></div> : null}
+            {lastGhError.action?.kind === "shell" ? <div>{t("pr.error.actionRun", "Action: run")} <code>{lastGhError.action.command}</code></div> : null}
             {lastGhError.retryable ? <button className="btn btn-sm pr-error__retry" onClick={() => void handleRefresh()}>{t("git.retryButton", "Retry")}</button> : null}
             <button className="btn btn-sm pr-error__dismiss" onClick={() => setLastGhError(null)} aria-label={t("git.dismissPrError", "Dismiss PR error")}>×</button>
           </div>

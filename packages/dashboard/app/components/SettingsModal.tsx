@@ -1850,10 +1850,10 @@ export function SettingsModal({
         const info = await fetchBackups(projectId);
         setBackupInfo(info);
       } else {
-        addToast(result.error || "Failed to create backup", "error");
+        addToast(result.error || t("settings.backups.createFailed", "Failed to create backup"), "error");
       }
     } catch (err) {
-      addToast(getErrorMessage(err) || "Failed to create backup", "error");
+      addToast(getErrorMessage(err) || t("settings.backups.createFailed", "Failed to create backup"), "error");
     } finally {
       setBackupLoading(false);
     }
@@ -1879,10 +1879,14 @@ export function SettingsModal({
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
       
-      const scopeLabel = scope === "global" ? "global" : scope === "project" ? "project" : "all";
-      addToast(`Settings exported (${scopeLabel} scope)`, "success");
+      const scopeLabel = scope === "global"
+        ? t("settings.importExport.scopeLabel.global", "global")
+        : scope === "project"
+          ? t("settings.importExport.scopeLabel.project", "project")
+          : t("settings.importExport.scopeLabel.all", "all");
+      addToast(t("settings.importExport.exported", "Settings exported ({{scope}} scope)", { scope: scopeLabel }), "success");
     } catch (err) {
-      addToast(getErrorMessage(err) || "Failed to export settings", "error");
+      addToast(getErrorMessage(err) || t("settings.importExport.exportFailed", "Failed to export settings"), "error");
     }
   }, [addToast, activeSectionScope, projectId]);
 
@@ -1899,7 +1903,7 @@ export function SettingsModal({
       setImportPreview(data);
       setImportDialogOpen(true);
     } catch (err) {
-      addToast(`Invalid JSON file: ${getErrorMessage(err)}`, "error");
+      addToast(t("settings.importExport.invalidJson", "Invalid JSON file: {{error}}", { error: getErrorMessage(err) }), "error");
       setImportFile(null);
     } finally {
       setImportLoading(false);
@@ -1914,10 +1918,10 @@ export function SettingsModal({
       const result = await importSettings(importPreview, { scope: importScope, merge: importMerge }, projectId);
       if (result.success) {
         const parts: string[] = [];
-        if (result.globalCount > 0) parts.push(`${result.globalCount} global`);
-        if (result.projectCount > 0) parts.push(`${result.projectCount} project`);
-        if (result.workflowSettingsCount > 0) parts.push(`${result.workflowSettingsCount} workflow setting value(s)`);
-        addToast(`Imported ${parts.join(", ")} setting(s)`, "success");
+        if (result.globalCount > 0) parts.push(t("settings.importExport.counts.global", "{{count}} global", { count: result.globalCount }));
+        if (result.projectCount > 0) parts.push(t("settings.importExport.counts.project", "{{count}} project", { count: result.projectCount }));
+        if (result.workflowSettingsCount > 0) parts.push(t("settings.importExport.counts.workflowSettings", "{{count}} workflow setting value", { count: result.workflowSettingsCount }));
+        addToast(t("settings.importExport.imported", "Imported {{counts}} setting(s)", { counts: parts.join(", ") }), "success");
         setImportDialogOpen(false);
         setImportPreview(null);
         setImportFile(null);
@@ -1925,10 +1929,10 @@ export function SettingsModal({
         const refreshed = await fetchSettings(projectId);
         setForm(refreshed);
       } else {
-        addToast(result.error || "Import failed", "error");
+        addToast(result.error || t("settings.importExport.importFailed", "Import failed"), "error");
       }
     } catch (err) {
-      addToast(getErrorMessage(err) || "Failed to import settings", "error");
+      addToast(getErrorMessage(err) || t("settings.importExport.importFailedDetailed", "Failed to import settings"), "error");
     } finally {
       setImportLoading(false);
     }
@@ -2373,11 +2377,11 @@ export function SettingsModal({
       const result = await installQmd(projectId);
       await refreshMemoryBackend();
       addToast(
-        result.qmdAvailable ? "qmd installed successfully" : "qmd install finished, but qmd is still unavailable",
+        result.qmdAvailable ? t("settings.memory.qmdInstalled", "qmd installed successfully") : t("settings.memory.qmdInstallUnavailable", "qmd install finished, but qmd is still unavailable"),
         result.qmdAvailable ? "success" : "warning",
       );
     } catch (err) {
-      addToast(getErrorMessage(err) || "Failed to install qmd", "error");
+      addToast(getErrorMessage(err) || t("settings.memory.qmdInstallFailed", "Failed to install qmd"), "error");
     } finally {
       setQmdInstallLoading(false);
     }
@@ -2471,14 +2475,14 @@ export function SettingsModal({
     try {
       const result = await installCloudflared(projectId);
       if (!result.success) {
-        setCloudflaredInstallError(result.error ?? "Installation failed");
+        setCloudflaredInstallError(result.error ?? t("settings.remote.installationFailed", "Installation failed"));
         return;
       }
       const status = await fetchRemoteStatus(projectId);
       setRemoteStatus(status);
       addToast(t("settings.remote.cloudflaredInstalled", "cloudflared installed successfully"), "success");
     } catch (err) {
-      setCloudflaredInstallError(err instanceof Error ? err.message : "Installation failed");
+      setCloudflaredInstallError(err instanceof Error ? err.message : t("settings.remote.installationFailed", "Installation failed"));
     } finally {
       setCloudflaredInstalling(false);
     }
@@ -2871,15 +2875,15 @@ export function SettingsModal({
               target="_blank"
               rel="noopener noreferrer"
               className="settings-github-star-btn"
-              aria-label="Star Fusion on GitHub"
-              title="Star Fusion on GitHub"
+              aria-label={t("settings.header.starFusion", "Star Fusion on GitHub")}
+              title={t("settings.header.starFusion", "Star Fusion on GitHub")}
               onClick={markStarClicked}
               data-clicked={starClicked ? "true" : "false"}
             >
               <span className="settings-github-star-btn__action">
                 <ProviderIcon provider="github" size="sm" />
                 <Star size={11} aria-hidden="true" />
-                Star
+                {t("settings.header.star", "Star")}
               </span>
               {gitHubStarCount !== null && (
                 <span className="settings-github-star-btn__count" aria-label={`${gitHubStarCount.toLocaleString()} stars`}>
@@ -2894,14 +2898,14 @@ export function SettingsModal({
               target="_blank"
               rel="noopener noreferrer"
               className="btn btn-sm settings-header-discord-btn"
-              aria-label="Join our Discord"
-              title="Join our Discord"
+              aria-label={t("settings.header.joinDiscord", "Join our Discord")}
+              title={t("settings.header.joinDiscord", "Join our Discord")}
             >
               <DiscordIcon size={13} />
               {t("settings.header.discord", "Discord")}
             </a>
           </div>
-          <button className="modal-close" onClick={onClose} aria-label="Close">
+          <button className="modal-close" onClick={onClose} aria-label={t("actions.close", "Close")}>
             &times;
           </button>
         </div>
@@ -2971,8 +2975,8 @@ export function SettingsModal({
               target="_blank"
               rel="noopener noreferrer"
               className="btn btn-sm settings-footer-help-btn"
-              aria-label="Help and discussions"
-              title="Help and discussions"
+              aria-label={t("settings.footer.helpDiscussions", "Help and discussions")}
+              title={t("settings.footer.helpDiscussions", "Help and discussions")}
             >
               <HelpCircle size={13} aria-hidden="true" />
               {t("settings.footer.help", "Help")}
@@ -2986,8 +2990,8 @@ export function SettingsModal({
                     void handleCheckForUpdates();
                   }}
                   disabled={updateCheckLoading}
-                  aria-label="Check for updates"
-                  title="Check for updates"
+                  aria-label={t("settings.footer.checkUpdates", "Check for updates")}
+                  title={t("settings.footer.checkUpdates", "Check for updates")}
                 >
                   <span className="settings-modal-version">{t("settings.footer.version", "Version {{version}}", { version: appVersion })}</span>
                   <RefreshCw size={12} className={updateCheckLoading ? "spinning" : undefined} />
@@ -3030,7 +3034,7 @@ export function SettingsModal({
               className="btn btn-sm"
               onClick={() => fileInputRef.current?.click()}
               disabled={importLoading}
-              title="Import settings from JSON file"
+              title={t("settings.importExport.importTitleAttr", "Import settings from JSON file")}
             >
               {importLoading ? t("settings.importExport.loadingFile", "Loading…") : t("settings.importExport.importBtn", "Import")}
             </button>
@@ -3052,18 +3056,18 @@ export function SettingsModal({
           onClick={handleOverlapPathPickerOverlayClick}
           role="dialog"
           aria-modal="true"
-          aria-label="Browse workspace path"
+          aria-label={t("settings.scheduling.browseWorkspacePath", "Browse workspace path")}
         >
           <div className="modal modal-lg settings-overlap-path-picker-modal" onClick={(event) => event.stopPropagation()}>
             <div className="modal-header">
               <h3>{t("settings.scheduling.selectIgnoredOverlapPath", "Select ignored overlap path")}</h3>
-              <button className="modal-close" onClick={closeOverlapPathPicker} aria-label="Close">
+              <button className="modal-close" onClick={closeOverlapPathPicker} aria-label={t("actions.close", "Close")}>
                 &times;
               </button>
             </div>
             <div className="modal-body settings-overlap-path-picker-body">
               <p className="settings-overlap-path-picker-note">
-                Choose a file to ignore directly, or navigate into a folder and select the current directory.
+                {t("settings.scheduling.overlapPickerNote", "Choose a file to ignore directly, or navigate into a folder and select the current directory.")}
               </p>
               <FileBrowser
                 entries={overlapPathPickerEntries}
@@ -3080,7 +3084,7 @@ export function SettingsModal({
             <div className="modal-actions">
               <div className="modal-actions-left">
                 <small>
-                  Current directory: <code>{overlapPathPickerCurrentPath === "." ? "(project root)" : overlapPathPickerCurrentPath}</code>
+                  {t("settings.fileBrowser.currentDirectory", "Current directory:")} <code>{overlapPathPickerCurrentPath === "." ? t("settings.fileBrowser.projectRoot", "(project root)") : overlapPathPickerCurrentPath}</code>
                 </small>
               </div>
               <div className="modal-actions-right">
@@ -3106,18 +3110,18 @@ export function SettingsModal({
           onClick={handleWorktreesDirPickerOverlayClick}
           role="dialog"
           aria-modal="true"
-          aria-label="Browse worktrees directory"
+          aria-label={t("settings.worktrees.browseWorktreesDirectory", "Browse worktrees directory")}
         >
           <div className="modal modal-lg settings-overlap-path-picker-modal" onClick={(event) => event.stopPropagation()}>
             <div className="modal-header">
               <h3>{t("settings.worktrees.selectWorktreesDir", "Select worktrees directory")}</h3>
-              <button className="modal-close" onClick={closeWorktreesDirPicker} aria-label="Close">
+              <button className="modal-close" onClick={closeWorktreesDirPicker} aria-label={t("actions.close", "Close")}>
                 &times;
               </button>
             </div>
             <div className="modal-body settings-overlap-path-picker-body">
               <p className="settings-overlap-path-picker-note">
-                Navigate to the folder where Fusion should create task worktrees, then select the current directory.
+                {t("settings.worktrees.worktreesPickerNote", "Navigate to the folder where Fusion should create task worktrees, then select the current directory.")}
               </p>
               <FileBrowser
                 entries={worktreesDirPickerEntries}
@@ -3134,7 +3138,7 @@ export function SettingsModal({
             <div className="modal-actions">
               <div className="modal-actions-left">
                 <small>
-                  Current directory: <code>{worktreesDirPickerCurrentPath === "." ? "(project root)" : worktreesDirPickerCurrentPath}</code>
+                  {t("settings.fileBrowser.currentDirectory", "Current directory:")} <code>{worktreesDirPickerCurrentPath === "." ? t("settings.fileBrowser.projectRoot", "(project root)") : worktreesDirPickerCurrentPath}</code>
                 </small>
               </div>
               <div className="modal-actions-right">
@@ -3156,7 +3160,7 @@ export function SettingsModal({
           <div className="modal modal-md">
             <div className="modal-header">
               <h3>{t("settings.importExport.importTitle", "Import Settings")}</h3>
-              <button className="modal-close" onClick={() => setImportDialogOpen(false)} aria-label="Close">
+              <button className="modal-close" onClick={() => setImportDialogOpen(false)} aria-label={t("actions.close", "Close")}>
                 &times;
               </button>
             </div>
@@ -3165,7 +3169,7 @@ export function SettingsModal({
               
               {importPreview.global && Object.keys(importPreview.global).length > 0 && (
                 <div className="form-group">
-                  <strong>Global Settings:</strong>
+                  <strong>{t("settings.importExport.globalSettings", "Global Settings:")}</strong>
                   <ul className="import-preview-list">
                     {Object.entries(importPreview.global)
                       .filter(([, v]) => v !== undefined)
@@ -3178,7 +3182,7 @@ export function SettingsModal({
               
               {importPreview.project && Object.keys(importPreview.project).length > 0 && (
                 <div className="form-group">
-                  <strong>Project Settings:</strong>
+                  <strong>{t("settings.importExport.projectSettings", "Project Settings:")}</strong>
                   <ul className="import-preview-list">
                     {Object.entries(importPreview.project)
                       .filter(([, v]) => v !== undefined)
@@ -3190,15 +3194,15 @@ export function SettingsModal({
               )}
               
               <div className="form-group">
-                <label htmlFor="import-scope">Import Scope:</label>
+                <label htmlFor="import-scope">{t("settings.importExport.importScope", "Import Scope:")}</label>
                 <select
                   id="import-scope"
                   value={importScope}
                   onChange={(e) => setImportScope(e.target.value as 'global' | 'project' | 'both')}
                 >
-                  <option value="both">Both global and project settings</option>
-                  <option value="global">Global settings only</option>
-                  <option value="project">Project settings only</option>
+                  <option value="both">{t("settings.importExport.scopeBoth", "Both global and project settings")}</option>
+                  <option value="global">{t("settings.importExport.scopeGlobal", "Global settings only")}</option>
+                  <option value="project">{t("settings.importExport.scopeProject", "Project settings only")}</option>
                 </select>
               </div>
               
@@ -3210,9 +3214,9 @@ export function SettingsModal({
                     checked={importMerge}
                     onChange={(e) => setImportMerge(e.target.checked)}
                   />
-                  Merge with existing settings (recommended)
+                  {t("settings.importExport.mergeExisting", "Merge with existing settings (recommended)")}
                 </label>
-                <small>If unchecked, existing settings will be replaced with imported values.</small>
+                <small>{t("settings.importExport.replaceWarning", "If unchecked, existing settings will be replaced with imported values.")}</small>
               </div>
             </div>
             <div className="modal-actions">

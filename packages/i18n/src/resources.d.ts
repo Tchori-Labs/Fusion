@@ -1183,7 +1183,11 @@ export default interface Resources {
         "workflowMismatch": "Drag can't move a card between workflows. Use the workflow switcher instead."
       },
       "todo": "To Do",
-      "triage": "Triage"
+      "triage": "Triage",
+      "workflow": {
+        "edit": "Edit workflows",
+        "new": "New workflow"
+      }
     },
     "branchGroup": {
       "abandonGroup": "Abandon group",
@@ -1805,6 +1809,7 @@ export default interface Resources {
     "comments": {
       "addButton": "Add Comment",
       "addedSuccess": "Comment added",
+      "aiGuidance": "AI Guidance",
       "deletedSuccess": "Comment deleted",
       "deletingButton": "Deleting…",
       "editedSuffix": "(edited)",
@@ -4661,6 +4666,7 @@ export default interface Resources {
       "viewUnavailable": "Plugin view unavailable"
     },
     "pr": {
+      "assignees": "Assignees",
       "authFail": "Run gh auth login and try again.",
       "authOk": "GitHub CLI auth is available.",
       "baseBranch": "Base branch",
@@ -4680,15 +4686,67 @@ export default interface Resources {
       "createDraftPr": "Create draft PR",
       "createPr": "Create PR",
       "createTitle": "Create Pull Request",
+      "dismissConflictResolutionError": "Dismiss conflict resolution error",
       "dismissError": "Dismiss PR error",
+      "dismissPushBranchError": "Dismiss push branch error",
+      "error": {
+        "actionOpen": "Action: open",
+        "actionRun": "Action: run",
+        "docs": "docs"
+      },
+      "generatingBody": "Generating AI body…",
+      "generatingTitle": "Generating AI title…",
+      "labels": "Labels",
+      "loadingOptions": "Loading PR options…",
+      "loadingPreflight": "Loading pre-flight checks…",
+      "noChangedFiles": "No changed files detected.",
+      "noCommits": "No commits found.",
       "noConflicts": "No merge conflicts detected.",
       "preflightChecks": "Pre-flight checks",
       "previewTitle": "Diff & commit preview",
+      "pushBranch": {
+        "button": "Push branch to remote",
+        "message": "Fusion will push this task's branch to origin so the PR can be created.",
+        "title": "Push branch to remote"
+      },
       "regenerate": "Regenerate",
       "rerunPreflight": "Re-run preflight",
+      "resolveConflicts": {
+        "button": "Resolve conflicts with AI",
+        "message": "Fusion will use AI to resolve conflicts on this branch and push it.",
+        "title": "Resolve conflicts with AI"
+      },
       "revertToAi": "Revert to AI version",
+      "reviewers": "Reviewers",
       "titleLabel": "Title",
-      "usingTemplate": "Using <code>.github/pull_request_template.md</code>"
+      "usingTemplate": "Using <code>.github/pull_request_template.md</code>",
+      "view": {
+        "agentDisagreed": "agent disagreed",
+        "agentReplyFix": "Agent reply — fix {{sha}}",
+        "approve": "Approve",
+        "autoMerge": "Auto-merge",
+        "close": "Close",
+        "confirmMerge": "Confirm merge",
+        "creating": "Creating PR…",
+        "creationFailed": "PR creation failed",
+        "loading": "Loading PR…",
+        "merge": "Merge",
+        "mergeDisabledUntilVerified": "Merge is disabled until GitHub verifies this PR",
+        "mergeableLabel": "Mergeable:",
+        "noReviewThreads": "No review threads.",
+        "none": "none",
+        "requestRetry": "Request retry",
+        "resolveConflictsBeforeMerge": "Resolve conflicts on GitHub before merging",
+        "resolveConflictsOnGithub": "Resolve conflicts on GitHub",
+        "responseAlreadyInProgress": "A response run is already in progress",
+        "responsePending_one": "Response run in progress — {{count}} threads pending",
+        "responsePending_other": "Response run in progress — {{count}} threads pending",
+        "retryCreation": "Retry PR creation",
+        "reviewLabel": "Review:",
+        "threadFixed": "fixed",
+        "threadPending": "pending",
+        "verifyingGithub": "Verifying with GitHub…"
+      }
     },
     "preview": {
       "blockedDescription": "You can view the preview in a separate browser tab.",
@@ -5527,6 +5585,7 @@ export default interface Resources {
         "backupS": " backup(s)",
         "backupScheduleCron": "Backup Schedule (Cron)",
         "backups": "backups",
+        "createFailed": "Failed to create backup",
         "creating": "Creating…",
         "cronExpressionForBackupTimingDefault02": " Cron expression for backup timing. Default: 0 2 * * * (daily at 2 AM). Examples: 0 * * * * (hourly), 0 0 * * 0 (weekly), */15 * * * * (every 15 min) ",
         "cronExpressionForMemoryBackupTimingDefault0": "Cron expression for memory backup timing. Default: 0 3 * * * (daily at 3 AM).",
@@ -5597,8 +5656,14 @@ export default interface Resources {
         "experimentalFeaturesAreEarlyCapabilitiesThatAreNot": " Experimental features are early capabilities that are not yet fully stable. Enable them to test new functionality, but be aware they may change or be removed. ",
         "featureFlags": "Feature Flags"
       },
+      "fileBrowser": {
+        "currentDirectory": "Current directory:",
+        "projectRoot": "(project root)"
+      },
       "footer": {
+        "checkUpdates": "Check for updates",
         "help": "Help",
+        "helpDiscussions": "Help and discussions",
         "version": "Version {{version}}"
       },
       "general": {
@@ -5748,17 +5813,48 @@ export default interface Resources {
         "whenEnabledStartupRefreshesModelsThroughTheLocal": " When enabled, startup refreshes models through the local "
       },
       "header": {
-        "discord": "Discord"
+        "discord": "Discord",
+        "joinDiscord": "Join our Discord",
+        "star": "Star",
+        "starFusion": "Star Fusion on GitHub"
       },
       "importExport": {
         "confirmImport": "Confirm Import",
+        "counts": {
+          "global_one": "{{count}} global",
+          "global_other": "{{count}} global",
+          "project_one": "{{count}} project",
+          "project_other": "{{count}} project",
+          "workflowSettings_one": "{{count}} workflow setting value",
+          "workflowSettings_other": "{{count}} workflow setting value"
+        },
         "exportBtn": "Export",
+        "exportFailed": "Failed to export settings",
         "exportTitle": "Export settings to JSON file",
+        "exported": "Settings exported ({{scope}} scope)",
+        "globalSettings": "Global Settings:",
         "importBtn": "Import",
+        "importFailed": "Import failed",
+        "importFailedDetailed": "Failed to import settings",
+        "importScope": "Import Scope:",
         "importTitle": "Import Settings",
+        "importTitleAttr": "Import settings from JSON file",
+        "imported": "Imported {{counts}} setting(s)",
         "importing": "Importing…",
+        "invalidJson": "Invalid JSON file: {{error}}",
         "loadingFile": "Loading…",
-        "reviewPrompt": "Review the settings to be imported:"
+        "mergeExisting": "Merge with existing settings (recommended)",
+        "projectSettings": "Project Settings:",
+        "replaceWarning": "If unchecked, existing settings will be replaced with imported values.",
+        "reviewPrompt": "Review the settings to be imported:",
+        "scopeBoth": "Both global and project settings",
+        "scopeGlobal": "Global settings only",
+        "scopeLabel": {
+          "all": "all",
+          "global": "global",
+          "project": "project"
+        },
+        "scopeProject": "Project settings only"
       },
       "jsonPlaceholder": "Enter JSON value...",
       "keepLocal": "Keep Local",
@@ -5800,6 +5896,9 @@ export default interface Resources {
         "noMatchingMemoryFound": "No matching memory found.",
         "processDreamsFromDailyMemory": " Process dreams from daily memory ",
         "qmd": " qmd ",
+        "qmdInstallFailed": "Failed to install qmd",
+        "qmdInstallUnavailable": "qmd install finished, but qmd is still unavailable",
+        "qmdInstalled": "qmd installed successfully",
         "qmdIsNotInstalledSearchWillUseLocal": " qmd is not installed. Search will use local files. Install indexed retrieval: ",
         "result": " result",
         "runsTheSameQmdBackedMemorySearchPath": "Runs the same qmd-backed memory_search path agents use.",
@@ -6115,6 +6214,7 @@ export default interface Resources {
         "ifHomebrewIsUnavailable": "If Homebrew is unavailable: ",
         "ingressURL": "Ingress URL",
         "installCloudflared": "Install cloudflared",
+        "installationFailed": "Installation failed",
         "installing": "Installing…",
         "lastShortLivedTokenExpiresAt": "Last short-lived token expires at ",
         "manualInstall": "Manual install: ",
@@ -6235,6 +6335,7 @@ export default interface Resources {
         "archiveCompletedTasksAfterDays": "Archive Completed Tasks After (days)",
         "backlogNoTaskAutoClaimIsExecutorOnly": "Backlog/no-task auto-claim is executor-only by default. Enable to let engineer-role agents auto-claim unowned backlog tasks; explicit routing and delegation are unchanged. Default: off.",
         "browse": " Browse ",
+        "browseWorkspacePath": "Browse workspace path",
         "closeParenPeriod": ").",
         "compactModeKeepsArchiveSizeLowWhilePreserving": "Compact mode keeps archive size low while preserving recent agent activity for context.",
         "compactSummaryAndRecentEntries": "Compact summary and recent entries",
@@ -6261,6 +6362,7 @@ export default interface Resources {
         "off": "Off",
         "optionalFileOrDirectoryPathsToIgnoreWhen": " Optional file or directory paths to ignore when overlap serialization is enabled. Paths are project-relative (for example ",
         "or": " or ",
+        "overlapPickerNote": "Choose a file to ignore directly, or navigate into a folder and select the current directory.",
         "pollIntervalMs": "Poll Interval (ms)",
         "preserveStepProgressOnStuckTaskRequeue": " Preserve step progress on stuck-task requeue ",
         "remove": " Remove ",
@@ -6334,6 +6436,7 @@ export default interface Resources {
         "worktreeNamingStyle": "Worktree Naming Style",
         "worktrees": "Worktrees",
         "worktreesDirectory": "Worktrees Directory",
+        "worktreesPickerNote": "Navigate to the folder where Fusion should create task worktrees, then select the current directory.",
         "worktrunk": " worktrunk ",
         "worktrunkBinaryPath": "Worktrunk binary path",
         "worktrunkFailureBehavior": "Worktrunk failure behavior",
@@ -6362,6 +6465,8 @@ export default interface Resources {
       "authToken": "Auth Token",
       "authTokenOptional": "Auth token (optional)",
       "back": "← Back",
+      "brandLogo": "Fusion logo",
+      "brandName": "Fusion",
       "browserAuthToken": "Browser Auth Token",
       "cancelLogin": "Cancel",
       "childProcess": "Child-Process",
@@ -6602,6 +6707,7 @@ export default interface Resources {
       "setUpAi": "Set Up AI",
       "setUpProject": "Set Up Project",
       "setupComplete": "Setup complete! Head to the board to create your first task, or explore the dashboard to see what's available.",
+      "setupCompleteTitle": "Setup Complete!",
       "setupMode": "Setup Mode",
       "setupWizardHint": "In the setup wizard, pick an existing directory or paste a GitHub clone URL.",
       "skip": "Skip",
@@ -6925,6 +7031,51 @@ export default interface Resources {
       "toggleWordWrap": "Toggle word wrap",
       "unavailable": "Detailed file changes unavailable."
     },
+    "taskChat": {
+      "activePlaceholder": "Steer the currently executing agent",
+      "activeSessionHint": "Message the active agent session. Guidance is delivered to the running session in real time.",
+      "agentMessages": "{{label}} messages",
+      "arguments": "Arguments",
+      "collapseChat": "Collapse chat",
+      "donePlaceholder": "Start a refinement task for this completed task",
+      "doneSessionHint": "Send a message to start a refinement task for this completed task.",
+      "emptyAgentOutput": "No agent output yet. Live messages from Planner, Executor, Reviewer, and Merger agents will appear here.",
+      "entryCount_one": "{{count}} entry",
+      "entryCount_other": "{{count}} entries",
+      "error": "Error",
+      "errorCount_one": "{{count}} error",
+      "errorCount_other": "{{count}} errors",
+      "expandChat": "Expand chat to full modal",
+      "idleSessionHint": "No agent is working on this task right now. Your message is saved as guidance and will reach an agent the next time this task runs.",
+      "jumpToLatestMessage": "Jump to latest message",
+      "latest": "Latest",
+      "loadPreviousMessages": "Load previous messages",
+      "loadingAgentOutput": "Loading agent output…",
+      "loadingEarlierMessages": "Loading earlier messages…",
+      "message": "Message",
+      "messageActiveAgentSession": "Message active agent session",
+      "moreTools_one": ", +{{count}} more",
+      "moreTools_other": ", +{{count}} more",
+      "result": "Result",
+      "roles": {
+        "agent": "Agent",
+        "executor": "Executor",
+        "merger": "Merger",
+        "planner": "Planner",
+        "reviewer": "Reviewer"
+      },
+      "sending": "Sending",
+      "thinking": "Thinking",
+      "toolCall": "Tool call",
+      "toolCallCount_one": "{{count}} tool call",
+      "toolCallCount_other": "{{count}} tool calls",
+      "toolCallTo": "Tool call → {{label}}",
+      "toolError": "Tool error",
+      "toolNames": "Tool names",
+      "toolResult": "Tool result",
+      "you": "You",
+      "youMessage": "You message"
+    },
     "taskDetail": {
       "actions": {
         "menuBtn": "Actions"
@@ -7199,6 +7350,7 @@ export default interface Resources {
         "checkPrStatus": "Check PR Status",
         "creatingPr": "Creating PR…",
         "finishAndClose": "Finish & Close",
+        "label": "PR",
         "mergeAndClose": "Merge & Close",
         "mergingFixes": "Merging fixes…",
         "mergingPr": "Merging PR…",
@@ -7218,7 +7370,8 @@ export default interface Resources {
       },
       "provenance": {
         "createdBy": "Created by",
-        "createdVia": "Created via"
+        "createdVia": "Created via",
+        "parentTaskOf": "of"
       },
       "recoveryState": "Recovery state",
       "refine": {
@@ -7903,22 +8056,45 @@ export default interface Resources {
     },
     "workflow": {
       "advisoryExplanation": "Advisory workflow steps flagged non-blocking improvements:",
+      "aggregateAdvisory": "Advisory",
+      "aggregateAllPassed": "All passed",
+      "aggregateInProgress": "In progress",
+      "aggregateNoResults": "No results",
       "aggregateResult": "Aggregate result",
+      "approveAndRun": "Approve & run",
+      "approveCommandError": "Failed to approve command",
+      "approving": "Approving…",
+      "awaitingInputTitle": "Waiting for your input",
+      "cliApprovalRejectHint": "To reject, keep the task paused and do not approve.",
+      "cliApprovalTitle": "Approve CLI command?",
+      "cliApprovalWarning": "This command will run in the task worktree. Approving trusts this exact command for future runs.",
       "configuredSteps": "Configured Workflow Steps",
+      "customWorkflowFallback": "Custom workflow",
+      "customWorkflowLabel": "Custom workflow",
+      "defaultWorkflow": "Default",
       "done": "Done",
       "doneEditingAriaLabel": "Done editing workflow steps",
       "edit": "Edit",
       "editAriaLabel": "Edit workflow steps",
       "editWorkflow": "Edit workflow",
+      "executionAwaitingCliApproval": "Awaiting CLI approval",
+      "executionAwaitingInput": "Awaiting input",
+      "executionCompleted": "Completed",
+      "executionNotStarted": "Not started",
       "executionOrder": "Execution order:",
+      "executionPaused": "Paused",
       "executionPhase": "Execution phase",
+      "executionPostMerge": "Post-merge steps running",
+      "executionPreMerge": "Pre-merge steps running",
       "expandOutput": "Expand output",
       "graph": "Workflow graph",
       "graphUnavailable": "Workflow graph unavailable",
       "hideOutput": "Hide output",
+      "inputPlaceholder": "Type your reply…",
       "loadingGraph": "Loading workflow graph…",
       "loadingResults": "Loading workflow results…",
       "markdown": "Markdown",
+      "modelDefault": "Default",
       "modelSettings": "Model settings",
       "moveDown": "Move down",
       "moveUp": "Move up",
@@ -7930,10 +8106,20 @@ export default interface Resources {
       "overview": "Workflow overview",
       "plain": "Plain",
       "polishNotes": "Polish notes",
+      "postMerge": "Post-merge",
+      "preMerge": "Pre-merge",
       "remove": "Remove",
+      "replyInComments": "Reply in the comments and unpause the task to continue.",
+      "resumeTaskError": "Failed to resume task",
+      "resuming": "Resuming…",
       "selectStepsDescription": "Select steps to run after task implementation completes",
       "showOutput": "Show output",
       "started": "Started:",
+      "statusAdvisory": "Advisory failure",
+      "statusFailed": "Failed",
+      "statusPassed": "Passed",
+      "statusRunning": "Running…",
+      "statusSkipped": "Skipped",
       "stepCount_one": "{{count}} step",
       "stepCount_other": "{{count}} steps",
       "stepDefinitionNotFound": "Step definition not found.",
@@ -7941,6 +8127,8 @@ export default interface Resources {
       "stepProgressValue": "{{completed}} of {{total}} steps completed",
       "steps": "Workflow Steps",
       "stepsExplanation": "Pre-merge steps run after implementation, before merge. Post-merge steps run after merge succeeds.",
+      "submitAndResume": "Submit & resume",
+      "submitting": "Submitting…",
       "summaryAdvisory_one": "{{count}} advisory",
       "summaryAdvisory_other": "{{count}} advisory",
       "summaryFailed_one": "{{count}} failed",
@@ -7957,6 +8145,7 @@ export default interface Resources {
       "switchToMarkdown": "Switch to markdown",
       "switchToPlain": "Switch to plain text",
       "thinkingLevel": "Thinking level",
+      "waitingForOutput": "Waiting for agent output…",
       "workflowName": "Workflow"
     },
     "workflowColumns": {
@@ -7993,6 +8182,10 @@ export default interface Resources {
       "unplacedCount_other": "{{count}} nodes not placed in a column"
     },
     "workflowEditor": {
+      "agent": "Agent",
+      "agentsLoadFailed": "Failed to load agents",
+      "autoApproveRequests": "Auto-approve requests",
+      "autoApproveRequestsNote": "Runs without pausing for approval — e.g. a CLI command executes on its first run without waiting for your sign-off.",
       "cliAgent": {
         "adapterLabel": "CLI adapter",
         "adapterNote": "Drives a CLI coding agent in an engine-owned terminal for this step.",
@@ -8007,9 +8200,28 @@ export default interface Resources {
         "notifyLabel": "Waiting-on-input notification",
         "notifyNote": "How you are alerted when the agent pauses waiting for input on this step."
       },
+      "cliCommandNote": "Runs an arbitrary command in the task worktree. The first time this exact command runs, the task pauses for your approval. The node prompt is passed via FUSION_NODE_PROMPT.",
+      "cliMode": "CLI mode",
+      "cliScript": "CLI / script",
       "collapsePrompt": "Collapse prompt editor",
+      "command": "Command",
       "editingPrompt": "Editing Prompt",
-      "expandPrompt": "Expand prompt editor"
+      "executor": "Executor",
+      "expandPrompt": "Expand prompt editor",
+      "maxRetries": "Max retries",
+      "model": "Model",
+      "modelsLoadFailed": "Failed to load models",
+      "namedScript": "Named script",
+      "namedScriptNote": "Named script from project settings. The node prompt is passed via FUSION_NODE_PROMPT.",
+      "prompt": "Prompt",
+      "scriptName": "Script name",
+      "selectAgent": "— select agent —",
+      "selectSkill": "— select skill —",
+      "skill": "Skill",
+      "skillsLoadFailed": "Failed to load skills",
+      "skipFirstRunApproval": "Skip first-run approval (runs without pausing)",
+      "waitForUserInput": "Wait for user input",
+      "waitForUserInputNote": "This node pauses the task until you reply in the task's comments and unpause. The Prompt field above is shown to the user as the question."
     },
     "workflowFields": {
       "add": "Add field",
@@ -8052,6 +8264,8 @@ export default interface Resources {
       "codeSource": "Source (TypeScript)",
       "codeTimeout": "Timeout (ms)",
       "collapseInspector": "Collapse",
+      "conditionFailure": "failure",
+      "conditionSuccess": "success",
       "cycleBlocked": "That connection would create a cycle — only rework edges inside a for-each template may loop back",
       "deleteEdge": "Delete edge",
       "deleteNode": "Delete node",
@@ -8108,6 +8322,7 @@ export default interface Resources {
       "mobileMoveDown": "Move down",
       "mobileMoveUp": "Move up",
       "mobileNodeKinds": "Node types",
+      "nodeInspector": "Node",
       "notifyCustom": "Custom",
       "notifyCustomEvent": "Custom event",
       "notifyEvent": "Event type",
@@ -8117,6 +8332,7 @@ export default interface Resources {
       "parseArtifact": "Artifact",
       "parseParser": "Parser",
       "quorumN": "Quorum count (n)",
+      "readOnlyDuplicateToEdit": "Read-only built-in — duplicate the workflow to edit nodes.",
       "releaseCapacity": "Downstream capacity",
       "releaseCondition": "Release condition",
       "releaseDependency": "Dependency complete",
@@ -8146,6 +8362,13 @@ export default interface Resources {
       "trivialGraphHint": "This workflow only runs start → end. Add steps from the palette above to build it out."
     },
     "workflowSelector": {
+      "applyFailed": "Failed to apply workflow",
+      "defaultCleared": "Default workflow cleared",
+      "defaultSet": "Default workflow set",
+      "defaultWorkflowLabel": "Default workflow for new tasks",
+      "loadFailed": "Failed to load workflows",
+      "manage": "Manage…",
+      "none": "None",
       "switchActiveMessage": "This task has an active session. Switching workflows aborts it and re-homes the card into the new workflow's entry column. Continue?",
       "switchActiveTitle": "Switch workflow?",
       "switchCancel": "Cancel",
@@ -8226,6 +8449,7 @@ export default interface Resources {
       "backToWorkflowList": "Back to workflows",
       "clickToEditDescription": "Click to edit description",
       "clickToRename": "Click to rename",
+      "closeEditor": "Close workflow editor",
       "createDescription": "Description (optional)",
       "createFailed": "Failed to create workflow",
       "createName": "Name",
@@ -8242,7 +8466,9 @@ export default interface Resources {
       "discardConfirm": "Discard",
       "discardMessage": "You have unsaved changes to this workflow. Discard them?",
       "discardTitle": "Discard unsaved changes?",
+      "duplicateFailed": "Failed to duplicate workflow",
       "duplicateToCustomize": "Duplicate to customize",
+      "duplicatedEditable": "Duplicated to \"{{name}}\" — editable",
       "emptyDescription": "Workflows orchestrate the steps and gates that run around task execution. Create one to start arranging that flow.",
       "emptyTitle": "No workflow selected",
       "export": "Export",
@@ -8255,11 +8481,14 @@ export default interface Resources {
       "importStripped": "Auto-approval flags were removed from imported nodes",
       "importTooltip": "Import a workflow from a JSON file",
       "imported": "Imported workflow \"{{name}}\"",
+      "loadFailed": "Failed to load workflows",
+      "loading": "Loading…",
       "migrationNotice": "Your legacy workflow steps were converted — find them as templates in the palette and as the \"Migrated steps\" workflow.",
       "mobileEditorNav": "Workflow editor sections",
       "mobileSelectNote": "Select a workflow to edit.",
       "nameLabel": "Workflow name",
       "newWorkflow": "New workflow",
+      "noneYet": "No workflows yet.",
       "readOnlyBuiltin": "Read-only built-in workflow",
       "saveFailed": "Failed to save workflow",
       "saved": "Workflow saved",
@@ -8273,7 +8502,8 @@ export default interface Resources {
       "templateNodeCount_other": "{{count}} nodes",
       "templatePickerLabel": "Start from",
       "templateSectionBuiltin": "Built-in workflows",
-      "templateSectionYours": "Your workflows"
+      "templateSectionYours": "Your workflows",
+      "title": "Workflows"
     },
     "workspace": {
       "projectRoot": "Project Root",
@@ -8519,6 +8749,9 @@ export default interface Resources {
     }
   },
   "common": {
+    "actions": {
+      "send": "Send"
+    },
     "agents": {
       "ratings": {
         "trendDeclining": "↓ Declining",
@@ -8597,6 +8830,9 @@ export default interface Resources {
       "error": "Error",
       "offline": "Offline",
       "online": "Online"
+    },
+    "labels": {
+      "name": "Name"
     },
     "merge": {
       "unknown": "Unknown"
@@ -8733,28 +8969,6 @@ export default interface Resources {
       "refreshSourceBackground": "Background",
       "refreshSourceInitialLoad": "Initial load",
       "refreshSourceManual": "Manual"
-    },
-    "workflow": {
-      "aggregateAllPassed": "All passed",
-      "aggregateInProgress": "In progress",
-      "aggregateNoResults": "No results",
-      "customWorkflowFallback": "Custom workflow",
-      "defaultWorkflow": "Default",
-      "executionAwaitingCliApproval": "Awaiting CLI approval",
-      "executionAwaitingInput": "Awaiting input",
-      "executionCompleted": "Completed",
-      "executionNotStarted": "Not started",
-      "executionPaused": "Paused",
-      "executionPostMerge": "Post-merge steps running",
-      "executionPreMerge": "Pre-merge steps running",
-      "postMerge": "Post-merge",
-      "preMerge": "Pre-merge",
-      "statusAdvisory": "Advisory failure",
-      "statusFailed": "Failed",
-      "statusPassed": "Passed",
-      "statusRunning": "Running…",
-      "statusSkipped": "Skipped",
-      "waitingForOutput": "Waiting for agent output…"
     },
     "workflowNodes": {
       "summaryAwaitInput": "Waits for user input",

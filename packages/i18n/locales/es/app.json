@@ -1181,7 +1181,11 @@
       "workflowMismatch": ""
     },
     "todo": "Por hacer",
-    "triage": "Triaje"
+    "triage": "Triaje",
+    "workflow": {
+      "edit": "",
+      "new": ""
+    }
   },
   "branchGroup": {
     "abandonGroup": "",
@@ -1810,7 +1814,8 @@
     "heading": "Comentarios",
     "placeholder": "Añadir un comentario",
     "postingButton": "Publicando…",
-    "updatedSuccess": "Comentario actualizado"
+    "updatedSuccess": "Comentario actualizado",
+    "aiGuidance": ""
   },
   "commit": {
     "filesChanged_one": "",
@@ -4686,7 +4691,60 @@
     "rerunPreflight": "Volver a ejecutar la comprobación previa",
     "revertToAi": "Revertir a la versión de IA",
     "titleLabel": "Título",
-    "usingTemplate": "Usando <code>.github/pull_request_template.md</code>"
+    "usingTemplate": "Usando <code>.github/pull_request_template.md</code>",
+    "assignees": "",
+    "dismissConflictResolutionError": "",
+    "dismissPushBranchError": "",
+    "error": {
+      "actionOpen": "",
+      "actionRun": "",
+      "docs": ""
+    },
+    "generatingBody": "",
+    "generatingTitle": "",
+    "labels": "",
+    "loadingOptions": "",
+    "loadingPreflight": "",
+    "noChangedFiles": "",
+    "noCommits": "",
+    "pushBranch": {
+      "button": "",
+      "message": "",
+      "title": ""
+    },
+    "resolveConflicts": {
+      "button": "",
+      "message": "",
+      "title": ""
+    },
+    "reviewers": "",
+    "view": {
+      "agentDisagreed": "",
+      "agentReplyFix": "",
+      "approve": "",
+      "autoMerge": "",
+      "close": "",
+      "confirmMerge": "",
+      "creating": "",
+      "creationFailed": "",
+      "loading": "",
+      "merge": "",
+      "mergeableLabel": "",
+      "mergeDisabledUntilVerified": "",
+      "none": "",
+      "noReviewThreads": "",
+      "requestRetry": "",
+      "resolveConflictsBeforeMerge": "",
+      "resolveConflictsOnGithub": "",
+      "responseAlreadyInProgress": "",
+      "responsePending_one": "",
+      "responsePending_other": "",
+      "retryCreation": "",
+      "reviewLabel": "",
+      "threadFixed": "",
+      "threadPending": "",
+      "verifyingGithub": ""
+    }
   },
   "preview": {
     "blockedDescription": "Puede ver la vista previa en una pestaña del navegador separada.",
@@ -5553,7 +5611,8 @@
       "totalSize": "",
       "view": "",
       "whenEnabledProjectAndAgentMemoryFilesAre": "",
-      "whenEnabledTheDatabaseIsBackedUpAutomatically": ""
+      "whenEnabledTheDatabaseIsBackedUpAutomatically": "",
+      "createFailed": ""
     },
     "clearToDefault": "",
     "cliAgents": {
@@ -5597,7 +5656,9 @@
     },
     "footer": {
       "help": "Ayuda",
-      "version": "Versión {{version}}"
+      "version": "Versión {{version}}",
+      "checkUpdates": "",
+      "helpDiscussions": ""
     },
     "general": {
       "25": "",
@@ -5746,7 +5807,10 @@
       "whenEnabledStartupRefreshesModelsThroughTheLocal": ""
     },
     "header": {
-      "discord": "Discord"
+      "discord": "Discord",
+      "joinDiscord": "",
+      "star": "",
+      "starFusion": ""
     },
     "importExport": {
       "confirmImport": "Confirmar importación",
@@ -5756,7 +5820,35 @@
       "importing": "Importando…",
       "importTitle": "Importar configuración",
       "loadingFile": "Cargando…",
-      "reviewPrompt": "Revisa la configuración a importar:"
+      "reviewPrompt": "Revisa la configuración a importar:",
+      "counts": {
+        "global_one": "",
+        "global_other": "",
+        "project_one": "",
+        "project_other": "",
+        "workflowSettings_one": "",
+        "workflowSettings_other": ""
+      },
+      "exported": "",
+      "exportFailed": "",
+      "globalSettings": "",
+      "imported": "",
+      "importFailed": "",
+      "importFailedDetailed": "",
+      "importScope": "",
+      "importTitleAttr": "",
+      "invalidJson": "",
+      "mergeExisting": "",
+      "projectSettings": "",
+      "replaceWarning": "",
+      "scopeBoth": "",
+      "scopeGlobal": "",
+      "scopeLabel": {
+        "all": "",
+        "global": "",
+        "project": ""
+      },
+      "scopeProject": ""
     },
     "jsonPlaceholder": "Ingresa un valor JSON...",
     "keepLocal": "Mantener local",
@@ -5806,7 +5898,10 @@
       "searchMemoryWithQmd": "",
       "testing": "Probando…",
       "testRetrieval": "Probar recuperación",
-      "turnsDailyNotesIntoDREAMSMdAndPromotes": ""
+      "turnsDailyNotesIntoDREAMSMdAndPromotes": "",
+      "qmdInstalled": "",
+      "qmdInstallFailed": "",
+      "qmdInstallUnavailable": ""
     },
     "merge": {
       "abort": "",
@@ -6155,7 +6250,8 @@
       "uRLAndQRGenerationUseTheSelectedToken": "",
       "uRLNoHostnameOrPortConfigurationNeeded": "",
       "useExisting": "Usar existente",
-      "usingQuickTunnel": ""
+      "usingQuickTunnel": "",
+      "installationFailed": ""
     },
     "researchGlobal": {
       "advancedExternalSearchProviders": "",
@@ -6275,7 +6371,9 @@
       "timeoutInMinutesForDetectingStuckTasksWhen": "",
       "whenEnabledTasksThatModifyTheSameFiles": "",
       "whenEnabledTasksWithStalePlansPROMPTMd": "",
-      "whenTheStuckDetectorKillsAndReQueues": ""
+      "whenTheStuckDetectorKillsAndReQueues": "",
+      "browseWorkspacePath": "",
+      "overlapPickerNote": ""
     },
     "scope": {
       "globalBanner": "Estos ajustes se comparten entre todos tus proyectos de Fusion.",
@@ -6335,7 +6433,12 @@
       "worktrunk": "",
       "worktrunkBinaryPath": "",
       "worktrunkFailureBehavior": "",
-      "worktrunkIntegration": ""
+      "worktrunkIntegration": "",
+      "worktreesPickerNote": ""
+    },
+    "fileBrowser": {
+      "currentDirectory": "",
+      "projectRoot": ""
     }
   },
   "setup": {
@@ -6655,7 +6758,10 @@
     "withoutGitHub1": "Crear tareas manualmente",
     "withoutGitHub2": "Describir trabajo para agentes de IA",
     "withoutGitHub3": "Seguir el progreso en el tablero",
-    "withoutGitHubHeading": "Sin GitHub (disponible ahora):"
+    "withoutGitHubHeading": "Sin GitHub (disponible ahora):",
+    "brandLogo": "",
+    "brandName": "",
+    "setupCompleteTitle": ""
   },
   "shell": {
     "activePill": "Activo",
@@ -7201,7 +7307,8 @@
       "mergingFixes": "Fusionando correcciones…",
       "mergingPr": "Fusionando PR…",
       "startPrReview": "Iniciar revisión del PR",
-      "statusRefreshed": "Estado del PR actualizado"
+      "statusRefreshed": "Estado del PR actualizado",
+      "label": ""
     },
     "priority": {
       "ariaLabel": "Prioridad de la tarea",
@@ -7216,7 +7323,8 @@
     },
     "provenance": {
       "createdBy": "Creado por",
-      "createdVia": "Creado mediante"
+      "createdVia": "Creado mediante",
+      "parentTaskOf": ""
     },
     "recoveryState": "Estado de recuperación",
     "refine": {
@@ -7955,7 +8063,43 @@
     "switchToMarkdown": "Cambiar a Markdown",
     "switchToPlain": "Cambiar a texto sin formato",
     "thinkingLevel": "",
-    "workflowName": ""
+    "workflowName": "",
+    "aggregateAdvisory": "",
+    "aggregateAllPassed": "",
+    "aggregateInProgress": "",
+    "aggregateNoResults": "",
+    "approveAndRun": "",
+    "approveCommandError": "",
+    "approving": "",
+    "awaitingInputTitle": "",
+    "cliApprovalRejectHint": "",
+    "cliApprovalTitle": "",
+    "cliApprovalWarning": "",
+    "customWorkflowFallback": "",
+    "customWorkflowLabel": "",
+    "defaultWorkflow": "",
+    "executionAwaitingCliApproval": "",
+    "executionAwaitingInput": "",
+    "executionCompleted": "",
+    "executionNotStarted": "",
+    "executionPaused": "",
+    "executionPostMerge": "",
+    "executionPreMerge": "",
+    "inputPlaceholder": "",
+    "modelDefault": "",
+    "postMerge": "",
+    "preMerge": "",
+    "replyInComments": "",
+    "resumeTaskError": "",
+    "resuming": "",
+    "statusAdvisory": "",
+    "statusFailed": "",
+    "statusPassed": "",
+    "statusRunning": "",
+    "statusSkipped": "",
+    "submitAndResume": "",
+    "submitting": "",
+    "waitingForOutput": ""
   },
   "workflowColumns": {
     "add": "",
@@ -8007,7 +8151,30 @@
     },
     "collapsePrompt": "",
     "editingPrompt": "",
-    "expandPrompt": ""
+    "expandPrompt": "",
+    "agent": "",
+    "agentsLoadFailed": "",
+    "autoApproveRequests": "",
+    "autoApproveRequestsNote": "",
+    "cliCommandNote": "",
+    "cliMode": "",
+    "cliScript": "",
+    "command": "",
+    "executor": "",
+    "maxRetries": "",
+    "model": "",
+    "modelsLoadFailed": "",
+    "namedScript": "",
+    "namedScriptNote": "",
+    "prompt": "",
+    "scriptName": "",
+    "selectAgent": "",
+    "selectSkill": "",
+    "skill": "",
+    "skillsLoadFailed": "",
+    "skipFirstRunApproval": "",
+    "waitForUserInput": "",
+    "waitForUserInputNote": ""
   },
   "workflowFields": {
     "add": "Agregar campo",
@@ -8141,7 +8308,11 @@
     "templatesPluginSteps": "Pasos de plugin",
     "templatesSection": "Plantillas",
     "timeoutMs": "",
-    "trivialGraphHint": "Este flujo de trabajo solo ejecuta inicio → fin. Añade pasos desde la paleta superior para construirlo."
+    "trivialGraphHint": "Este flujo de trabajo solo ejecuta inicio → fin. Añade pasos desde la paleta superior para construirlo.",
+    "conditionFailure": "",
+    "conditionSuccess": "",
+    "nodeInspector": "",
+    "readOnlyDuplicateToEdit": ""
   },
   "workflows": {
     "aiEdit": "Diseñar con IA",
@@ -8204,13 +8375,27 @@
     "templateNodeCount_other": "{{count}} nodos",
     "templatePickerLabel": "Comenzar desde",
     "templateSectionBuiltin": "Flujos de trabajo integrados",
-    "templateSectionYours": "Tus flujos de trabajo"
+    "templateSectionYours": "Tus flujos de trabajo",
+    "closeEditor": "",
+    "duplicatedEditable": "",
+    "duplicateFailed": "",
+    "loadFailed": "",
+    "loading": "",
+    "noneYet": "",
+    "title": ""
   },
   "workflowSelector": {
     "switchActiveMessage": "",
     "switchActiveTitle": "",
     "switchCancel": "",
-    "switchConfirm": ""
+    "switchConfirm": "",
+    "applyFailed": "",
+    "defaultCleared": "",
+    "defaultSet": "",
+    "defaultWorkflowLabel": "",
+    "loadFailed": "",
+    "manage": "",
+    "none": ""
   },
   "workflowSettings": {
     "add": "",
@@ -8288,5 +8473,50 @@
     "installRequestTitle": "Solicitud de instalación de Worktrunk",
     "sha256": "SHA-256",
     "version": "Versión"
+  },
+  "taskChat": {
+    "activePlaceholder": "",
+    "activeSessionHint": "",
+    "agentMessages": "",
+    "arguments": "",
+    "collapseChat": "",
+    "donePlaceholder": "",
+    "doneSessionHint": "",
+    "emptyAgentOutput": "",
+    "entryCount_one": "",
+    "entryCount_other": "",
+    "error": "",
+    "errorCount_one": "",
+    "errorCount_other": "",
+    "expandChat": "",
+    "idleSessionHint": "",
+    "jumpToLatestMessage": "",
+    "latest": "",
+    "loadingAgentOutput": "",
+    "loadingEarlierMessages": "",
+    "loadPreviousMessages": "",
+    "message": "",
+    "messageActiveAgentSession": "",
+    "moreTools_one": "",
+    "moreTools_other": "",
+    "result": "",
+    "roles": {
+      "agent": "",
+      "executor": "",
+      "merger": "",
+      "planner": "",
+      "reviewer": ""
+    },
+    "sending": "",
+    "thinking": "",
+    "toolCall": "",
+    "toolCallCount_one": "",
+    "toolCallCount_other": "",
+    "toolCallTo": "",
+    "toolError": "",
+    "toolNames": "",
+    "toolResult": "",
+    "you": "",
+    "youMessage": ""
   }
 }

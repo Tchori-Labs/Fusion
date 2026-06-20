@@ -2,6 +2,11 @@ import "@xyflow/react/dist/style.css";
 import "./WorkflowResultsTab.css";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+
+/*
+FNXC:i18n-Localize 2026-06-20-00:00:
+FN-6770 requires the workflow/task/setup/PR dashboard cluster to render user-facing copy through locale catalogs so i18n:lint can scan these files again without narrow deferrals.
+*/
 import { Check, ChevronDown, ChevronRight, ChevronUp, Maximize2, Pencil, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -62,10 +67,11 @@ interface WorkflowResultsTabProps {
 
 /** Extract the user-facing question from a workflow-input paused reason.
  *  Strips the leading "workflow-input:<nodeId>: " prefix if present. */
-function parseWorkflowInputQuestion(pausedReason?: string): string {
-  if (!pausedReason) return "Reply in the comments and unpause the task to continue.";
+function parseWorkflowInputQuestion(pausedReason: string | undefined, t: ReturnType<typeof useTranslation>["t"]): string {
+  const fallback = t("app:workflow.replyInComments", "Reply in the comments and unpause the task to continue.");
+  if (!pausedReason) return fallback;
   const match = /^workflow-input:[^:]+:\s*(.*)$/s.exec(pausedReason);
-  if (match) return match[1].trim() || "Reply in the comments and unpause the task to continue.";
+  if (match) return match[1].trim() || fallback;
   return pausedReason;
 }
 
@@ -89,15 +95,15 @@ interface WorkflowStepOption {
 function getStatusLabel(status: WorkflowStepResult["status"], t: ReturnType<typeof useTranslation>["t"]): string {
   switch (status) {
     case "passed":
-      return t("workflow.statusPassed", "Passed");
+      return t("app:workflow.statusPassed", "Passed");
     case "failed":
-      return t("workflow.statusFailed", "Failed");
+      return t("app:workflow.statusFailed", "Failed");
     case "advisory_failure":
-      return t("workflow.statusAdvisory", "Advisory failure");
+      return t("app:workflow.statusAdvisory", "Advisory failure");
     case "skipped":
-      return t("workflow.statusSkipped", "Skipped");
+      return t("app:workflow.statusSkipped", "Skipped");
     case "pending":
-      return t("workflow.statusRunning", "Running…");
+      return t("app:workflow.statusRunning", "Running…");
     default:
       return status;
   }
@@ -135,7 +141,7 @@ function phaseBadge(phase: "pre-merge" | "post-merge", id: string, prefix: strin
       className={`phase-badge ${phaseClass}`}
       data-testid={`${prefix}-${id}`}
     >
-      {phase === "post-merge" ? t("workflow.postMerge", "Post-merge") : t("workflow.preMerge", "Pre-merge")}
+      {phase === "post-merge" ? t("app:workflow.postMerge", "Post-merge") : t("app:workflow.preMerge", "Pre-merge")}
     </span>
   );
 }
@@ -145,9 +151,9 @@ function getWorkflowName(
   workflows: WorkflowDefinition[],
   t: ReturnType<typeof useTranslation>["t"],
 ): string {
-  if (!selectedWorkflowId) return t("workflow.defaultWorkflow", "Default");
+  if (!selectedWorkflowId) return t("app:workflow.defaultWorkflow", "Default");
   const match = workflows.find((workflow) => workflow.id === selectedWorkflowId);
-  return match?.name || t("workflow.customWorkflowFallback", "Custom workflow");
+  return match?.name || t("app:workflow.customWorkflowFallback", "Custom workflow");
 }
 
 function getAggregateWorkflowResult(
@@ -155,18 +161,18 @@ function getAggregateWorkflowResult(
   t: ReturnType<typeof useTranslation>["t"],
 ): { label: string; badgeClass: string; testId: string } {
   if (results.some((result) => result.status === "failed")) {
-    return { label: t("workflow.statusFailed", "Failed"), badgeClass: "workflow-result-badge--failed", testId: "failed" };
+    return { label: t("app:workflow.statusFailed", "Failed"), badgeClass: "workflow-result-badge--failed", testId: "failed" };
   }
   if (results.some((result) => result.status === "advisory_failure")) {
-    return { label: t("workflow.statusAdvisory", "Advisory"), badgeClass: "workflow-result-badge--advisory_failure", testId: "advisory" };
+    return { label: t("app:workflow.aggregateAdvisory", "Advisory"), badgeClass: "workflow-result-badge--advisory_failure", testId: "advisory" };
   }
   if (results.some((result) => result.status === "pending")) {
-    return { label: t("workflow.aggregateInProgress", "In progress"), badgeClass: "workflow-result-badge--pending", testId: "pending" };
+    return { label: t("app:workflow.aggregateInProgress", "In progress"), badgeClass: "workflow-result-badge--pending", testId: "pending" };
   }
   if (results.length === 0) {
-    return { label: t("workflow.aggregateNoResults", "No results"), badgeClass: "workflow-result-badge--skipped", testId: "no-results" };
+    return { label: t("app:workflow.aggregateNoResults", "No results"), badgeClass: "workflow-result-badge--skipped", testId: "no-results" };
   }
-  return { label: t("workflow.aggregateAllPassed", "All passed"), badgeClass: "workflow-result-badge--passed", testId: "passed" };
+  return { label: t("app:workflow.aggregateAllPassed", "All passed"), badgeClass: "workflow-result-badge--passed", testId: "passed" };
 }
 
 function getExecutionPhase(
@@ -177,13 +183,13 @@ function getExecutionPhase(
   t: ReturnType<typeof useTranslation>["t"],
 ): { label: string; badgeClass: string; testId: string } {
   if (taskStatus === "awaiting-user-input") {
-    return { label: t("workflow.executionAwaitingInput", "Awaiting input"), badgeClass: "workflow-result-badge--pending", testId: "awaiting-input" };
+    return { label: t("app:workflow.executionAwaitingInput", "Awaiting input"), badgeClass: "workflow-result-badge--pending", testId: "awaiting-input" };
   }
   if (taskStatus === "awaiting-cli-approval") {
-    return { label: t("workflow.executionAwaitingCliApproval", "Awaiting CLI approval"), badgeClass: "workflow-result-badge--pending", testId: "awaiting-cli-approval" };
+    return { label: t("app:workflow.executionAwaitingCliApproval", "Awaiting CLI approval"), badgeClass: "workflow-result-badge--pending", testId: "awaiting-cli-approval" };
   }
   if (taskStatus === "paused" || taskPausedReason) {
-    return { label: t("workflow.executionPaused", "Paused"), badgeClass: "workflow-result-badge--pending", testId: "paused" };
+    return { label: t("app:workflow.executionPaused", "Paused"), badgeClass: "workflow-result-badge--pending", testId: "paused" };
   }
 
   const pendingResult = results.find((result) => result.status === "pending");
@@ -191,8 +197,8 @@ function getExecutionPhase(
     const isPostMerge = (pendingResult.phase || "pre-merge") === "post-merge";
     return {
       label: isPostMerge
-        ? t("workflow.executionPostMerge", "Post-merge steps running")
-        : t("workflow.executionPreMerge", "Pre-merge steps running"),
+        ? t("app:workflow.executionPostMerge", "Post-merge steps running")
+        : t("app:workflow.executionPreMerge", "Pre-merge steps running"),
       badgeClass: "workflow-result-badge--pending",
       testId: isPostMerge ? "post-merge" : "pre-merge",
     };
@@ -200,14 +206,14 @@ function getExecutionPhase(
 
   const hasTerminalResults = results.length > 0 && results.every((result) => ["passed", "failed", "advisory_failure", "skipped"].includes(result.status));
   if (hasTerminalResults || taskStatus === "done" || task?.column === "done" || task?.column === "in-review") {
-    return { label: t("workflow.executionCompleted", "Completed"), badgeClass: "workflow-result-badge--passed", testId: "completed" };
+    return { label: t("app:workflow.executionCompleted", "Completed"), badgeClass: "workflow-result-badge--passed", testId: "completed" };
   }
 
-  return { label: t("workflow.executionNotStarted", "Not started"), badgeClass: "workflow-result-badge--pending", testId: "not-started" };
+  return { label: t("app:workflow.executionNotStarted", "Not started"), badgeClass: "workflow-result-badge--pending", testId: "not-started" };
 }
 
-function formatModelValue(selection: { provider?: string; modelId?: string } | undefined): string {
-  if (!selection?.provider || !selection.modelId) return "Default";
+function formatModelValue(selection: { provider?: string; modelId?: string } | undefined, t: ReturnType<typeof useTranslation>["t"]): string {
+  if (!selection?.provider || !selection.modelId) return t("app:workflow.modelDefault", "Default");
   return `${selection.provider}/${selection.modelId}`;
 }
 
@@ -245,7 +251,7 @@ function LiveAgentLogOutput({
   if (stepEntries.length === 0) {
     return (
       <div className="workflow-live-log" data-testid={`workflow-live-log-${stepId}`}>
-        <div className="workflow-live-log-empty">{t("workflow.waitingForOutput", "Waiting for agent output…")}</div>
+        <div className="workflow-live-log-empty">{t("app:workflow.waitingForOutput", "Waiting for agent output…")}</div>
       </div>
     );
   }
@@ -570,7 +576,7 @@ export function WorkflowResultsTab({
       return {
         id: stepId,
         name: stepInfo?.name || stepId,
-        description: stepInfo?.description || t("workflow.stepDefinitionNotFound", "Step definition not found."),
+        description: stepInfo?.description || t("app:workflow.stepDefinitionNotFound", "Step definition not found."),
         phase: stepInfo?.phase || "pre-merge",
       } as WorkflowStepOption;
     });
@@ -595,7 +601,7 @@ export function WorkflowResultsTab({
       <div className="workflow-results-editor" data-testid="workflow-steps-editor">
         <div className="workflow-steps-section">
           <small className="workflow-steps-description">
-            {t("workflow.selectStepsDescription", "Select steps to run after task implementation completes")}
+            {t("app:workflow.selectStepsDescription", "Select steps to run after task implementation completes")}
           </small>
           <div className="workflow-steps-list">
             {workflowStepOptions.map((step) => (
@@ -625,7 +631,7 @@ export function WorkflowResultsTab({
 
         {selectedWorkflowSteps.length > 1 && (
           <div className="workflow-step-order" data-testid="workflow-step-order">
-            <small className="workflow-step-order-label">{t("workflow.executionOrder", "Execution order:")}</small>
+            <small className="workflow-step-order-label">{t("app:workflow.executionOrder", "Execution order:")}</small>
             {selectedWorkflowSteps.map((stepId, index) => {
               const stepInfo = workflowStepLookup.get(stepId);
               return (
@@ -639,7 +645,7 @@ export function WorkflowResultsTab({
                       onClick={() => moveWorkflowStepUp(index)}
                       disabled={index === 0}
                       data-testid={`workflow-step-move-up-${stepId}`}
-                      title={t("workflow.moveUp", "Move up")}
+                      title={t("app:workflow.moveUp", "Move up")}
                     >
                       <ChevronUp />
                     </button>
@@ -649,7 +655,7 @@ export function WorkflowResultsTab({
                       onClick={() => moveWorkflowStepDown(index)}
                       disabled={index === selectedWorkflowSteps.length - 1}
                       data-testid={`workflow-step-move-down-${stepId}`}
-                      title={t("workflow.moveDown", "Move down")}
+                      title={t("app:workflow.moveDown", "Move down")}
                     >
                       <ChevronDown />
                     </button>
@@ -658,7 +664,7 @@ export function WorkflowResultsTab({
                       className="btn btn-icon btn-sm"
                       onClick={() => removeWorkflowStep(stepId)}
                       data-testid={`workflow-step-remove-${stepId}`}
-                      title={t("workflow.remove", "Remove")}
+                      title={t("app:workflow.remove", "Remove")}
                     >
                       <X />
                     </button>
@@ -677,7 +683,7 @@ export function WorkflowResultsTab({
       return (
         <div className="workflow-results-loading" data-testid="workflow-results-loading">
           <div className="workflow-results-spinner" />
-          <span>{t("workflow.loadingResults", "Loading workflow results…")}</span>
+          <span>{t("app:workflow.loadingResults", "Loading workflow results…")}</span>
         </div>
       );
     }
@@ -685,9 +691,9 @@ export function WorkflowResultsTab({
     if (!hasResults) {
       return (
         <div className="workflow-results-empty" data-testid="workflow-results-empty">
-          <p>{t("workflow.noStepsConfigured", "No workflow steps configured for this task.")}</p>
+          <p>{t("app:workflow.noStepsConfigured", "No workflow steps configured for this task.")}</p>
           <p className="workflow-results-empty-hint">
-            {t("workflow.stepsExplanation", "Pre-merge steps run after implementation, before merge. Post-merge steps run after merge succeeds.")}
+            {t("app:workflow.stepsExplanation", "Pre-merge steps run after implementation, before merge. Post-merge steps run after merge succeeds.")}
           </p>
         </div>
       );
@@ -699,26 +705,26 @@ export function WorkflowResultsTab({
     const skipped = results.filter((r) => r.status === "skipped").length;
     const pending = results.filter((r) => r.status === "pending").length;
 
-    const summaryParts: string[] = [t("workflow.summaryStepCount", { count: results.length, defaultValue_one: "{{count}} step", defaultValue_other: "{{count}} steps" })];
-    if (passed > 0) summaryParts.push(t("workflow.summaryPassed", "{{count}} passed", { count: passed }));
-    if (failed > 0) summaryParts.push(t("workflow.summaryFailed", "{{count}} failed", { count: failed }));
-    if (advisoryFailures.length > 0) summaryParts.push(t("workflow.summaryAdvisory", "{{count}} advisory", { count: advisoryFailures.length }));
-    if (skipped > 0) summaryParts.push(t("workflow.summarySkipped", "{{count}} skipped", { count: skipped }));
-    if (pending > 0) summaryParts.push(t("workflow.summaryRunning", "{{count}} running", { count: pending }));
+    const summaryParts: string[] = [t("app:workflow.summaryStepCount", { count: results.length, defaultValue_one: "{{count}} step", defaultValue_other: "{{count}} steps" })];
+    if (passed > 0) summaryParts.push(t("app:workflow.summaryPassed", "{{count}} passed", { count: passed }));
+    if (failed > 0) summaryParts.push(t("app:workflow.summaryFailed", "{{count}} failed", { count: failed }));
+    if (advisoryFailures.length > 0) summaryParts.push(t("app:workflow.summaryAdvisory", "{{count}} advisory", { count: advisoryFailures.length }));
+    if (skipped > 0) summaryParts.push(t("app:workflow.summarySkipped", "{{count}} skipped", { count: skipped }));
+    if (pending > 0) summaryParts.push(t("app:workflow.summaryRunning", "{{count}} running", { count: pending }));
 
     return (
       <div className="workflow-results-list" data-testid="workflow-results-list">
         <div className="workflow-results-summary-bar" data-testid="workflow-results-summary">
-          {summaryParts.join(t("workflow.summarySeparator", " · "))}
+          {summaryParts.join(t("app:workflow.summarySeparator", " · "))}
         </div>
         {advisoryFailures.length > 0 && (
           <div className="workflow-polish-notes" data-testid="workflow-polish-notes">
-            <h4>{t("workflow.polishNotes", "Polish notes")}</h4>
-            <p>{t("workflow.advisoryExplanation", "Advisory workflow steps flagged non-blocking improvements:")}</p>
+            <h4>{t("app:workflow.polishNotes", "Polish notes")}</h4>
+            <p>{t("app:workflow.advisoryExplanation", "Advisory workflow steps flagged non-blocking improvements:")}</p>
             <ul>
               {advisoryFailures.map((result, index) => (
                 <li key={`advisory-${result.workflowStepId}-${index}`}>
-                  <strong>{result.workflowStepName}:</strong> {result.output || t("workflow.needsReview", "Needs follow-up review.")}
+                  <strong>{result.workflowStepName}:</strong> {result.output || t("app:workflow.needsReview", "Needs follow-up review.")}
                 </li>
               ))}
             </ul>
@@ -758,7 +764,7 @@ export function WorkflowResultsTab({
 
               {result.notes && result.status !== "pending" && (
                 <div className="workflow-result-notes" data-testid={`workflow-result-notes-${result.workflowStepId}`}>
-                  <span className="workflow-result-notes-label">{t("workflow.notes", "Notes:")} </span>
+                  <span className="workflow-result-notes-label">{t("app:workflow.notes", "Notes:")} </span>
                   <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
                     {result.notes}
                   </ReactMarkdown>
@@ -767,7 +773,7 @@ export function WorkflowResultsTab({
 
               <div className="workflow-result-meta">
                 {result.startedAt && (
-                  <span className="workflow-result-timestamp">{t("workflow.started", "Started:")} {formatTimestamp(result.startedAt)}</span>
+                  <span className="workflow-result-timestamp">{t("app:workflow.started", "Started:")} {formatTimestamp(result.startedAt)}</span>
                 )}
                 {result.completedAt && (
                   <span className="workflow-result-duration">{formatDuration(result.startedAt, result.completedAt)}</span>
@@ -785,14 +791,14 @@ export function WorkflowResultsTab({
               ) : result.output ? (
                 <div className="workflow-result-output-section">
                   <div className="workflow-result-output-header">
-                    <span className="workflow-result-output-label">{t("workflow.output", "Output:")} </span>
+                    <span className="workflow-result-output-label">{t("app:workflow.output", "Output:")} </span>
                     <button
                       type="button"
                       className="btn btn-sm workflow-result-toggle"
                       onClick={() => toggleOutput(result.workflowStepId)}
                       data-testid={`workflow-result-toggle-${result.workflowStepId}`}
                     >
-                      {isExpanded ? t("workflow.hideOutput", "Hide output") : t("workflow.showOutput", "Show output")}
+                      {isExpanded ? t("app:workflow.hideOutput", "Hide output") : t("app:workflow.showOutput", "Show output")}
                     </button>
                     {!isExpanded && (
                       <span
@@ -809,16 +815,16 @@ export function WorkflowResultsTab({
                           className="btn btn-sm workflow-result-mode-toggle"
                           onClick={() => toggleRenderMode(result.workflowStepId)}
                           data-testid={`workflow-result-mode-toggle-${result.workflowStepId}`}
-                          title={(renderModes[result.workflowStepId] ?? "markdown") === "markdown" ? t("workflow.switchToPlain", "Switch to plain text") : t("workflow.switchToMarkdown", "Switch to markdown")}
+                          title={(renderModes[result.workflowStepId] ?? "markdown") === "markdown" ? t("app:workflow.switchToPlain", "Switch to plain text") : t("app:workflow.switchToMarkdown", "Switch to markdown")}
                         >
-                          {(renderModes[result.workflowStepId] ?? "markdown") === "markdown" ? t("workflow.markdown", "Markdown") : t("workflow.plain", "Plain")}
+                          {(renderModes[result.workflowStepId] ?? "markdown") === "markdown" ? t("app:workflow.markdown", "Markdown") : t("app:workflow.plain", "Plain")}
                         </button>
                         <button
                           type="button"
                           className="btn btn-icon btn-sm workflow-result-expand-toggle"
                           onClick={() => openExpandedView(result.workflowStepId)}
                           data-testid={`workflow-result-expand-${result.workflowStepId}`}
-                          title={t("workflow.expandOutput", "Expand output")}
+                          title={t("app:workflow.expandOutput", "Expand output")}
                         >
                           <Maximize2 size={12} />
                         </button>
@@ -858,18 +864,18 @@ export function WorkflowResultsTab({
       className="btn btn-sm workflow-results-edit-toggle"
       onClick={() => setIsEditing((prev) => !prev)}
       data-testid="workflow-steps-edit-toggle"
-      aria-label={isEditing ? t("workflow.doneEditingAriaLabel", "Done editing workflow steps") : t("workflow.editAriaLabel", "Edit workflow steps")}
-      title={isEditing ? t("workflow.done", "Done") : t("workflow.edit", "Edit")}
+      aria-label={isEditing ? t("app:workflow.doneEditingAriaLabel", "Done editing workflow steps") : t("app:workflow.editAriaLabel", "Edit workflow steps")}
+      title={isEditing ? t("app:workflow.done", "Done") : t("app:workflow.edit", "Edit")}
     >
       {isEditing ? (
         <>
           <Check size={14} />
-          {t("workflow.done", "Done")}
+          {t("app:workflow.done", "Done")}
         </>
       ) : (
         <>
           <Pencil size={14} />
-          {t("workflow.edit", "Edit")}
+          {t("app:workflow.edit", "Edit")}
         </>
       )}
     </button>
@@ -891,7 +897,7 @@ export function WorkflowResultsTab({
       setInputText("");
       setSubmitted(true);
     } catch (err) {
-      setResumeError(getErrorMessage(err) || "Failed to resume task");
+      setResumeError(getErrorMessage(err) || t("app:workflow.resumeTaskError", "Failed to resume task"));
     } finally {
       setSubmitting(false);
     }
@@ -905,7 +911,7 @@ export function WorkflowResultsTab({
       await approveTaskWorkflowCli(taskId, projectId);
       setSubmitted(true);
     } catch (err) {
-      setResumeError(getErrorMessage(err) || "Failed to approve command");
+      setResumeError(getErrorMessage(err) || t("app:workflow.approveCommandError", "Failed to approve command"));
     } finally {
       setSubmitting(false);
     }
@@ -915,16 +921,16 @@ export function WorkflowResultsTab({
     <div className="workflow-results-tab" data-task-id={taskId}>
       {isAwaitingInput && (
         <div className="workflow-input-banner" role="alert">
-          <strong>Waiting for your input</strong>
-          <span>{parseWorkflowInputQuestion(taskPausedReason)}</span>
+          <strong>{t("app:workflow.awaitingInputTitle", "Waiting for your input")}</strong>
+          <span>{parseWorkflowInputQuestion(taskPausedReason, t)}</span>
           {submitted ? (
-            <span className="workflow-input-resuming">Resuming…</span>
+            <span className="workflow-input-resuming">{t("app:workflow.resuming", "Resuming…")}</span>
           ) : (
             <div className="workflow-input-actions">
               <textarea
                 className="workflow-input-textarea"
                 rows={3}
-                placeholder="Type your reply…"
+                placeholder={t("app:workflow.inputPlaceholder", "Type your reply…")}
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}
                 disabled={submitting}
@@ -935,7 +941,7 @@ export function WorkflowResultsTab({
                 onClick={handleSubmitInput}
                 disabled={submitting || !inputText.trim()}
               >
-                {submitting ? "Submitting…" : "Submit & resume"}
+                {submitting ? t("app:workflow.submitting", "Submitting…") : t("app:workflow.submitAndResume", "Submit & resume")}
               </button>
               {resumeError && (
                 <span className="workflow-input-error" role="alert">{resumeError}</span>
@@ -946,13 +952,13 @@ export function WorkflowResultsTab({
       )}
       {isAwaitingCliApproval && (
         <div className="workflow-input-banner workflow-input-banner--approval" role="alert">
-          <strong>Approve CLI command?</strong>
+          <strong>{t("app:workflow.cliApprovalTitle", "Approve CLI command?")}</strong>
           <span className="workflow-input-approval-warning">
-            This command will run in the task worktree. Approving trusts this exact command for future runs.
+            {t("app:workflow.cliApprovalWarning", "This command will run in the task worktree. Approving trusts this exact command for future runs.")}
           </span>
           <pre className="workflow-input-approval-command"><code>{parseCliApprovalCommand(taskPausedReason)}</code></pre>
           {submitted ? (
-            <span className="workflow-input-resuming">Resuming…</span>
+            <span className="workflow-input-resuming">{t("app:workflow.resuming", "Resuming…")}</span>
           ) : (
             <div className="workflow-input-actions">
               <button
@@ -961,9 +967,9 @@ export function WorkflowResultsTab({
                 onClick={handleApproveCli}
                 disabled={submitting}
               >
-                {submitting ? "Approving…" : "Approve & run"}
+                {submitting ? t("app:workflow.approving", "Approving…") : t("app:workflow.approveAndRun", "Approve & run")}
               </button>
-              <span className="workflow-input-keep-paused">To reject, keep the task paused and do not approve.</span>
+              <span className="workflow-input-keep-paused">{t("app:workflow.cliApprovalRejectHint", "To reject, keep the task paused and do not approve.")}</span>
               {resumeError && (
                 <span className="workflow-input-error" role="alert">{resumeError}</span>
               )}
@@ -973,28 +979,28 @@ export function WorkflowResultsTab({
       )}
       <section className="card workflow-state-summary" data-testid="workflow-state-summary">
         <div className="workflow-state-summary__header">
-          <h4>{t("workflow.overview", "Workflow overview")}</h4>
+          <h4>{t("app:workflow.overview", "Workflow overview")}</h4>
         </div>
         <div className="workflow-state-summary__grid">
           <div className="workflow-state-summary__item" data-testid="workflow-state-summary-name">
-            <span className="workflow-state-summary__label">{t("workflow.workflowName", "Workflow")}</span>
+            <span className="workflow-state-summary__label">{t("app:workflow.workflowName", "Workflow")}</span>
             <span className="workflow-state-summary__value">{workflowName}</span>
           </div>
           <div className="workflow-state-summary__item" data-testid="workflow-state-summary-phase">
-            <span className="workflow-state-summary__label">{t("workflow.executionPhase", "Execution phase")}</span>
+            <span className="workflow-state-summary__label">{t("app:workflow.executionPhase", "Execution phase")}</span>
             <span className={`workflow-result-badge ${executionPhase.badgeClass}`} data-testid={`workflow-phase-badge-${executionPhase.testId}`}>
               {executionPhase.label}
             </span>
           </div>
           <div className="workflow-state-summary__item" data-testid="workflow-state-summary-aggregate">
-            <span className="workflow-state-summary__label">{t("workflow.aggregateResult", "Aggregate result")}</span>
+            <span className="workflow-state-summary__label">{t("app:workflow.aggregateResult", "Aggregate result")}</span>
             <span className={`workflow-result-badge ${aggregateResult.badgeClass}`} data-testid={`workflow-aggregate-badge-${aggregateResult.testId}`}>
               {aggregateResult.label}
             </span>
           </div>
           <div className="workflow-state-summary__item" data-testid="workflow-state-summary-count">
-            <span className="workflow-state-summary__label">{t("workflow.stepProgress", "Step count")}</span>
-            <span className="workflow-state-summary__value">{t("workflow.stepProgressValue", "{{completed}} of {{total}} steps completed", { completed: completedStepCount, total: results.length })}</span>
+            <span className="workflow-state-summary__label">{t("app:workflow.stepProgress", "Step count")}</span>
+            <span className="workflow-state-summary__value">{t("app:workflow.stepProgressValue", "{{completed}} of {{total}} steps completed", { completed: completedStepCount, total: results.length })}</span>
           </div>
         </div>
       </section>
@@ -1008,19 +1014,19 @@ export function WorkflowResultsTab({
         >
           <span className="workflow-disclosure__title">
             {graphExpanded ? <ChevronDown aria-hidden /> : <ChevronRight aria-hidden />}
-            {t("workflow.graph", "Workflow graph")}
+            {t("app:workflow.graph", "Workflow graph")}
           </span>
         </button>
         {graphExpanded && (
           <div className="workflow-disclosure__content">
             {!selectedWorkflowId ? (
               <p className="workflow-disclosure__empty" data-testid="workflow-graph-empty">
-                {t("workflow.noWorkflowAssigned", "No workflow assigned")}
+                {t("app:workflow.noWorkflowAssigned", "No workflow assigned")}
               </p>
             ) : workflowGraphLoading && !graphWorkflow ? (
               <div className="workflow-results-loading" data-testid="workflow-graph-loading">
                 <div className="workflow-results-spinner" />
-                <span>{t("workflow.loadingGraph", "Loading workflow graph…")}</span>
+                <span>{t("app:workflow.loadingGraph", "Loading workflow graph…")}</span>
               </div>
             ) : graphFlow ? (
               <div className="workflow-graph-preview" data-testid="workflow-graph-preview">
@@ -1042,7 +1048,7 @@ export function WorkflowResultsTab({
               </div>
             ) : (
               <p className="workflow-disclosure__empty" data-testid="workflow-graph-unavailable">
-                {t("workflow.graphUnavailable", "Workflow graph unavailable")}
+                {t("app:workflow.graphUnavailable", "Workflow graph unavailable")}
               </p>
             )}
           </div>
@@ -1051,7 +1057,7 @@ export function WorkflowResultsTab({
 
       <section className="card workflow-management" data-testid="workflow-management-section">
         <div className="workflow-management__header">
-          <h4>{t("workflow.workflowName", "Workflow")}</h4>
+          <h4>{t("app:workflow.workflowName", "Workflow")}</h4>
           {canEdit && selectedWorkflowId && onEditWorkflow && (
             <button
               type="button"
@@ -1060,7 +1066,7 @@ export function WorkflowResultsTab({
               data-testid="workflow-edit-button"
             >
               <Pencil aria-hidden />
-              {t("workflow.editWorkflow", "Edit workflow")}
+              {t("app:workflow.editWorkflow", "Edit workflow")}
             </button>
           )}
         </div>
@@ -1068,7 +1074,7 @@ export function WorkflowResultsTab({
           value={selectedWorkflowId}
           onChange={handleWorkflowSelect}
           projectId={projectId}
-          label="Custom workflow"
+          label={t("app:workflow.customWorkflowLabel", "Custom workflow")}
           disabled={!canEdit}
         />
       </section>
@@ -1082,16 +1088,16 @@ export function WorkflowResultsTab({
         >
           <span className="workflow-disclosure__title">
             {modelSettingsExpanded ? <ChevronDown aria-hidden /> : <ChevronRight aria-hidden />}
-            {t("workflow.modelSettings", "Model settings")}
+            {t("app:workflow.modelSettings", "Model settings")}
           </span>
         </button>
         {modelSettingsExpanded && (
           <div className="workflow-disclosure__content workflow-state-summary__grid" data-testid="workflow-model-settings-content">
             {[
-              { key: "executor", label: t("models.targetLabels.executor", "Executor"), value: formatModelValue(effectiveExecutor), provider: effectiveExecutor?.provider },
-              { key: "reviewer", label: t("models.targetLabels.validator", "Reviewer"), value: formatModelValue(effectiveValidator), provider: effectiveValidator?.provider },
-              { key: "planning", label: t("models.targetLabels.planning", "Planning"), value: formatModelValue(effectivePlanning), provider: effectivePlanning?.provider },
-              { key: "thinking", label: t("workflow.thinkingLevel", "Thinking level"), value: task?.thinkingLevel || "Default" },
+              { key: "executor", label: t("models.targetLabels.executor", "Executor"), value: formatModelValue(effectiveExecutor, t), provider: effectiveExecutor?.provider },
+              { key: "reviewer", label: t("models.targetLabels.validator", "Reviewer"), value: formatModelValue(effectiveValidator, t), provider: effectiveValidator?.provider },
+              { key: "planning", label: t("models.targetLabels.planning", "Planning"), value: formatModelValue(effectivePlanning, t), provider: effectivePlanning?.provider },
+              { key: "thinking", label: t("app:workflow.thinkingLevel", "Thinking level"), value: task?.thinkingLevel || "Default" },
             ].map((item) => (
               <div className="workflow-state-summary__item" key={item.key} data-testid={`workflow-model-setting-${item.key}`}>
                 <span className="workflow-state-summary__label">{item.label}</span>
@@ -1108,9 +1114,9 @@ export function WorkflowResultsTab({
         <div className="workflow-configured-steps" data-testid="workflow-configured-steps">
           <div className="workflow-configured-header" data-testid="workflow-configured-header">
             <div className="workflow-configured-title-row">
-              <h4>{t("workflow.configuredSteps", "Configured Workflow Steps")}</h4>
+              <h4>{t("app:workflow.configuredSteps", "Configured Workflow Steps")}</h4>
               <span className="workflow-configured-count" data-testid="workflow-configured-count">
-                {t("workflow.stepCount", { count: configuredSteps.length, defaultValue_one: "{{count}} step", defaultValue_other: "{{count}} steps" })}
+                {t("app:workflow.stepCount", { count: configuredSteps.length, defaultValue_one: "{{count}} step", defaultValue_other: "{{count}} steps" })}
               </span>
             </div>
             {editButton}
@@ -1133,7 +1139,7 @@ export function WorkflowResultsTab({
           </div>
 
           <p className="workflow-results-empty-hint">
-            {t("workflow.stepsExplanation", "Pre-merge steps run after implementation, before merge. Post-merge steps run after merge succeeds.")}
+            {t("app:workflow.stepsExplanation", "Pre-merge steps run after implementation, before merge. Post-merge steps run after merge succeeds.")}
           </p>
 
           {renderEditor()}
@@ -1142,7 +1148,7 @@ export function WorkflowResultsTab({
         <>
           {showEditHeaderForResults && (
             <div className="workflow-results-edit-header" data-testid="workflow-results-edit-header">
-              <h4>{t("workflow.steps", "Workflow Steps")}</h4>
+              <h4>{t("app:workflow.steps", "Workflow Steps")}</h4>
               {editButton}
             </div>
           )}
@@ -1179,9 +1185,9 @@ export function WorkflowResultsTab({
                     className="btn btn-sm workflow-result-mode-toggle"
                     onClick={() => toggleRenderMode(result.workflowStepId)}
                     data-testid="workflow-output-modal-mode-toggle"
-                    title={renderMode === "markdown" ? t("workflow.switchToPlain", "Switch to plain text") : t("workflow.switchToMarkdown", "Switch to markdown")}
+                    title={renderMode === "markdown" ? t("app:workflow.switchToPlain", "Switch to plain text") : t("app:workflow.switchToMarkdown", "Switch to markdown")}
                   >
-                    {renderMode === "markdown" ? t("workflow.markdown", "Markdown") : t("workflow.plain", "Plain")}
+                    {renderMode === "markdown" ? t("app:workflow.markdown", "Markdown") : t("app:workflow.plain", "Plain")}
                   </button>
                   <button
                     type="button"

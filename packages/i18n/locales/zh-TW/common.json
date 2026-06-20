@@ -1,4 +1,7 @@
 {
+  "actions": {
+    "send": ""
+  },
   "agents": {
     "ratings": {
       "trendDeclining": "",
@@ -77,6 +80,9 @@
     "error": "",
     "offline": "",
     "online": ""
+  },
+  "labels": {
+    "name": ""
   },
   "merge": {
     "unknown": ""
@@ -213,28 +219,6 @@
     "refreshSourceBackground": "",
     "refreshSourceInitialLoad": "",
     "refreshSourceManual": ""
-  },
-  "workflow": {
-    "aggregateAllPassed": "",
-    "aggregateInProgress": "",
-    "aggregateNoResults": "",
-    "customWorkflowFallback": "",
-    "defaultWorkflow": "",
-    "executionAwaitingCliApproval": "",
-    "executionAwaitingInput": "",
-    "executionCompleted": "",
-    "executionNotStarted": "",
-    "executionPaused": "",
-    "executionPostMerge": "",
-    "executionPreMerge": "",
-    "postMerge": "",
-    "preMerge": "",
-    "statusAdvisory": "",
-    "statusFailed": "",
-    "statusPassed": "",
-    "statusRunning": "",
-    "statusSkipped": "",
-    "waitingForOutput": ""
   },
   "workflowNodes": {
     "summaryAwaitInput": "",

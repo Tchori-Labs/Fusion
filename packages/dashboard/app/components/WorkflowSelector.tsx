@@ -8,6 +8,11 @@ import { fetchWorkflow, fetchWorkflows, fetchProjectDefaultWorkflow, setProjectD
 import type { ToastType } from "../hooks/useToast";
 import { useConfirm } from "../hooks/useConfirm";
 
+/*
+FNXC:i18n-Localize 2026-06-20-00:00:
+FN-6770 localizes this workflow surface through t() and authored en catalog keys so hardcoded user-facing copy does not need a lint.ignore deferral.
+*/
+
 interface WorkflowSelectorProps {
   /** Currently selected workflow id, or null for none. */
   value: string | null;
@@ -63,7 +68,7 @@ export function WorkflowSelector({
       })
       .catch((err) => {
         if (!cancelled) setWorkflows([]);
-        addToast?.(getErrorMessage(err) || "Failed to load workflows", "error");
+        addToast?.(getErrorMessage(err) || t("workflowSelector.loadFailed", "Failed to load workflows"), "error");
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -93,7 +98,7 @@ export function WorkflowSelector({
       try {
         await onChange(workflowId);
       } catch (err) {
-        addToast?.(getErrorMessage(err) || "Failed to apply workflow", "error");
+        addToast?.(getErrorMessage(err) || t("workflowSelector.applyFailed", "Failed to apply workflow"), "error");
       } finally {
         setApplying(false);
       }
@@ -115,7 +120,7 @@ export function WorkflowSelector({
           disabled={disabled || loading || applying}
           onChange={(e) => void handleChange(e.target.value)}
         >
-          <option value="">None</option>
+          <option value="">{t("workflowSelector.none", "None")}</option>
           {workflows.map((w) => (
             <option key={w.id} value={w.id}>
               {w.name}
@@ -125,7 +130,7 @@ export function WorkflowSelector({
       </div>
       {onManage && (
         <button type="button" className="workflow-selector-manage" onClick={onManage}>
-          Manage…
+          {t("workflowSelector.manage", "Manage…")}
         </button>
       )}
     </div>
@@ -140,6 +145,7 @@ interface ProjectDefaultWorkflowFieldProps {
 
 /** Self-contained project-default workflow picker for the settings modal. */
 export function ProjectDefaultWorkflowField({ projectId, addToast, onManage }: ProjectDefaultWorkflowFieldProps) {
+  const { t } = useTranslation("app");
   const [value, setValue] = useState<string | null>(null);
 
   useEffect(() => {
@@ -162,9 +168,9 @@ export function ProjectDefaultWorkflowField({ projectId, addToast, onManage }: P
     async (workflowId: string | null) => {
       const res = await setProjectDefaultWorkflow(workflowId, projectId);
       setValue(res.workflowId);
-      addToast?.(workflowId ? "Default workflow set" : "Default workflow cleared", "success");
+      addToast?.(workflowId ? t("workflowSelector.defaultSet", "Default workflow set") : t("workflowSelector.defaultCleared", "Default workflow cleared"), "success");
     },
-    [projectId, addToast],
+    [projectId, addToast, t],
   );
 
   return (
@@ -173,7 +179,7 @@ export function ProjectDefaultWorkflowField({ projectId, addToast, onManage }: P
       onChange={handleChange}
       projectId={projectId}
       addToast={addToast}
-      label="Default workflow for new tasks"
+      label={t("workflowSelector.defaultWorkflowLabel", "Default workflow for new tasks")}
       onManage={onManage}
     />
   );

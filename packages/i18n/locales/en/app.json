@@ -1181,7 +1181,11 @@
       "workflowMismatch": "Drag can't move a card between workflows. Use the workflow switcher instead."
     },
     "todo": "To Do",
-    "triage": "Triage"
+    "triage": "Triage",
+    "workflow": {
+      "edit": "Edit workflows",
+      "new": "New workflow"
+    }
   },
   "branchGroup": {
     "abandonGroup": "Abandon group",
@@ -1810,7 +1814,8 @@
     "heading": "Comments",
     "placeholder": "Add a comment",
     "postingButton": "Posting…",
-    "updatedSuccess": "Comment updated"
+    "updatedSuccess": "Comment updated",
+    "aiGuidance": "AI Guidance"
   },
   "commit": {
     "filesChanged_one": "Files Changed ({{count}})",
@@ -4686,7 +4691,60 @@
     "rerunPreflight": "Re-run preflight",
     "revertToAi": "Revert to AI version",
     "titleLabel": "Title",
-    "usingTemplate": "Using <code>.github/pull_request_template.md</code>"
+    "usingTemplate": "Using <code>.github/pull_request_template.md</code>",
+    "assignees": "Assignees",
+    "dismissConflictResolutionError": "Dismiss conflict resolution error",
+    "dismissPushBranchError": "Dismiss push branch error",
+    "error": {
+      "actionOpen": "Action: open",
+      "actionRun": "Action: run",
+      "docs": "docs"
+    },
+    "generatingBody": "Generating AI body…",
+    "generatingTitle": "Generating AI title…",
+    "labels": "Labels",
+    "loadingOptions": "Loading PR options…",
+    "loadingPreflight": "Loading pre-flight checks…",
+    "noChangedFiles": "No changed files detected.",
+    "noCommits": "No commits found.",
+    "pushBranch": {
+      "button": "Push branch to remote",
+      "message": "Fusion will push this task's branch to origin so the PR can be created.",
+      "title": "Push branch to remote"
+    },
+    "resolveConflicts": {
+      "button": "Resolve conflicts with AI",
+      "message": "Fusion will use AI to resolve conflicts on this branch and push it.",
+      "title": "Resolve conflicts with AI"
+    },
+    "reviewers": "Reviewers",
+    "view": {
+      "agentDisagreed": "agent disagreed",
+      "agentReplyFix": "Agent reply — fix {{sha}}",
+      "approve": "Approve",
+      "autoMerge": "Auto-merge",
+      "close": "Close",
+      "confirmMerge": "Confirm merge",
+      "creating": "Creating PR…",
+      "creationFailed": "PR creation failed",
+      "loading": "Loading PR…",
+      "merge": "Merge",
+      "mergeableLabel": "Mergeable:",
+      "mergeDisabledUntilVerified": "Merge is disabled until GitHub verifies this PR",
+      "none": "none",
+      "noReviewThreads": "No review threads.",
+      "requestRetry": "Request retry",
+      "resolveConflictsBeforeMerge": "Resolve conflicts on GitHub before merging",
+      "resolveConflictsOnGithub": "Resolve conflicts on GitHub",
+      "responseAlreadyInProgress": "A response run is already in progress",
+      "responsePending_one": "Response run in progress — {{count}} threads pending",
+      "responsePending_other": "Response run in progress — {{count}} threads pending",
+      "retryCreation": "Retry PR creation",
+      "reviewLabel": "Review:",
+      "threadFixed": "fixed",
+      "threadPending": "pending",
+      "verifyingGithub": "Verifying with GitHub…"
+    }
   },
   "preview": {
     "blockedDescription": "You can view the preview in a separate browser tab.",
@@ -5553,7 +5611,8 @@
       "totalSize": "total size",
       "view": "View ",
       "whenEnabledProjectAndAgentMemoryFilesAre": "When enabled, project and agent memory files are backed up automatically on a schedule.",
-      "whenEnabledTheDatabaseIsBackedUpAutomatically": "When enabled, the database is backed up automatically on a schedule"
+      "whenEnabledTheDatabaseIsBackedUpAutomatically": "When enabled, the database is backed up automatically on a schedule",
+      "createFailed": "Failed to create backup"
     },
     "clearToDefault": "Reset to default",
     "cliAgents": {
@@ -5597,7 +5656,9 @@
     },
     "footer": {
       "help": "Help",
-      "version": "Version {{version}}"
+      "version": "Version {{version}}",
+      "checkUpdates": "Check for updates",
+      "helpDiscussions": "Help and discussions"
     },
     "general": {
       "25": "25",
@@ -5746,7 +5807,10 @@
       "whenEnabledStartupRefreshesModelsThroughTheLocal": " When enabled, startup refreshes models through the local "
     },
     "header": {
-      "discord": "Discord"
+      "discord": "Discord",
+      "joinDiscord": "Join our Discord",
+      "star": "Star",
+      "starFusion": "Star Fusion on GitHub"
     },
     "importExport": {
       "confirmImport": "Confirm Import",
@@ -5756,7 +5820,35 @@
       "importing": "Importing…",
       "importTitle": "Import Settings",
       "loadingFile": "Loading…",
-      "reviewPrompt": "Review the settings to be imported:"
+      "reviewPrompt": "Review the settings to be imported:",
+      "counts": {
+        "global_one": "{{count}} global",
+        "global_other": "{{count}} global",
+        "project_one": "{{count}} project",
+        "project_other": "{{count}} project",
+        "workflowSettings_one": "{{count}} workflow setting value",
+        "workflowSettings_other": "{{count}} workflow setting value"
+      },
+      "exported": "Settings exported ({{scope}} scope)",
+      "exportFailed": "Failed to export settings",
+      "globalSettings": "Global Settings:",
+      "imported": "Imported {{counts}} setting(s)",
+      "importFailed": "Import failed",
+      "importFailedDetailed": "Failed to import settings",
+      "importScope": "Import Scope:",
+      "importTitleAttr": "Import settings from JSON file",
+      "invalidJson": "Invalid JSON file: {{error}}",
+      "mergeExisting": "Merge with existing settings (recommended)",
+      "projectSettings": "Project Settings:",
+      "replaceWarning": "If unchecked, existing settings will be replaced with imported values.",
+      "scopeBoth": "Both global and project settings",
+      "scopeGlobal": "Global settings only",
+      "scopeLabel": {
+        "all": "all",
+        "global": "global",
+        "project": "project"
+      },
+      "scopeProject": "Project settings only"
     },
     "jsonPlaceholder": "Enter JSON value...",
     "keepLocal": "Keep Local",
@@ -5806,7 +5898,10 @@
       "searchMemoryWithQmd": "Search memory with qmd",
       "testing": "Testing…",
       "testRetrieval": "Test Retrieval",
-      "turnsDailyNotesIntoDREAMSMdAndPromotes": "Turns daily notes into DREAMS.md and promotes reusable lessons into MEMORY.md."
+      "turnsDailyNotesIntoDREAMSMdAndPromotes": "Turns daily notes into DREAMS.md and promotes reusable lessons into MEMORY.md.",
+      "qmdInstalled": "qmd installed successfully",
+      "qmdInstallFailed": "Failed to install qmd",
+      "qmdInstallUnavailable": "qmd install finished, but qmd is still unavailable"
     },
     "merge": {
       "abort": "Abort",
@@ -6155,7 +6250,8 @@
       "uRLAndQRGenerationUseTheSelectedToken": " URL and QR generation use the selected token type. ",
       "uRLNoHostnameOrPortConfigurationNeeded": " URL — no hostname or port configuration needed.",
       "useExisting": "Use Existing",
-      "usingQuickTunnel": "Using Quick Tunnel — automatically creates a random trycloudflare.com URL, no account needed."
+      "usingQuickTunnel": "Using Quick Tunnel — automatically creates a random trycloudflare.com URL, no account needed.",
+      "installationFailed": "Installation failed"
     },
     "researchGlobal": {
       "advancedExternalSearchProviders": "Advanced — external search providers",
@@ -6275,7 +6371,9 @@
       "timeoutInMinutesForDetectingStuckTasksWhen": "Timeout in minutes for detecting stuck tasks. When a task&apos;s agent session shows no activity for longer than this duration, the task is terminated and retried. Leave empty to disable. Suggested: 10.",
       "whenEnabledTasksThatModifyTheSameFiles": "When enabled, tasks that modify the same files are queued serially to avoid merge conflicts",
       "whenEnabledTasksWithStalePlansPROMPTMd": "When enabled, tasks with stale plans (PROMPT.md older than the threshold) are automatically sent back to planning for replanning",
-      "whenTheStuckDetectorKillsAndReQueues": "When the stuck detector kills and re-queues a task, keep completed step statuses so the agent can resume from where it left off. Disable to reset every step to pending on each stuck retry. Default: enabled."
+      "whenTheStuckDetectorKillsAndReQueues": "When the stuck detector kills and re-queues a task, keep completed step statuses so the agent can resume from where it left off. Disable to reset every step to pending on each stuck retry. Default: enabled.",
+      "browseWorkspacePath": "Browse workspace path",
+      "overlapPickerNote": "Choose a file to ignore directly, or navigate into a folder and select the current directory."
     },
     "scope": {
       "globalBanner": "These settings are shared across all your Fusion projects.",
@@ -6335,7 +6433,12 @@
       "worktrunk": " worktrunk ",
       "worktrunkBinaryPath": "Worktrunk binary path",
       "worktrunkFailureBehavior": "Worktrunk failure behavior",
-      "worktrunkIntegration": "Worktrunk integration"
+      "worktrunkIntegration": "Worktrunk integration",
+      "worktreesPickerNote": "Navigate to the folder where Fusion should create task worktrees, then select the current directory."
+    },
+    "fileBrowser": {
+      "currentDirectory": "Current directory:",
+      "projectRoot": "(project root)"
     }
   },
   "setup": {
@@ -6655,7 +6758,10 @@
     "withoutGitHub1": "Create tasks manually",
     "withoutGitHub2": "Describe work for AI agents",
     "withoutGitHub3": "Track progress on the board",
-    "withoutGitHubHeading": "Without GitHub (available now):"
+    "withoutGitHubHeading": "Without GitHub (available now):",
+    "brandLogo": "Fusion logo",
+    "brandName": "Fusion",
+    "setupCompleteTitle": "Setup Complete!"
   },
   "shell": {
     "activePill": "Active",
@@ -7201,7 +7307,8 @@
       "mergingFixes": "Merging fixes…",
       "mergingPr": "Merging PR…",
       "startPrReview": "Start PR Review",
-      "statusRefreshed": "PR status refreshed"
+      "statusRefreshed": "PR status refreshed",
+      "label": "PR"
     },
     "priority": {
       "ariaLabel": "Task priority",
@@ -7216,7 +7323,8 @@
     },
     "provenance": {
       "createdBy": "Created by",
-      "createdVia": "Created via"
+      "createdVia": "Created via",
+      "parentTaskOf": "of"
     },
     "recoveryState": "Recovery state",
     "refine": {
@@ -7955,7 +8063,43 @@
     "switchToMarkdown": "Switch to markdown",
     "switchToPlain": "Switch to plain text",
     "thinkingLevel": "Thinking level",
-    "workflowName": "Workflow"
+    "workflowName": "Workflow",
+    "aggregateAdvisory": "Advisory",
+    "aggregateAllPassed": "All passed",
+    "aggregateInProgress": "In progress",
+    "aggregateNoResults": "No results",
+    "approveAndRun": "Approve & run",
+    "approveCommandError": "Failed to approve command",
+    "approving": "Approving…",
+    "awaitingInputTitle": "Waiting for your input",
+    "cliApprovalRejectHint": "To reject, keep the task paused and do not approve.",
+    "cliApprovalTitle": "Approve CLI command?",
+    "cliApprovalWarning": "This command will run in the task worktree. Approving trusts this exact command for future runs.",
+    "customWorkflowFallback": "Custom workflow",
+    "customWorkflowLabel": "Custom workflow",
+    "defaultWorkflow": "Default",
+    "executionAwaitingCliApproval": "Awaiting CLI approval",
+    "executionAwaitingInput": "Awaiting input",
+    "executionCompleted": "Completed",
+    "executionNotStarted": "Not started",
+    "executionPaused": "Paused",
+    "executionPostMerge": "Post-merge steps running",
+    "executionPreMerge": "Pre-merge steps running",
+    "inputPlaceholder": "Type your reply…",
+    "modelDefault": "Default",
+    "postMerge": "Post-merge",
+    "preMerge": "Pre-merge",
+    "replyInComments": "Reply in the comments and unpause the task to continue.",
+    "resumeTaskError": "Failed to resume task",
+    "resuming": "Resuming…",
+    "statusAdvisory": "Advisory failure",
+    "statusFailed": "Failed",
+    "statusPassed": "Passed",
+    "statusRunning": "Running…",
+    "statusSkipped": "Skipped",
+    "submitAndResume": "Submit & resume",
+    "submitting": "Submitting…",
+    "waitingForOutput": "Waiting for agent output…"
   },
   "workflowColumns": {
     "add": "Add column",
@@ -8007,7 +8151,30 @@
     },
     "collapsePrompt": "Collapse prompt editor",
     "editingPrompt": "Editing Prompt",
-    "expandPrompt": "Expand prompt editor"
+    "expandPrompt": "Expand prompt editor",
+    "agent": "Agent",
+    "agentsLoadFailed": "Failed to load agents",
+    "autoApproveRequests": "Auto-approve requests",
+    "autoApproveRequestsNote": "Runs without pausing for approval — e.g. a CLI command executes on its first run without waiting for your sign-off.",
+    "cliCommandNote": "Runs an arbitrary command in the task worktree. The first time this exact command runs, the task pauses for your approval. The node prompt is passed via FUSION_NODE_PROMPT.",
+    "cliMode": "CLI mode",
+    "cliScript": "CLI / script",
+    "command": "Command",
+    "executor": "Executor",
+    "maxRetries": "Max retries",
+    "model": "Model",
+    "modelsLoadFailed": "Failed to load models",
+    "namedScript": "Named script",
+    "namedScriptNote": "Named script from project settings. The node prompt is passed via FUSION_NODE_PROMPT.",
+    "prompt": "Prompt",
+    "scriptName": "Script name",
+    "selectAgent": "— select agent —",
+    "selectSkill": "— select skill —",
+    "skill": "Skill",
+    "skillsLoadFailed": "Failed to load skills",
+    "skipFirstRunApproval": "Skip first-run approval (runs without pausing)",
+    "waitForUserInput": "Wait for user input",
+    "waitForUserInputNote": "This node pauses the task until you reply in the task's comments and unpause. The Prompt field above is shown to the user as the question."
   },
   "workflowFields": {
     "add": "Add field",
@@ -8141,7 +8308,11 @@
     "templatesPluginSteps": "Plugin steps",
     "templatesSection": "Templates",
     "timeoutMs": "{{timeout}}ms",
-    "trivialGraphHint": "This workflow only runs start → end. Add steps from the palette above to build it out."
+    "trivialGraphHint": "This workflow only runs start → end. Add steps from the palette above to build it out.",
+    "conditionFailure": "failure",
+    "conditionSuccess": "success",
+    "nodeInspector": "Node",
+    "readOnlyDuplicateToEdit": "Read-only built-in — duplicate the workflow to edit nodes."
   },
   "workflows": {
     "aiEdit": "Design with AI",
@@ -8204,13 +8375,27 @@
     "templateNodeCount_other": "{{count}} nodes",
     "templatePickerLabel": "Start from",
     "templateSectionBuiltin": "Built-in workflows",
-    "templateSectionYours": "Your workflows"
+    "templateSectionYours": "Your workflows",
+    "closeEditor": "Close workflow editor",
+    "duplicatedEditable": "Duplicated to \"{{name}}\" — editable",
+    "duplicateFailed": "Failed to duplicate workflow",
+    "loadFailed": "Failed to load workflows",
+    "loading": "Loading…",
+    "noneYet": "No workflows yet.",
+    "title": "Workflows"
   },
   "workflowSelector": {
     "switchActiveMessage": "This task has an active session. Switching workflows aborts it and re-homes the card into the new workflow's entry column. Continue?",
     "switchActiveTitle": "Switch workflow?",
     "switchCancel": "Cancel",
-    "switchConfirm": "Switch and abort"
+    "switchConfirm": "Switch and abort",
+    "applyFailed": "Failed to apply workflow",
+    "defaultCleared": "Default workflow cleared",
+    "defaultSet": "Default workflow set",
+    "defaultWorkflowLabel": "Default workflow for new tasks",
+    "loadFailed": "Failed to load workflows",
+    "manage": "Manage…",
+    "none": "None"
   },
   "workflowSettings": {
     "add": "Add setting",
@@ -8288,5 +8473,50 @@
     "installRequestTitle": "Worktrunk install request",
     "sha256": "SHA-256",
     "version": "Version"
+  },
+  "taskChat": {
+    "activePlaceholder": "Steer the currently executing agent",
+    "activeSessionHint": "Message the active agent session. Guidance is delivered to the running session in real time.",
+    "agentMessages": "{{label}} messages",
+    "arguments": "Arguments",
+    "collapseChat": "Collapse chat",
+    "donePlaceholder": "Start a refinement task for this completed task",
+    "doneSessionHint": "Send a message to start a refinement task for this completed task.",
+    "emptyAgentOutput": "No agent output yet. Live messages from Planner, Executor, Reviewer, and Merger agents will appear here.",
+    "entryCount_one": "{{count}} entry",
+    "entryCount_other": "{{count}} entries",
+    "error": "Error",
+    "errorCount_one": "{{count}} error",
+    "errorCount_other": "{{count}} errors",
+    "expandChat": "Expand chat to full modal",
+    "idleSessionHint": "No agent is working on this task right now. Your message is saved as guidance and will reach an agent the next time this task runs.",
+    "jumpToLatestMessage": "Jump to latest message",
+    "latest": "Latest",
+    "loadingAgentOutput": "Loading agent output…",
+    "loadingEarlierMessages": "Loading earlier messages…",
+    "loadPreviousMessages": "Load previous messages",
+    "message": "Message",
+    "messageActiveAgentSession": "Message active agent session",
+    "moreTools_one": ", +{{count}} more",
+    "moreTools_other": ", +{{count}} more",
+    "result": "Result",
+    "roles": {
+      "agent": "Agent",
+      "executor": "Executor",
+      "merger": "Merger",
+      "planner": "Planner",
+      "reviewer": "Reviewer"
+    },
+    "sending": "Sending",
+    "thinking": "Thinking",
+    "toolCall": "Tool call",
+    "toolCallCount_one": "{{count}} tool call",
+    "toolCallCount_other": "{{count}} tool calls",
+    "toolCallTo": "Tool call → {{label}}",
+    "toolError": "Tool error",
+    "toolNames": "Tool names",
+    "toolResult": "Tool result",
+    "you": "You",
+    "youMessage": "You message"
   }
 }

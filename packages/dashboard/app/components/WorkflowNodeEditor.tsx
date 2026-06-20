@@ -42,6 +42,11 @@ import type { DiscoveredSkill } from "../api";
 import type { ToastType } from "../hooks/useToast";
 import { useOverlayDismiss } from "../hooks/useOverlayDismiss";
 import { useConfirm } from "../hooks/useConfirm";
+
+/*
+FNXC:i18n-Localize 2026-06-20-00:00:
+FN-6770 localizes this workflow surface through t() and authored en catalog keys so hardcoded user-facing copy does not need a lint.ignore deferral.
+*/
 import { useModalResizePersist } from "../hooks/useModalResizePersist";
 import { useAppSettings } from "../hooks/useAppSettings";
 import { isMobileViewport, useViewportMode } from "../hooks/useViewportMode";
@@ -210,6 +215,9 @@ const NOTIFY_EVENT_OPTIONS = [
   "workflow-notify",
 ] as const;
 const NOTIFY_CUSTOM_EVENT_VALUE = "__custom";
+const WORKFLOW_CLI_COMMAND_PLACEHOLDER = "npm test -- --runInBand";
+const WORKFLOW_CODE_SOURCE_PLACEHOLDER = "export default async (ctx) => ({ outcome: \"success\" });";
+const WORKFLOW_NOTIFY_MESSAGE_PLACEHOLDER = "Task {{taskId}} reached {{workflowName}}";
 
 const PALETTE: Array<{ kind: WorkflowEditorNodeKind; label: string; icon: typeof MessageSquare; presetConfig?: Record<string, unknown> }> = [
   { kind: "prompt", label: "Prompt", icon: MessageSquare },
@@ -1019,11 +1027,11 @@ function InnerEditor({
         return isMobileMode ? null : data[0]?.id ?? null;
       });
     } catch (err) {
-      addToast(getErrorMessage(err) || "Failed to load workflows", "error");
+      addToast(getErrorMessage(err) || t("workflows.loadFailed", "Failed to load workflows"), "error");
     } finally {
       setLoading(false);
     }
-  }, [projectId, addToast, isMobileMode, initialAction, initialWorkflowId]);
+  }, [projectId, addToast, isMobileMode, initialAction, initialWorkflowId, t]);
 
   useEffect(() => {
     void loadWorkflows();
@@ -1752,11 +1760,11 @@ function InnerEditor({
       setWorkflows((ws) => [...ws, created]);
       setActiveId(created.id);
       setWorkflowListStageOpen(false);
-      addToast(`Duplicated to "${created.name}" — editable`, "success");
+      addToast(t("workflows.duplicatedEditable", "Duplicated to \"{{name}}\" — editable", { name: created.name }), "success");
     } catch (err) {
-      addToast(getErrorMessage(err) || "Failed to duplicate workflow", "error");
+      addToast(getErrorMessage(err) || t("workflows.duplicateFailed", "Failed to duplicate workflow"), "error");
     }
-  }, [activeWorkflow, projectId, addToast]);
+  }, [activeWorkflow, projectId, addToast, t]);
 
   const handleSave = useCallback(async () => {
     if (!activeWorkflow) return;
@@ -2107,25 +2115,25 @@ function InnerEditor({
     // step-review offers an optional review model picker (KTD-4).
     if (selectedNode?.data.kind === "step-review" && models.length === 0) {
       fetchModels().then((res) => setModels(res.models)).catch((err) => {
-        addToast(getErrorMessage(err) || "Failed to load models", "error");
+        addToast(getErrorMessage(err) || t("workflowEditor.modelsLoadFailed", "Failed to load models"), "error");
       });
       return;
     }
     if (!selectedNode || (selectedNode.data.kind !== "prompt" && selectedNode.data.kind !== "gate")) return;
     if (currentExecutor === "model" && models.length === 0) {
       fetchModels().then((res) => setModels(res.models)).catch((err) => {
-        addToast(getErrorMessage(err) || "Failed to load models", "error");
+        addToast(getErrorMessage(err) || t("workflowEditor.modelsLoadFailed", "Failed to load models"), "error");
       });
     } else if (currentExecutor === "agent" && agents.length === 0) {
       // Project-scoped, matching WorkflowColumnPanel's fetchAgents(undefined,
       // projectId) — an unscoped fetch returns the wrong registry in
       // multi-project deployments (PR #1432 review).
       fetchAgents(undefined, projectId).then(setAgents).catch((err) => {
-        addToast(getErrorMessage(err) || "Failed to load agents", "error");
+        addToast(getErrorMessage(err) || t("workflowEditor.agentsLoadFailed", "Failed to load agents"), "error");
       });
     } else if (currentExecutor === "skill" && skills.length === 0) {
       fetchDiscoveredSkills(projectId).then(setSkills).catch((err) => {
-        addToast(getErrorMessage(err) || "Failed to load skills", "error");
+        addToast(getErrorMessage(err) || t("workflowEditor.skillsLoadFailed", "Failed to load skills"), "error");
       });
     }
   }, [
@@ -2137,6 +2145,7 @@ function InnerEditor({
     models.length,
     agents.length,
     skills.length,
+    t,
   ]);
 
   // ── Dirty-state dismissal guard (U4, R7) ────────────────────────────────────
@@ -2198,12 +2207,12 @@ function InnerEditor({
     Promise.resolve(fetchAgents(undefined, projectId)).then((list) => {
       if (!cancelled) setAgents(list ?? []);
     }).catch((err) => {
-      if (!cancelled) addToast(getErrorMessage(err) || "Failed to load agents", "error");
+      if (!cancelled) addToast(getErrorMessage(err) || t("workflowEditor.agentsLoadFailed", "Failed to load agents"), "error");
     });
     return () => {
       cancelled = true;
     };
-  }, [overrideColumnBinding, agents.length, projectId, addToast]);
+  }, [overrideColumnBinding, agents.length, projectId, addToast, t]);
 
   const overlayProps = useOverlayDismiss(requestClose);
   const promptFullscreenOverlay =
@@ -2226,7 +2235,7 @@ function InnerEditor({
               </button>
             </div>
             <label className="wf-field">
-              <span>Prompt</span>
+              <span>{t("workflowEditor.prompt", "Prompt")}</span>
               <textarea
                 rows={undefined}
                 value={selectedNodePromptValue}
@@ -2263,8 +2272,8 @@ function InnerEditor({
         }}
       >
         <header className="wf-editor-header">
-          <h2>Workflows</h2>
-          <button className="wf-editor-close" onClick={requestClose} aria-label="Close workflow editor">
+          <h2>{t("workflows.title", "Workflows")}</h2>
+          <button className="wf-editor-close" onClick={requestClose} aria-label={t("workflows.closeEditor", "Close workflow editor")}>
             <X size={18} />
           </button>
         </header>
@@ -2349,10 +2358,10 @@ function InnerEditor({
             ) : null}
             {loading ? (
               <div className="wf-editor-empty">
-                <Loader2 size={16} className="wf-spin" /> Loading…
+                <Loader2 size={16} className="wf-spin" /> {t("workflows.loading", "Loading…")}
               </div>
             ) : workflows.length === 0 ? (
-              <div className="wf-editor-empty">No workflows yet.</div>
+              <div className="wf-editor-empty">{t("workflows.noneYet", "No workflows yet.")}</div>
             ) : (
               <ul className="wf-editor-list">
                 {workflows.map((w) => (
@@ -3236,7 +3245,7 @@ function InnerEditor({
             !(compactLayoutEnabled && !isMobileMode) && (
             <aside className="wf-editor-inspector" data-testid="wf-node-inspector">
               <div className="wf-inspector-heading">
-                <h3>Node</h3>
+                <h3>{t("workflowNodes.nodeInspector", "Node")}</h3>
                 {isMobileMode && (
                   <button
                     type="button"
@@ -3258,14 +3267,14 @@ function InnerEditor({
               </div>
               {isBuiltin && (
                 <p className="wf-inspector-note wf-inspector-note--info">
-                  Read-only built-in — duplicate the workflow to edit nodes.
+                  {t("workflowNodes.readOnlyDuplicateToEdit", "Read-only built-in — duplicate the workflow to edit nodes.")}
                 </p>
               )}
               <fieldset className="wf-inspector-fields" disabled={isBuiltin}>
               {/* FNXC:WorkflowEditor 2026-06-17-00:20: Start labels are structural and ignored by flowToIr, so exposing the generic Name editor would create a no-op rename. */}
               {selectedNode.data.kind !== "start" && (
                 <label className="wf-field">
-                  <span>Name</span>
+                  <span>{t("common:labels.name", "Name")}</span>
                   <input
                     value={selectedNode.data.label}
                     onChange={(e) => updateSelectedData({ label: e.target.value })}
@@ -3307,7 +3316,7 @@ function InnerEditor({
               {selectedNode.data.kind === "prompt" || selectedNode.data.kind === "gate" ? (
                 <div className="wf-prompt-editor">
                   <label className="wf-field">
-                    <span>Prompt</span>
+                    <span>{t("workflowEditor.prompt", "Prompt")}</span>
                     <textarea
                       rows={5}
                       value={selectedNodePromptValue}
@@ -3334,15 +3343,15 @@ function InnerEditor({
               {selectedNode.data.kind === "prompt" ? (
                 <>
                   <label className="wf-field">
-                    <span>Executor</span>
+                    <span>{t("workflowEditor.executor", "Executor")}</span>
                     <select
                       value={currentExecutor}
                       onChange={(e) => updateSelectedData({ config: { executor: e.target.value } })}
                     >
-                      <option value="model">Model</option>
-                      <option value="agent">Agent</option>
-                      <option value="skill">Skill</option>
-                      <option value="cli">CLI / script</option>
+                      <option value="model">{t("workflowEditor.model", "Model")}</option>
+                      <option value="agent">{t("workflowEditor.agent", "Agent")}</option>
+                      <option value="skill">{t("workflowEditor.skill", "Skill")}</option>
+                      <option value="cli">{t("workflowEditor.cliScript", "CLI / script")}</option>
                       <option value="cli-agent">{t("workflowEditor.cliAgent.executorOption")}</option>
                     </select>
                   </label>
@@ -3362,9 +3371,9 @@ function InnerEditor({
 
                   {currentExecutor === "model" && (
                     <label className="wf-field">
-                      <span>Model</span>
+                      <span>{t("workflowEditor.model", "Model")}</span>
                       <CustomModelDropdown
-                        label="Model"
+                        label={t("workflowEditor.model", "Model")}
                         models={models}
                         value={getModelDropdownValue(
                           String(selectedNode.data.config?.modelProvider ?? ""),
@@ -3386,12 +3395,12 @@ function InnerEditor({
                     const nodeAgentStale = nodeAgentId !== "" && !agents.some((a) => a.id === nodeAgentId);
                     return (
                       <label className="wf-field">
-                        <span>Agent</span>
+                        <span>{t("workflowEditor.agent", "Agent")}</span>
                         <select
                           value={nodeAgentId}
                           onChange={(e) => updateSelectedData({ config: { agentId: e.target.value || undefined } })}
                         >
-                          <option value="">— select agent —</option>
+                          <option value="">{t("workflowEditor.selectAgent", "— select agent —")}</option>
                           {nodeAgentStale && (
                             <option value={nodeAgentId}>
                               {t("workflowColumns.agentNotFound", "Agent not found — {{id}}", { id: nodeAgentId })}
@@ -3412,12 +3421,12 @@ function InnerEditor({
 
                   {currentExecutor === "skill" && (
                     <label className="wf-field">
-                      <span>Skill</span>
+                      <span>{t("workflowEditor.skill", "Skill")}</span>
                       <select
                         value={String(selectedNode.data.config?.skillName ?? "")}
                         onChange={(e) => updateSelectedData({ config: { skillName: e.target.value || undefined } })}
                       >
-                        <option value="">— select skill —</option>
+                        <option value="">{t("workflowEditor.selectSkill", "— select skill —")}</option>
                         {skills.map((s) => (
                           <option key={s.id} value={s.name}>{s.name}</option>
                         ))}
@@ -3428,26 +3437,26 @@ function InnerEditor({
                   {currentExecutor === "cli" && (
                     <>
                       <label className="wf-field">
-                        <span>CLI mode</span>
+                        <span>{t("workflowEditor.cliMode", "CLI mode")}</span>
                         <select
                           value={String(selectedNode.data.config?.cliMode ?? "command")}
                           onChange={(e) => updateSelectedData({ config: { cliMode: e.target.value } })}
                         >
-                          <option value="command">Command</option>
-                          <option value="script">Named script</option>
+                          <option value="command">{t("workflowEditor.command", "Command")}</option>
+                          <option value="script">{t("workflowEditor.namedScript", "Named script")}</option>
                         </select>
                       </label>
                       {(selectedNode.data.config?.cliMode ?? "command") === "command" ? (
                         <label className="wf-field">
-                          <span>Command</span>
+                          <span>{t("workflowEditor.command", "Command")}</span>
                           <textarea
                             rows={3}
-                            placeholder="npm test -- --runInBand"
+                            placeholder={WORKFLOW_CLI_COMMAND_PLACEHOLDER}
                             value={String(selectedNode.data.config?.cliCommand ?? "")}
                             onChange={(e) => updateSelectedData({ config: { cliCommand: e.target.value } })}
                           />
                           <p className="wf-inspector-note wf-inspector-note--info">
-                            Runs an arbitrary command in the task worktree. The first time this exact command runs, the task pauses for your approval. The node prompt is passed via FUSION_NODE_PROMPT.
+                            {t("workflowEditor.cliCommandNote", "Runs an arbitrary command in the task worktree. The first time this exact command runs, the task pauses for your approval. The node prompt is passed via FUSION_NODE_PROMPT.")}
                           </p>
                           <label className="wf-field wf-field--checkbox">
                             <input
@@ -3455,17 +3464,17 @@ function InnerEditor({
                               checked={selectedNode.data.config?.cliSkipApproval === true}
                               onChange={(e) => updateSelectedData({ config: { cliSkipApproval: e.target.checked } })}
                             />
-                            <span>Skip first-run approval (runs without pausing)</span>
+                            <span>{t("workflowEditor.skipFirstRunApproval", "Skip first-run approval (runs without pausing)")}</span>
                           </label>
                         </label>
                       ) : (
                         <label className="wf-field">
-                          <span>Script name</span>
+                          <span>{t("workflowEditor.scriptName", "Script name")}</span>
                           <input
                             value={String(selectedNode.data.config?.scriptName ?? "")}
                             onChange={(e) => updateSelectedData({ config: { scriptName: e.target.value } })}
                           />
-                          <span className="wf-inspector-note">Named script from project settings. The node prompt is passed via FUSION_NODE_PROMPT.</span>
+                          <span className="wf-inspector-note">{t("workflowEditor.namedScriptNote", "Named script from project settings. The node prompt is passed via FUSION_NODE_PROMPT.")}</span>
                         </label>
                       )}
                     </>
@@ -3554,16 +3563,16 @@ function InnerEditor({
                       checked={Boolean(selectedNode.data.config?.autoApprove)}
                       onChange={(e) => updateSelectedData({ config: { autoApprove: e.target.checked } })}
                     />
-                    <span>Auto-approve requests</span>
+                    <span>{t("workflowEditor.autoApproveRequests", "Auto-approve requests")}</span>
                   </label>
                   {Boolean(selectedNode.data.config?.autoApprove) && (
                     <p className="wf-inspector-note">
-                      Runs without pausing for approval — e.g. a CLI command executes on its first run without waiting for your sign-off.
+                      {t("workflowEditor.autoApproveRequestsNote", "Runs without pausing for approval — e.g. a CLI command executes on its first run without waiting for your sign-off.")}
                     </p>
                   )}
 
                   <label className="wf-field">
-                    <span>Max retries</span>
+                    <span>{t("workflowEditor.maxRetries", "Max retries")}</span>
                     <input
                       type="number"
                       min={1}
@@ -3594,11 +3603,11 @@ function InnerEditor({
                       checked={Boolean(selectedNode.data.config?.awaitInput)}
                       onChange={(e) => updateSelectedData({ config: { awaitInput: e.target.checked } })}
                     />
-                    <span>Wait for user input</span>
+                    <span>{t("workflowEditor.waitForUserInput", "Wait for user input")}</span>
                   </label>
                   {Boolean(selectedNode.data.config?.awaitInput) && (
                     <p className="wf-inspector-note wf-inspector-note--info">
-                      This node pauses the task until you reply in the task's comments and unpause. The Prompt field above is shown to the user as the question.
+                      {t("workflowEditor.waitForUserInputNote", "This node pauses the task until you reply in the task's comments and unpause. The Prompt field above is shown to the user as the question.")}
                     </p>
                   )}
                 </>
@@ -3606,7 +3615,7 @@ function InnerEditor({
 
               {selectedNode.data.kind === "script" ? (
                 <label className="wf-field">
-                  <span>Script name</span>
+                  <span>{t("workflowEditor.scriptName", "Script name")}</span>
                   <input
                     value={String(selectedNode.data.config?.scriptName ?? "")}
                     onChange={(e) => updateSelectedData({ config: { scriptName: e.target.value } })}
@@ -4086,7 +4095,7 @@ function InnerEditor({
                       className="wf-code-source"
                       rows={8}
                       spellCheck={false}
-                      placeholder={"export default async (ctx) => ({ outcome: \"success\" });"}
+                      placeholder={WORKFLOW_CODE_SOURCE_PLACEHOLDER}
                       value={String(selectedNode.data.config?.source ?? "")}
                       onChange={(e) => updateSelectedData({ config: { source: e.target.value } })}
                     />
@@ -4176,7 +4185,7 @@ function InnerEditor({
                         <textarea
                           rows={4}
                           value={String(selectedNode.data.config?.message ?? "")}
-                          placeholder="Task {{taskId}} reached {{workflowName}}"
+                          placeholder={WORKFLOW_NOTIFY_MESSAGE_PLACEHOLDER}
                           onChange={(e) => updateSelectedData({ config: { message: e.target.value } })}
                         />
                       </label>
@@ -4299,8 +4308,8 @@ function InnerEditor({
                       value={String(selectedEdge.data?.condition ?? "success")}
                       onChange={(e) => updateSelectedEdge({ condition: e.target.value })}
                     >
-                      <option value="success">success</option>
-                      <option value="failure">failure</option>
+                      <option value="success">{t("workflowNodes.conditionSuccess", "success")}</option>
+                      <option value="failure">{t("workflowNodes.conditionFailure", "failure")}</option>
                     </select>
                   </label>
                 ) : (

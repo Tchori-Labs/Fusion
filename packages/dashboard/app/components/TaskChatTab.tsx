@@ -3,6 +3,8 @@ import React, { useCallback, useLayoutEffect, useMemo, useRef, useState } from "
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ChevronDown, Loader2, Maximize2, Minimize2, Send } from "lucide-react";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { addSteeringComment, refineTask } from "../api";
 import { useAgentLogs } from "../hooks/useAgentLogs";
 import type { ToastType } from "../hooks/useToast";
@@ -58,18 +60,18 @@ function isTranscriptNearBottom(container: HTMLElement): boolean {
   return container.scrollHeight - (container.scrollTop + container.clientHeight) <= BOTTOM_FOLLOW_THRESHOLD;
 }
 
-function getRoleLabel(role: AgentLogRole): string {
+function getRoleLabel(role: AgentLogRole, t: TFunction<"app">): string {
   switch (role) {
     case "triage":
-      return "Planner";
+      return t("taskChat.roles.planner", "Planner");
     case "executor":
-      return "Executor";
+      return t("taskChat.roles.executor", "Executor");
     case "reviewer":
-      return "Reviewer";
+      return t("taskChat.roles.reviewer", "Reviewer");
     case "merger":
-      return "Merger";
+      return t("taskChat.roles.merger", "Merger");
     default:
-      return "Agent";
+      return t("taskChat.roles.agent", "Agent");
   }
 }
 
@@ -137,7 +139,7 @@ function mergeUserMessages(persistedComments: readonly SteeringComment[] | undef
   return messages;
 }
 
-function buildTranscriptItems(entries: readonly AgentLogEntry[], userMessages: readonly UserChatMessage[]): TaskChatTranscriptItem[] {
+function buildTranscriptItems(entries: readonly AgentLogEntry[], userMessages: readonly UserChatMessage[], t: TFunction<"app">): TaskChatTranscriptItem[] {
   const orderedItems = [
     ...entries.map((entry, index) => ({ kind: "agent" as const, entry, index, timestamp: getTimestampMs(entry.timestamp) })),
     ...userMessages.map((message, index) => ({ kind: "user" as const, message, index, timestamp: getTimestampMs(message.createdAt) })),
@@ -155,7 +157,7 @@ function buildTranscriptItems(entries: readonly AgentLogEntry[], userMessages: r
       previousItem.entries.push(item.entry);
       return items;
     }
-    items.push({ kind: "agent", role, label: getRoleLabel(role), entries: [item.entry] });
+    items.push({ kind: "agent", role, label: getRoleLabel(role, t), entries: [item.entry] });
     return items;
   }, []);
 }
@@ -178,25 +180,29 @@ function isToolLikeEntry(entry: AgentLogEntry): boolean {
   return entry.type === "tool" || entry.type === "tool_result" || entry.type === "tool_error";
 }
 
-function formatEntryLabel(entry: AgentLogEntry): string {
+function formatEntryLabel(entry: AgentLogEntry, t: TFunction<"app">): string {
   switch (entry.type) {
     case "tool":
-      return "Tool call";
+      return t("taskChat.toolCall", "Tool call");
     case "tool_result":
-      return "Tool result";
+      return t("taskChat.toolResult", "Tool result");
     case "tool_error":
-      return "Tool error";
+      return t("taskChat.toolError", "Tool error");
     case "thinking":
-      return "Thinking";
+      return t("taskChat.thinking", "Thinking");
     default:
-      return "Message";
+      return t("taskChat.message", "Message");
   }
+}
+
+function formatCompletionLabel(entry: AgentLogEntry, t: TFunction<"app">): string {
+  return entry.type === "tool_error" ? t("taskChat.error", "Error") : t("taskChat.result", "Result");
 }
 
 const TOOL_NAME_SUMMARY_LIMIT = 5;
 
-function formatToolCallCount(count: number): string {
-  return count === 1 ? "1 tool call" : `${count} tool calls`;
+function formatToolCallCount(count: number, t: TFunction<"app">): string {
+  return t("taskChat.toolCallCount", "{{count}} tool call", { count });
 }
 
 function getToolInvocationEntries(entries: AgentLogEntry[]): AgentLogEntry[] {
@@ -270,12 +276,14 @@ function TaskChatText({ entries }: { entries: AgentLogEntry[] }) {
 }
 
 function TaskChatToolEntry({ entry }: { entry: AgentLogEntry }) {
+  const { t } = useTranslation("app");
+
   return (
     <article
       className={`task-chat-tool-entry task-chat-tool-entry--${entry.type.replace("_", "-")}`}
       data-testid={`task-chat-entry-${entry.type}`}
     >
-      <div className="task-chat-entry-kicker">{formatEntryLabel(entry)}</div>
+      <div className="task-chat-entry-kicker">{formatEntryLabel(entry, t)}</div>
       <div className="task-chat-entry-text">{entry.text}</div>
       {entry.detail ? <pre className="task-chat-tool-detail">{linkifyFilePaths(entry.detail)}</pre> : null}
     </article>
@@ -310,25 +318,26 @@ function getToolGroupRows(entries: AgentLogEntry[]): TaskChatToolGroupRow[] {
 }
 
 function TaskChatToolInvocation({ row }: { row: Extract<TaskChatToolGroupRow, { kind: "invocation" }> }) {
+  const { t } = useTranslation("app");
   const completion = row.completion;
-  const completionLabel = completion ? formatEntryLabel(completion).replace("Tool ", "") : undefined;
+  const completionLabel = completion ? formatCompletionLabel(completion, t) : undefined;
   const className = `task-chat-tool-entry task-chat-tool-invocation${completion?.type === "tool_error" ? " task-chat-tool-entry--tool-error" : ""}`;
 
   return (
     <article className={className} data-testid="task-chat-tool-invocation">
       <div className="task-chat-entry-kicker">
-        {completionLabel ? `Tool call → ${completionLabel}` : "Tool call"}
+        {completionLabel ? t("taskChat.toolCallTo", "Tool call → {{label}}", { label: completionLabel }) : t("taskChat.toolCall", "Tool call")}
       </div>
       <div className="task-chat-entry-text">{row.call.text}</div>
       {row.call.detail ? (
         <div className="task-chat-tool-detail-block">
-          <div className="task-chat-tool-detail-label">Arguments</div>
+          <div className="task-chat-tool-detail-label">{t("taskChat.arguments", "Arguments")}</div>
           <pre className="task-chat-tool-detail">{linkifyFilePaths(row.call.detail)}</pre>
         </div>
       ) : null}
       {completion?.detail ? (
         <div className="task-chat-tool-detail-block">
-          <div className="task-chat-tool-detail-label">{completion.type === "tool_error" ? "Error" : "Result"}</div>
+          <div className="task-chat-tool-detail-label">{completion.type === "tool_error" ? t("taskChat.error", "Error") : t("taskChat.result", "Result")}</div>
           <pre className="task-chat-tool-detail">{linkifyFilePaths(completion.detail)}</pre>
         </div>
       ) : null}
@@ -337,6 +346,7 @@ function TaskChatToolInvocation({ row }: { row: Extract<TaskChatToolGroupRow, { 
 }
 
 function TaskChatToolGroup({ entries }: { entries: AgentLogEntry[] }) {
+  const { t } = useTranslation("app");
   const invocationEntries = getToolInvocationEntries(entries);
   const invocationCount = invocationEntries.length;
   const errorCount = entries.filter((entry) => entry.type === "tool_error").length;
@@ -346,16 +356,16 @@ function TaskChatToolGroup({ entries }: { entries: AgentLogEntry[] }) {
   return (
     <details className="task-chat-tool-group" data-testid="task-chat-tool-group">
       <summary className="task-chat-tool-group-summary">
-        <span className="task-chat-tool-group-count">{formatToolCallCount(invocationCount)}</span>
+        <span className="task-chat-tool-group-count">{formatToolCallCount(invocationCount, t)}</span>
         {visibleNames.length > 0 ? (
-          <span className="task-chat-tool-group-names" aria-label="Tool names">
+          <span className="task-chat-tool-group-names" aria-label={t("taskChat.toolNames", "Tool names")}>
             {visibleNames.join(", ")}
-            {overflowCount > 0 ? <span className="task-chat-tool-group-overflow">, +{overflowCount} more</span> : null}
+            {overflowCount > 0 ? <span className="task-chat-tool-group-overflow">{t("taskChat.moreTools", ", +{{count}} more", { count: overflowCount })}</span> : null}
           </span>
         ) : null}
         {errorCount > 0 ? (
           <span className="task-chat-tool-group-error-count">
-            {errorCount === 1 ? "1 error" : `${errorCount} errors`}
+            {t("taskChat.errorCount", "{{count}} error", { count: errorCount })}
           </span>
         ) : null}
       </summary>
@@ -373,11 +383,12 @@ function TaskChatToolGroup({ entries }: { entries: AgentLogEntry[] }) {
 }
 
 function TaskChatThinking({ entries }: { entries: AgentLogEntry[] }) {
+  const { t } = useTranslation("app");
   const combinedThinkingText = entries.map((entry) => entry.text).join("");
 
   return (
     <details className="task-chat-thinking" data-testid="task-chat-thinking" open>
-      <summary className="task-chat-thinking-summary">Thinking</summary>
+      <summary className="task-chat-thinking-summary">{t("taskChat.thinking", "Thinking")}</summary>
       <div className="task-chat-thinking-body">
         <div
           className="markdown-body task-chat-markdown task-chat-thinking-markdown"
@@ -407,12 +418,13 @@ FNXC:TaskChatTimestamps 2026-06-17-15:43:
 FN-6597 requires small relative timestamps on both task-chat agent group headers and user message headers, computed at render time from existing transcript timestamps without adding a live timer.
 */
 function TaskChatUserMessage({ message }: { message: UserChatMessage }) {
+  const { t } = useTranslation("app");
   const relativeTime = formatRelativeTimeAgo(message.createdAt);
 
   return (
-    <section className="task-chat-user-group" aria-label="You message">
+    <section className="task-chat-user-group" aria-label={t("taskChat.youMessage", "You message")}>
       <div className="task-chat-user-header">
-        <div className="task-chat-role-label">You</div>
+        <div className="task-chat-role-label">{t("taskChat.you", "You")}</div>
         {relativeTime ? (
           <span className="task-chat-timestamp" data-testid="task-chat-user-time">
             {relativeTime}
@@ -431,6 +443,7 @@ function TaskChatUserMessage({ message }: { message: UserChatMessage }) {
 }
 
 export function TaskChatTab({ task, projectId, active, addToast, sessionLive, onTaskUpdated, expanded = false, onToggleExpanded }: TaskChatTabProps) {
+  const { t } = useTranslation("app");
   const { entries, loading, loadMore, hasMore, loadingMore } = useAgentLogs(task.id, active, projectId);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
@@ -452,7 +465,7 @@ export function TaskChatTab({ task, projectId, active, addToast, sessionLive, on
     () => mergeUserMessages(task.steeringComments, optimisticMessages),
     [optimisticMessages, task.steeringComments],
   );
-  const transcriptItems = useMemo(() => buildTranscriptItems(entries, userMessages), [entries, userMessages]);
+  const transcriptItems = useMemo(() => buildTranscriptItems(entries, userMessages, t), [entries, t, userMessages]);
   const transcriptItemCount = entries.length + userMessages.length;
   const firstEntryKey = entries[0] ? getEntryKey(entries[0], 0) : null;
   const activeSession = isActiveAgentSession(task, { sessionLive });
@@ -463,13 +476,13 @@ export function TaskChatTab({ task, projectId, active, addToast, sessionLive, on
    * The task-detail chat must never silently accept a question when no agent session will consume it. Keep idle chats sendable, but surface that the message is saved as guidance for the next task run instead of implying a live reply.
    */
   const sessionHint = isDoneTask
-    ? "Send a message to start a refinement task for this completed task."
+    ? t("taskChat.doneSessionHint", "Send a message to start a refinement task for this completed task.")
     : activeSession
-      ? "Message the active agent session. Guidance is delivered to the running session in real time."
-      : "No agent is working on this task right now. Your message is saved as guidance and will reach an agent the next time this task runs.";
+      ? t("taskChat.activeSessionHint", "Message the active agent session. Guidance is delivered to the running session in real time.")
+      : t("taskChat.idleSessionHint", "No agent is working on this task right now. Your message is saved as guidance and will reach an agent the next time this task runs.");
   const composerPlaceholder = isDoneTask
-    ? "Start a refinement task for this completed task"
-    : "Steer the currently executing agent";
+    ? t("taskChat.donePlaceholder", "Start a refinement task for this completed task")
+    : t("taskChat.activePlaceholder", "Steer the currently executing agent");
   const canSend = draft.trim().length > 0 && !sending;
 
   const resizeComposer = useCallback(() => {
@@ -711,7 +724,7 @@ export function TaskChatTab({ task, projectId, active, addToast, sessionLive, on
           type="button"
           className="btn btn-icon btn-sm task-chat-expand-toggle task-chat-expand-toggle--overlay"
           onClick={onToggleExpanded}
-          aria-label={expanded ? "Collapse chat" : "Expand chat to full modal"}
+          aria-label={expanded ? t("taskChat.collapseChat", "Collapse chat") : t("taskChat.expandChat", "Expand chat to full modal")}
           aria-pressed={expanded}
           data-testid="task-chat-expand-toggle"
         >
@@ -731,17 +744,17 @@ export function TaskChatTab({ task, projectId, active, addToast, sessionLive, on
             {loadingMore ? (
               <div className="task-chat-load-previous-status" role="status" data-testid="task-chat-load-previous-loading">
                 <Loader2 className="animate-spin" aria-hidden="true" />
-                <span>Loading earlier messages…</span>
+                <span>{t("taskChat.loadingEarlierMessages", "Loading earlier messages…")}</span>
               </div>
             ) : (
               <button
                 type="button"
                 className="btn btn-secondary btn-sm task-chat-load-previous"
                 onClick={() => { void loadPreviousMessages(); }}
-                aria-label="Load previous messages"
+                aria-label={t("taskChat.loadPreviousMessages", "Load previous messages")}
                 data-testid="task-chat-load-previous"
               >
-                Load previous messages
+                {t("taskChat.loadPreviousMessages", "Load previous messages")}
               </button>
             )}
           </div>
@@ -749,10 +762,10 @@ export function TaskChatTab({ task, projectId, active, addToast, sessionLive, on
         {loading && transcriptItemCount === 0 ? (
           <div className="task-chat-empty" role="status">
             <Loader2 className="animate-spin" aria-hidden="true" />
-            <span>Loading agent output…</span>
+            <span>{t("taskChat.loadingAgentOutput", "Loading agent output…")}</span>
           </div>
         ) : transcriptItemCount === 0 ? (
-          <div className="task-chat-empty">No agent output yet. Live messages from Planner, Executor, Reviewer, and Merger agents will appear here.</div>
+          <div className="task-chat-empty">{t("taskChat.emptyAgentOutput", "No agent output yet. Live messages from Planner, Executor, Reviewer, and Merger agents will appear here.")}</div>
         ) : (
           transcriptItems.map((item, itemIndex) => {
             if (item.kind === "user") {
@@ -768,13 +781,13 @@ export function TaskChatTab({ task, projectId, active, addToast, sessionLive, on
             const latestEntryTimestamp = item.entries[item.entries.length - 1]?.timestamp ?? "";
             const relativeTime = formatRelativeTimeAgo(latestEntryTimestamp);
             return (
-              <section className="task-chat-group" key={`${item.role ?? "agent"}-${itemIndex}`} aria-label={`${item.label} messages`}>
+              <section className="task-chat-group" key={`${item.role ?? "agent"}-${itemIndex}`} aria-label={t("taskChat.agentMessages", "{{label}} messages", { label: item.label })}>
                 <header className="task-chat-group-header">
                   <AgentAvatar agent={avatarAgent} className="task-chat-avatar" />
                   <div>
                     <div className="task-chat-role-label">{item.label}</div>
                     <div className="task-chat-group-meta">
-                      <span>{item.entries.length === 1 ? "1 entry" : `${item.entries.length} entries`}</span>
+                      <span>{t("taskChat.entryCount", "{{count}} entry", { count: item.entries.length })}</span>
                       {relativeTime ? (
                         <span className="task-chat-timestamp" data-testid="task-chat-group-time">
                           {relativeTime}
@@ -798,11 +811,11 @@ export function TaskChatTab({ task, projectId, active, addToast, sessionLive, on
             type="button"
             className="task-chat-jump-to-bottom"
             onClick={scrollTranscriptToBottom}
-            aria-label="Jump to latest message"
+            aria-label={t("taskChat.jumpToLatestMessage", "Jump to latest message")}
             data-testid="task-chat-jump-to-bottom"
           >
             <ChevronDown aria-hidden="true" />
-            <span>Latest</span>
+            <span>{t("taskChat.latest", "Latest")}</span>
           </button>
         ) : null}
       </div>
@@ -826,15 +839,15 @@ export function TaskChatTab({ task, projectId, active, addToast, sessionLive, on
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={handleKeyDown}
             disabled={sending}
-            aria-label="Message active agent session"
+            aria-label={t("taskChat.messageActiveAgentSession", "Message active agent session")}
             rows={1}
           />
           <button
             type="submit"
             className="btn btn-primary btn-icon task-chat-send"
             disabled={!canSend}
-            aria-label={sending ? "Sending" : "Send"}
-            title={sending ? "Sending" : "Send"}
+            aria-label={sending ? t("taskChat.sending", "Sending") : t("common:actions.send", "Send")}
+            title={sending ? t("taskChat.sending", "Sending") : t("common:actions.send", "Send")}
           >
             {sending ? <Loader2 className="animate-spin" aria-hidden="true" /> : <Send aria-hidden="true" />}
           </button>

@@ -1181,7 +1181,11 @@
       "workflowMismatch": ""
     },
     "todo": "待办",
-    "triage": "分诊"
+    "triage": "分诊",
+    "workflow": {
+      "edit": "",
+      "new": ""
+    }
   },
   "branchGroup": {
     "abandonGroup": "",
@@ -1810,7 +1814,8 @@
     "heading": "评论",
     "placeholder": "添加评论",
     "postingButton": "发布中…",
-    "updatedSuccess": "评论已更新"
+    "updatedSuccess": "评论已更新",
+    "aiGuidance": ""
   },
   "commit": {
     "filesChanged_one": "",
@@ -4686,7 +4691,60 @@
     "rerunPreflight": "重新运行飞行前检查",
     "revertToAi": "恢复为 AI 版本",
     "titleLabel": "标题",
-    "usingTemplate": "使用 <code>.github/pull_request_template.md</code>"
+    "usingTemplate": "使用 <code>.github/pull_request_template.md</code>",
+    "assignees": "",
+    "dismissConflictResolutionError": "",
+    "dismissPushBranchError": "",
+    "error": {
+      "actionOpen": "",
+      "actionRun": "",
+      "docs": ""
+    },
+    "generatingBody": "",
+    "generatingTitle": "",
+    "labels": "",
+    "loadingOptions": "",
+    "loadingPreflight": "",
+    "noChangedFiles": "",
+    "noCommits": "",
+    "pushBranch": {
+      "button": "",
+      "message": "",
+      "title": ""
+    },
+    "resolveConflicts": {
+      "button": "",
+      "message": "",
+      "title": ""
+    },
+    "reviewers": "",
+    "view": {
+      "agentDisagreed": "",
+      "agentReplyFix": "",
+      "approve": "",
+      "autoMerge": "",
+      "close": "",
+      "confirmMerge": "",
+      "creating": "",
+      "creationFailed": "",
+      "loading": "",
+      "merge": "",
+      "mergeableLabel": "",
+      "mergeDisabledUntilVerified": "",
+      "none": "",
+      "noReviewThreads": "",
+      "requestRetry": "",
+      "resolveConflictsBeforeMerge": "",
+      "resolveConflictsOnGithub": "",
+      "responseAlreadyInProgress": "",
+      "responsePending_one": "",
+      "responsePending_other": "",
+      "retryCreation": "",
+      "reviewLabel": "",
+      "threadFixed": "",
+      "threadPending": "",
+      "verifyingGithub": ""
+    }
   },
   "preview": {
     "blockedDescription": "您可以在单独的浏览器标签页中查看预览。",
@@ -5553,7 +5611,8 @@
       "totalSize": "",
       "view": "",
       "whenEnabledProjectAndAgentMemoryFilesAre": "",
-      "whenEnabledTheDatabaseIsBackedUpAutomatically": ""
+      "whenEnabledTheDatabaseIsBackedUpAutomatically": "",
+      "createFailed": ""
     },
     "clearToDefault": "",
     "cliAgents": {
@@ -5597,7 +5656,9 @@
     },
     "footer": {
       "help": "帮助",
-      "version": "版本 {{version}}"
+      "version": "版本 {{version}}",
+      "checkUpdates": "",
+      "helpDiscussions": ""
     },
     "general": {
       "25": "",
@@ -5746,7 +5807,10 @@
       "whenEnabledStartupRefreshesModelsThroughTheLocal": ""
     },
     "header": {
-      "discord": "Discord"
+      "discord": "Discord",
+      "joinDiscord": "",
+      "star": "",
+      "starFusion": ""
     },
     "importExport": {
       "confirmImport": "确认导入",
@@ -5756,7 +5820,35 @@
       "importing": "导入中…",
       "importTitle": "导入设置",
       "loadingFile": "加载中…",
-      "reviewPrompt": "查看要导入的设置："
+      "reviewPrompt": "查看要导入的设置：",
+      "counts": {
+        "global_one": "",
+        "global_other": "",
+        "project_one": "",
+        "project_other": "",
+        "workflowSettings_one": "",
+        "workflowSettings_other": ""
+      },
+      "exported": "",
+      "exportFailed": "",
+      "globalSettings": "",
+      "imported": "",
+      "importFailed": "",
+      "importFailedDetailed": "",
+      "importScope": "",
+      "importTitleAttr": "",
+      "invalidJson": "",
+      "mergeExisting": "",
+      "projectSettings": "",
+      "replaceWarning": "",
+      "scopeBoth": "",
+      "scopeGlobal": "",
+      "scopeLabel": {
+        "all": "",
+        "global": "",
+        "project": ""
+      },
+      "scopeProject": ""
     },
     "jsonPlaceholder": "输入 JSON 值...",
     "keepLocal": "保留本地",
@@ -5806,7 +5898,10 @@
       "searchMemoryWithQmd": "",
       "testing": "测试中…",
       "testRetrieval": "测试检索",
-      "turnsDailyNotesIntoDREAMSMdAndPromotes": ""
+      "turnsDailyNotesIntoDREAMSMdAndPromotes": "",
+      "qmdInstalled": "",
+      "qmdInstallFailed": "",
+      "qmdInstallUnavailable": ""
     },
     "merge": {
       "abort": "",
@@ -6155,7 +6250,8 @@
       "uRLAndQRGenerationUseTheSelectedToken": "",
       "uRLNoHostnameOrPortConfigurationNeeded": "",
       "useExisting": "使用现有",
-      "usingQuickTunnel": ""
+      "usingQuickTunnel": "",
+      "installationFailed": ""
     },
     "researchGlobal": {
       "advancedExternalSearchProviders": "",
@@ -6275,7 +6371,9 @@
       "timeoutInMinutesForDetectingStuckTasksWhen": "",
       "whenEnabledTasksThatModifyTheSameFiles": "",
       "whenEnabledTasksWithStalePlansPROMPTMd": "",
-      "whenTheStuckDetectorKillsAndReQueues": ""
+      "whenTheStuckDetectorKillsAndReQueues": "",
+      "browseWorkspacePath": "",
+      "overlapPickerNote": ""
     },
     "scope": {
       "globalBanner": "这些设置在所有 Fusion 项目中共享。",
@@ -6335,7 +6433,12 @@
       "worktrunk": "",
       "worktrunkBinaryPath": "",
       "worktrunkFailureBehavior": "",
-      "worktrunkIntegration": ""
+      "worktrunkIntegration": "",
+      "worktreesPickerNote": ""
+    },
+    "fileBrowser": {
+      "currentDirectory": "",
+      "projectRoot": ""
     }
   },
   "setup": {
@@ -6655,7 +6758,10 @@
     "withoutGitHub1": "手动创建任务",
     "withoutGitHub2": "为 AI 代理描述工作",
     "withoutGitHub3": "在看板上跟踪进度",
-    "withoutGitHubHeading": "不使用 GitHub（现在可用）："
+    "withoutGitHubHeading": "不使用 GitHub（现在可用）：",
+    "brandLogo": "",
+    "brandName": "",
+    "setupCompleteTitle": ""
   },
   "shell": {
     "activePill": "活跃",
@@ -7201,7 +7307,8 @@
       "mergingFixes": "正在合并修复…",
       "mergingPr": "正在合并 PR…",
       "startPrReview": "开始 PR 审查",
-      "statusRefreshed": "PR 状态已刷新"
+      "statusRefreshed": "PR 状态已刷新",
+      "label": ""
     },
     "priority": {
       "ariaLabel": "任务优先级",
@@ -7216,7 +7323,8 @@
     },
     "provenance": {
       "createdBy": "创建者：",
-      "createdVia": "通过…创建"
+      "createdVia": "通过…创建",
+      "parentTaskOf": ""
     },
     "recoveryState": "恢复状态",
     "refine": {
@@ -7955,7 +8063,43 @@
     "switchToMarkdown": "切换到 Markdown",
     "switchToPlain": "切换到纯文本",
     "thinkingLevel": "",
-    "workflowName": ""
+    "workflowName": "",
+    "aggregateAdvisory": "",
+    "aggregateAllPassed": "",
+    "aggregateInProgress": "",
+    "aggregateNoResults": "",
+    "approveAndRun": "",
+    "approveCommandError": "",
+    "approving": "",
+    "awaitingInputTitle": "",
+    "cliApprovalRejectHint": "",
+    "cliApprovalTitle": "",
+    "cliApprovalWarning": "",
+    "customWorkflowFallback": "",
+    "customWorkflowLabel": "",
+    "defaultWorkflow": "",
+    "executionAwaitingCliApproval": "",
+    "executionAwaitingInput": "",
+    "executionCompleted": "",
+    "executionNotStarted": "",
+    "executionPaused": "",
+    "executionPostMerge": "",
+    "executionPreMerge": "",
+    "inputPlaceholder": "",
+    "modelDefault": "",
+    "postMerge": "",
+    "preMerge": "",
+    "replyInComments": "",
+    "resumeTaskError": "",
+    "resuming": "",
+    "statusAdvisory": "",
+    "statusFailed": "",
+    "statusPassed": "",
+    "statusRunning": "",
+    "statusSkipped": "",
+    "submitAndResume": "",
+    "submitting": "",
+    "waitingForOutput": ""
   },
   "workflowColumns": {
     "add": "",
@@ -8007,7 +8151,30 @@
     },
     "collapsePrompt": "",
     "editingPrompt": "",
-    "expandPrompt": ""
+    "expandPrompt": "",
+    "agent": "",
+    "agentsLoadFailed": "",
+    "autoApproveRequests": "",
+    "autoApproveRequestsNote": "",
+    "cliCommandNote": "",
+    "cliMode": "",
+    "cliScript": "",
+    "command": "",
+    "executor": "",
+    "maxRetries": "",
+    "model": "",
+    "modelsLoadFailed": "",
+    "namedScript": "",
+    "namedScriptNote": "",
+    "prompt": "",
+    "scriptName": "",
+    "selectAgent": "",
+    "selectSkill": "",
+    "skill": "",
+    "skillsLoadFailed": "",
+    "skipFirstRunApproval": "",
+    "waitForUserInput": "",
+    "waitForUserInputNote": ""
   },
   "workflowFields": {
     "add": "添加字段",
@@ -8141,7 +8308,11 @@
     "templatesPluginSteps": "插件步骤",
     "templatesSection": "模板",
     "timeoutMs": "",
-    "trivialGraphHint": "此工作流仅运行开始→结束。从上方面板添加步骤以构建工作流。"
+    "trivialGraphHint": "此工作流仅运行开始→结束。从上方面板添加步骤以构建工作流。",
+    "conditionFailure": "",
+    "conditionSuccess": "",
+    "nodeInspector": "",
+    "readOnlyDuplicateToEdit": ""
   },
   "workflows": {
     "aiEdit": "用 AI 设计",
@@ -8204,13 +8375,27 @@
     "templateNodeCount_other": "{{count}} 个节点",
     "templatePickerLabel": "从…开始",
     "templateSectionBuiltin": "内置工作流",
-    "templateSectionYours": "我的工作流"
+    "templateSectionYours": "我的工作流",
+    "closeEditor": "",
+    "duplicatedEditable": "",
+    "duplicateFailed": "",
+    "loadFailed": "",
+    "loading": "",
+    "noneYet": "",
+    "title": ""
   },
   "workflowSelector": {
     "switchActiveMessage": "",
     "switchActiveTitle": "",
     "switchCancel": "",
-    "switchConfirm": ""
+    "switchConfirm": "",
+    "applyFailed": "",
+    "defaultCleared": "",
+    "defaultSet": "",
+    "defaultWorkflowLabel": "",
+    "loadFailed": "",
+    "manage": "",
+    "none": ""
   },
   "workflowSettings": {
     "add": "",
@@ -8288,5 +8473,50 @@
     "installRequestTitle": "Worktrunk 安装请求",
     "sha256": "SHA-256",
     "version": "版本"
+  },
+  "taskChat": {
+    "activePlaceholder": "",
+    "activeSessionHint": "",
+    "agentMessages": "",
+    "arguments": "",
+    "collapseChat": "",
+    "donePlaceholder": "",
+    "doneSessionHint": "",
+    "emptyAgentOutput": "",
+    "entryCount_one": "",
+    "entryCount_other": "",
+    "error": "",
+    "errorCount_one": "",
+    "errorCount_other": "",
+    "expandChat": "",
+    "idleSessionHint": "",
+    "jumpToLatestMessage": "",
+    "latest": "",
+    "loadingAgentOutput": "",
+    "loadingEarlierMessages": "",
+    "loadPreviousMessages": "",
+    "message": "",
+    "messageActiveAgentSession": "",
+    "moreTools_one": "",
+    "moreTools_other": "",
+    "result": "",
+    "roles": {
+      "agent": "",
+      "executor": "",
+      "merger": "",
+      "planner": "",
+      "reviewer": ""
+    },
+    "sending": "",
+    "thinking": "",
+    "toolCall": "",
+    "toolCallCount_one": "",
+    "toolCallCount_other": "",
+    "toolCallTo": "",
+    "toolError": "",
+    "toolNames": "",
+    "toolResult": "",
+    "you": "",
+    "youMessage": ""
   }
 }

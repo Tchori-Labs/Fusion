@@ -115,7 +115,7 @@ export function TaskComments({ task, onTaskUpdated, addToast, currentAuthor = "u
                 <div className="detail-log-header comments-header-row">
                   <div className="comments-author-row">
                     {isAIGuidance ? (
-                      <span className="ai-guidance-badge" data-testid="ai-guidance-badge">AI Guidance</span>
+                      <span className="ai-guidance-badge" data-testid="ai-guidance-badge">{t("comments.aiGuidance", "AI Guidance")}</span>
                     ) : (
                       <strong>{comment.author}</strong>
                     )}

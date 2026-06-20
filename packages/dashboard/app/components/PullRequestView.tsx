@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   GitPullRequest,
   GitMerge,
@@ -101,6 +102,7 @@ function ChecksIcon({ rollup }: { rollup: string }) {
 }
 
 export function PullRequestView(props: PullRequestViewProps) {
+  const { t } = useTranslation("app");
   const { detail: detailProp, pullRequestId, projectId, onAction, loadPullRequest } = props;
   const [detail, setDetail] = useState<PrDetail | null>(detailProp ?? null);
   const [error, setError] = useState<string | null>(null);
@@ -166,7 +168,7 @@ export function PullRequestView(props: PullRequestViewProps) {
   if (!detail) {
     return (
       <div className="pr-view pr-view--loading" data-testid="pr-view-loading">
-        Loading PR…
+        {t("pr.view.loading", "Loading PR…")}
       </div>
     );
   }
@@ -179,7 +181,7 @@ export function PullRequestView(props: PullRequestViewProps) {
       <div className="pr-view" data-testid="pr-view" data-state="creating">
         <PrIdentityHeader detail={detail} />
         <div className="pr-placeholder" data-testid="pr-creating">
-          <Clock size={16} /> Creating PR…
+          <Clock size={16} /> {t("pr.view.creating", "Creating PR…")}
         </div>
       </div>
     );
@@ -192,7 +194,7 @@ export function PullRequestView(props: PullRequestViewProps) {
         <PrIdentityHeader detail={detail} />
         <div className="pr-error-reason" data-testid="pr-failed">
           <AlertTriangle size={16} className="pr-icon-failure" />
-          <span>{detail.failureReason ?? "PR creation failed"}</span>
+          <span>{detail.failureReason ?? t("pr.view.creationFailed", "PR creation failed")}</span>
         </div>
         <div className="pr-action-bar">
           <button
@@ -202,7 +204,7 @@ export function PullRequestView(props: PullRequestViewProps) {
             disabled={busy === "retry-create"}
             onClick={() => void runAction("retry-create")}
           >
-            <RotateCcw size={14} /> Retry PR creation
+            <RotateCcw size={14} /> {t("pr.view.retryCreation", "Retry PR creation")}
           </button>
         </div>
         {error && <div className="pr-inline-error">{error}</div>}
@@ -216,7 +218,7 @@ export function PullRequestView(props: PullRequestViewProps) {
       <div className="pr-view" data-testid="pr-view" data-state="unverified">
         <PrIdentityHeader detail={detail} />
         <div className="pr-notice pr-notice--unverified" data-testid="pr-unverified">
-          <Clock size={16} /> Verifying with GitHub…
+          <Clock size={16} /> {t("pr.view.verifyingGithub", "Verifying with GitHub…")}
         </div>
         <div className="pr-action-bar">
           <button
@@ -224,9 +226,9 @@ export function PullRequestView(props: PullRequestViewProps) {
             className="pr-action"
             data-testid="pr-merge"
             disabled
-            title="Merge is disabled until GitHub verifies this PR"
+            title={t("pr.view.mergeDisabledUntilVerified", "Merge is disabled until GitHub verifies this PR")}
           >
-            <GitMerge size={14} /> Merge
+            <GitMerge size={14} /> {t("pr.view.merge", "Merge")}
           </button>
         </div>
         {/* checks/threads hidden while unverified */}
@@ -243,8 +245,7 @@ export function PullRequestView(props: PullRequestViewProps) {
       {/* responding banner */}
       {state === "responding" && (
         <div className="pr-banner pr-banner--responding" data-testid="pr-responding">
-          <MessageSquare size={16} /> Response run in progress — {summary.pendingThreads} threads
-          pending
+          <MessageSquare size={16} /> {t("pr.view.responsePending", "Response run in progress — {{count}} threads pending", { count: summary.pendingThreads })}
         </div>
       )}
 
@@ -257,17 +258,17 @@ export function PullRequestView(props: PullRequestViewProps) {
           disabled={state === "responding" || busy === "approve"}
           onClick={() => void runAction("approve")}
         >
-          <ThumbsUp size={14} /> Approve
+          <ThumbsUp size={14} /> {t("pr.view.approve", "Approve")}
         </button>
         <button
           type="button"
           className="pr-action pr-action--retry"
           data-testid="pr-retry"
           disabled={state === "responding" || busy === "retry"}
-          title={state === "responding" ? "A response run is already in progress" : undefined}
+          title={state === "responding" ? t("pr.view.responseAlreadyInProgress", "A response run is already in progress") : undefined}
           onClick={() => void runAction("retry")}
         >
-          <RotateCcw size={14} /> Request retry
+          <RotateCcw size={14} /> {t("pr.view.requestRetry", "Request retry")}
         </button>
         {!confirmingMerge ? (
           <button
@@ -275,10 +276,10 @@ export function PullRequestView(props: PullRequestViewProps) {
             className="pr-action pr-action--merge"
             data-testid="pr-merge"
             disabled={conflicting || state === "responding" || busy === "merge"}
-            title={conflicting ? "Resolve conflicts on GitHub before merging" : undefined}
+            title={conflicting ? t("pr.view.resolveConflictsBeforeMerge", "Resolve conflicts on GitHub before merging") : undefined}
             onClick={() => setConfirmingMerge(true)}
           >
-            <GitMerge size={14} /> Merge
+            <GitMerge size={14} /> {t("pr.view.merge", "Merge")}
           </button>
         ) : (
           <button
@@ -288,7 +289,7 @@ export function PullRequestView(props: PullRequestViewProps) {
             disabled={busy === "merge"}
             onClick={() => void runAction("merge")}
           >
-            <GitMerge size={14} /> Confirm merge
+            <GitMerge size={14} /> {t("pr.view.confirmMerge", "Confirm merge")}
           </button>
         )}
         <button
@@ -298,7 +299,7 @@ export function PullRequestView(props: PullRequestViewProps) {
           disabled={busy === "close"}
           onClick={() => void runAction("close")}
         >
-          <XCircle size={14} /> Close
+          <XCircle size={14} /> {t("pr.view.close", "Close")}
         </button>
 
         <label className="pr-automerge-toggle" data-testid="pr-automerge">
@@ -308,7 +309,7 @@ export function PullRequestView(props: PullRequestViewProps) {
             disabled={busy === "automerge"}
             onChange={(e) => void runAction("automerge", { enabled: e.target.checked })}
           />
-          <span>Auto-merge</span>
+          <span>{t("pr.view.autoMerge", "Auto-merge")}</span>
           <span className="pr-automerge-gate" data-testid="pr-automerge-gate">
             {summary.autoMergeReason}
           </span>
@@ -324,17 +325,17 @@ export function PullRequestView(props: PullRequestViewProps) {
           target="_blank"
           rel="noopener noreferrer"
         >
-          Resolve conflicts on GitHub <ExternalLink size={12} />
+          {t("pr.view.resolveConflictsOnGithub", "Resolve conflicts on GitHub")} <ExternalLink size={12} />
         </a>
       )}
 
       {/* ── merge-readiness summary ─────────────────────────────────────── */}
       <div className="pr-summary" data-testid="pr-summary">
         <span className="pr-summary-item" data-testid="pr-summary-mergeable">
-          Mergeable: {summary.mergeable}
+          {t("pr.view.mergeableLabel", "Mergeable:")} {summary.mergeable}
         </span>
         <span className="pr-summary-item" data-testid="pr-summary-review">
-          Review: {summary.reviewDecision ?? "none"}
+          {t("pr.view.reviewLabel", "Review:")} {summary.reviewDecision ?? t("pr.view.none", "none")}
         </span>
         <span className="pr-summary-item" data-testid="pr-summary-checks">
           <ChecksIcon rollup={summary.checksRollup} /> {summary.checksRollup}
@@ -344,7 +345,7 @@ export function PullRequestView(props: PullRequestViewProps) {
       {/* ── threads (agent replies nested) ───────────────────────────────── */}
       <div className="pr-threads" data-testid="pr-threads">
         {detail.threads.length === 0 ? (
-          <div className="pr-threads-empty">No review threads.</div>
+          <div className="pr-threads-empty">{t("pr.view.noReviewThreads", "No review threads.")}</div>
         ) : (
           detail.threads.map((thread) => (
             <div
@@ -358,24 +359,24 @@ export function PullRequestView(props: PullRequestViewProps) {
               <div className="pr-thread-head">
                 {thread.outcome === "pending" && (
                   <span className="pr-thread-pending">
-                    <Clock size={12} /> pending
+                    <Clock size={12} /> {t("pr.view.threadPending", "pending")}
                   </span>
                 )}
                 {thread.outcome === "disagreed" && (
                   <span className="pr-thread-disagreed">
-                    <AlertTriangle size={12} /> agent disagreed
+                    <AlertTriangle size={12} /> {t("pr.view.agentDisagreed", "agent disagreed")}
                   </span>
                 )}
                 {thread.outcome === "fixed" && (
                   <span className="pr-thread-fixed">
-                    <CheckCircle size={12} /> fixed
+                    <CheckCircle size={12} /> {t("pr.view.threadFixed", "fixed")}
                   </span>
                 )}
                 <span className="pr-thread-id">{thread.threadId}</span>
               </div>
               {thread.fixCommitSha && (
                 <div className="pr-thread-reply" data-testid="pr-thread-reply">
-                  Agent reply — fix {thread.fixCommitSha.slice(0, 8)}
+                  {t("pr.view.agentReplyFix", "Agent reply — fix {{sha}}", { sha: thread.fixCommitSha.slice(0, 8) })}
                 </div>
               )}
             </div>
