@@ -1878,51 +1878,65 @@ describe("TaskExecutor bounded recovery retries", () => {
     expect(store.handoffToReview).not.toHaveBeenCalled();
   });
 
-  it.each(["todo", "done"] as const)(
-    "surfaces paused graph exits in already-advanced %s column without lifecycle movement",
-    async (column) => {
-      const store = createMockStore();
-      const task = {
-        id: "FN-001",
-        title: "Test",
-        description: "Test",
-        column: "in-progress",
-        status: undefined,
-        dependencies: [],
-        steps: [{ name: "Preflight", status: "pending" }],
-        currentStep: 0,
-        log: [{ timestamp: new Date().toISOString(), action: "Resuming execution after unpause" }],
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      } as Task;
-      store.getTask.mockResolvedValue({
-        ...task,
-        column,
-        paused: true,
-        status: undefined,
-        error: null,
-      });
-      const executor = new TaskExecutor(store, "/tmp/test", {});
+  function advancedColumnTask(): Task {
+    return {
+      id: "FN-001",
+      title: "Test",
+      description: "Test",
+      column: "in-progress",
+      status: undefined,
+      dependencies: [],
+      steps: [{ name: "Preflight", status: "pending" }],
+      currentStep: 0,
+      log: [{ timestamp: new Date().toISOString(), action: "Resuming execution after unpause" }],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    } as Task;
+  }
 
-      await (executor as any).handleGraphFailure(task, {
-        visitedNodeIds: ["execute"],
-      });
+  // FN-6782: a paused graph exit that already landed back in `todo` is BENIGN —
+  // it must NOT be parked `failed` (that re-fail loop was the retry storm). It
+  // logs a benign line, clears the pause-abort marker, and leaves the task in
+  // todo for normal scheduling. (Previously this was surfaced as an
+  // operator-action failure; see the `done` case below for the still-surfaced path.)
+  it("treats a paused graph exit re-queued to todo as benign without parking failed", async () => {
+    const store = createMockStore();
+    const task = advancedColumnTask();
+    store.getTask.mockResolvedValue({ ...task, column: "todo", paused: true, status: undefined, error: null });
+    const executor = new TaskExecutor(store, "/tmp/test", {});
 
-      const expectedMessage = `Workflow graph failure surfaced after paused task pause in '${column}' at node 'execute' — operator action required; retry or explicitly unpause/resume after inspecting the task`;
-      expect(store.logEntry).toHaveBeenCalledWith("FN-001", expectedMessage, undefined, undefined);
-      if (column === "done") {
-        expect(store.updateTask).not.toHaveBeenCalledWith(
-          "FN-001",
-          expect.objectContaining({ status: "failed" }),
-          expect.anything(),
-        );
-      } else {
-        expect(store.updateTask).toHaveBeenCalledWith("FN-001", { error: expectedMessage, status: "failed" }, undefined);
-      }
-      expect(store.moveTask).not.toHaveBeenCalled();
-      expect(store.handoffToReview).not.toHaveBeenCalled();
-    },
-  );
+    await (executor as any).handleGraphFailure(task, { visitedNodeIds: ["execute"] });
+
+    const benignMessage = "Workflow graph run ended during task pause with task re-queued to todo — benign, cleared for normal scheduling";
+    expect(store.logEntry).toHaveBeenCalledWith("FN-001", benignMessage, undefined, undefined);
+    expect(store.updateTask).not.toHaveBeenCalledWith(
+      "FN-001",
+      expect.objectContaining({ status: "failed" }),
+      expect.anything(),
+    );
+    expect(store.moveTask).not.toHaveBeenCalled();
+    expect(store.handoffToReview).not.toHaveBeenCalled();
+  });
+
+  it("surfaces a paused graph exit in an already-advanced done column without parking failed", async () => {
+    const store = createMockStore();
+    const task = advancedColumnTask();
+    store.getTask.mockResolvedValue({ ...task, column: "done", paused: true, status: undefined, error: null });
+    const executor = new TaskExecutor(store, "/tmp/test", {});
+
+    await (executor as any).handleGraphFailure(task, { visitedNodeIds: ["execute"] });
+
+    const expectedMessage = "Workflow graph failure surfaced after paused task pause in 'done' at node 'execute' — operator action required; retry or explicitly unpause/resume after inspecting the task";
+    expect(store.logEntry).toHaveBeenCalledWith("FN-001", expectedMessage, undefined, undefined);
+    // done/archived are terminal — surfaced via log only, never parked failed.
+    expect(store.updateTask).not.toHaveBeenCalledWith(
+      "FN-001",
+      expect.objectContaining({ status: "failed" }),
+      expect.anything(),
+    );
+    expect(store.moveTask).not.toHaveBeenCalled();
+    expect(store.handoffToReview).not.toHaveBeenCalled();
+  });
 
   describe("merge-seam abort classification (FN-6568)", () => {
     /*
