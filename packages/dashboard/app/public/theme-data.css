@@ -2227,7 +2227,11 @@ FN-6756 adds shadcn color-family themes as exact zinc-neutral shadcn variants wi
   --accent-text: #18181b;
 }
 
-[data-color-theme="shadcn-mono"] {
+/*
+FNXC:DashboardTheming 2026-06-20-00:00:
+FN-6813 makes the shadcn mono theme a color family: shadcn-mono-red preserves the renamed legacy red accent while the other mono variants reuse the same zinc-neutral tokens and swap only accent/CTA values. Legacy stored shadcn-mono selections remap in bootstrap/theme hooks so users keep the red mono theme instead of falling back to default.
+*/
+[data-color-theme="shadcn-mono-red"] {
   --bg: #09090b;
   --surface: #0c0c0e;
   --card: #18181b;
@@ -2298,7 +2302,8 @@ FN-6756 adds shadcn color-family themes as exact zinc-neutral shadcn variants wi
   --accent-text: #ffffff;
 }
 
-[data-color-theme="shadcn-mono"][data-theme="light"] {
+
+[data-color-theme="shadcn-mono-red"][data-theme="light"] {
   --bg: #ffffff;
   --surface: #ffffff;
   --card: #ffffff;
@@ -2344,6 +2349,727 @@ FN-6756 adds shadcn color-family themes as exact zinc-neutral shadcn variants wi
   --accent: #dc2626;
   --accent-text: #ffffff;
 }
+
+
+[data-color-theme="shadcn-mono-blue"] {
+  --bg: #09090b;
+  --surface: #0c0c0e;
+  --card: #18181b;
+  --card-hover: #1f1f23;
+  --surface-hover: color-mix(in srgb, var(--surface) 90%, var(--text) 10%);
+  --border: #27272a;
+
+  --text: #fafafa;
+  --text-muted: #a1a1aa;
+  --text-dim: #52525b;
+
+  --todo: #a1a1aa;
+  --in-progress: #71717a;
+  --in-progress-rgb: 113, 113, 122;
+  --in-review: #71717a;
+  --triage: #a1a1aa;
+  --done: #52525b;
+
+  --color-success: #71717a;
+  --color-warning: #a1a1aa;
+  --color-error: #ef4444;
+  --color-muted: #71717a;
+
+  --font-primary: "Geist", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, Monaco, Consolas, monospace;
+
+  --space-xs: 4px;
+  --space-sm: 6px;
+  --space-md: 10px;
+  --space-lg: 16px;
+  --space-xl: 20px;
+  --space-2xl: 28px;
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius: var(--radius-md);
+
+  --btn-padding: 6px 12px;
+  --btn-border-width: 1px;
+  --card-padding: 10px 12px;
+  --modal-padding: var(--space-md) var(--space-lg);
+  --header-padding: var(--space-sm) var(--space-lg);
+  --column-gap: var(--space-md);
+  --board-padding: var(--space-md) var(--space-lg);
+
+  --shadow-sm: 0 1px 2px color-mix(in srgb, #000000 18%, transparent);
+  --shadow-md: 0 1px 3px color-mix(in srgb, #000000 22%, transparent);
+  --shadow-lg: 0 4px 12px color-mix(in srgb, #000000 24%, transparent);
+  --shadow-glow: none;
+  --glow-success: none;
+  --glow-warning: none;
+  --glow-danger: none;
+  --focus-ring: 0 0 0 calc(var(--btn-border-width) * 3) color-mix(in srgb, var(--accent) 35%, transparent);
+  --focus-ring-strong: 0 0 0 calc(var(--btn-border-width) * 3) color-mix(in srgb, var(--accent) 45%, transparent);
+  --shadow: var(--shadow-lg);
+
+  --cta-bg: #3b82f6;
+  --cta-border: #3b82f6;
+  --cta-text: #ffffff;
+  --cta-bg-hover: #2563eb;
+  --cta-border-hover: #2563eb;
+  --cta-glow: none;
+  --logo-accent: var(--accent);
+  --color-info: #a1a1aa;
+  --accent: #3b82f6;
+  --accent-text: #ffffff;
+}
+
+
+[data-color-theme="shadcn-mono-blue"][data-theme="light"] {
+  --bg: #ffffff;
+  --surface: #ffffff;
+  --card: #ffffff;
+  --card-hover: #f4f4f5;
+  --surface-hover: color-mix(in srgb, var(--surface) 92%, var(--text) 8%);
+  --border: #e4e4e7;
+
+  --text: #09090b;
+  --text-muted: #71717a;
+  --text-dim: #a1a1aa;
+
+  --todo: #71717a;
+  --in-progress: #71717a;
+  --in-progress-rgb: 113, 113, 122;
+  --in-review: #52525b;
+  --triage: #71717a;
+  --done: #a1a1aa;
+
+  --color-success: #71717a;
+  --color-warning: #71717a;
+  --color-error: #dc2626;
+  --color-muted: #71717a;
+
+  --shadow-sm: 0 1px 2px color-mix(in srgb, var(--text) 8%, transparent);
+  --shadow-md: 0 1px 3px color-mix(in srgb, var(--text) 10%, transparent);
+  --shadow-lg: 0 4px 12px color-mix(in srgb, var(--text) 12%, transparent);
+  --shadow-glow: none;
+  --glow-success: none;
+  --glow-warning: none;
+  --glow-danger: none;
+  --focus-ring: 0 0 0 calc(var(--btn-border-width) * 3) color-mix(in srgb, var(--accent) 18%, transparent);
+  --focus-ring-strong: 0 0 0 calc(var(--btn-border-width) * 3) color-mix(in srgb, var(--accent) 28%, transparent);
+  --shadow: var(--shadow-lg);
+
+  --cta-bg: #2563eb;
+  --cta-border: #2563eb;
+  --cta-text: #ffffff;
+  --cta-bg-hover: #1d4ed8;
+  --cta-border-hover: #1d4ed8;
+  --cta-glow: none;
+  --logo-accent: var(--accent);
+  --color-info: #71717a;
+  --accent: #2563eb;
+  --accent-text: #ffffff;
+}
+
+
+[data-color-theme="shadcn-mono-green"] {
+  --bg: #09090b;
+  --surface: #0c0c0e;
+  --card: #18181b;
+  --card-hover: #1f1f23;
+  --surface-hover: color-mix(in srgb, var(--surface) 90%, var(--text) 10%);
+  --border: #27272a;
+
+  --text: #fafafa;
+  --text-muted: #a1a1aa;
+  --text-dim: #52525b;
+
+  --todo: #a1a1aa;
+  --in-progress: #71717a;
+  --in-progress-rgb: 113, 113, 122;
+  --in-review: #71717a;
+  --triage: #a1a1aa;
+  --done: #52525b;
+
+  --color-success: #71717a;
+  --color-warning: #a1a1aa;
+  --color-error: #ef4444;
+  --color-muted: #71717a;
+
+  --font-primary: "Geist", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, Monaco, Consolas, monospace;
+
+  --space-xs: 4px;
+  --space-sm: 6px;
+  --space-md: 10px;
+  --space-lg: 16px;
+  --space-xl: 20px;
+  --space-2xl: 28px;
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius: var(--radius-md);
+
+  --btn-padding: 6px 12px;
+  --btn-border-width: 1px;
+  --card-padding: 10px 12px;
+  --modal-padding: var(--space-md) var(--space-lg);
+  --header-padding: var(--space-sm) var(--space-lg);
+  --column-gap: var(--space-md);
+  --board-padding: var(--space-md) var(--space-lg);
+
+  --shadow-sm: 0 1px 2px color-mix(in srgb, #000000 18%, transparent);
+  --shadow-md: 0 1px 3px color-mix(in srgb, #000000 22%, transparent);
+  --shadow-lg: 0 4px 12px color-mix(in srgb, #000000 24%, transparent);
+  --shadow-glow: none;
+  --glow-success: none;
+  --glow-warning: none;
+  --glow-danger: none;
+  --focus-ring: 0 0 0 calc(var(--btn-border-width) * 3) color-mix(in srgb, var(--accent) 35%, transparent);
+  --focus-ring-strong: 0 0 0 calc(var(--btn-border-width) * 3) color-mix(in srgb, var(--accent) 45%, transparent);
+  --shadow: var(--shadow-lg);
+
+  --cta-bg: #22c55e;
+  --cta-border: #22c55e;
+  --cta-text: #ffffff;
+  --cta-bg-hover: #16a34a;
+  --cta-border-hover: #16a34a;
+  --cta-glow: none;
+  --logo-accent: var(--accent);
+  --color-info: #a1a1aa;
+  --accent: #22c55e;
+  --accent-text: #ffffff;
+}
+
+
+[data-color-theme="shadcn-mono-green"][data-theme="light"] {
+  --bg: #ffffff;
+  --surface: #ffffff;
+  --card: #ffffff;
+  --card-hover: #f4f4f5;
+  --surface-hover: color-mix(in srgb, var(--surface) 92%, var(--text) 8%);
+  --border: #e4e4e7;
+
+  --text: #09090b;
+  --text-muted: #71717a;
+  --text-dim: #a1a1aa;
+
+  --todo: #71717a;
+  --in-progress: #71717a;
+  --in-progress-rgb: 113, 113, 122;
+  --in-review: #52525b;
+  --triage: #71717a;
+  --done: #a1a1aa;
+
+  --color-success: #71717a;
+  --color-warning: #71717a;
+  --color-error: #dc2626;
+  --color-muted: #71717a;
+
+  --shadow-sm: 0 1px 2px color-mix(in srgb, var(--text) 8%, transparent);
+  --shadow-md: 0 1px 3px color-mix(in srgb, var(--text) 10%, transparent);
+  --shadow-lg: 0 4px 12px color-mix(in srgb, var(--text) 12%, transparent);
+  --shadow-glow: none;
+  --glow-success: none;
+  --glow-warning: none;
+  --glow-danger: none;
+  --focus-ring: 0 0 0 calc(var(--btn-border-width) * 3) color-mix(in srgb, var(--accent) 18%, transparent);
+  --focus-ring-strong: 0 0 0 calc(var(--btn-border-width) * 3) color-mix(in srgb, var(--accent) 28%, transparent);
+  --shadow: var(--shadow-lg);
+
+  --cta-bg: #16a34a;
+  --cta-border: #16a34a;
+  --cta-text: #ffffff;
+  --cta-bg-hover: #15803d;
+  --cta-border-hover: #15803d;
+  --cta-glow: none;
+  --logo-accent: var(--accent);
+  --color-info: #71717a;
+  --accent: #16a34a;
+  --accent-text: #ffffff;
+}
+
+
+[data-color-theme="shadcn-mono-purple"] {
+  --bg: #09090b;
+  --surface: #0c0c0e;
+  --card: #18181b;
+  --card-hover: #1f1f23;
+  --surface-hover: color-mix(in srgb, var(--surface) 90%, var(--text) 10%);
+  --border: #27272a;
+
+  --text: #fafafa;
+  --text-muted: #a1a1aa;
+  --text-dim: #52525b;
+
+  --todo: #a1a1aa;
+  --in-progress: #71717a;
+  --in-progress-rgb: 113, 113, 122;
+  --in-review: #71717a;
+  --triage: #a1a1aa;
+  --done: #52525b;
+
+  --color-success: #71717a;
+  --color-warning: #a1a1aa;
+  --color-error: #ef4444;
+  --color-muted: #71717a;
+
+  --font-primary: "Geist", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, Monaco, Consolas, monospace;
+
+  --space-xs: 4px;
+  --space-sm: 6px;
+  --space-md: 10px;
+  --space-lg: 16px;
+  --space-xl: 20px;
+  --space-2xl: 28px;
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius: var(--radius-md);
+
+  --btn-padding: 6px 12px;
+  --btn-border-width: 1px;
+  --card-padding: 10px 12px;
+  --modal-padding: var(--space-md) var(--space-lg);
+  --header-padding: var(--space-sm) var(--space-lg);
+  --column-gap: var(--space-md);
+  --board-padding: var(--space-md) var(--space-lg);
+
+  --shadow-sm: 0 1px 2px color-mix(in srgb, #000000 18%, transparent);
+  --shadow-md: 0 1px 3px color-mix(in srgb, #000000 22%, transparent);
+  --shadow-lg: 0 4px 12px color-mix(in srgb, #000000 24%, transparent);
+  --shadow-glow: none;
+  --glow-success: none;
+  --glow-warning: none;
+  --glow-danger: none;
+  --focus-ring: 0 0 0 calc(var(--btn-border-width) * 3) color-mix(in srgb, var(--accent) 35%, transparent);
+  --focus-ring-strong: 0 0 0 calc(var(--btn-border-width) * 3) color-mix(in srgb, var(--accent) 45%, transparent);
+  --shadow: var(--shadow-lg);
+
+  --cta-bg: #8b5cf6;
+  --cta-border: #8b5cf6;
+  --cta-text: #ffffff;
+  --cta-bg-hover: #7c3aed;
+  --cta-border-hover: #7c3aed;
+  --cta-glow: none;
+  --logo-accent: var(--accent);
+  --color-info: #a1a1aa;
+  --accent: #8b5cf6;
+  --accent-text: #ffffff;
+}
+
+
+[data-color-theme="shadcn-mono-purple"][data-theme="light"] {
+  --bg: #ffffff;
+  --surface: #ffffff;
+  --card: #ffffff;
+  --card-hover: #f4f4f5;
+  --surface-hover: color-mix(in srgb, var(--surface) 92%, var(--text) 8%);
+  --border: #e4e4e7;
+
+  --text: #09090b;
+  --text-muted: #71717a;
+  --text-dim: #a1a1aa;
+
+  --todo: #71717a;
+  --in-progress: #71717a;
+  --in-progress-rgb: 113, 113, 122;
+  --in-review: #52525b;
+  --triage: #71717a;
+  --done: #a1a1aa;
+
+  --color-success: #71717a;
+  --color-warning: #71717a;
+  --color-error: #dc2626;
+  --color-muted: #71717a;
+
+  --shadow-sm: 0 1px 2px color-mix(in srgb, var(--text) 8%, transparent);
+  --shadow-md: 0 1px 3px color-mix(in srgb, var(--text) 10%, transparent);
+  --shadow-lg: 0 4px 12px color-mix(in srgb, var(--text) 12%, transparent);
+  --shadow-glow: none;
+  --glow-success: none;
+  --glow-warning: none;
+  --glow-danger: none;
+  --focus-ring: 0 0 0 calc(var(--btn-border-width) * 3) color-mix(in srgb, var(--accent) 18%, transparent);
+  --focus-ring-strong: 0 0 0 calc(var(--btn-border-width) * 3) color-mix(in srgb, var(--accent) 28%, transparent);
+  --shadow: var(--shadow-lg);
+
+  --cta-bg: #7c3aed;
+  --cta-border: #7c3aed;
+  --cta-text: #ffffff;
+  --cta-bg-hover: #6d28d9;
+  --cta-border-hover: #6d28d9;
+  --cta-glow: none;
+  --logo-accent: var(--accent);
+  --color-info: #71717a;
+  --accent: #7c3aed;
+  --accent-text: #ffffff;
+}
+
+
+[data-color-theme="shadcn-mono-pink"] {
+  --bg: #09090b;
+  --surface: #0c0c0e;
+  --card: #18181b;
+  --card-hover: #1f1f23;
+  --surface-hover: color-mix(in srgb, var(--surface) 90%, var(--text) 10%);
+  --border: #27272a;
+
+  --text: #fafafa;
+  --text-muted: #a1a1aa;
+  --text-dim: #52525b;
+
+  --todo: #a1a1aa;
+  --in-progress: #71717a;
+  --in-progress-rgb: 113, 113, 122;
+  --in-review: #71717a;
+  --triage: #a1a1aa;
+  --done: #52525b;
+
+  --color-success: #71717a;
+  --color-warning: #a1a1aa;
+  --color-error: #ef4444;
+  --color-muted: #71717a;
+
+  --font-primary: "Geist", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, Monaco, Consolas, monospace;
+
+  --space-xs: 4px;
+  --space-sm: 6px;
+  --space-md: 10px;
+  --space-lg: 16px;
+  --space-xl: 20px;
+  --space-2xl: 28px;
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius: var(--radius-md);
+
+  --btn-padding: 6px 12px;
+  --btn-border-width: 1px;
+  --card-padding: 10px 12px;
+  --modal-padding: var(--space-md) var(--space-lg);
+  --header-padding: var(--space-sm) var(--space-lg);
+  --column-gap: var(--space-md);
+  --board-padding: var(--space-md) var(--space-lg);
+
+  --shadow-sm: 0 1px 2px color-mix(in srgb, #000000 18%, transparent);
+  --shadow-md: 0 1px 3px color-mix(in srgb, #000000 22%, transparent);
+  --shadow-lg: 0 4px 12px color-mix(in srgb, #000000 24%, transparent);
+  --shadow-glow: none;
+  --glow-success: none;
+  --glow-warning: none;
+  --glow-danger: none;
+  --focus-ring: 0 0 0 calc(var(--btn-border-width) * 3) color-mix(in srgb, var(--accent) 35%, transparent);
+  --focus-ring-strong: 0 0 0 calc(var(--btn-border-width) * 3) color-mix(in srgb, var(--accent) 45%, transparent);
+  --shadow: var(--shadow-lg);
+
+  --cta-bg: #ec4899;
+  --cta-border: #ec4899;
+  --cta-text: #ffffff;
+  --cta-bg-hover: #db2777;
+  --cta-border-hover: #db2777;
+  --cta-glow: none;
+  --logo-accent: var(--accent);
+  --color-info: #a1a1aa;
+  --accent: #ec4899;
+  --accent-text: #ffffff;
+}
+
+
+[data-color-theme="shadcn-mono-pink"][data-theme="light"] {
+  --bg: #ffffff;
+  --surface: #ffffff;
+  --card: #ffffff;
+  --card-hover: #f4f4f5;
+  --surface-hover: color-mix(in srgb, var(--surface) 92%, var(--text) 8%);
+  --border: #e4e4e7;
+
+  --text: #09090b;
+  --text-muted: #71717a;
+  --text-dim: #a1a1aa;
+
+  --todo: #71717a;
+  --in-progress: #71717a;
+  --in-progress-rgb: 113, 113, 122;
+  --in-review: #52525b;
+  --triage: #71717a;
+  --done: #a1a1aa;
+
+  --color-success: #71717a;
+  --color-warning: #71717a;
+  --color-error: #dc2626;
+  --color-muted: #71717a;
+
+  --shadow-sm: 0 1px 2px color-mix(in srgb, var(--text) 8%, transparent);
+  --shadow-md: 0 1px 3px color-mix(in srgb, var(--text) 10%, transparent);
+  --shadow-lg: 0 4px 12px color-mix(in srgb, var(--text) 12%, transparent);
+  --shadow-glow: none;
+  --glow-success: none;
+  --glow-warning: none;
+  --glow-danger: none;
+  --focus-ring: 0 0 0 calc(var(--btn-border-width) * 3) color-mix(in srgb, var(--accent) 18%, transparent);
+  --focus-ring-strong: 0 0 0 calc(var(--btn-border-width) * 3) color-mix(in srgb, var(--accent) 28%, transparent);
+  --shadow: var(--shadow-lg);
+
+  --cta-bg: #db2777;
+  --cta-border: #db2777;
+  --cta-text: #ffffff;
+  --cta-bg-hover: #be185d;
+  --cta-border-hover: #be185d;
+  --cta-glow: none;
+  --logo-accent: var(--accent);
+  --color-info: #71717a;
+  --accent: #db2777;
+  --accent-text: #ffffff;
+}
+
+
+[data-color-theme="shadcn-mono-orange"] {
+  --bg: #09090b;
+  --surface: #0c0c0e;
+  --card: #18181b;
+  --card-hover: #1f1f23;
+  --surface-hover: color-mix(in srgb, var(--surface) 90%, var(--text) 10%);
+  --border: #27272a;
+
+  --text: #fafafa;
+  --text-muted: #a1a1aa;
+  --text-dim: #52525b;
+
+  --todo: #a1a1aa;
+  --in-progress: #71717a;
+  --in-progress-rgb: 113, 113, 122;
+  --in-review: #71717a;
+  --triage: #a1a1aa;
+  --done: #52525b;
+
+  --color-success: #71717a;
+  --color-warning: #a1a1aa;
+  --color-error: #ef4444;
+  --color-muted: #71717a;
+
+  --font-primary: "Geist", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, Monaco, Consolas, monospace;
+
+  --space-xs: 4px;
+  --space-sm: 6px;
+  --space-md: 10px;
+  --space-lg: 16px;
+  --space-xl: 20px;
+  --space-2xl: 28px;
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius: var(--radius-md);
+
+  --btn-padding: 6px 12px;
+  --btn-border-width: 1px;
+  --card-padding: 10px 12px;
+  --modal-padding: var(--space-md) var(--space-lg);
+  --header-padding: var(--space-sm) var(--space-lg);
+  --column-gap: var(--space-md);
+  --board-padding: var(--space-md) var(--space-lg);
+
+  --shadow-sm: 0 1px 2px color-mix(in srgb, #000000 18%, transparent);
+  --shadow-md: 0 1px 3px color-mix(in srgb, #000000 22%, transparent);
+  --shadow-lg: 0 4px 12px color-mix(in srgb, #000000 24%, transparent);
+  --shadow-glow: none;
+  --glow-success: none;
+  --glow-warning: none;
+  --glow-danger: none;
+  --focus-ring: 0 0 0 calc(var(--btn-border-width) * 3) color-mix(in srgb, var(--accent) 35%, transparent);
+  --focus-ring-strong: 0 0 0 calc(var(--btn-border-width) * 3) color-mix(in srgb, var(--accent) 45%, transparent);
+  --shadow: var(--shadow-lg);
+
+  --cta-bg: #f97316;
+  --cta-border: #f97316;
+  --cta-text: #ffffff;
+  --cta-bg-hover: #ea580c;
+  --cta-border-hover: #ea580c;
+  --cta-glow: none;
+  --logo-accent: var(--accent);
+  --color-info: #a1a1aa;
+  --accent: #f97316;
+  --accent-text: #ffffff;
+}
+
+
+[data-color-theme="shadcn-mono-orange"][data-theme="light"] {
+  --bg: #ffffff;
+  --surface: #ffffff;
+  --card: #ffffff;
+  --card-hover: #f4f4f5;
+  --surface-hover: color-mix(in srgb, var(--surface) 92%, var(--text) 8%);
+  --border: #e4e4e7;
+
+  --text: #09090b;
+  --text-muted: #71717a;
+  --text-dim: #a1a1aa;
+
+  --todo: #71717a;
+  --in-progress: #71717a;
+  --in-progress-rgb: 113, 113, 122;
+  --in-review: #52525b;
+  --triage: #71717a;
+  --done: #a1a1aa;
+
+  --color-success: #71717a;
+  --color-warning: #71717a;
+  --color-error: #dc2626;
+  --color-muted: #71717a;
+
+  --shadow-sm: 0 1px 2px color-mix(in srgb, var(--text) 8%, transparent);
+  --shadow-md: 0 1px 3px color-mix(in srgb, var(--text) 10%, transparent);
+  --shadow-lg: 0 4px 12px color-mix(in srgb, var(--text) 12%, transparent);
+  --shadow-glow: none;
+  --glow-success: none;
+  --glow-warning: none;
+  --glow-danger: none;
+  --focus-ring: 0 0 0 calc(var(--btn-border-width) * 3) color-mix(in srgb, var(--accent) 18%, transparent);
+  --focus-ring-strong: 0 0 0 calc(var(--btn-border-width) * 3) color-mix(in srgb, var(--accent) 28%, transparent);
+  --shadow: var(--shadow-lg);
+
+  --cta-bg: #ea580c;
+  --cta-border: #ea580c;
+  --cta-text: #ffffff;
+  --cta-bg-hover: #c2410c;
+  --cta-border-hover: #c2410c;
+  --cta-glow: none;
+  --logo-accent: var(--accent);
+  --color-info: #71717a;
+  --accent: #ea580c;
+  --accent-text: #ffffff;
+}
+
+
+[data-color-theme="shadcn-mono-yellow"] {
+  --bg: #09090b;
+  --surface: #0c0c0e;
+  --card: #18181b;
+  --card-hover: #1f1f23;
+  --surface-hover: color-mix(in srgb, var(--surface) 90%, var(--text) 10%);
+  --border: #27272a;
+
+  --text: #fafafa;
+  --text-muted: #a1a1aa;
+  --text-dim: #52525b;
+
+  --todo: #a1a1aa;
+  --in-progress: #71717a;
+  --in-progress-rgb: 113, 113, 122;
+  --in-review: #71717a;
+  --triage: #a1a1aa;
+  --done: #52525b;
+
+  --color-success: #71717a;
+  --color-warning: #a1a1aa;
+  --color-error: #ef4444;
+  --color-muted: #71717a;
+
+  --font-primary: "Geist", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, Monaco, Consolas, monospace;
+
+  --space-xs: 4px;
+  --space-sm: 6px;
+  --space-md: 10px;
+  --space-lg: 16px;
+  --space-xl: 20px;
+  --space-2xl: 28px;
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius: var(--radius-md);
+
+  --btn-padding: 6px 12px;
+  --btn-border-width: 1px;
+  --card-padding: 10px 12px;
+  --modal-padding: var(--space-md) var(--space-lg);
+  --header-padding: var(--space-sm) var(--space-lg);
+  --column-gap: var(--space-md);
+  --board-padding: var(--space-md) var(--space-lg);
+
+  --shadow-sm: 0 1px 2px color-mix(in srgb, #000000 18%, transparent);
+  --shadow-md: 0 1px 3px color-mix(in srgb, #000000 22%, transparent);
+  --shadow-lg: 0 4px 12px color-mix(in srgb, #000000 24%, transparent);
+  --shadow-glow: none;
+  --glow-success: none;
+  --glow-warning: none;
+  --glow-danger: none;
+  --focus-ring: 0 0 0 calc(var(--btn-border-width) * 3) color-mix(in srgb, var(--accent) 35%, transparent);
+  --focus-ring-strong: 0 0 0 calc(var(--btn-border-width) * 3) color-mix(in srgb, var(--accent) 45%, transparent);
+  --shadow: var(--shadow-lg);
+
+  --cta-bg: #eab308;
+  --cta-border: #eab308;
+  --cta-text: #18181b;
+  --cta-bg-hover: #ca8a04;
+  --cta-border-hover: #ca8a04;
+  --cta-glow: none;
+  --logo-accent: var(--accent);
+  --color-info: #a1a1aa;
+  --accent: #eab308;
+  --accent-text: #18181b;
+}
+
+
+[data-color-theme="shadcn-mono-yellow"][data-theme="light"] {
+  --bg: #ffffff;
+  --surface: #ffffff;
+  --card: #ffffff;
+  --card-hover: #f4f4f5;
+  --surface-hover: color-mix(in srgb, var(--surface) 92%, var(--text) 8%);
+  --border: #e4e4e7;
+
+  --text: #09090b;
+  --text-muted: #71717a;
+  --text-dim: #a1a1aa;
+
+  --todo: #71717a;
+  --in-progress: #71717a;
+  --in-progress-rgb: 113, 113, 122;
+  --in-review: #52525b;
+  --triage: #71717a;
+  --done: #a1a1aa;
+
+  --color-success: #71717a;
+  --color-warning: #71717a;
+  --color-error: #dc2626;
+  --color-muted: #71717a;
+
+  --shadow-sm: 0 1px 2px color-mix(in srgb, var(--text) 8%, transparent);
+  --shadow-md: 0 1px 3px color-mix(in srgb, var(--text) 10%, transparent);
+  --shadow-lg: 0 4px 12px color-mix(in srgb, var(--text) 12%, transparent);
+  --shadow-glow: none;
+  --glow-success: none;
+  --glow-warning: none;
+  --glow-danger: none;
+  --focus-ring: 0 0 0 calc(var(--btn-border-width) * 3) color-mix(in srgb, var(--accent) 18%, transparent);
+  --focus-ring-strong: 0 0 0 calc(var(--btn-border-width) * 3) color-mix(in srgb, var(--accent) 28%, transparent);
+  --shadow: var(--shadow-lg);
+
+  --cta-bg: #ca8a04;
+  --cta-border: #ca8a04;
+  --cta-text: #18181b;
+  --cta-bg-hover: #a16207;
+  --cta-border-hover: #a16207;
+  --cta-glow: none;
+  --logo-accent: var(--accent);
+  --color-info: #71717a;
+  --accent: #ca8a04;
+  --accent-text: #18181b;
+}
+
 
 [data-color-theme="shadcn-black"] {
   --bg: #09090b;
@@ -2592,7 +3318,13 @@ Shadcn Gray is the fully-neutral zinc variant: it keeps the shadcn surfaces and 
 [data-color-theme="shadcn-pink"] .card.agent-active,
 [data-color-theme="shadcn-orange"] .card.agent-active,
 [data-color-theme="shadcn-yellow"] .card.agent-active,
-[data-color-theme="shadcn-mono"] .card.agent-active,
+[data-color-theme="shadcn-mono-red"] .card.agent-active,
+[data-color-theme="shadcn-mono-blue"] .card.agent-active,
+[data-color-theme="shadcn-mono-green"] .card.agent-active,
+[data-color-theme="shadcn-mono-purple"] .card.agent-active,
+[data-color-theme="shadcn-mono-pink"] .card.agent-active,
+[data-color-theme="shadcn-mono-orange"] .card.agent-active,
+[data-color-theme="shadcn-mono-yellow"] .card.agent-active,
 [data-color-theme="shadcn-black"] .card.agent-active,
 [data-color-theme="shadcn-gray"] .card.agent-active {
   border-color: var(--accent);
@@ -2607,7 +3339,13 @@ Shadcn Gray is the fully-neutral zinc variant: it keeps the shadcn surfaces and 
 [data-color-theme="shadcn-pink"][data-theme="light"] .card.agent-active,
 [data-color-theme="shadcn-orange"][data-theme="light"] .card.agent-active,
 [data-color-theme="shadcn-yellow"][data-theme="light"] .card.agent-active,
-[data-color-theme="shadcn-mono"][data-theme="light"] .card.agent-active,
+[data-color-theme="shadcn-mono-red"][data-theme="light"] .card.agent-active,
+[data-color-theme="shadcn-mono-blue"][data-theme="light"] .card.agent-active,
+[data-color-theme="shadcn-mono-green"][data-theme="light"] .card.agent-active,
+[data-color-theme="shadcn-mono-purple"][data-theme="light"] .card.agent-active,
+[data-color-theme="shadcn-mono-pink"][data-theme="light"] .card.agent-active,
+[data-color-theme="shadcn-mono-orange"][data-theme="light"] .card.agent-active,
+[data-color-theme="shadcn-mono-yellow"][data-theme="light"] .card.agent-active,
 [data-color-theme="shadcn-black"][data-theme="light"] .card.agent-active,
 [data-color-theme="shadcn-gray"][data-theme="light"] .card.agent-active {
   border-color: var(--accent);
@@ -2622,7 +3360,13 @@ Shadcn Gray is the fully-neutral zinc variant: it keeps the shadcn surfaces and 
 [data-color-theme="shadcn-pink"] .btn,
 [data-color-theme="shadcn-orange"] .btn,
 [data-color-theme="shadcn-yellow"] .btn,
-[data-color-theme="shadcn-mono"] .btn,
+[data-color-theme="shadcn-mono-red"] .btn,
+[data-color-theme="shadcn-mono-blue"] .btn,
+[data-color-theme="shadcn-mono-green"] .btn,
+[data-color-theme="shadcn-mono-purple"] .btn,
+[data-color-theme="shadcn-mono-pink"] .btn,
+[data-color-theme="shadcn-mono-orange"] .btn,
+[data-color-theme="shadcn-mono-yellow"] .btn,
 [data-color-theme="shadcn-black"] .btn,
 [data-color-theme="shadcn-gray"] .btn {
   text-transform: none;
@@ -2644,8 +3388,20 @@ Shadcn Gray is the fully-neutral zinc variant: it keeps the shadcn surfaces and 
 [data-color-theme="shadcn-orange"] .btn-task-create,
 [data-color-theme="shadcn-yellow"] .btn-primary,
 [data-color-theme="shadcn-yellow"] .btn-task-create,
-[data-color-theme="shadcn-mono"] .btn-primary,
-[data-color-theme="shadcn-mono"] .btn-task-create,
+[data-color-theme="shadcn-mono-red"] .btn-primary,
+[data-color-theme="shadcn-mono-red"] .btn-task-create,
+[data-color-theme="shadcn-mono-blue"] .btn-primary,
+[data-color-theme="shadcn-mono-blue"] .btn-task-create,
+[data-color-theme="shadcn-mono-green"] .btn-primary,
+[data-color-theme="shadcn-mono-green"] .btn-task-create,
+[data-color-theme="shadcn-mono-purple"] .btn-primary,
+[data-color-theme="shadcn-mono-purple"] .btn-task-create,
+[data-color-theme="shadcn-mono-pink"] .btn-primary,
+[data-color-theme="shadcn-mono-pink"] .btn-task-create,
+[data-color-theme="shadcn-mono-orange"] .btn-primary,
+[data-color-theme="shadcn-mono-orange"] .btn-task-create,
+[data-color-theme="shadcn-mono-yellow"] .btn-primary,
+[data-color-theme="shadcn-mono-yellow"] .btn-task-create,
 [data-color-theme="shadcn-black"] .btn-primary,
 [data-color-theme="shadcn-black"] .btn-task-create,
 [data-color-theme="shadcn-gray"] .btn-primary,
@@ -2670,8 +3426,20 @@ Shadcn Gray is the fully-neutral zinc variant: it keeps the shadcn surfaces and 
 [data-color-theme="shadcn-orange"] .btn-task-create:hover,
 [data-color-theme="shadcn-yellow"] .btn-primary:hover,
 [data-color-theme="shadcn-yellow"] .btn-task-create:hover,
-[data-color-theme="shadcn-mono"] .btn-primary:hover,
-[data-color-theme="shadcn-mono"] .btn-task-create:hover,
+[data-color-theme="shadcn-mono-red"] .btn-primary:hover,
+[data-color-theme="shadcn-mono-red"] .btn-task-create:hover,
+[data-color-theme="shadcn-mono-blue"] .btn-primary:hover,
+[data-color-theme="shadcn-mono-blue"] .btn-task-create:hover,
+[data-color-theme="shadcn-mono-green"] .btn-primary:hover,
+[data-color-theme="shadcn-mono-green"] .btn-task-create:hover,
+[data-color-theme="shadcn-mono-purple"] .btn-primary:hover,
+[data-color-theme="shadcn-mono-purple"] .btn-task-create:hover,
+[data-color-theme="shadcn-mono-pink"] .btn-primary:hover,
+[data-color-theme="shadcn-mono-pink"] .btn-task-create:hover,
+[data-color-theme="shadcn-mono-orange"] .btn-primary:hover,
+[data-color-theme="shadcn-mono-orange"] .btn-task-create:hover,
+[data-color-theme="shadcn-mono-yellow"] .btn-primary:hover,
+[data-color-theme="shadcn-mono-yellow"] .btn-task-create:hover,
 [data-color-theme="shadcn-black"] .btn-primary:hover,
 [data-color-theme="shadcn-black"] .btn-task-create:hover,
 [data-color-theme="shadcn-gray"] .btn-primary:hover,
@@ -2696,8 +3464,20 @@ Shadcn Gray is the fully-neutral zinc variant: it keeps the shadcn surfaces and 
 [data-color-theme="shadcn-orange"] .column,
 [data-color-theme="shadcn-yellow"] .card,
 [data-color-theme="shadcn-yellow"] .column,
-[data-color-theme="shadcn-mono"] .card,
-[data-color-theme="shadcn-mono"] .column,
+[data-color-theme="shadcn-mono-red"] .card,
+[data-color-theme="shadcn-mono-red"] .column,
+[data-color-theme="shadcn-mono-blue"] .card,
+[data-color-theme="shadcn-mono-blue"] .column,
+[data-color-theme="shadcn-mono-green"] .card,
+[data-color-theme="shadcn-mono-green"] .column,
+[data-color-theme="shadcn-mono-purple"] .card,
+[data-color-theme="shadcn-mono-purple"] .column,
+[data-color-theme="shadcn-mono-pink"] .card,
+[data-color-theme="shadcn-mono-pink"] .column,
+[data-color-theme="shadcn-mono-orange"] .card,
+[data-color-theme="shadcn-mono-orange"] .column,
+[data-color-theme="shadcn-mono-yellow"] .card,
+[data-color-theme="shadcn-mono-yellow"] .column,
 [data-color-theme="shadcn-black"] .card,
 [data-color-theme="shadcn-black"] .column,
 [data-color-theme="shadcn-gray"] .card,

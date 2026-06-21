@@ -75,9 +75,11 @@ function readCachedThemeMode(): ThemeMode {
 function readCachedColorTheme(): ColorTheme {
   if (!isBrowser) return "default";
   try {
-    const saved = localStorage.getItem(COLOR_THEME_STORAGE_KEY);
-    if (saved && VALID_COLOR_THEMES.includes(saved as ColorTheme)) {
-      return saved as ColorTheme;
+    let colorTheme = localStorage.getItem(COLOR_THEME_STORAGE_KEY);
+    // FNXC:DashboardTheming 2026-06-20-00:00: FN-6813 keeps existing shadcn-mono users on the renamed red mono variant before the validity guard would otherwise fall back to default.
+    if (colorTheme === 'shadcn-mono') colorTheme = 'shadcn-mono-red';
+    if (colorTheme && VALID_COLOR_THEMES.includes(colorTheme as ColorTheme)) {
+      return colorTheme as ColorTheme;
     }
   } catch {
     // localStorage not available, use default
@@ -390,6 +392,8 @@ export function getThemeInitScript(): string {
         var mode = localStorage.getItem('${THEME_MODE_STORAGE_KEY}') || 'dark';
         var colorTheme = localStorage.getItem('${COLOR_THEME_STORAGE_KEY}') || 'default';
         var validThemes = ${JSON.stringify(VALID_COLOR_THEMES)};
+        // FNXC:DashboardTheming 2026-06-20-00:00: FN-6813 remaps the legacy mono id before bootstrap validation so persisted users keep the red mono accent.
+        if (colorTheme === 'shadcn-mono') colorTheme = 'shadcn-mono-red';
         if (!validThemes.includes(colorTheme)) {
           colorTheme = 'default';
         }

@@ -557,7 +557,8 @@ describe("useTheme", () => {
     const themeDataCss = readFileSync(resolve(PACKAGE_ROOT, "app/public/theme-data.css"), "utf8");
     const shadcnVariants = [
       { id: "shadcn-blue", accent: "#3b82f6" },
-      { id: "shadcn-mono", accent: "#ef4444" },
+      { id: "shadcn-mono-red", accent: "#ef4444" },
+      { id: "shadcn-mono-blue", accent: "#3b82f6" },
       { id: "shadcn-black", accent: "#fafafa" },
     ] as const;
     style.textContent = `${baseCss}\n${themeDataCss}`;
@@ -569,6 +570,10 @@ describe("useTheme", () => {
       )?.groups?.body;
       expect(block).toBeDefined();
 
+      const variantStyle = document.createElement("style");
+      variantStyle.textContent = `:root[data-color-theme="${variant.id}"] {${block}}`;
+      document.head.appendChild(variantStyle);
+
       localStorageMock[COLOR_THEME_STORAGE_KEY] = variant.id;
       renderHook(() => useTheme());
 
@@ -578,13 +583,31 @@ describe("useTheme", () => {
       expect(block).toContain("--shadow-glow: none;");
       expect(block).toContain("--cta-glow: none;");
       expect(block).not.toMatch(/--(?:shadow-glow|glow-success|glow-warning|glow-danger|cta-glow):\s*0 0/);
+
+      const resolvedStyle = getComputedStyle(document.documentElement);
+      expect(resolvedStyle.getPropertyValue("--accent").trim()).toBe(variant.accent);
+      expect(resolvedStyle.getPropertyValue("--shadow-glow").trim()).toBe("none");
+      expect(resolvedStyle.getPropertyValue("--cta-glow").trim()).toBe("none");
+      expect(resolvedStyle.getPropertyValue("--btn-border-width").trim()).toBe("1px");
+
+      document.head.removeChild(variantStyle);
     }
 
     const blueBlock = themeDataCss.match(/\[data-color-theme="shadcn-blue"\] \{(?<body>[\s\S]*?)\n\}/)?.groups
       ?.body;
+    const monoRedBlock = themeDataCss.match(/\[data-color-theme="shadcn-mono-red"\] \{(?<body>[\s\S]*?)\n\}/)
+      ?.groups?.body;
+    const monoBlueBlock = themeDataCss.match(/\[data-color-theme="shadcn-mono-blue"\] \{(?<body>[\s\S]*?)\n\}/)
+      ?.groups?.body;
     const blackBlock = themeDataCss.match(/\[data-color-theme="shadcn-black"\] \{(?<body>[\s\S]*?)\n\}/)
       ?.groups?.body;
     expect(blueBlock).toContain("--todo: #60a5fa;");
+    expect(monoRedBlock).toContain("--todo: #a1a1aa;");
+    expect(monoRedBlock).toContain("--in-progress: #71717a;");
+    expect(monoBlueBlock).toContain("--todo: #a1a1aa;");
+    expect(monoBlueBlock).toContain("--in-progress: #71717a;");
+    expect(monoBlueBlock).toContain("--color-error: #ef4444;");
+    expect(monoBlueBlock).not.toContain("--todo: #60a5fa;");
     expect(blackBlock).toContain("--todo: #d4d4d8;");
     expect(blackBlock).toContain("--in-progress: #a1a1aa;");
     expect(blackBlock).not.toContain("--todo: #60a5fa;");
@@ -620,6 +643,15 @@ describe("useTheme", () => {
     const { result } = renderHook(() => useTheme());
 
     expect(result.current.themeMode).toBe("dark");
+  });
+
+  it("remaps legacy shadcn mono color theme from localStorage", () => {
+    localStorageMock[COLOR_THEME_STORAGE_KEY] = "shadcn-mono";
+
+    const { result } = renderHook(() => useTheme());
+
+    expect(result.current.colorTheme).toBe("shadcn-mono-red");
+    expect(document.documentElement.getAttribute("data-color-theme")).toBe("shadcn-mono-red");
   });
 
   it("ignores invalid color theme in localStorage", () => {
@@ -737,6 +769,7 @@ describe("getThemeInitScript", () => {
       expect(script).toContain(theme);
     });
     expect(script).toContain("validThemes");
+    expect(script).toContain("if (colorTheme === 'shadcn-mono') colorTheme = 'shadcn-mono-red';");
     expect(script).toContain("colorTheme = 'default'");
   });
 
