@@ -1006,12 +1006,22 @@ export interface AgentOptions {
   permanentAgentGating?: PermanentAgentGatingContext;
 }
 
+/**
+ * Map a user-facing custom-provider `apiType` to the pi-ai api-registry key.
+ *
+ * FNXC:CustomProviders 2026-06-21-13:45:
+ * Every arm must return a key that pi-ai's api-registry actually registers
+ * (see @earendil-works/pi-ai register-builtins). `anthropic-compatible` resolves
+ * to "anthropic-messages" — the key the Anthropic Messages API is registered
+ * under. The bare "anthropic" key is never registered, so returning it let a
+ * provider register but threw "No API provider registered for api: anthropic"
+ * the moment a task tried to stream.
+ *
+ * @param apiType - the custom provider's declared compatibility type.
+ * @returns the registered pi-ai api key to stream against.
+ */
 function resolveCustomProviderApiType(apiType: string): "anthropic-messages" | "openai-responses" | "openai-completions" {
   if (apiType === "anthropic-compatible") {
-    // pi-ai registers the Anthropic Messages API under the key
-    // "anthropic-messages" (see @earendil-works/pi-ai register-builtins).
-    // Returning bare "anthropic" throws "No API provider registered for
-    // api: anthropic" at stream time, so map to the real registry key.
     return "anthropic-messages";
   }
   if (apiType === "openai-responses") {

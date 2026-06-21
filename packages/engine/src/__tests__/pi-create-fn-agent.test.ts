@@ -1395,15 +1395,40 @@ describe("createFnAgent", () => {
       apiKey: "RESPONSES_API_KEY",
       models: [expect.objectContaining({ id: "responses-model", name: "Responses Model" })],
     }));
-    // anthropic-compatible must map to pi-ai's registered "anthropic-messages"
-    // api key, NOT bare "anthropic" (which throws "No API provider registered
-    // for api: anthropic" at stream time). Regression guard for that bug.
+    /*
+    FNXC:CustomProviders 2026-06-21-13:45:
+    Invariant (FN-5893 surface = providers/execution paths): every custom-provider apiType must map to an api key pi-ai's registry actually registers. anthropic-compatible maps to "anthropic-messages", NOT bare "anthropic" — the latter registered fine but threw "No API provider registered for api: anthropic" the moment a task streamed. Assert the corrected value AND that the broken bare key is never used, so a future regression to "anthropic" fails here.
+    */
     expect(registerProviderMock).toHaveBeenCalledWith("custom-anthropic", expect.objectContaining({
       baseUrl: "https://anthropic.example",
       api: "anthropic-messages",
       apiKey: "ANTHROPIC_API_KEY",
       models: [expect.objectContaining({ id: "anthropic-model", name: "Anthropic Model" })],
     }));
+    // Negative guard: the unregistered bare "anthropic" api key must never be emitted for any provider.
+    expect(registerProviderMock).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ api: "anthropic" }),
+    );
+    // Invariant: every api key handed to registerProvider must be one pi-ai registers
+    // (mirrors @earendil-works/pi-ai register-builtins). Catches a typo in any arm.
+    const PI_AI_REGISTERED_APIS = new Set([
+      "anthropic-messages",
+      "openai-completions",
+      "openai-responses",
+      "azure-openai-responses",
+      "openai-codex-responses",
+      "google-generative-ai",
+      "google-vertex",
+      "mistral-conversations",
+      "bedrock-converse-stream",
+    ]);
+    for (const [, config] of registerProviderMock.mock.calls) {
+      const api = (config as { api?: string } | undefined)?.api;
+      if (typeof api === "string") {
+        expect(PI_AI_REGISTERED_APIS.has(api)).toBe(true);
+      }
+    }
   });
 
   it("avoids lock-based SettingsManager.create when loading extension providers", async () => {
