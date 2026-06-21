@@ -1816,10 +1816,16 @@ FN-6500 fixes a tablet regression from FN-5599: the task-detail overlay offset a
 }
 
 /* === Detail Tabs === */
+/*
+FNXC:TaskDetailTabs 2026-06-21-00:00:
+The mobile global `* { touch-action: pan-y; }` lock from FN-6365 prevents horizontal swipe gestures unless each known horizontal scroller opts back into pan-x.
+The overflowing task-detail tab strip must keep horizontal touch panning enabled so conditional and plugin tabs remain reachable on narrow touch viewports (FN-6864), matching the FN-6450 agent-detail tab precedent.
+*/
 .detail-tabs {
   display: flex;
   gap: 0;
   overflow-x: auto;
+  touch-action: pan-x pan-y;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: thin;
   border-bottom: 1px solid var(--border);
