@@ -1802,6 +1802,40 @@ describe("TaskChatTab", () => {
     expectComposerSendableAfterDraft();
   });
 
+  it.each([undefined, "planning", "merging", "merging-fix"])(
+    "treats an actively-executing in-progress task as an active session even without an assignment (ephemeral mode): %s status",
+    (status) => {
+      // In the default ephemeral-agents mode the scheduler never writes
+      // assignedAgentId/checkedOutBy, so a running in-progress task has no
+      // assignment field yet IS being worked. It must NOT show the idle
+      // "no agent is working" hint.
+      render(
+        <TaskChatTab
+          task={makeTask({ column: "in-progress", status, assignedAgentId: undefined, checkedOutBy: undefined })}
+          active
+          addToast={vi.fn()}
+          sessionLive={false}
+        />,
+      );
+
+      expectActiveSessionCopy();
+      expect(screen.getByLabelText("Message active agent session")).not.toBeDisabled();
+    },
+  );
+
+  it("keeps a queued (waiting) unassigned in-progress task idle in ephemeral mode", () => {
+    render(
+      <TaskChatTab
+        task={makeTask({ column: "in-progress", status: "queued", assignedAgentId: undefined, checkedOutBy: undefined })}
+        active
+        addToast={vi.fn()}
+        sessionLive={false}
+      />,
+    );
+
+    expectIdleSessionHint();
+  });
+
   it.each(["busy", "ready", "starting", "waitingOnInput"] as const)("treats %s CLI sessions as live", (agentState) => {
     expect(isCliSessionLive(makeCliSession(agentState))).toBe(true);
   });

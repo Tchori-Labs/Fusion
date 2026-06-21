@@ -172,8 +172,20 @@ function isActiveAgentSession(task: Task | TaskDetail, opts: { sessionLive?: boo
   const statusAllowsReviewSteering = !task.status || REVIEW_STEERABLE_STATUSES.has(task.status);
   const columnAllowsSteering = (task.column === "in-progress" && statusAllowsProgressSteering)
     || (task.column === "in-review" && statusAllowsReviewSteering);
+  // In the default ephemeral-agents mode the scheduler never writes
+  // `assignedAgentId`/`checkedOutBy` — those are only set when
+  // `ephemeralAgentsEnabled === false` (scheduler.ts). An actively-executing
+  // in-progress task therefore has no assignment field yet IS being worked, so
+  // requiring `hasAssignedAgent` made the chat always show "no agent is working"
+  // for default-mode tasks. Treat assignment as sufficient-but-not-necessary:
+  // a non-blocked, non-`queued` in-progress task is a live session on its own.
+  // `queued` is the documented waiting/blocked marker (self-healing.ts), so it
+  // stays assignment-gated; in-review keeps requiring an assignment.
+  const inProgressExecuting = task.column === "in-progress"
+    && statusAllowsProgressSteering
+    && task.status !== "queued";
   return columnAllowsSteering
-    && hasAssignedAgent;
+    && (hasAssignedAgent || inProgressExecuting);
 }
 
 function isToolLikeEntry(entry: AgentLogEntry): boolean {
