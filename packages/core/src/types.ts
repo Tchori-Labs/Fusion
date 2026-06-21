@@ -332,6 +332,7 @@ export const COLOR_THEMES = [
   "shadcn",
   // FNXC:DashboardTheming 2026-06-19-16:07: FN-6756 extends the published color-theme union with shadcn-family accent variants; keep dashboard theme options, bootstrap validation, swatches, and theme-data token blocks in lockstep with this ordered list.
   // FNXC:DashboardTheming 2026-06-20-00:00: FN-6813 renames the grayscale-base mono theme to shadcn-mono-red and adds the remaining mono accent variants; keep Shadcn Gray adjacent to Shadcn Black so the color-family order stays stable with FN-6814.
+  // FNXC:DashboardTheming 2026-06-21-00:00: FN-6815 adds shadcn-gray-blue as the slate-neutral blue-gray sibling; keep it adjacent to Shadcn Gray so the published union mirrors dashboard option order.
   "shadcn-blue",
   "shadcn-green",
   "shadcn-red",
@@ -348,6 +349,7 @@ export const COLOR_THEMES = [
   "shadcn-mono-yellow",
   "shadcn-black",
   "shadcn-gray",
+  "shadcn-gray-blue",
 ] as const;
 export type ColorTheme = (typeof COLOR_THEMES)[number];
 

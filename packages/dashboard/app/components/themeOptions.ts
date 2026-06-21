@@ -86,4 +86,6 @@ export const COLOR_THEMES: { value: ColorTheme; label: string; className: string
   { value: "shadcn-black", label: "Shadcn Black", className: "theme-swatch-shadcn-black" },
   /* FNXC:DashboardTheming 2026-06-20-00:00: Shadcn Gray is the fully-neutral zinc accent option; keep it adjacent to Shadcn Black so selectors mirror the core COLOR_THEMES order. */
   { value: "shadcn-gray", label: "Shadcn Gray", className: "theme-swatch-shadcn-gray" },
+  /* FNXC:DashboardTheming 2026-06-21-00:00: FN-6815 exposes the slate-neutral Shadcn Gray Blue option next to Shadcn Gray so users can pick a blue-tinted gray surface ramp rather than only a blue accent. */
+  { value: "shadcn-gray-blue", label: "Shadcn Gray Blue", className: "theme-swatch-shadcn-gray-blue" },
 ];

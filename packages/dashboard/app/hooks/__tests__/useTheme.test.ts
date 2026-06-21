@@ -560,6 +560,7 @@ describe("useTheme", () => {
       { id: "shadcn-mono-red", accent: "#ef4444" },
       { id: "shadcn-mono-blue", accent: "#3b82f6" },
       { id: "shadcn-black", accent: "#fafafa" },
+      { id: "shadcn-gray-blue", accent: "#64748b", card: "#0f172a" },
     ] as const;
     style.textContent = `${baseCss}\n${themeDataCss}`;
     document.head.appendChild(style);
@@ -580,6 +581,9 @@ describe("useTheme", () => {
       expect(document.documentElement.getAttribute("data-color-theme")).toBe(variant.id);
       expect(block).toContain("--btn-border-width: 1px;");
       expect(block).toContain(`--accent: ${variant.accent};`);
+      if ("card" in variant) {
+        expect(block).toContain(`--card: ${variant.card};`);
+      }
       expect(block).toContain("--shadow-glow: none;");
       expect(block).toContain("--cta-glow: none;");
       expect(block).not.toMatch(/--(?:shadow-glow|glow-success|glow-warning|glow-danger|cta-glow):\s*0 0/);
@@ -589,6 +593,9 @@ describe("useTheme", () => {
       expect(resolvedStyle.getPropertyValue("--shadow-glow").trim()).toBe("none");
       expect(resolvedStyle.getPropertyValue("--cta-glow").trim()).toBe("none");
       expect(resolvedStyle.getPropertyValue("--btn-border-width").trim()).toBe("1px");
+      if ("card" in variant) {
+        expect(resolvedStyle.getPropertyValue("--card").trim()).toBe(variant.card);
+      }
 
       document.head.removeChild(variantStyle);
     }
@@ -601,6 +608,8 @@ describe("useTheme", () => {
       ?.groups?.body;
     const blackBlock = themeDataCss.match(/\[data-color-theme="shadcn-black"\] \{(?<body>[\s\S]*?)\n\}/)
       ?.groups?.body;
+    const grayBlueBlock = themeDataCss.match(/\[data-color-theme="shadcn-gray-blue"\] \{(?<body>[\s\S]*?)\n\}/)
+      ?.groups?.body;
     expect(blueBlock).toContain("--todo: #60a5fa;");
     expect(monoRedBlock).toContain("--todo: #a1a1aa;");
     expect(monoRedBlock).toContain("--in-progress: #71717a;");
@@ -611,6 +620,9 @@ describe("useTheme", () => {
     expect(blackBlock).toContain("--todo: #d4d4d8;");
     expect(blackBlock).toContain("--in-progress: #a1a1aa;");
     expect(blackBlock).not.toContain("--todo: #60a5fa;");
+    expect(grayBlueBlock).toContain("--card: #0f172a;");
+    expect(grayBlueBlock).not.toContain("--card: #18181b;");
+    expect(grayBlueBlock).toContain("--accent: #64748b;");
 
     document.head.removeChild(style);
   });

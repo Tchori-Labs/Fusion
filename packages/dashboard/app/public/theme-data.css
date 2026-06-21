@@ -3311,6 +3311,128 @@ Shadcn Gray is the fully-neutral zinc variant: it keeps the shadcn surfaces and 
   --accent-text: #ffffff;
 }
 
+/*
+FNXC:Theming 2026-06-21-00:00:
+FN-6815 adds Shadcn Gray Blue as the slate-neutral shadcn variant: the whole surface ramp moves from zinc to blue-gray slate while CTA/accent tokens use muted slate-blue and the shadcn flat-shadow/no-glow treatment stays intact.
+*/
+[data-color-theme="shadcn-gray-blue"] {
+  --bg: #020617;
+  --surface: #0b1220;
+  --card: #0f172a;
+  --card-hover: #1e293b;
+  --surface-hover: color-mix(in srgb, var(--surface) 90%, var(--text) 10%);
+  --border: #1e293b;
+
+  --text: #f8fafc;
+  --text-muted: #94a3b8;
+  --text-dim: #475569;
+
+  --todo: #60a5fa;
+  --in-progress: #38bdf8;
+  --in-progress-rgb: 56, 189, 248;
+  --in-review: #34d399;
+  --triage: #f59e0b;
+  --done: #64748b;
+
+  --color-success: #22c55e;
+  --color-warning: #f59e0b;
+  --color-error: #ef4444;
+  --color-muted: #64748b;
+
+  --font-primary: "Geist", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, Monaco, Consolas, monospace;
+
+  --space-xs: 4px;
+  --space-sm: 6px;
+  --space-md: 10px;
+  --space-lg: 16px;
+  --space-xl: 20px;
+  --space-2xl: 28px;
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius: var(--radius-md);
+
+  --btn-padding: 6px 12px;
+  --btn-border-width: 1px;
+  --card-padding: 10px 12px;
+  --modal-padding: var(--space-md) var(--space-lg);
+  --header-padding: var(--space-sm) var(--space-lg);
+  --column-gap: var(--space-md);
+  --board-padding: var(--space-md) var(--space-lg);
+
+  --shadow-sm: 0 1px 2px color-mix(in srgb, #000000 18%, transparent);
+  --shadow-md: 0 1px 3px color-mix(in srgb, #000000 22%, transparent);
+  --shadow-lg: 0 4px 12px color-mix(in srgb, #000000 24%, transparent);
+  --shadow-glow: none;
+  --glow-success: none;
+  --glow-warning: none;
+  --glow-danger: none;
+  --focus-ring: 0 0 0 calc(var(--btn-border-width) * 3) color-mix(in srgb, var(--accent) 35%, transparent);
+  --focus-ring-strong: 0 0 0 calc(var(--btn-border-width) * 3) color-mix(in srgb, var(--accent) 45%, transparent);
+  --shadow: var(--shadow-lg);
+
+  --cta-bg: #64748b;
+  --cta-border: #64748b;
+  --cta-text: #ffffff;
+  --cta-bg-hover: #475569;
+  --cta-border-hover: #475569;
+  --cta-glow: none;
+  --logo-accent: var(--accent);
+  --color-info: #64748b;
+  --accent: #64748b;
+  --accent-text: #ffffff;
+}
+
+[data-color-theme="shadcn-gray-blue"][data-theme="light"] {
+  --bg: #ffffff;
+  --surface: #ffffff;
+  --card: #ffffff;
+  --card-hover: #f1f5f9;
+  --surface-hover: color-mix(in srgb, var(--surface) 92%, var(--text) 8%);
+  --border: #e2e8f0;
+
+  --text: #0f172a;
+  --text-muted: #64748b;
+  --text-dim: #94a3b8;
+
+  --todo: #2563eb;
+  --in-progress: #0284c7;
+  --in-progress-rgb: 2, 132, 199;
+  --in-review: #16a34a;
+  --triage: #d97706;
+  --done: #94a3b8;
+
+  --color-success: #16a34a;
+  --color-warning: #d97706;
+  --color-error: #dc2626;
+  --color-muted: #64748b;
+
+  --shadow-sm: 0 1px 2px color-mix(in srgb, var(--text) 8%, transparent);
+  --shadow-md: 0 1px 3px color-mix(in srgb, var(--text) 10%, transparent);
+  --shadow-lg: 0 4px 12px color-mix(in srgb, var(--text) 12%, transparent);
+  --shadow-glow: none;
+  --glow-success: none;
+  --glow-warning: none;
+  --glow-danger: none;
+  --focus-ring: 0 0 0 calc(var(--btn-border-width) * 3) color-mix(in srgb, var(--accent) 18%, transparent);
+  --focus-ring-strong: 0 0 0 calc(var(--btn-border-width) * 3) color-mix(in srgb, var(--accent) 28%, transparent);
+  --shadow: var(--shadow-lg);
+
+  --cta-bg: #475569;
+  --cta-border: #475569;
+  --cta-text: #ffffff;
+  --cta-bg-hover: #334155;
+  --cta-border-hover: #334155;
+  --cta-glow: none;
+  --logo-accent: var(--accent);
+  --color-info: #475569;
+  --accent: #475569;
+  --accent-text: #ffffff;
+}
+
 [data-color-theme="shadcn-blue"] .card.agent-active,
 [data-color-theme="shadcn-green"] .card.agent-active,
 [data-color-theme="shadcn-red"] .card.agent-active,
@@ -3326,7 +3448,8 @@ Shadcn Gray is the fully-neutral zinc variant: it keeps the shadcn surfaces and 
 [data-color-theme="shadcn-mono-orange"] .card.agent-active,
 [data-color-theme="shadcn-mono-yellow"] .card.agent-active,
 [data-color-theme="shadcn-black"] .card.agent-active,
-[data-color-theme="shadcn-gray"] .card.agent-active {
+[data-color-theme="shadcn-gray"] .card.agent-active,
+[data-color-theme="shadcn-gray-blue"] .card.agent-active {
   border-color: var(--accent);
   box-shadow: none;
   animation: none;
@@ -3347,7 +3470,8 @@ Shadcn Gray is the fully-neutral zinc variant: it keeps the shadcn surfaces and 
 [data-color-theme="shadcn-mono-orange"][data-theme="light"] .card.agent-active,
 [data-color-theme="shadcn-mono-yellow"][data-theme="light"] .card.agent-active,
 [data-color-theme="shadcn-black"][data-theme="light"] .card.agent-active,
-[data-color-theme="shadcn-gray"][data-theme="light"] .card.agent-active {
+[data-color-theme="shadcn-gray"][data-theme="light"] .card.agent-active,
+[data-color-theme="shadcn-gray-blue"][data-theme="light"] .card.agent-active {
   border-color: var(--accent);
   box-shadow: none;
   animation: none;
@@ -3368,7 +3492,8 @@ Shadcn Gray is the fully-neutral zinc variant: it keeps the shadcn surfaces and 
 [data-color-theme="shadcn-mono-orange"] .btn,
 [data-color-theme="shadcn-mono-yellow"] .btn,
 [data-color-theme="shadcn-black"] .btn,
-[data-color-theme="shadcn-gray"] .btn {
+[data-color-theme="shadcn-gray"] .btn,
+[data-color-theme="shadcn-gray-blue"] .btn {
   text-transform: none;
   letter-spacing: normal;
   font-weight: 500;
@@ -3405,7 +3530,9 @@ Shadcn Gray is the fully-neutral zinc variant: it keeps the shadcn surfaces and 
 [data-color-theme="shadcn-black"] .btn-primary,
 [data-color-theme="shadcn-black"] .btn-task-create,
 [data-color-theme="shadcn-gray"] .btn-primary,
-[data-color-theme="shadcn-gray"] .btn-task-create {
+[data-color-theme="shadcn-gray"] .btn-task-create,
+[data-color-theme="shadcn-gray-blue"] .btn-primary,
+[data-color-theme="shadcn-gray-blue"] .btn-task-create {
   background: var(--cta-bg);
   border-color: var(--cta-border);
   color: var(--cta-text);
@@ -3443,7 +3570,9 @@ Shadcn Gray is the fully-neutral zinc variant: it keeps the shadcn surfaces and 
 [data-color-theme="shadcn-black"] .btn-primary:hover,
 [data-color-theme="shadcn-black"] .btn-task-create:hover,
 [data-color-theme="shadcn-gray"] .btn-primary:hover,
-[data-color-theme="shadcn-gray"] .btn-task-create:hover {
+[data-color-theme="shadcn-gray"] .btn-task-create:hover,
+[data-color-theme="shadcn-gray-blue"] .btn-primary:hover,
+[data-color-theme="shadcn-gray-blue"] .btn-task-create:hover {
   background: var(--cta-bg-hover);
   border-color: var(--cta-border-hover);
   color: var(--cta-text);
@@ -3481,7 +3610,9 @@ Shadcn Gray is the fully-neutral zinc variant: it keeps the shadcn surfaces and 
 [data-color-theme="shadcn-black"] .card,
 [data-color-theme="shadcn-black"] .column,
 [data-color-theme="shadcn-gray"] .card,
-[data-color-theme="shadcn-gray"] .column {
+[data-color-theme="shadcn-gray"] .column,
+[data-color-theme="shadcn-gray-blue"] .card,
+[data-color-theme="shadcn-gray-blue"] .column {
   border-width: var(--btn-border-width);
 }
 
