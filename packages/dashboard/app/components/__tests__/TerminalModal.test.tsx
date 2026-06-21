@@ -9,11 +9,26 @@ import {
   DEFAULT_TERMINAL_PREFERENCES,
   LEGACY_TERMINAL_FONT_SIZE_KEY,
   TERMINAL_PREFERENCES_KEY,
+  TERMINAL_SYMBOLS_FONT_FAMILY,
   XTERM_FONT_FAMILY,
+  resolveTerminalFontFamily,
 } from "../../utils/terminalPreferences";
 import * as useTerminalModule from "../../hooks/useTerminal";
 import * as useTerminalSessionsModule from "../../hooks/useTerminalSessions";
 import * as apiModule from "../../api";
+
+function splitFontFamilies(stack: string): string[] {
+  return stack
+    .split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)/)
+    .map((family) => family.trim())
+    .filter(Boolean);
+}
+
+function expectMeasurementSafeFontStack(stack: string): void {
+  const families = splitFontFamilies(stack);
+  expect(families.length).toBeGreaterThan(0);
+  expect(families).not.toContain(TERMINAL_SYMBOLS_FONT_FAMILY);
+}
 
 // Mock hooks and API
 vi.mock("../../hooks/useTerminal", () => ({
@@ -647,7 +662,32 @@ describe("TerminalModal", () => {
         fontFamily: XTERM_FONT_FAMILY,
       }),
     );
+    expectMeasurementSafeFontStack(mockTerminalInstance.options.fontFamily as string);
     expect(screen.getByTestId("terminal-font-size-value").textContent).toBe("14px");
+  });
+
+  it("initializes xterm with a non-default symbols-free font preset", async () => {
+    const { Terminal } = await import("@xterm/xterm");
+    window.localStorage.setItem(
+      TERMINAL_PREFERENCES_KEY,
+      JSON.stringify({
+        ...DEFAULT_TERMINAL_PREFERENCES,
+        fontFamily: "system-mono",
+      }),
+    );
+
+    render(<TerminalModal isOpen={true} onClose={mockOnClose} />);
+
+    await waitFor(() => {
+      expect(mockTerminalInstance.open).toHaveBeenCalled();
+    });
+
+    expect(Terminal).toHaveBeenCalledWith(
+      expect.objectContaining({
+        fontFamily: resolveTerminalFontFamily("system-mono"),
+      }),
+    );
+    expectMeasurementSafeFontStack(mockTerminalInstance.options.fontFamily as string);
   });
 
   describe("shortcut panel", () => {
@@ -1080,7 +1120,8 @@ describe("TerminalModal", () => {
       fireEvent.click(screen.getByTestId("terminal-preference-cursor-blink"));
 
       await waitFor(() => {
-        expect(mockTerminalInstance.options.fontFamily).toContain("ui-monospace");
+        expect(mockTerminalInstance.options.fontFamily).toBe(resolveTerminalFontFamily("system-mono"));
+        expectMeasurementSafeFontStack(mockTerminalInstance.options.fontFamily as string);
         expect(mockTerminalInstance.options.cursorStyle).toBe("underline");
         expect(mockTerminalInstance.options.cursorBlink).toBe(false);
       });
@@ -5085,9 +5126,7 @@ describe("TerminalModal — xterm focus initialization (FN-1602)", () => {
 
     await waitFor(() => {
       expect(mockTerminalInstance.options.fontFamily).toBe(XTERM_FONT_FAMILY);
-      expect(mockTerminalInstance.options.fontFamily).not.toContain(
-        "Fusion Terminal Nerd Font Symbols",
-      );
+      expectMeasurementSafeFontStack(mockTerminalInstance.options.fontFamily as string);
       expect(mockTerminalInstance.options.fontSize).toBe(DEFAULT_TERMINAL_PREFERENCES.fontSize);
       expect(mockFitAddonFit.mock.calls.length).toBeGreaterThan(fitCallBaseline);
       expect(mockResize).toHaveBeenCalledWith(

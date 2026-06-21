@@ -64,11 +64,22 @@ export function clampTerminalFontSize(value: number): number {
   return Math.min(MAX_TERMINAL_FONT_SIZE, Math.max(MIN_TERMINAL_FONT_SIZE, value));
 }
 
+function stripTerminalSymbolsFontFamily(stack: string): string {
+  return splitTerminalFontFamilies(stack)
+    .filter((family) => family !== TERMINAL_SYMBOLS_FONT_FAMILY)
+    .join(", ");
+}
+
 export function resolveTerminalFontFamily(fontFamily: TerminalFontFamily): string {
-  return (
+  const presetStack =
     TERMINAL_FONT_FAMILY_PRESETS.find((preset) => preset.id === fontFamily)?.css ??
-    XTERM_FONT_FAMILY
-  );
+    XTERM_FONT_FAMILY;
+
+  /*
+  FNXC:Terminal 2026-06-20-18:04:
+  FN-6811 recurrence #6 keeps the symbols-free measured-family invariant defensive at the shared resolver boundary. Preset constants and tests should stay clean, but this filter prevents any future UI path from accidentally feeding the symbols-only face into xterm's ASCII cell measurement option.
+  */
+  return stripTerminalSymbolsFontFamily(presetStack);
 }
 
 export function resolveTerminalGlyphFontFamily(fontFamily: TerminalFontFamily): string {

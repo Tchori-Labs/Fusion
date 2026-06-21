@@ -1,11 +1,23 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, it, expect } from "vitest";
 import { loadAllAppCss } from "../test/cssFixture";
 import {
   TERMINAL_FONT_FAMILY_PRESETS,
+  TERMINAL_SYMBOLS_FONT_FAMILY,
   XTERM_FONT_FAMILY,
+  resolveTerminalFontFamily,
 } from "../utils/terminalPreferences";
 
 const css = loadAllAppCss();
+const terminalModalCss = readFileSync(
+  resolve(__dirname, "../components/TerminalModal.css"),
+  "utf8",
+);
+const sessionTerminalCss = readFileSync(
+  resolve(__dirname, "../components/SessionTerminal.css"),
+  "utf8",
+);
 
 function findHelperTextareaRule(): string {
   const match = css.match(
@@ -44,8 +56,8 @@ function expectTextSizeAdjustPinned(ruleBody: string): void {
   expect(ruleBody).toMatch(/text-size-adjust\s*:\s*100%\s*;/);
 }
 
-function findTerminalSymbolsFontFaceRule(): string {
-  const fontFaceRules = css.match(/@font-face\s*\{[^}]*\}/g) ?? [];
+function findTerminalSymbolsFontFaceRule(cssSource = css): string {
+  const fontFaceRules = cssSource.match(/@font-face\s*\{[^}]*\}/g) ?? [];
   return (
     fontFaceRules.find((rule) =>
       /font-family\s*:\s*["']Fusion Terminal Nerd Font Symbols["']/.test(rule),
@@ -119,24 +131,38 @@ describe("terminal helper textarea CSS contract", () => {
   it("keeps a DOM glyph fallback mechanism outside xterm measurement options", () => {
     expect(findTerminalGlyphFallbackRule()).toMatch(/--terminal-glyph-font-family/);
     expect(findSessionTerminalGlyphFallbackRule()).toMatch(/--terminal-glyph-font-family/);
+    expect(findTerminalGlyphFallbackRule()).not.toMatch(/Fusion Terminal Nerd Font Symbols/);
+    expect(findSessionTerminalGlyphFallbackRule()).not.toMatch(/Fusion Terminal Nerd Font Symbols/);
   });
 });
 
 describe("FN-6424 terminal symbols font CSS contract", () => {
-  it("scopes the symbols-only Nerd Font away from ASCII cell measurement", () => {
-    const ruleBody = findTerminalSymbolsFontFaceRule();
-    expect(ruleBody).not.toBe("");
+  function expectScopedSymbolsFontFace(cssSource: string, surface: string): void {
+    const ruleBody = findTerminalSymbolsFontFaceRule(cssSource);
+    expect(ruleBody, `${surface} symbols @font-face`).not.toBe("");
 
     const unicodeRanges = parseUnicodeRangeValues(ruleBody);
-    expect(unicodeRanges).toEqual(
+    expect(unicodeRanges, `${surface} required Nerd Font ranges`).toEqual(
       expect.arrayContaining(["U+E0A0-E0D7", "U+E700-E8EF", "U+F0001-F1AF0"]),
     );
-    expect(unicodeRanges.some(unicodeRangeIncludesAsciiPrintable)).toBe(false);
+    expect(
+      unicodeRanges.some(unicodeRangeIncludesAsciiPrintable),
+      `${surface} symbols @font-face excludes printable ASCII`,
+    ).toBe(false);
+  }
+
+  it("scopes the symbols-only Nerd Font away from ASCII cell measurement", () => {
+    expectScopedSymbolsFontFace(css, "combined app CSS");
+  });
+
+  it("keeps the scoped symbols face owned by each terminal surface CSS chunk", () => {
+    expectScopedSymbolsFontFace(terminalModalCss, "TerminalModal.css");
+    expectScopedSymbolsFontFace(sessionTerminalCss, "SessionTerminal.css");
   });
 });
 
 describe("FN-6659 terminal font stack measurement contract", () => {
-  const symbolsFamily = '"Fusion Terminal Nerd Font Symbols"';
+  const symbolsFamily = TERMINAL_SYMBOLS_FONT_FAMILY;
 
   function splitFontFamilies(stack: string): string[] {
     return stack
@@ -158,6 +184,15 @@ describe("FN-6659 terminal font stack measurement contract", () => {
 
       expect(families, `${preset.id} xterm measurement stack`).not.toContain(symbolsFamily);
       expect(families.length, `${preset.id} has a text font`).toBeGreaterThan(0);
+    }
+  });
+
+  it("resolves every xterm-measured preset without the DOM-only symbols face", () => {
+    for (const preset of TERMINAL_FONT_FAMILY_PRESETS) {
+      const families = splitFontFamilies(resolveTerminalFontFamily(preset.id));
+
+      expect(families, `${preset.id} resolved xterm stack`).not.toContain(symbolsFamily);
+      expect(families.length, `${preset.id} resolved text font`).toBeGreaterThan(0);
     }
   });
 });

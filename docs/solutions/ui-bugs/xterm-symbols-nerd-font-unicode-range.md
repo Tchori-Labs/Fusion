@@ -15,6 +15,7 @@ resolution_type: code_fix
 severity: high
 related_components:
   - packages/dashboard/app/components/TerminalModal.css
+  - packages/dashboard/app/components/SessionTerminal.css
   - packages/dashboard/app/components/TerminalModal.tsx
   - packages/dashboard/app/components/SessionTerminal.tsx
   - packages/dashboard/app/__tests__/terminal-input.test.ts
@@ -23,6 +24,7 @@ related_components:
   - FN-6603
   - FN-6638
   - FN-6659
+  - FN-6811
 tags:
   - xterm
   - font-loading
@@ -42,13 +44,17 @@ FN-6603 found the third recurrence: the FN-6390 remeasure and FN-6424 `unicode-r
 
 FN-6638 then added a `text-size-adjust: 100%` pin plus best-effort `document.fonts` settlement and unconditional xterm option reapply/fit/refresh. That recurrence's diagnostic measured `66.76px for AGENTS.md` across symbols-first, symbols-last, and system-mono stacks and was initially read as "font-stack ordering is inert." FN-6659 corrected that reading: all three diagnostic stacks were still symbols-inclusive because every preset appended `"Fusion Terminal Nerd Font Symbols"`, and that symbols face was the only bundled/loaded terminal `@font-face`. Playwright/desktop WebKit emulation and the unfinished real-iOS acceptance gate let four blind fixes ship despite the real iOS Safari symptom remaining.
 
+FN-6811 found recurrence #6 in the attach/session terminal surface. `SessionTerminal` is code-split with its own `SessionTerminal.css`, so it could render without the scoped symbols `@font-face` owned by `TerminalModal.css`; tests mostly inspected combined CSS and did not prove each xterm surface owned the ASCII-excluding symbols face. The fix duplicated the scoped `@font-face` into `SessionTerminal.css`, made `resolveTerminalFontFamily()` defensively strip the symbols face from any xterm-measured stack, and added per-surface tests for modal and session terminals. Real-device iOS Safari verification remains an explicit gap for this recurrence; until it is run, rely only on the automated contract checks plus a documented manual/cloud-device pass before claiming the mobile symptom is closed.
+
 ## Solution
 
 Keep the symbols font available for powerline/Nerd-Font codepoints, but do not let it participate in xterm's measured `fontFamily` option:
 
 1. Scope its `@font-face` with `unicode-range` so printable ASCII is never resolved through that family during normal glyph fallback.
-2. Keep `XTERM_FONT_FAMILY` and every terminal preset symbols-free. `TerminalModal` and `SessionTerminal` must pass only real text monospace stacks to `new Terminal(...)`, remeasure, and live-preference updates.
-3. If a DOM-renderer symbols fallback is needed, attach it through a separate scoped CSS variable/rule for `.xterm-rows span` (for example `--terminal-glyph-font-family`) rather than the xterm option that drives ASCII cell measurement. Do not re-tune ordering: FN-6659 showed symbols-last was still unsafe on real iOS because the symbols face's mere presence polluted the measured shorthand.
+2. Keep `XTERM_FONT_FAMILY` and every terminal preset symbols-free. `resolveTerminalFontFamily()` should also defensively strip `"Fusion Terminal Nerd Font Symbols"` so a future preset edit cannot feed the symbols-only face into xterm measurement.
+3. `TerminalModal` and `SessionTerminal` must pass only real text monospace stacks to `new Terminal(...)`, remeasure, and live-preference updates.
+4. If a DOM-renderer symbols fallback is needed, attach it through a separate scoped CSS variable/rule for `.xterm-rows span` (for example `--terminal-glyph-font-family`) rather than the xterm option that drives ASCII cell measurement. Do not re-tune ordering: FN-6659 showed symbols-last was still unsafe on real iOS because the symbols face's mere presence polluted the measured shorthand.
+5. Each code-split terminal CSS owner that exposes the DOM glyph fallback must define or import the scoped symbols face in that chunk. FN-6811 showed relying on `TerminalModal.css` alone leaks when `SessionTerminal.css` is loaded independently.
 
 Use the standard Symbols Nerd Font ranges, including powerline and private-use blocks, for example:
 
@@ -73,4 +79,5 @@ Automated jsdom tests cannot validate font advance widths, so cover the enforcea
 - Assert the shared default stack and every terminal font preset do **not** include `"Fusion Terminal Nerd Font Symbols"` in the xterm-measured family.
 - Assert the retained symbols-rendering mechanism is separate from xterm measurement (for example CSS rules using `--terminal-glyph-font-family` on DOM row spans).
 - Check every xterm consumer: `TerminalModal` and `SessionTerminal` both use `resolveTerminalFontFamily()`, so both need component-level coverage that the stack passed to `new Terminal(...)`, remeasure, and live preference updates is symbols-free.
-- Verify on a real iOS Safari device/cloud path (not Playwright/desktop WebKit emulation) that ASCII output renders tightly while the powerline glyph still renders for the default `nerd-font` and `system-mono` presets on both `TerminalModal` and `SessionTerminal`.
+- Check each code-split CSS owner independently (`TerminalModal.css` and `SessionTerminal.css`) for the scoped symbols `@font-face`; do not rely only on a combined app stylesheet scan.
+- Verify on a real iOS Safari device/cloud path (not Playwright/desktop WebKit emulation) that ASCII output renders tightly while the powerline glyph still renders for the default `nerd-font` and `system-mono` presets on both `TerminalModal` and `SessionTerminal`. If the real-device pass is unavailable, record that as an explicit gap in the task/review notes rather than treating desktop WebKit or jsdom as proof.

@@ -186,6 +186,7 @@ describe("SessionTerminal", () => {
 
     await waitFor(() => {
       expect(mockTerm.options.fontFamily).toBe(resolveTerminalFontFamily("nerd-font"));
+      expectMeasurementSafeFontStack(mockTerm.options.fontFamily as string);
       expect(mockTerm.options.fontSize).toBe(DEFAULT_TERMINAL_PREFERENCES.fontSize);
       expect(mockFitAddon.fit.mock.calls.length).toBeGreaterThan(fitCallBaseline);
       expect(mockTerm.refresh).toHaveBeenCalledWith(0, mockTerm.rows - 1);
@@ -216,6 +217,7 @@ describe("SessionTerminal", () => {
         cursorBlink: true,
       }),
     );
+    expectMeasurementSafeFontStack(mockTerm.options.fontFamily as string);
   });
 
   it("falls back to safe default preferences for corrupt storage", async () => {
@@ -312,6 +314,7 @@ describe("SessionTerminal", () => {
         cursorBlink: false,
       });
     });
+    expectMeasurementSafeFontStack(mockTerm.options.fontFamily as string);
     expect(mockFitAddon.fit).toHaveBeenCalled();
   });
 
