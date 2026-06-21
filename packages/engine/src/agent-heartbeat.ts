@@ -18,7 +18,7 @@
  */
 
 import type { AgentStore, AgentHeartbeatRun, HeartbeatInvocationSource, AgentHeartbeatConfig, AgentBudgetStatus, Message, MessageStore, TaskStore, TaskDetail, AgentRole, Agent, InboxTask, RunMutationContext, Settings, AgentConfigRevision, ReflectionStore, ChatStore, ChatRoom, ChatRoomMessage, AgentMemoryInclusionMode } from "@fusion/core";
-import { AutoClaimSnapshotManager, type AutoClaimCandidate } from "./auto-claim-snapshot.js";
+import { AutoClaimSnapshotManager, resolveFreshAutoClaimCandidates, type AutoClaimCandidate } from "./auto-claim-snapshot.js";
 import { ApprovalRequestStore, buildExecutionMemoryInstructions, isEphemeralAgent, hasAgentIdentity, resolveEffectiveAgentPermissionPolicy, canAgentTakeImplementationTask, canAgentTakeImplementationTaskForExplicitRouting, resolvePersistAgentThinkingLog, resolveAgentMemoryInclusionMode } from "@fusion/core";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type, type Static } from "@earendil-works/pi-ai";
@@ -2100,10 +2100,15 @@ export class HeartbeatMonitor {
         if (!taskId && canRunNoTaskHeartbeat && autoClaimEnabled && this.snapshotManager) {
           try {
             const snapshot = await this.snapshotManager.getSnapshot();
-            autoClaimSnapshotCandidateCount = snapshot.tasks.length;
-            autoClaimPromptCandidates = snapshot.tasks;
-            const roleCompatibleCandidates = snapshot.tasks.filter((candidate) => canAgentTakeImplementationTask(agent, candidate, { allowEngineer: engineerBacklogAutoClaim }));
-            const skippedIncompatibleCount = snapshot.tasks.length - roleCompatibleCandidates.length;
+            /*
+            FNXC:AutoClaim 2026-06-21-10:35:
+            FN-6850 requires the heartbeat consumer to re-resolve cached auto-claim candidates against canonical task rows before both ranking and prompt rendering, preventing superseded FN-6812-style triage tasks from being surfaced or claimed within the snapshot TTL.
+            */
+            const freshCandidates = await resolveFreshAutoClaimCandidates(taskStore, snapshot.tasks);
+            autoClaimSnapshotCandidateCount = freshCandidates.length;
+            autoClaimPromptCandidates = freshCandidates;
+            const roleCompatibleCandidates = freshCandidates.filter((candidate) => canAgentTakeImplementationTask(agent, candidate, { allowEngineer: engineerBacklogAutoClaim }));
+            const skippedIncompatibleCount = freshCandidates.length - roleCompatibleCandidates.length;
             autoClaimRoleFilteredCount = skippedIncompatibleCount;
             if (skippedIncompatibleCount > 0) {
               heartbeatLog.log(

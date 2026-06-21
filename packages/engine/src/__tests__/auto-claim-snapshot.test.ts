@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Task } from "@fusion/core";
-import { AutoClaimSnapshotManager, extractDescriptionFirstLine } from "../auto-claim-snapshot.js";
+import { AutoClaimSnapshotManager, extractDescriptionFirstLine, isRunnableAutoClaimCandidate, resolveFreshAutoClaimCandidates } from "../auto-claim-snapshot.js";
 
 function makeTask(overrides: Partial<Task> & Pick<Task, "id">): Task {
   return {
@@ -19,11 +19,31 @@ function makeTask(overrides: Partial<Task> & Pick<Task, "id">): Task {
     assignedAgentId: overrides.assignedAgentId,
     checkedOutBy: overrides.checkedOutBy,
     paused: overrides.paused,
+    deletedAt: overrides.deletedAt,
     columnMovedAt: overrides.columnMovedAt,
   } as unknown as Task;
 }
 
 describe("AutoClaimSnapshotManager", () => {
+  it("uses the shared predicate for unchanged runnability filter cases", () => {
+    const runnable = makeTask({ id: "FN-1", dependencies: ["FN-done", "FN-archived"] });
+    const tasks = [
+      runnable,
+      makeTask({ id: "FN-paused", paused: true }),
+      makeTask({ id: "FN-assigned", assignedAgentId: "agent-1" }),
+      makeTask({ id: "FN-checked", checkedOutBy: "agent-2" }),
+      makeTask({ id: "FN-deleted", deletedAt: "2026-01-02T00:00:00.000Z" } as Partial<Task> & Pick<Task, "id">),
+      makeTask({ id: "FN-blocked", dependencies: ["FN-open"] }),
+      makeTask({ id: "FN-triage", column: "triage" }),
+      makeTask({ id: "FN-done", column: "done" }),
+      makeTask({ id: "FN-archived", column: "archived" }),
+      makeTask({ id: "FN-open", column: "in-progress" }),
+    ];
+    const tasksById = new Map(tasks.map((task) => [task.id, task]));
+
+    expect(tasks.filter((task) => isRunnableAutoClaimCandidate(task, tasksById)).map((task) => task.id)).toEqual(["FN-1"]);
+  });
+
   it("shares one listTasks call across concurrent getSnapshot calls", async () => {
     const listTasks = vi.fn(async () => [makeTask({ id: "FN-1" })]);
     const manager = new AutoClaimSnapshotManager({ taskStore: { listTasks }, now: () => Date.parse("2026-01-03T00:00:00.000Z") });
@@ -72,6 +92,49 @@ describe("AutoClaimSnapshotManager", () => {
     const snapshot = await manager.getSnapshot();
 
     expect(snapshot.tasks.map((t) => t.id)).toEqual(["FN-1"]);
+  });
+
+  it("re-resolves cached candidates against canonical runnable rows", async () => {
+    const initialTasks = [
+      makeTask({ id: "FN-stale-triage", title: "Old title", description: "old desc", createdAt: "2026-01-01T00:00:00.000Z" }),
+      makeTask({ id: "FN-retitled", title: "Old runnable title", description: "old runnable desc", createdAt: "2026-01-02T00:00:00.000Z" }),
+      makeTask({ id: "FN-paused", createdAt: "2026-01-03T00:00:00.000Z" }),
+      makeTask({ id: "FN-assigned", createdAt: "2026-01-04T00:00:00.000Z" }),
+      makeTask({ id: "FN-checked", createdAt: "2026-01-05T00:00:00.000Z" }),
+      makeTask({ id: "FN-deleted", createdAt: "2026-01-06T00:00:00.000Z" }),
+      makeTask({ id: "FN-blocked", dependencies: ["FN-dep"], createdAt: "2026-01-07T00:00:00.000Z" }),
+      makeTask({ id: "FN-missing", createdAt: "2026-01-08T00:00:00.000Z" }),
+      makeTask({ id: "FN-dep", column: "done" }),
+      makeTask({ id: "FN-survivor", title: "Survivor", createdAt: "2026-01-09T00:00:00.000Z" }),
+    ];
+    const canonicalTasks = [
+      makeTask({ id: "FN-stale-triage", title: "Superseded stale title", column: "triage" }),
+      makeTask({ id: "FN-retitled", title: "Updated runnable title", description: "updated first line\nsecond", createdAt: "2026-01-02T00:00:00.000Z" }),
+      makeTask({ id: "FN-paused", paused: true }),
+      makeTask({ id: "FN-assigned", assignedAgentId: "agent-1" }),
+      makeTask({ id: "FN-checked", checkedOutBy: "agent-2" }),
+      makeTask({ id: "FN-deleted", deletedAt: "2026-01-10T00:00:00.000Z" } as Partial<Task> & Pick<Task, "id">),
+      makeTask({ id: "FN-blocked", dependencies: ["FN-dep"] }),
+      makeTask({ id: "FN-dep", column: "in-progress" }),
+      makeTask({ id: "FN-survivor", title: "Survivor", createdAt: "2026-01-09T00:00:00.000Z" }),
+    ];
+    const listTasks = vi.fn()
+      .mockResolvedValueOnce(initialTasks)
+      .mockResolvedValueOnce(canonicalTasks);
+    const manager = new AutoClaimSnapshotManager({ taskStore: { listTasks }, now: () => Date.parse("2026-01-12T00:00:00.000Z") });
+
+    const snapshot = await manager.getSnapshot();
+    const resolved = await resolveFreshAutoClaimCandidates({ listTasks }, snapshot.tasks, () => Date.parse("2026-01-12T00:00:00.000Z"));
+
+    expect(listTasks).toHaveBeenCalledTimes(2);
+    expect(resolved.map((candidate) => candidate.id)).toEqual(["FN-retitled", "FN-survivor"]);
+    expect(resolved[0]).toMatchObject({
+      id: "FN-retitled",
+      title: "Updated runnable title",
+      description: "updated first line\nsecond",
+      descriptionFirstLine: "updated first line",
+      column: "todo",
+    });
   });
 
   it("sorts by columnMovedAt then createdAt ascending", async () => {
