@@ -259,9 +259,13 @@ The overflowing agent-detail tab strip must keep horizontal touch panning enable
 /*
 FNXC:AgentDetailView 2026-06-19-08:26:
 Tablet viewports inherit the base tab rule because AgentDetailView has only a mobile breakpoint, so FN-6728 enlarges tab labels to about 14px for Dashboard / Logs / Mail readability without changing icon, spacing, or horizontal-scroll behavior.
+
+FNXC:AgentDetailView 2026-06-21-11:03:
+Agent-detail tabs must be non-shrinking flex children so the overflow strip develops real horizontal scroll on narrow mobile viewports instead of squashing Dashboard / Logs / Mail / Skills / Settings into the available width (FN-6865).
 */
 .agent-detail-tab {
   display: flex;
+  flex: 0 0 auto;
   align-items: center;
   gap: var(--space-xs);
   padding: calc(var(--space-sm) + var(--space-xs) * 0.5) var(--space-md);
