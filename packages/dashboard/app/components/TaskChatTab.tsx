@@ -49,6 +49,8 @@ const STEERING_BLOCKED_STATUSES = new Set([
   "awaiting-user-input",
   "awaiting-cli-approval",
   "awaiting-user-review",
+  "awaiting-approval",
+  "awaiting-integration",
   "failed",
   "needs-replan",
 ]);
@@ -171,11 +173,16 @@ function isActiveAgentSession(task: Task | TaskDetail, opts: { sessionLive?: boo
   if (task.paused || task.userPaused) return false;
   if (opts.sessionLive) return true;
 
+  if (task.status === SCHEDULER_WAITING_STATUS) return false;
+
   const hasAssignedAgent = Boolean(task.assignedAgentId || task.checkedOutBy);
   const statusBlocksProgressSteering = task.status ? STEERING_BLOCKED_STATUSES.has(task.status) : false;
+  if (statusBlocksProgressSteering) return false;
+
   const statusAllowsProgressSteering = !statusBlocksProgressSteering;
   const statusAllowsReviewSteering = !task.status || REVIEW_STEERABLE_STATUSES.has(task.status);
-  const columnAllowsSteering = (task.column === "in-progress" && statusAllowsProgressSteering)
+  const columnAllowsSteering = (task.column === "triage" && statusAllowsProgressSteering)
+    || (task.column === "in-progress" && statusAllowsProgressSteering)
     || (task.column === "in-review" && statusAllowsReviewSteering);
   // FNXC:TaskDetailChat 2026-06-20-20:10:
   // In the default ephemeral-agents mode the scheduler never writes
@@ -184,14 +191,21 @@ function isActiveAgentSession(task: Task | TaskDetail, opts: { sessionLive?: boo
   // task therefore has no assignment field yet IS being worked, so requiring
   // `hasAssignedAgent` made the chat always show "no agent is working" for
   // default-mode tasks. Treat assignment as sufficient-but-not-necessary:
-  // - in-progress with a non-blocked, non-`queued` status is an executing run
-  //   (`queued` is the documented waiting marker, self-healing.ts — it stays
-  //   assignment-gated);
+  // - in-progress with a non-blocked, non-`queued` status is an executing run;
   // - in-review with an active review/merge status (REVIEW_STEERABLE_STATUSES)
   //   has a reviewer/merger running. A null-status in-review row is awaiting
   //   human review, not actively worked, so it stays assignment-gated and idle.
+  // FNXC:TaskDetailChat 2026-06-21-13:03:
+  // Planning/triage is an execution surface too: triage.ts writes
+  // `status: "planning"` only after a planner slot is acquired, while active
+  // default-mode planner sessions still omit assignment fields. Treat non-waiting,
+  // non-blocked triage rows as active so steering copy does not falsely say no
+  // agent is working during spec generation. Keep `queued` and awaiting/failed
+  // statuses idle before assignment checks because they are waiting states, not
+  // live agent work.
   const executionImpliesActiveAgent =
-    (task.column === "in-progress" && statusAllowsProgressSteering && task.status !== SCHEDULER_WAITING_STATUS)
+    (task.column === "triage" && statusAllowsProgressSteering)
+    || (task.column === "in-progress" && statusAllowsProgressSteering)
     || (task.column === "in-review" && task.status != null && REVIEW_STEERABLE_STATUSES.has(task.status));
   return columnAllowsSteering
     && (hasAssignedAgent || executionImpliesActiveAgent);
