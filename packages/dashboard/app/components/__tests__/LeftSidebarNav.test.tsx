@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import type { ComponentProps } from "react";
@@ -25,6 +27,15 @@ const projects: ProjectInfo[] = [
     updatedAt: "2026-06-20T00:00:00.000Z",
   },
 ];
+
+const leftSidebarNavCss = readFileSync(resolve(__dirname, "../LeftSidebarNav.css"), "utf8");
+const obsoleteCollapseToggleFloatingClass = "left-sidebar-nav__collapse-toggle--" + "floating";
+
+function getCssRuleBlock(css: string, selector: string) {
+  const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = css.match(new RegExp(`${escapedSelector}\\s*\\{([^}]*)\\}`));
+  return match?.[1] ?? "";
+}
 
 const pluginViews: PluginDashboardViewEntry[] = [
   {
@@ -57,10 +68,22 @@ function expectNoSidebarBrandOrProjectAffordances(container: HTMLElement) {
   expect(container.querySelector(".left-sidebar-nav__wordmark")).toBeNull();
 }
 
-function expectSettingsLastInFooter() {
+function expectCollapseToggleImmediatelyBeforeSettings() {
   const footer = screen.getByTestId("sidebar-nav-settings").closest(".left-sidebar-nav__footer");
+  const toggle = screen.getByTestId("sidebar-nav-collapse-toggle");
+  const settings = screen.getByTestId("sidebar-nav-settings");
   expect(footer).not.toBeNull();
-  expect(footer?.lastElementChild).toBe(screen.getByTestId("sidebar-nav-settings"));
+  expect(toggle.closest(".left-sidebar-nav__footer")).toBe(footer);
+  expect(toggle).toHaveClass("left-sidebar-nav__item");
+  expect(toggle).toHaveClass("left-sidebar-nav__collapse-toggle");
+  expect(toggle).not.toHaveClass(obsoleteCollapseToggleFloatingClass);
+  expect(footer?.children[0]).toBe(toggle);
+  expect(toggle.nextElementSibling).toBe(settings);
+  expect(footer?.lastElementChild).toBe(settings);
+}
+
+function expectSettingsLastInFooter() {
+  expectCollapseToggleImmediatelyBeforeSettings();
 }
 
 function renderSidebar(overrides: Partial<ComponentProps<typeof LeftSidebarNav>> = {}) {
@@ -285,26 +308,47 @@ describe("LeftSidebarNav", () => {
     },
   );
 
-  it("removes the brand-row shell while keeping the floating toggle reachable in expanded and collapsed states", () => {
+  it("renders the collapse toggle in the footer above Settings in expanded and collapsed states", () => {
     const { container } = renderSidebar();
     const sidebar = screen.getByTestId("left-sidebar-nav");
     const expandedToggle = screen.getByTestId("sidebar-nav-collapse-toggle");
 
     expectNoSidebarBrandOrProjectAffordances(container);
-    expect(expandedToggle).toHaveClass("left-sidebar-nav__collapse-toggle--floating");
+    expectCollapseToggleImmediatelyBeforeSettings();
     expect(expandedToggle).toHaveAttribute("aria-pressed", "false");
     expect(expandedToggle).toHaveAccessibleName("Collapse sidebar");
     expect(expandedToggle).toHaveAttribute("title", "Collapse sidebar");
+    expect(expandedToggle).toHaveTextContent("Collapse");
+    expect(expandedToggle.querySelector("svg")).not.toBeNull();
+    expect(within(sidebar).getAllByRole("button").at(-1)).toBe(screen.getByTestId("sidebar-nav-settings"));
 
     fireEvent.click(expandedToggle);
 
     const collapsedToggle = screen.getByTestId("sidebar-nav-collapse-toggle");
     expect(sidebar.className).toContain("left-sidebar-nav--collapsed");
     expectNoSidebarBrandOrProjectAffordances(container);
-    expect(collapsedToggle).toHaveClass("left-sidebar-nav__collapse-toggle--floating");
+    expectCollapseToggleImmediatelyBeforeSettings();
     expect(collapsedToggle).toHaveAttribute("aria-pressed", "true");
     expect(collapsedToggle).toHaveAccessibleName("Expand sidebar");
     expect(collapsedToggle).toHaveAttribute("title", "Expand sidebar");
+    expect(collapsedToggle.querySelector("svg")).not.toBeNull();
+    expect(within(sidebar).getAllByRole("button").at(-1)).toBe(screen.getByTestId("sidebar-nav-settings"));
+  });
+
+  it("keeps collapse toggle styling tokenized and removes the floating modifier", () => {
+    expect(leftSidebarNavCss).not.toContain(obsoleteCollapseToggleFloatingClass);
+
+    const toggleRule = getCssRuleBlock(leftSidebarNavCss, ".left-sidebar-nav__collapse-toggle");
+    expect(toggleRule).toContain("flex-shrink: 0");
+    expect(toggleRule).toContain("justify-content: flex-start");
+    expect(toggleRule).not.toMatch(/#|rgb\(/i);
+    expect(toggleRule).not.toMatch(/position:\s*absolute/);
+
+    const itemRule = getCssRuleBlock(leftSidebarNavCss, ".left-sidebar-nav__item");
+    expect(itemRule).toContain("gap: var(--space-sm)");
+    expect(itemRule).toContain("border-radius: var(--radius-md)");
+    expect(itemRule).toContain("color: var(--text-muted)");
+    expect(itemRule).not.toMatch(/#|rgb\(/i);
   });
 
   it("toggles collapsed rail mode, keeps bottom settings reachable, and restores it on remount", () => {

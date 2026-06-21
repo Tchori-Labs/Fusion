@@ -397,28 +397,28 @@ export function LeftSidebarNav({
       aria-label={t("nav.sidebarAriaLabel", "Sidebar navigation")}
       style={isCollapsed ? undefined : { width: sidebarWidth, minWidth: sidebarWidth }}
     >
-      {/*
-      FNXC:Navigation 2026-06-20-12:00:
-      The sidebar collapse affordance must not consume a dedicated brand row now that logo, wordmark, and project controls live in Header. Float the single toggle on the resize border so expanded and rail states retain the same reachable click target without an empty header shell.
-      */}
-      <button
-        type="button"
-        className="btn btn-icon left-sidebar-nav__collapse-toggle left-sidebar-nav__collapse-toggle--floating"
-        aria-label={isCollapsed ? t("nav.expandSidebar", "Expand sidebar") : t("nav.collapseSidebar", "Collapse sidebar")}
-        title={isCollapsed ? t("nav.expandSidebar", "Expand sidebar") : t("nav.collapseSidebar", "Collapse sidebar")}
-        aria-pressed={isCollapsed}
-        data-testid="sidebar-nav-collapse-toggle"
-        onClick={toggleCollapsed}
-      >
-        {isCollapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
-      </button>
-
       <nav className="left-sidebar-nav__list" aria-label={t("nav.primaryNavAriaLabel", "Primary navigation")}>
         <div className="left-sidebar-nav__section">{primaryEntries.map(renderEntry)}</div>
         <div className="left-sidebar-nav__section left-sidebar-nav__section--secondary">{secondaryEntries.map(renderEntry)}</div>
       </nav>
 
       <div className="left-sidebar-nav__footer">
+        {/*
+        FNXC:Navigation 2026-06-21-00:00:
+        The sidebar collapse affordance belongs in the footer immediately above Settings, using the same row-item visual language. Expanded mode shows the Collapse label, while rail mode relies on the shared label-hiding rule so the button remains icon-only like Settings.
+        */}
+        <button
+          type="button"
+          className="btn left-sidebar-nav__item left-sidebar-nav__collapse-toggle"
+          aria-label={isCollapsed ? t("nav.expandSidebar", "Expand sidebar") : t("nav.collapseSidebar", "Collapse sidebar")}
+          title={isCollapsed ? t("nav.expandSidebar", "Expand sidebar") : t("nav.collapseSidebar", "Collapse sidebar")}
+          aria-pressed={isCollapsed}
+          data-testid="sidebar-nav-collapse-toggle"
+          onClick={toggleCollapsed}
+        >
+          {isCollapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
+          <span className="left-sidebar-nav__label">{t("nav.collapse", "Collapse")}</span>
+        </button>
         <button
           type="button"
           className="btn left-sidebar-nav__item left-sidebar-nav__settings"

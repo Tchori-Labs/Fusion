@@ -25,27 +25,13 @@ The left sidebar is a sibling of project-content, so it does not inherit project
   padding-bottom: var(--executor-footer-height);
 }
 
+/*
+FNXC:Navigation 2026-06-21-00:00:
+The collapse toggle lives in the footer above Settings instead of floating on the resize border. It reuses the tokenized row-item styling so expanded mode can show the Collapse label and rail mode can hide that label consistently with other sidebar items.
+*/
 .left-sidebar-nav__collapse-toggle {
   flex-shrink: 0;
-}
-
-/*
-FNXC:DashboardStyling 2026-06-20-20:56:
-The floating sidebar collapse toggle must stay fully round, but FN-6809 surfaced that --radius-full is not a defined dashboard token. Use 50% here to preserve the circular affordance without introducing another undefined custom property.
-*/
-.left-sidebar-nav__collapse-toggle--floating {
-  position: absolute;
-  top: var(--space-sm);
-  right: calc((var(--space-lg) + var(--space-xs)) * -1);
-  z-index: 2;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: calc(var(--space-lg) + var(--space-md));
-  min-height: calc(var(--space-lg) + var(--space-md));
-  padding: var(--space-xs);
-  border-radius: 50%;
-  box-shadow: var(--shadow-sm);
+  justify-content: flex-start;
 }
 
 .left-sidebar-nav__list {
