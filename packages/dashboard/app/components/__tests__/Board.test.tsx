@@ -940,13 +940,6 @@ describe("Board", () => {
       });
     }
 
-    function workflowToolbarActionNames() {
-      const toolbar = document.querySelector(".board-workflow-toolbar");
-      expect(toolbar).not.toBeNull();
-      return Array.from(toolbar?.querySelectorAll("button") ?? [])
-        .filter((button) => button.getAttribute("data-testid") !== "workflow-switcher")
-        .map((button) => button.getAttribute("aria-label"));
-    }
 
     async function openWorkflowSwitcher() {
       const trigger = await screen.findByTestId("workflow-switcher");
@@ -1041,11 +1034,14 @@ describe("Board", () => {
       });
 
       await waitFor(() => expect(screen.getByTestId("column-triage")).toBeDefined());
-      expect(screen.queryByTestId("workflow-switcher")).toBeNull();
-      expect(workflowToolbarActionNames()).toEqual(["Edit workflows", "New workflow"]);
+      const selector = screen.getByTestId("workflow-switcher");
+      expect(document.querySelector(".board-workflow-edit-btn")).toBeNull();
+      expect(document.querySelector(".board-workflow-create-btn")).toBeNull();
 
-      fireEvent.click(screen.getByRole("button", { name: "New workflow" }));
-      fireEvent.click(screen.getByRole("button", { name: "Edit workflows" }));
+      fireEvent.click(selector);
+      fireEvent.click(screen.getByTestId("workflow-switcher-create"));
+      fireEvent.click(selector);
+      fireEvent.click(screen.getByTestId("workflow-switcher-edit-builtin:coding"));
       expect(onCreateWorkflow).toHaveBeenCalledTimes(1);
       expect(onOpenWorkflowEditor).toHaveBeenCalledTimes(1);
       expect(onOpenWorkflowEditor).toHaveBeenCalledWith("builtin:coding");
@@ -1057,8 +1053,10 @@ describe("Board", () => {
       const { unmount } = renderBoard({ onCreateWorkflow });
 
       await waitFor(() => expect(document.querySelector(".board-workflow-toolbar")).not.toBeNull());
-      expect(workflowToolbarActionNames()).toEqual(["New workflow"]);
-      fireEvent.click(screen.getByRole("button", { name: "New workflow" }));
+      expect(document.querySelector(".board-workflow-create-btn")).toBeNull();
+      fireEvent.click(screen.getByTestId("workflow-switcher"));
+      fireEvent.click(screen.getByTestId("workflow-switcher-create"));
+      expect(screen.queryByTestId("workflow-switcher-edit-builtin:coding")).toBeNull();
       expect(onCreateWorkflow).toHaveBeenCalledTimes(1);
       unmount();
 
@@ -1067,8 +1065,10 @@ describe("Board", () => {
       renderBoard({ onOpenWorkflowEditor });
 
       await waitFor(() => expect(document.querySelector(".board-workflow-toolbar")).not.toBeNull());
-      expect(workflowToolbarActionNames()).toEqual(["Edit workflows"]);
-      fireEvent.click(screen.getByRole("button", { name: "Edit workflows" }));
+      expect(document.querySelector(".board-workflow-edit-btn")).toBeNull();
+      fireEvent.click(screen.getByTestId("workflow-switcher"));
+      expect(screen.queryByTestId("workflow-switcher-create")).toBeNull();
+      fireEvent.click(screen.getByTestId("workflow-switcher-edit-builtin:coding"));
       expect(onOpenWorkflowEditor).toHaveBeenCalledTimes(1);
     });
 
@@ -1085,9 +1085,13 @@ describe("Board", () => {
         onOpenWorkflowEditor,
       });
 
-      expect(await screen.findByTestId("workflow-switcher")).toBeDefined();
-      expect(screen.getByRole("button", { name: "New workflow" })).toBeDefined();
-      expect(screen.getByRole("button", { name: "Edit workflows" })).toBeDefined();
+      const selector = await screen.findByTestId("workflow-switcher");
+      expect(document.querySelector(".board-workflow-edit-btn")).toBeNull();
+      expect(document.querySelector(".board-workflow-create-btn")).toBeNull();
+      fireEvent.click(selector);
+      expect(screen.getByTestId("workflow-switcher-create")).toBeDefined();
+      expect(screen.getByTestId("workflow-switcher-edit-builtin:coding")).toBeDefined();
+      expect(screen.getByTestId("workflow-switcher-edit-wf-custom")).toBeDefined();
       const toolbar = document.querySelector(".board-workflow-toolbar");
       expect(toolbar).not.toBeNull();
       expect(toolbar?.hasAttribute("data-collapsed")).toBe(false);
@@ -1118,15 +1122,17 @@ describe("Board", () => {
         const selector = await screen.findByTestId("workflow-switcher");
         await waitFor(() => expect(headerSlot.querySelector(".board-workflow-toolbar")).not.toBeNull());
         expect(headerSlot.contains(selector)).toBe(true);
-        expect(headerSlot.querySelector(".board-workflow-edit-btn")).not.toBeNull();
-        expect(headerSlot.querySelector(".board-workflow-create-btn")).not.toBeNull();
+        expect(headerSlot.querySelector(".board-workflow-edit-btn")).toBeNull();
+        expect(headerSlot.querySelector(".board-workflow-create-btn")).toBeNull();
         expect(document.querySelector(".board-workflow-view > .board-workflow-toolbar")).toBeNull();
 
         fireEvent.click(selector);
+        expect(screen.getByTestId("workflow-switcher-create")).toBeInTheDocument();
         fireEvent.click(screen.getByTestId("workflow-switcher-option-wf-custom"));
         await waitFor(() => expect(screen.getByTestId("column-intake")).toBeDefined());
         expect(screen.queryByTestId("column-todo")).toBeNull();
-        fireEvent.click(screen.getByRole("button", { name: "Edit workflows" }));
+        fireEvent.click(selector);
+        fireEvent.click(screen.getByTestId("workflow-switcher-edit-wf-custom"));
         expect(onOpenWorkflowEditor).toHaveBeenCalledWith("wf-custom");
       } finally {
         headerSlot.remove();
@@ -1196,9 +1202,12 @@ describe("Board", () => {
       expect(selector).toHaveTextContent("1");
       expect(screen.getByTestId("workflow-switcher-option-wf-custom")).toHaveTextContent("2");
       fireEvent.keyDown(selector, { key: "Escape" });
-      expect(workflowToolbarActionNames()).toEqual(["Edit workflows", "New workflow"]);
-      fireEvent.click(screen.getByRole("button", { name: "New workflow" }));
-      fireEvent.click(screen.getByRole("button", { name: "Edit workflows" }));
+      expect(document.querySelector(".board-workflow-edit-btn")).toBeNull();
+      expect(document.querySelector(".board-workflow-create-btn")).toBeNull();
+      fireEvent.click(selector);
+      fireEvent.click(screen.getByTestId("workflow-switcher-create"));
+      fireEvent.click(selector);
+      fireEvent.click(screen.getByTestId("workflow-switcher-edit-builtin:coding"));
       expect(onCreateWorkflow).toHaveBeenCalledTimes(1);
       expect(onOpenWorkflowEditor).toHaveBeenCalledTimes(1);
       expect(JSON.parse(screen.getByTestId("column-todo").getAttribute("data-tasks") || "[]").map((task: Task) => task.id)).toEqual(["FN-1"]);
@@ -1209,7 +1218,8 @@ describe("Board", () => {
       expect(JSON.parse(screen.getByTestId("column-intake").getAttribute("data-tasks") || "[]").map((task: Task) => task.id).sort()).toEqual(["FN-2", "FN-3"]);
       expect(screen.queryByTestId("column-todo")).toBeNull();
 
-      fireEvent.click(screen.getByRole("button", { name: "Edit workflows" }));
+      fireEvent.click(screen.getByTestId("workflow-switcher"));
+      fireEvent.click(screen.getByTestId("workflow-switcher-edit-wf-custom"));
       expect(onOpenWorkflowEditor).toHaveBeenCalledWith("wf-custom");
     });
 

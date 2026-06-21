@@ -7,8 +7,6 @@ import "./Board.css";
 import type { ToastType } from "../hooks/useToast";
 import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { createPortal } from "react-dom";
-import { useTranslation } from "react-i18next";
-import { Pencil, Plus } from "lucide-react";
 import { fetchWorkflowSteps, fetchBoardWorkflows, promoteTask, type ModelInfo, type BoardWorkflowDefinition, type BoardWorkflowsPayload } from "../api";
 import { useBlockerFanout } from "../hooks/useBlockerFanout";
 import { MOBILE_MEDIA_QUERY } from "../hooks/useViewportMode";
@@ -148,7 +146,6 @@ function BoardWorkflowSkeleton({ empty = false }: { empty?: boolean }) {
 }
 
 export function Board({ tasks, projectId, maxConcurrent, onMoveTask, onPauseTask, onOpenDetail, onOpenGroupModal, addToast, onQuickCreate, onNewTask, autoMerge, onToggleAutoMerge, globalPaused, onUpdateTask, onRetryTask, onArchiveTask, onUnarchiveTask, onDeleteTask, onArchiveAllDone, onLoadArchivedTasks, searchQuery = "", availableModels, onPlanningMode, onSubtaskBreakdown, onOpenDetailWithTab, favoriteProviders, favoriteModels, onToggleFavorite, onToggleModelFavorite, taskStuckTimeoutMs, onOpenMission, staleHighFanoutBlockerAgeThresholdMs, lastFetchTimeMs, prAuthAvailable, onOpenWorkflowEditor, onCreateWorkflow, workflowColumnsEnabled, settingsLoaded, workflowControlsInHeader = false }: BoardProps) {
-  const { t } = useTranslation("app");
   const [archivedCollapsed, setArchivedCollapsed] = useState(true);
   const archivedLoadedRef = useRef(false);
   const [workflowStepNameLookup, setWorkflowStepNameLookup] = useState<ReadonlyMap<string, string>>(EMPTY_WORKFLOW_STEP_NAME_LOOKUP);
@@ -570,46 +567,27 @@ export function Board({ tasks, projectId, maxConcurrent, onMoveTask, onPauseTask
   }
 
   if (workflowMode && selectedWorkflow) {
-    const shouldRenderWorkflowControls = workflowOptions.length > 1 || onCreateWorkflow || onOpenWorkflowEditor;
-    const workflowToolbar = shouldRenderWorkflowControls ? (
+    const shouldRenderWorkflowControls = workflowOptions.length > 1 || Boolean(onCreateWorkflow || onOpenWorkflowEditor);
+    const workflowToolbar = shouldRenderWorkflowControls && workflowOptions.length > 0 ? (
       <div className="board-workflow-toolbar">
-        {workflowOptions.length > 1 && (
-          <div className="board-workflow-selector">
-            <WorkflowSwitcher
-              workflows={workflowOptions}
-              value={selectedWorkflow.id}
-              onChange={setSelectedWorkflowId}
-              counts={workflowStatusCounts}
-            />
-          </div>
-        )}
-        {onOpenWorkflowEditor && (
-          <button
-            type="button"
-            className="btn btn-icon btn-sm board-workflow-edit-btn"
-            onClick={() => onOpenWorkflowEditor(selectedWorkflow.id)}
-            title={t("board.workflow.edit", "Edit workflows")}
-            aria-label={t("board.workflow.edit", "Edit workflows")}
-          >
-            <Pencil size={15} />
-          </button>
-        )}
-        {onCreateWorkflow && (
-          <button
-            type="button"
-            className="btn btn-icon btn-sm board-workflow-create-btn"
-            onClick={onCreateWorkflow}
-            title={t("board.workflow.new", "New workflow")}
-            aria-label={t("board.workflow.new", "New workflow")}
-          >
-            <Plus size={15} />
-          </button>
-        )}
+        <div className="board-workflow-selector">
+          <WorkflowSwitcher
+            workflows={workflowOptions}
+            value={selectedWorkflow.id}
+            onChange={setSelectedWorkflowId}
+            counts={workflowStatusCounts}
+            onEditWorkflow={onOpenWorkflowEditor}
+            onCreateWorkflow={onCreateWorkflow}
+          />
+        </div>
       </div>
     ) : null;
     /*
     FNXC:WorkflowControls 2026-06-20-00:00:
     Board owns workflow selection state, so the existing selector/edit/create toolbar is portaled to Header only when the left sidebar is the active tablet/desktop navigation surface. If the Header slot is not mounted yet, render inline as the safe fallback so controls are never lost.
+
+    FNXC:WorkflowControls 2026-06-20-15:42:
+    Standalone workflow edit/create icon buttons were removed because those actions now live inside WorkflowSwitcher; keep this wrapper only when it contains the switcher to avoid empty toolbar shells.
     */
     const relocatedWorkflowToolbar = workflowControlsInHeader && headerWorkflowSlot && workflowToolbar
       ? createPortal(workflowToolbar, headerWorkflowSlot)

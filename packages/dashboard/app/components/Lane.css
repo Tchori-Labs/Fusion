@@ -44,10 +44,6 @@
   min-width: 0;
 }
 
-.board-workflow-create-btn,
-.board-workflow-edit-btn {
-  flex: 0 0 auto;
-}
 
 .board.board-workflow-columns {
   flex: 1 1 auto;

@@ -86,6 +86,90 @@ describe("WorkflowSwitcher", () => {
     expect(screen.queryByRole("listbox", { name: "Workflow" })).not.toBeInTheDocument();
   });
 
+  it("renders per-row edit buttons that close without selecting workflows", () => {
+    const onChange = vi.fn();
+    const onEditWorkflow = vi.fn();
+    render(
+      <WorkflowSwitcher
+        workflows={workflows}
+        value="coding"
+        onChange={onChange}
+        counts={countMap()}
+        onEditWorkflow={onEditWorkflow}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("workflow-switcher"));
+    fireEvent.click(screen.getByTestId("workflow-switcher-edit-design"));
+
+    expect(onEditWorkflow).toHaveBeenCalledWith("design");
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.queryByRole("listbox", { name: "Workflow" })).not.toBeInTheDocument();
+  });
+
+  it("renders a persistent New workflow footer for single and many workflow lists", () => {
+    const onCreateWorkflow = vi.fn();
+    const { rerender } = render(
+      <WorkflowSwitcher
+        workflows={[workflows[0]]}
+        value="coding"
+        onChange={vi.fn()}
+        counts={countMap()}
+        onCreateWorkflow={onCreateWorkflow}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("workflow-switcher"));
+    expect(screen.getByTestId("workflow-switcher-create")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("workflow-switcher-create"));
+    expect(onCreateWorkflow).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("listbox", { name: "Workflow" })).not.toBeInTheDocument();
+
+    const manyWorkflows = Array.from({ length: 8 }, (_, index) => ({
+      id: `workflow-${index}`,
+      name: `Workflow ${index}`,
+      columns: [],
+    }));
+    rerender(
+      <WorkflowSwitcher
+        workflows={manyWorkflows}
+        value="workflow-0"
+        onChange={vi.fn()}
+        counts={countMap()}
+        onCreateWorkflow={onCreateWorkflow}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("workflow-switcher"));
+    expect(screen.getByTestId("workflow-switcher-create")).toBeInTheDocument();
+    expect(screen.getAllByRole("option")).toHaveLength(manyWorkflows.length);
+  });
+
+  it("keeps Enter selection scoped to highlighted workflow options when actions exist", () => {
+    const onChange = vi.fn();
+    const onEditWorkflow = vi.fn();
+    const onCreateWorkflow = vi.fn();
+    render(
+      <WorkflowSwitcher
+        workflows={workflows}
+        value="coding"
+        onChange={onChange}
+        counts={countMap()}
+        onEditWorkflow={onEditWorkflow}
+        onCreateWorkflow={onCreateWorkflow}
+      />,
+    );
+
+    const trigger = screen.getByTestId("workflow-switcher");
+    fireEvent.keyDown(trigger, { key: "ArrowDown" });
+    fireEvent.keyDown(trigger, { key: "ArrowDown" });
+    fireEvent.keyDown(trigger, { key: "Enter" });
+
+    expect(onChange).toHaveBeenCalledWith("design");
+    expect(onEditWorkflow).not.toHaveBeenCalled();
+    expect(onCreateWorkflow).not.toHaveBeenCalled();
+  });
+
   it("renders populated and zero counts only after the dropdown expands", () => {
     render(
       <WorkflowSwitcher

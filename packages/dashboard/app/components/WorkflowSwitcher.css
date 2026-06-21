@@ -131,12 +131,35 @@ The switcher's inline Todo, In Progress, and Done count badges intentionally mir
   padding: var(--space-xs) 0;
 }
 
+.workflow-switcher-option-row {
+  display: flex;
+  align-items: stretch;
+  gap: var(--space-xs);
+  padding: 0 var(--space-xs);
+  background: transparent;
+}
+
+.workflow-switcher-option-row:hover,
+.workflow-switcher-option-row--highlighted {
+  background: var(--card-hover);
+}
+
+.workflow-switcher-option-row--selected {
+  background: color-mix(in srgb, var(--todo) 15%, transparent);
+}
+
+.workflow-switcher-option-row--selected:hover,
+.workflow-switcher-option-row--selected.workflow-switcher-option-row--highlighted {
+  background: color-mix(in srgb, var(--todo) 25%, transparent);
+}
+
 .workflow-switcher-option {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--space-sm);
-  width: 100%;
+  min-width: 0;
+  flex: 1 1 auto;
   padding: var(--space-sm) var(--space-md);
   border: 0;
   background: transparent;
@@ -146,18 +169,21 @@ The switcher's inline Todo, In Progress, and Done count badges intentionally mir
   cursor: pointer;
 }
 
-.workflow-switcher-option:hover,
-.workflow-switcher-option--highlighted {
-  background: var(--card-hover);
+.workflow-switcher-option:focus-visible,
+.workflow-switcher-edit:focus-visible,
+.workflow-switcher-create:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 
-.workflow-switcher-option--selected {
-  background: color-mix(in srgb, var(--todo) 15%, transparent);
+.workflow-switcher-edit {
+  flex: 0 0 auto;
+  align-self: center;
+  color: var(--text-muted);
 }
 
-.workflow-switcher-option--selected:hover,
-.workflow-switcher-option--selected.workflow-switcher-option--highlighted {
-  background: color-mix(in srgb, var(--todo) 25%, transparent);
+.workflow-switcher-edit:hover {
+  color: var(--text);
 }
 
 .workflow-switcher-option-name {
@@ -166,6 +192,22 @@ The switcher's inline Todo, In Progress, and Done count badges intentionally mir
 
 .workflow-switcher-counts--option {
   margin-left: auto;
+}
+
+.workflow-switcher-footer {
+  flex: 0 0 auto;
+  padding: var(--space-xs);
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.workflow-switcher-create {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-sm);
+  width: 100%;
+  min-height: calc(var(--space-lg) + var(--space-sm));
 }
 
 @media (max-width: 768px) {

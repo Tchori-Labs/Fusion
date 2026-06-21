@@ -772,8 +772,9 @@ describe("ListView", () => {
     mobileSpy.mockRestore();
   });
 
-  it("shows a new-workflow action next to the workflow selector", async () => {
+  it("shows workflow edit and New actions inside the dropdown", async () => {
     const onCreateWorkflow = vi.fn();
+    const onOpenWorkflowEditor = vi.fn();
     vi.mocked(fetchBoardWorkflows).mockResolvedValue({
       flagEnabled: true,
       defaultWorkflowId: "builtin:coding",
@@ -801,17 +802,24 @@ describe("ListView", () => {
     renderListView({
       tasks: [createMockTask({ id: "FN-001", column: "triage", title: "Workflow task" })],
       onCreateWorkflow,
+      onOpenWorkflowEditor,
     });
 
-    await screen.findByTestId("workflow-switcher");
-    const createButtons = screen.getAllByRole("button", { name: "New workflow" });
-    expect(createButtons.length).toBeGreaterThan(0);
-    fireEvent.click(createButtons[0]);
+    const selector = await screen.findByTestId("workflow-switcher");
+    expect(document.querySelector(".list-workflow-create-btn")).toBeNull();
+    fireEvent.click(selector);
+    fireEvent.click(screen.getByTestId("workflow-switcher-edit-wf-custom"));
+    expect(onOpenWorkflowEditor).toHaveBeenCalledWith("wf-custom");
+    expect(onCreateWorkflow).not.toHaveBeenCalled();
+
+    fireEvent.click(selector);
+    fireEvent.click(screen.getByTestId("workflow-switcher-create"));
     expect(onCreateWorkflow).toHaveBeenCalledTimes(1);
   });
 
-  it("relocates the list workflow selector and create action into the header slot without adding edit", async () => {
+  it("relocates the list workflow selector and dropdown actions into the header slot", async () => {
     const onCreateWorkflow = vi.fn();
+    const onOpenWorkflowEditor = vi.fn();
     const headerSlot = document.createElement("div");
     headerSlot.id = "header-workflow-slot";
     headerSlot.className = "header-workflow-slot";
@@ -846,20 +854,25 @@ describe("ListView", () => {
           createMockTask({ id: "FN-002", column: "backlog", title: "Custom task" }),
         ],
         onCreateWorkflow,
+        onOpenWorkflowEditor,
         workflowControlsInHeader: true,
       });
 
       const selector = await screen.findByTestId("workflow-switcher");
       await waitFor(() => expect(headerSlot.querySelector(".list-workflow-control")).not.toBeNull());
       expect(headerSlot.contains(selector)).toBe(true);
-      expect(headerSlot.querySelector(".list-workflow-create-btn")).not.toBeNull();
+      expect(headerSlot.querySelector(".list-workflow-create-btn")).toBeNull();
       expect(headerSlot.querySelector(".board-workflow-edit-btn")).toBeNull();
       expect(document.querySelector(".list-view > .list-workflow-control")).toBeNull();
 
       fireEvent.click(selector);
+      expect(screen.getByTestId("workflow-switcher-create")).toBeInTheDocument();
       fireEvent.click(screen.getByTestId("workflow-switcher-option-wf-custom"));
       await waitFor(() => expect(screen.getByText("Custom task")).toBeInTheDocument());
       expect(screen.queryByText("Coding task")).not.toBeInTheDocument();
+      fireEvent.click(selector);
+      fireEvent.click(screen.getByTestId("workflow-switcher-edit-wf-custom"));
+      expect(onOpenWorkflowEditor).toHaveBeenCalledWith("wf-custom");
     } finally {
       headerSlot.remove();
     }

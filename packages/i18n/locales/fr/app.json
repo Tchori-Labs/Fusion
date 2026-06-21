@@ -8456,7 +8456,9 @@
     "inProgress": "In Progress",
     "label": "Workflow",
     "todo": "Todo",
-    "triggerAria": "Select workflow. Current workflow: {{name}}"
+    "triggerAria": "Select workflow. Current workflow: {{name}}",
+    "editWorkflow": "Edit workflow",
+    "newWorkflow": "New workflow"
   },
   "workspace": {
     "projectRoot": "Racine du projet",

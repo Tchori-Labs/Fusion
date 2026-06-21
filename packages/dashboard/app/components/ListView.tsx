@@ -3,7 +3,7 @@ import { useState, useCallback, useMemo, Fragment, useEffect, useRef } from "rea
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
-import { ArrowUpDown, ArrowUp, ArrowDown, Link, Columns3, EyeOff, Eye, ChevronRight, Zap, Trash2, Pause, Play, Archive, Plus } from "lucide-react";
+import { ArrowUpDown, ArrowUp, ArrowDown, Link, Columns3, EyeOff, Eye, ChevronRight, Zap, Trash2, Pause, Play, Archive } from "lucide-react";
 import type { Task, TaskDetail, Column, ColumnId, TaskCreateInput, MergeResult, GithubIssueAction } from "@fusion/core";
 import { COLUMNS, DEFAULT_COLUMN, getErrorMessage, isColumn } from "@fusion/core";
 import { useColumnLabel } from "../i18n/labels";
@@ -242,6 +242,7 @@ interface ListViewProps {
   lastFetchTimeMs?: number;
   prAuthAvailable?: boolean;
   autoMerge?: boolean;
+  onOpenWorkflowEditor?: (workflowId?: string) => void;
   onCreateWorkflow?: () => void;
   workflowColumnsEnabled?: boolean;
   settingsLoaded?: boolean;
@@ -310,6 +311,7 @@ export function ListView({
   lastFetchTimeMs,
   prAuthAvailable,
   autoMerge,
+  onOpenWorkflowEditor,
   onCreateWorkflow,
   workflowColumnsEnabled,
   settingsLoaded,
@@ -1618,36 +1620,28 @@ export function ListView({
   };
 
   const renderWorkflowSelector = () => {
-    if (!workflowMode) return null;
-    const showSelect = workflowOptions.length > 1 && selectedWorkflow;
-    if (!showSelect && !onCreateWorkflow) return null;
+    if (!workflowMode || !selectedWorkflow) return null;
+    const shouldRenderWorkflowControls = workflowOptions.length > 1 || Boolean(onCreateWorkflow || onOpenWorkflowEditor);
+    if (!shouldRenderWorkflowControls || workflowOptions.length === 0) return null;
     const workflowControl = (
       <div className="list-workflow-control">
-        {showSelect && selectedWorkflow && (
-          <WorkflowSwitcher
-            workflows={workflowOptions}
-            value={selectedWorkflow.id}
-            onChange={setSelectedWorkflowId}
-            counts={workflowStatusCounts}
-            label={t("listView.workflowLabel", "Workflow")}
-          />
-        )}
-        {onCreateWorkflow && (
-          <button
-            type="button"
-            className="btn btn-icon btn-sm list-workflow-create-btn"
-            onClick={onCreateWorkflow}
-            title={t("workflows.newWorkflow", "New workflow")}
-            aria-label={t("workflows.newWorkflow", "New workflow")}
-          >
-            <Plus size={15} />
-          </button>
-        )}
+        <WorkflowSwitcher
+          workflows={workflowOptions}
+          value={selectedWorkflow.id}
+          onChange={setSelectedWorkflowId}
+          counts={workflowStatusCounts}
+          label={t("listView.workflowLabel", "Workflow")}
+          onEditWorkflow={onOpenWorkflowEditor}
+          onCreateWorkflow={onCreateWorkflow}
+        />
       </div>
     );
     /*
     FNXC:WorkflowControls 2026-06-20-00:00:
-    ListView keeps its own workflow selection state and only portals its existing selector/create controls into Header when the sidebar header slot exists. It intentionally does not add the Board-only edit affordance.
+    ListView keeps its own workflow selection state and only portals its workflow controls into Header when the sidebar header slot exists.
+
+    FNXC:WorkflowControls 2026-06-20-15:43:
+    ListView now has edit parity through WorkflowSwitcher row actions and no longer renders a standalone create icon, preventing empty button shells across desktop and mobile header placements.
     */
     return workflowControlsInHeader && headerWorkflowSlot
       ? createPortal(workflowControl, headerWorkflowSlot)

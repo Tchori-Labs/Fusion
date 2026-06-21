@@ -1,6 +1,6 @@
 import "./WorkflowSwitcher.css";
 
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, Pencil, Plus } from "lucide-react";
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
@@ -13,6 +13,8 @@ export interface WorkflowSwitcherProps {
   onChange: (id: string) => void;
   counts: Map<string, WorkflowStatusCounts>;
   label?: string;
+  onEditWorkflow?: (workflowId: string) => void;
+  onCreateWorkflow?: () => void;
 }
 
 interface DropdownPosition {
@@ -36,13 +38,19 @@ function getCounts(counts: Map<string, WorkflowStatusCounts>, workflowId: string
  * FNXC:WorkflowSwitcher 2026-06-20-00:31:
  * Counts are contextual detail, so the collapsed trigger must stay visually and accessibly scoped to the active workflow name plus chevron.
  * Render Todo, In Progress, and Done counts only while the dropdown is expanded; option rows keep their count text because the listbox is the comparison surface.
+ *
+ * FNXC:WorkflowSwitcher 2026-06-20-15:34:
+ * Workflow edit and creation affordances moved into the shared dropdown so Board and ListView cannot leave separate toolbar icon shells behind.
+ * Each option row owns a sibling edit button, and New workflow remains visible in a non-scrolling footer while long workflow lists scroll.
  */
-export function WorkflowSwitcher({ workflows, value, onChange, counts, label: labelProp }: WorkflowSwitcherProps) {
+export function WorkflowSwitcher({ workflows, value, onChange, counts, label: labelProp, onEditWorkflow, onCreateWorkflow }: WorkflowSwitcherProps) {
   const { t } = useTranslation("app");
   const label = labelProp ?? t("workflowSwitcher.label", "Workflow");
   const todoLabel = t("workflowSwitcher.todo", "Todo");
   const inProgressLabel = t("workflowSwitcher.inProgress", "In Progress");
   const doneLabel = t("workflowSwitcher.done", "Done");
+  const editWorkflowLabel = t("workflowSwitcher.editWorkflow", "Edit workflow");
+  const newWorkflowLabel = t("workflowSwitcher.newWorkflow", "New workflow");
   const listboxId = useId();
 
   const [isOpen, setIsOpen] = useState(false);
@@ -139,6 +147,18 @@ export function WorkflowSwitcher({ workflows, value, onChange, counts, label: la
     triggerRef.current?.focus();
   }, [onChange]);
 
+  const handleEditWorkflow = useCallback((workflowId: string) => {
+    if (!onEditWorkflow) return;
+    setIsOpen(false);
+    onEditWorkflow(workflowId);
+  }, [onEditWorkflow]);
+
+  const handleCreateWorkflow = useCallback(() => {
+    if (!onCreateWorkflow) return;
+    setIsOpen(false);
+    onCreateWorkflow();
+  }, [onCreateWorkflow]);
+
   const handleKeyDown = useCallback((event: KeyboardEvent) => {
     switch (event.key) {
       case "ArrowDown":
@@ -223,24 +243,56 @@ export function WorkflowSwitcher({ workflows, value, onChange, counts, label: la
             const isSelected = workflow.id === selectedWorkflow.id;
             const isHighlighted = index === highlightedIndex;
             return (
-              <button
+              <div
                 key={workflow.id}
-                type="button"
-                role="option"
-                aria-selected={isSelected}
-                data-index={index}
-                data-testid={`workflow-switcher-option-${workflow.id}`}
-                className={`workflow-switcher-option${isSelected ? " workflow-switcher-option--selected" : ""}${isHighlighted ? " workflow-switcher-option--highlighted" : ""}`}
+                className={`workflow-switcher-option-row${isSelected ? " workflow-switcher-option-row--selected" : ""}${isHighlighted ? " workflow-switcher-option-row--highlighted" : ""}`}
                 onMouseEnter={() => setHighlightedIndex(index)}
-                onClick={() => selectWorkflow(workflow.id)}
               >
-                <span className="workflow-switcher-option-name">{workflow.name}</span>
-                {renderCountBadges(workflowCounts, "option")}
-                {renderAccessibleCounts(workflowCounts)}
-              </button>
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={isSelected}
+                  data-index={index}
+                  data-testid={`workflow-switcher-option-${workflow.id}`}
+                  className="workflow-switcher-option"
+                  onClick={() => selectWorkflow(workflow.id)}
+                >
+                  <span className="workflow-switcher-option-name">{workflow.name}</span>
+                  {renderCountBadges(workflowCounts, "option")}
+                  {renderAccessibleCounts(workflowCounts)}
+                </button>
+                {onEditWorkflow ? (
+                  <button
+                    type="button"
+                    className="btn btn-icon btn-sm workflow-switcher-edit"
+                    data-testid={`workflow-switcher-edit-${workflow.id}`}
+                    aria-label={editWorkflowLabel}
+                    title={editWorkflowLabel}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      handleEditWorkflow(workflow.id);
+                    }}
+                  >
+                    <Pencil aria-hidden="true" />
+                  </button>
+                ) : null}
+              </div>
             );
           })}
         </div>
+        {onCreateWorkflow ? (
+          <div className="workflow-switcher-footer">
+            <button
+              type="button"
+              className="btn workflow-switcher-create"
+              data-testid="workflow-switcher-create"
+              onClick={handleCreateWorkflow}
+            >
+              <Plus aria-hidden="true" />
+              <span>{newWorkflowLabel}</span>
+            </button>
+          </div>
+        ) : null}
       </div>,
       portalRoot,
     )

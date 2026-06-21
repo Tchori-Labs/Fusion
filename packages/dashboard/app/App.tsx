@@ -1890,6 +1890,7 @@ function AppInner() {
           lastFetchTimeMs={lastFetchTimeMs}
           prAuthAvailable={prAuthAvailable}
           autoMerge={autoMerge}
+          onOpenWorkflowEditor={openWorkflowEditorWithNav}
           onCreateWorkflow={openCreateWorkflowWithNav}
           workflowColumnsEnabled={experimentalFeatures.workflowColumns === true}
           settingsLoaded={settingsLoaded}
