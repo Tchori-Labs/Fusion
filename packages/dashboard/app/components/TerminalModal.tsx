@@ -1935,45 +1935,21 @@ export function TerminalModal({ isOpen, onClose, initialCommand, initialCommandG
                 <span className="terminal-action-label">{t("terminal.newSession", "New Session")}</span>
               </button>
             )}
-            <button
-              className="terminal-clear-btn"
-              onClick={handleClear}
-              data-testid="terminal-clear-btn"
-              title={t("terminal.clearTerminal", "Clear terminal")}
-            >
-              <Trash2 size={14} />
-              <span className="terminal-action-label">{t("terminal.clear", "Clear")}</span>
-            </button>
-            <button
-              className="terminal-clear-btn terminal-clear-btn--shortcut"
-              onClick={() => setShowShortcuts((current) => !current)}
-              data-testid="terminal-shortcut-toggle"
-              title={t("terminal.shortcuts", "Shortcuts")}
-              aria-pressed={showShortcuts}
-            >
-              <Keyboard size={14} />
-              <span className="terminal-action-label">{t("terminal.shortcuts", "Shortcuts")}</span>
-            </button>
-            <button
-              className="terminal-clear-btn terminal-clear-btn--shortcut"
-              onClick={() => setShowPreferences((current) => !current)}
-              data-testid="terminal-preferences-toggle"
-              title={t("terminal.preferences", "Preferences")}
-              aria-pressed={showPreferences}
-            >
-              <Settings size={14} />
-              <span className="terminal-action-label">{t("terminal.preferences", "Preferences")}</span>
-            </button>
+            {/*
+            FNXC:Terminal 2026-06-23-00:15:
+            Clear / Shortcuts / Preferences moved OUT of the header actions and DOWN into the bottom status bar (footer) next to the text-size control, so the header keeps only contextual reconnect/restart, the icon-only pop-out toggle, and close.
+            The pop-out/dock toggle is now ICON-ONLY (no visible "Pop out"/"Dock" text); the icon flips and the title/aria-label still announce the toggle target for accessibility.
+            */}
             {!isMobileTerminal && (
               <button
-                className="terminal-clear-btn terminal-clear-btn--shortcut"
+                className="terminal-clear-btn terminal-clear-btn--shortcut terminal-clear-btn--icon"
                 onClick={handleToggleDisplayMode}
                 data-testid="terminal-popout-toggle"
                 title={displayMode === "floating" ? t("terminal.dockTerminal", "Dock terminal") : t("terminal.popOutTerminal", "Pop out terminal")}
+                aria-label={displayMode === "floating" ? t("terminal.dockTerminal", "Dock terminal") : t("terminal.popOutTerminal", "Pop out terminal")}
                 aria-pressed={displayMode === "floating"}
               >
                 {displayMode === "floating" ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
-                <span className="terminal-action-label">{displayMode === "floating" ? t("terminal.dock", "Dock") : t("terminal.popOut", "Pop out")}</span>
               </button>
             )}
             <button
@@ -2254,19 +2230,11 @@ export function TerminalModal({ isOpen, onClose, initialCommand, initialCommandG
           </div>
         )}
 
-        {/* Connection status bar */}
+        {/*
+        FNXC:Terminal 2026-06-23-00:15:
+        Footer is laid out left-to-right as a flex row: the text-size control sits at the LEFT, followed by the relocated Clear / Shortcuts / Preferences action buttons (a grouped cluster). The connection-status text and zoom-hint copy stay on the right and collapse first on narrow widths. The whole control cluster wraps/scrolls when the footer is too narrow so docked/floating/mobile layouts never clip the buttons.
+        */}
         <div className="terminal-status-bar" data-testid="terminal-status-bar">
-          <span className={`terminal-connection-status ${connectionStatus}`}>
-            {connectionStatus === "connected" && t("terminal.statusConnected", "Connected")}
-            {connectionStatus === "connecting" && t("terminal.statusConnecting", "Connecting...")}
-            {connectionStatus === "reconnecting" && t("terminal.statusReconnecting", "Reconnecting...")}
-            {connectionStatus === "disconnected" && t("terminal.statusDisconnected", "Disconnected")}
-          </span>
-          {exitCode !== null && (
-            <span className="terminal-exit-code" data-testid="terminal-exit-code">
-              {t("terminal.exitLabel", "Exit: {{code}}", { code: exitCode })}
-            </span>
-          )}
           <span className="terminal-font-size-controls">
             <button
               type="button"
@@ -2290,6 +2258,49 @@ export function TerminalModal({ isOpen, onClose, initialCommand, initialCommandG
               <Plus size={14} />
             </button>
           </span>
+          {/* FNXC:Terminal 2026-06-23-00:15: Clear / Shortcuts / Preferences relocated here from the header actions; same handlers, testids, and labels preserved. */}
+          <span className="terminal-footer-actions" data-testid="terminal-footer-actions">
+            <button
+              className="terminal-clear-btn"
+              onClick={handleClear}
+              data-testid="terminal-clear-btn"
+              title={t("terminal.clearTerminal", "Clear terminal")}
+            >
+              <Trash2 size={14} />
+              <span className="terminal-action-label">{t("terminal.clear", "Clear")}</span>
+            </button>
+            <button
+              className="terminal-clear-btn terminal-clear-btn--shortcut"
+              onClick={() => setShowShortcuts((current) => !current)}
+              data-testid="terminal-shortcut-toggle"
+              title={t("terminal.shortcuts", "Shortcuts")}
+              aria-pressed={showShortcuts}
+            >
+              <Keyboard size={14} />
+              <span className="terminal-action-label">{t("terminal.shortcuts", "Shortcuts")}</span>
+            </button>
+            <button
+              className="terminal-clear-btn terminal-clear-btn--shortcut"
+              onClick={() => setShowPreferences((current) => !current)}
+              data-testid="terminal-preferences-toggle"
+              title={t("terminal.preferences", "Preferences")}
+              aria-pressed={showPreferences}
+            >
+              <Settings size={14} />
+              <span className="terminal-action-label">{t("terminal.preferences", "Preferences")}</span>
+            </button>
+          </span>
+          <span className={`terminal-connection-status ${connectionStatus}`}>
+            {connectionStatus === "connected" && t("terminal.statusConnected", "Connected")}
+            {connectionStatus === "connecting" && t("terminal.statusConnecting", "Connecting...")}
+            {connectionStatus === "reconnecting" && t("terminal.statusReconnecting", "Reconnecting...")}
+            {connectionStatus === "disconnected" && t("terminal.statusDisconnected", "Disconnected")}
+          </span>
+          {exitCode !== null && (
+            <span className="terminal-exit-code" data-testid="terminal-exit-code">
+              {t("terminal.exitLabel", "Exit: {{code}}", { code: exitCode })}
+            </span>
+          )}
           <span className="terminal-shortcuts">
             {t("terminal.helpText", "Ctrl++/- zoom • ⌨ Shortcuts panel • Esc close")}
           </span>

@@ -434,6 +434,12 @@ The floating-mode header is the move grip. `touch-action: none` is required so a
   margin-left: var(--space-xs);
 }
 
+/* FNXC:Terminal 2026-06-23-00:15: Icon-only pop-out/dock toggle — no visible text label, so render as a square icon button while keeping the same hover/border treatment as the other header controls. */
+.terminal-clear-btn--icon {
+  padding: 6px;
+  justify-content: center;
+}
+
 .terminal-log-container {
   flex: 1;
   overflow: hidden;
@@ -930,10 +936,15 @@ The shortcut bar (modifier keys + arrow keys) must sit on ONE line, not stack in
   justify-self: start;
 }
 
+/*
+FNXC:Terminal 2026-06-23-00:15:
+Footer reads left-to-right: text-size control, then the relocated Clear/Shortcuts/Preferences action cluster, then connection status / exit code / zoom-hint pushed to the right edge (margin-left:auto on the connection status). flex-wrap keeps the action cluster from clipping when the docked/floating panel is narrow; gap replaces the old space-between distribution.
+*/
 .terminal-status-bar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
   padding: var(--space-sm) var(--space-lg);
   background: var(--surface);
   border-top: 1px solid var(--border);
@@ -941,8 +952,19 @@ The shortcut bar (modifier keys + arrow keys) must sit on ONE line, not stack in
   color: var(--text-muted);
 }
 
+/* FNXC:Terminal 2026-06-23-00:15: Grouped cluster of the relocated Clear/Shortcuts/Preferences buttons; scrolls horizontally as a unit on very narrow footers so the buttons stay reachable instead of clipping. */
+.terminal-footer-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  min-width: 0;
+  overflow-x: auto;
+}
+
+/* FNXC:Terminal 2026-06-23-00:15: Connection status starts the right-aligned trailing group (status + exit code + zoom hint) so the left edge holds the text-size and action controls. */
 .terminal-connection-status {
   font-weight: 500;
+  margin-left: auto;
 }
 
 .terminal-connection-status.connected {
