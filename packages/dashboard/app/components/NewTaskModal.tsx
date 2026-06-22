@@ -17,6 +17,8 @@ import { useMobileScrollLock } from "../hooks/useMobileScrollLock";
 import { useNodes } from "../hooks/useNodes";
 import { useViewportMode } from "../hooks/useViewportMode";
 import { useAgentsMapCache } from "../hooks/useAgentsMapCache";
+import { readBoardWorkflowsCache } from "../utils/boardWorkflowsCache";
+import { readLastSelectedWorkflowId } from "../utils/lastSelectedWorkflow";
 
 interface NewTaskModalProps {
   isOpen: boolean;
@@ -64,6 +66,7 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
   // `null` = explicit "No workflow", `string` = a specific workflow. Materialized
   // atomically at create time via the `workflowId` create parameter.
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null | undefined>(undefined);
+  const initialWorkflowIdRef = useRef<string | null | undefined>(undefined);
   // Optional workflow steps the user opted into; TaskForm fetches + seeds these
   // from the selected workflow's defaultOn and lifts the enabled set up here.
   const [enabledWorkflowSteps, setEnabledWorkflowSteps] = useState<string[]>([]);
@@ -96,13 +99,23 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
   /**
    * FNXC:SelectionComment 2026-06-16-23:58:
    * Selection comments open the normal New Task dialog with a prefilled description; seed only on the closed→open transition so rerenders do not overwrite user edits.
+   *
+   * FNXC:WorkflowDefaults 2026-06-22-00:00:
+   * Seed New Task's workflow selector from the project's last selected board lane only when that lane still exists in the board-workflows cache. Store the seed as the pristine baseline so opening on a remembered lane does not trigger discard-changes confirmation, and reset returns to that same baseline.
    */
   useEffect(() => {
     if (isOpen && !wasOpenRef.current) {
       setDescription(initialDescription);
+      const persistedWorkflowId = readLastSelectedWorkflowId(projectId);
+      const cachedWorkflows = readBoardWorkflowsCache(projectId);
+      const initialWorkflowId = persistedWorkflowId && cachedWorkflows?.workflows.some((workflow) => workflow.id === persistedWorkflowId)
+        ? persistedWorkflowId
+        : undefined;
+      initialWorkflowIdRef.current = initialWorkflowId;
+      setSelectedWorkflowId(initialWorkflowId);
     }
     wasOpenRef.current = isOpen;
-  }, [initialDescription, isOpen]);
+  }, [initialDescription, isOpen, projectId]);
 
   // Load agents for agent picker
   const loadAgents = useCallback(() => {
@@ -171,7 +184,7 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
       description.trim() !== "" ||
       dependencies.length > 0 ||
       pendingImages.length > 0 ||
-      selectedWorkflowId !== undefined ||
+      selectedWorkflowId !== initialWorkflowIdRef.current ||
       // Optional workflow steps the user toggled count as unsaved work. (Workflows
       // whose steps are defaultOn:false — today's only shipped step — seed an empty
       // set, so this stays false until the user actually opts a step in.)
@@ -207,7 +220,7 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
     setThinkingLevel("");
     setSelectedPresetId("");
     setPresetMode("default");
-    setSelectedWorkflowId(undefined);
+    setSelectedWorkflowId(initialWorkflowIdRef.current);
     setEnabledWorkflowSteps([]);
     setSelectedAgentId(null);
     setShowAgentPicker(false);
@@ -335,7 +348,7 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
       setThinkingLevel("");
       setSelectedPresetId("");
       setPresetMode("default");
-      setSelectedWorkflowId(undefined);
+      setSelectedWorkflowId(initialWorkflowIdRef.current);
       setEnabledWorkflowSteps([]);
       setSelectedAgentId(null);
       setShowAgentPicker(false);

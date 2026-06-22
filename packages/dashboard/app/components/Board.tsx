@@ -16,6 +16,7 @@ import { getBoardCanDropTaskRejection } from "./boardCanDropTask";
 import { WorkflowSwitcher } from "./WorkflowSwitcher";
 import { computeWorkflowStatusCounts } from "./workflowStatusCounts";
 import { readBoardWorkflowsCache, writeBoardWorkflowsCache } from "../utils/boardWorkflowsCache";
+import { writeLastSelectedWorkflowId } from "../utils/lastSelectedWorkflow";
 
 interface BoardProps {
   tasks: Task[];
@@ -483,6 +484,15 @@ export function Board({ tasks, projectId, maxConcurrent, onMoveTask, onPauseTask
     }
   }, [selectedWorkflow, selectedWorkflowId, workflowMode]);
 
+  /**
+   * FNXC:WorkflowDefaults 2026-06-22-00:00:
+   * Persist explicit board-lane picks per project so the New Task dialog opens on the same current or last selected workflow lane without changing board filtering semantics.
+   */
+  const handleSelectedWorkflowChange = useCallback((id: string) => {
+    setSelectedWorkflowId(id);
+    writeLastSelectedWorkflowId(projectId, id);
+  }, [projectId]);
+
   const selectedWorkflowTasks = useMemo(() => {
     if (!workflowMode || !boardWorkflows || !selectedWorkflow) return [];
     return tasks.filter((task) => {
@@ -612,7 +622,7 @@ export function Board({ tasks, projectId, maxConcurrent, onMoveTask, onPauseTask
           <WorkflowSwitcher
             workflows={workflowOptions}
             value={selectedWorkflow.id}
-            onChange={setSelectedWorkflowId}
+            onChange={handleSelectedWorkflowChange}
             counts={workflowStatusCounts}
             onOpen={refreshBoardWorkflows}
             onEditWorkflow={onOpenWorkflowEditor}
