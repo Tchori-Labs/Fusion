@@ -78,6 +78,7 @@ import type {
   WorkflowNodeLayout,
 } from "./workflow-definition-types.js";
 import { compileWorkflowToSteps, isInterpreterDeferredWorkflowCompileError } from "./workflow-compiler.js";
+import { resolveDefaultOnOptionalGroupIds } from "./workflow-optional-steps.js";
 import {
   BUILTIN_WORKFLOWS,
   getBuiltinWorkflow,
@@ -15798,11 +15799,17 @@ ${stepsSection}`;
       if (isBuiltinWorkflowId(workflowId) && isInterpreterDeferredWorkflowCompileError(err)) return undefined;
       throw err;
     }
+    // FNXC:WorkflowOptionalGroup 2026-06-21-14:20: seed `enabledWorkflowSteps`
+    // with the ids of `optional-group` nodes whose `defaultOn` is true, mirroring
+    // the prior `optionalStep.defaultOn ?? false` precedence (U3, R3). These group
+    // ids are NOT WorkflowStep rows — they are toggle keys the executor reads at
+    // the optional-group seam — so they ride alongside the compiled step ids.
+    const defaultGroupIds = resolveDefaultOnOptionalGroupIds(def.ir);
     if (isBuiltinWorkflowId(workflowId) && inputs.length === 0) {
-      return { workflowId, stepIds: [] };
+      return { workflowId, stepIds: defaultGroupIds };
     }
     const stepIds = await this.materializeWorkflowSteps(workflowId, inputs);
-    return { workflowId, stepIds };
+    return { workflowId, stepIds: [...stepIds, ...defaultGroupIds] };
   }
 
   /** Resolve an EXPLICITLY requested workflow id (U6/R3/KTD-4) into materialized
@@ -15823,11 +15830,15 @@ ${stepsSection}`;
     try {
       inputs = compileWorkflowToSteps(def.ir);
     } catch (err) {
-      if (isBuiltinWorkflowId(workflowId) && isInterpreterDeferredWorkflowCompileError(err)) return { workflowId, stepIds: [] };
+      if (isBuiltinWorkflowId(workflowId) && isInterpreterDeferredWorkflowCompileError(err))
+        return { workflowId, stepIds: resolveDefaultOnOptionalGroupIds(def.ir) };
       throw err;
     }
+    // FNXC:WorkflowOptionalGroup 2026-06-21-14:20: same defaultOn-group seeding as
+    // the default-workflow path, for an explicitly requested create-time workflow.
+    const defaultGroupIds = resolveDefaultOnOptionalGroupIds(def.ir);
     const stepIds = await this.materializeWorkflowSteps(workflowId, inputs);
-    return { workflowId, stepIds };
+    return { workflowId, stepIds: [...stepIds, ...defaultGroupIds] };
   }
 
   /**

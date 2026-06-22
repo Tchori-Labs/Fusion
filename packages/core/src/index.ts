@@ -85,6 +85,7 @@ export type {
   WorkflowForeachConfig,
   WorkflowLoopConfig,
   WorkflowLoopExitCondition,
+  WorkflowOptionalGroupConfig,
   WorkflowIrArtifact,
   WorkflowFieldDefinition,
   WorkflowFieldType,
@@ -118,7 +119,10 @@ export type {
 } from "./column-agent-resolver.js";
 export { BUILTIN_CODING_WORKFLOW_IR } from "./builtin-coding-workflow-ir.js";
 export { BUILTIN_MARKETING_WORKFLOW_IR } from "./builtin-marketing-workflow-ir.js";
-export { resolveWorkflowOptionalSteps } from "./workflow-optional-steps.js";
+export {
+  resolveWorkflowOptionalSteps,
+  resolveDefaultOnOptionalGroupIds,
+} from "./workflow-optional-steps.js";
 export type { ResolvedWorkflowOptionalStep } from "./workflow-optional-steps.js";
 export { BUILTIN_STEPWISE_CODING_WORKFLOW_IR } from "./builtin-stepwise-coding-workflow-ir.js";
 export { BUILTIN_PR_WORKFLOW_IR } from "./builtin-pr-workflow-ir.js";
