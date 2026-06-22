@@ -53,6 +53,7 @@ import { isMobileViewport, useViewportMode } from "../hooks/useViewportMode";
 import { workflowNodeTypes, type WorkflowFlowNodeData, type WorkflowEditorNodeKind } from "./nodes/WorkflowNodeTypes";
 import { WorkflowEditorCatalogContext } from "./nodes/WorkflowEditorCatalogContext";
 import { bareSkillName, type NodeSummaryCatalogs } from "./nodes/node-summary";
+import { nodeHelpForData } from "./nodes/node-help";
 import {
   irToFlow,
   flowToIr,
@@ -1968,6 +1969,8 @@ function InnerEditor({
    * The structural start node needs an inspector because its entry column is editable and persisted in the workflow IR. Keep end structural-only until it has a meaningful editable property.
    */
   const selectedNodeHasInspector = selectedNode !== null && selectedNode.data.kind !== "end";
+  // FNXC:WorkflowEditor 2026-06-21-10:00: Help content for the inspector, keyed by the node's effective kind (preserved IR kind when a graph-only policy node collapsed onto a generic merge/gate/hold shape).
+  const selectedNodeHelp = selectedNode !== null ? nodeHelpForData(selectedNode.data) : null;
   const selectedEdge = edges.find((e) => e.id === selectedEdgeId) ?? null;
   const mobileNodeDetailStage = isMobileMode && selectedNodeHasInspector && !inspectorCollapsed;
   const mobileEdgeDetailStage = isMobileMode && selectedEdge !== null;
@@ -3309,7 +3312,8 @@ function InnerEditor({
             !(compactLayoutEnabled && !isMobileMode) && (
             <aside className="wf-editor-inspector" data-testid="wf-node-inspector">
               <div className="wf-inspector-heading">
-                <h3>{t("workflowNodes.nodeInspector", "Node")}</h3>
+                {/* FNXC:WorkflowEditor 2026-06-21-10:00: Heading shows the node-kind title (from the help registry) so the pane names what is selected, falling back to the generic "Node" label. */}
+                <h3>{selectedNodeHelp?.title ?? t("workflowNodes.nodeInspector", "Node")}</h3>
                 {isMobileMode && (
                   <button
                     type="button"
@@ -3329,6 +3333,37 @@ function InnerEditor({
                   </button>
                 )}
               </div>
+              {/* FNXC:WorkflowEditor 2026-06-21-10:00: Per-node Help — what the node does, how to configure it, and its inputs/outputs/edges. Collapsed by default so it never pushes config fields below the fold; remembered open/closed within the session is intentionally not persisted (cheap to reopen). Engine-managed graph-only nodes (merge gate, branch-group integration/promotion, PR/recovery nodes) get an "Engine-managed" badge since they are read-only. */}
+              {selectedNodeHelp && (
+                <details className="wf-inspector-help" data-testid="wf-node-help">
+                  <summary className="wf-inspector-help-summary">
+                    <HelpCircle size={13} aria-hidden />
+                    <span>{t("workflowNodes.helpTitle", "What does this node do?")}</span>
+                    {selectedNodeHelp.graphOnly && (
+                      <span className="wf-inspector-help-badge" data-testid="wf-node-help-engine-managed">
+                        {t("workflowNodes.helpEngineManaged", "Engine-managed")}
+                      </span>
+                    )}
+                  </summary>
+                  <div className="wf-inspector-help-body">
+                    <p className="wf-inspector-help-summary-text">{selectedNodeHelp.summary}</p>
+                    <dl className="wf-inspector-help-dl">
+                      {selectedNodeHelp.configure && (
+                        <>
+                          <dt>{t("workflowNodes.helpConfigure", "Configure")}</dt>
+                          <dd>{selectedNodeHelp.configure}</dd>
+                        </>
+                      )}
+                      <dt>{t("workflowNodes.helpInputs", "Inputs")}</dt>
+                      <dd>{selectedNodeHelp.inputs}</dd>
+                      <dt>{t("workflowNodes.helpOutputs", "Outputs")}</dt>
+                      <dd>{selectedNodeHelp.outputs}</dd>
+                      <dt>{t("workflowNodes.helpEdges", "Edges")}</dt>
+                      <dd>{selectedNodeHelp.edges}</dd>
+                    </dl>
+                  </div>
+                </details>
+              )}
               {isBuiltin && (
                 <p className="wf-inspector-note wf-inspector-note--info">
                   {t("workflowNodes.readOnlyDuplicateToEdit", "Read-only built-in — duplicate the workflow to edit nodes.")}

@@ -794,6 +794,25 @@ describe("WorkflowNodeEditor", () => {
     expect(within(inspector).queryByLabelText("Name")).not.toBeInTheDocument();
   });
 
+  // FNXC:WorkflowEditor 2026-06-21-10:00: Every node's detail pane carries a Help section describing what it does and its inputs/outputs/edges.
+  it("renders a Help section in the node detail pane", async () => {
+    vi.mocked(fetchWorkflows).mockResolvedValue([def()]);
+
+    render(<WorkflowNodeEditor isOpen onClose={() => {}} addToast={() => {}} />);
+
+    await screen.findByText("Save");
+    fireEvent.click(await screen.findByTestId("wf-node-start"));
+
+    const inspector = await screen.findByTestId("wf-node-inspector");
+    const help = within(inspector).getByTestId("wf-node-help");
+    expect(help).toHaveTextContent("What does this node do?");
+    expect(help).toHaveTextContent("Inputs");
+    expect(help).toHaveTextContent("Outputs");
+    expect(help).toHaveTextContent("Edges");
+    // Editor (non-policy) nodes are not flagged engine-managed.
+    expect(within(inspector).queryByTestId("wf-node-help-engine-managed")).not.toBeInTheDocument();
+  });
+
   it("keeps built-in start node entry-column controls read-only", async () => {
     vi.mocked(fetchWorkflows).mockResolvedValue([builtinDef()]);
 
