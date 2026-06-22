@@ -1,11 +1,13 @@
 import { useEffect, useRef, type RefObject } from "react";
 import { Maximize2, X } from "lucide-react";
-import { findOverflowViewEntry, type OverflowViewKey, type OverflowViewRenderProps, type OverflowViewVisibilityOptions } from "./overflowViewRegistry";
+import { findOverflowViewEntry, type OverflowViewEntry, type OverflowViewKey, type OverflowViewRenderProps, type OverflowViewVisibilityOptions } from "./overflowViewRegistry";
 import { useModalResizePersist } from "../hooks/useModalResizePersist";
 import { useOverlayDismiss } from "../hooks/useOverlayDismiss";
 import "./RightDock.css";
 
 const RIGHT_DOCK_EXPAND_MODAL_SIZE_STORAGE_KEY = "fusion:right-dock-expand-modal-size";
+
+type RenderableOverflowViewEntry = OverflowViewEntry & Required<Pick<OverflowViewEntry, "render">>;
 
 export interface RightDockExpandModalProps {
   viewKey: OverflowViewKey | null;
@@ -18,6 +20,9 @@ export interface RightDockExpandModalProps {
 /*
 FNXC:Navigation 2026-06-21-00:00:
 Expanded right-dock views reuse the same overflow registry render function as the dock body, so expanding changes only available space and never swaps to a divergent component or prop contract.
+
+FNXC:Navigation 2026-06-21-20:16:
+FN-6882 makes most right-dock entries launcher actions. The expand modal is restricted to inline view entries so action-only tools cannot open an empty modal body.
 */
 export function RightDockExpandModal({
   viewKey,
@@ -27,7 +32,8 @@ export function RightDockExpandModal({
   returnFocusRef,
 }: RightDockExpandModalProps) {
   const modalRef = useRef<HTMLDivElement>(null);
-  const entry = viewKey ? findOverflowViewEntry(viewKey, visibilityOptions) : undefined;
+  const resolvedEntry = viewKey ? findOverflowViewEntry(viewKey, visibilityOptions) : undefined;
+  const entry: RenderableOverflowViewEntry | undefined = resolvedEntry?.render ? { ...resolvedEntry, render: resolvedEntry.render } : undefined;
   const closeAndRestoreFocus = () => {
     onClose();
     window.setTimeout(() => returnFocusRef?.current?.focus(), 0);

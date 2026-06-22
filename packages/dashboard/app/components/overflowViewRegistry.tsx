@@ -1,15 +1,11 @@
-import { lazy, Suspense, type ComponentType, type ReactNode } from "react";
+import { Suspense, type ComponentType, type ReactNode } from "react";
 import {
-  Brain,
-  CheckSquare,
-  FileText,
+  Activity,
+  Clock,
   Folder,
-  Lock,
-  Monitor,
-  Search,
-  Sparkles,
-  Target,
-  Zap,
+  GitBranch,
+  GitPullRequestArrow,
+  History,
   type LucideProps,
 } from "lucide-react";
 import type { Task, TaskDetail, WorkflowStep } from "@fusion/core";
@@ -23,29 +19,13 @@ import { FileBrowser } from "./FileBrowser";
 import { PageErrorBoundary } from "./ErrorBoundary";
 import { getPluginNavIcon } from "./pluginNavIcon";
 
-const DocumentsView = lazy(() => import("./DocumentsView").then((m) => ({ default: m.DocumentsView })));
-const InsightsView = lazy(() => import("./InsightsView").then((m) => ({ default: m.InsightsView })));
-const ResearchView = lazy(() => import("./ResearchView").then((m) => ({ default: m.ResearchView })));
-const EvalsView = lazy(() => import("./EvalsView").then((m) => ({ default: m.EvalsView })));
-const SkillsView = lazy(() => import("./SkillsView").then((m) => ({ default: m.SkillsView })));
-const MemoryView = lazy(() => import("./MemoryView").then((m) => ({ default: m.MemoryView })));
-const SecretsView = lazy(() => import("./SecretsView").then((m) => ({ default: m.SecretsView })));
-const DevServerView = lazy(() => import("./DevServerView").then((m) => ({ default: m.DevServerView })));
-const TodoView = lazy(() => import("./TodoView").then((m) => ({ default: m.TodoView })));
-const GoalsView = lazy(() => import("./GoalsView").then((m) => ({ default: m.GoalsView })));
-
 export type OverflowViewKey =
+  | "usage"
+  | "activity-log"
+  | "github-import"
+  | "git-manager"
   | "files"
-  | "documents"
-  | "research"
-  | "insights"
-  | "skills"
-  | "memory"
-  | "secrets"
-  | "evals"
-  | "goalsView"
-  | "todos"
-  | "devserver"
+  | "automation"
   | `plugin:${string}:${string}`;
 
 export interface OverflowViewFeatureState {
@@ -77,6 +57,11 @@ export interface OverflowViewRenderProps {
   renderTaskCard?: (task: Task | TaskDetail) => ReactNode;
   subscribePluginEvents?: PluginDashboardViewContext["subscribePluginEvents"];
   openFile?: PluginDashboardViewContext["openFile"];
+  onOpenUsage?: (anchorRect?: DOMRect | null) => void;
+  onOpenActivityLog?: () => void;
+  onOpenGitHubImport?: () => void;
+  onOpenGitManager?: () => void;
+  onOpenSchedules?: () => void;
 }
 
 export interface OverflowViewEntry {
@@ -84,7 +69,8 @@ export interface OverflowViewEntry {
   label: string;
   icon: ComponentType<LucideProps>;
   testId: string;
-  render: (props: OverflowViewRenderProps) => ReactNode;
+  render?: (props: OverflowViewRenderProps) => ReactNode;
+  onActivate?: (props: OverflowViewRenderProps) => void;
   isVisible?: (options: OverflowViewVisibilityOptions) => boolean;
 }
 
@@ -126,8 +112,39 @@ function InlineFilesView({ projectId, openFile }: Pick<OverflowViewRenderProps, 
 /*
 FNXC:Navigation 2026-06-21-00:00:
 The right dock and its expand modal must resolve every hosted overflow destination through this registry so toolbar gating, component choice, and props cannot drift between the compact panel and full-size modal surfaces.
+
+FNXC:Navigation 2026-06-21-20:10:
+FN-6882 makes the right dock a tools rail for Activity, Activity Log, GitHub Import, Git Manager, Files, and Automation so content views live only in the left sidebar and do not duplicate across navigation surfaces.
 */
 export const STATIC_OVERFLOW_VIEW_ENTRIES: readonly OverflowViewEntry[] = [
+  {
+    key: "usage",
+    label: "Activity",
+    icon: Activity,
+    testId: "right-dock-tab-usage",
+    onActivate: (props) => props.onOpenUsage?.(null),
+  },
+  {
+    key: "activity-log",
+    label: "Activity Log",
+    icon: History,
+    testId: "right-dock-tab-activity-log",
+    onActivate: (props) => props.onOpenActivityLog?.(),
+  },
+  {
+    key: "github-import",
+    label: "Import from GitHub",
+    icon: GitPullRequestArrow,
+    testId: "right-dock-tab-github-import",
+    onActivate: (props) => props.onOpenGitHubImport?.(),
+  },
+  {
+    key: "git-manager",
+    label: "Git Manager",
+    icon: GitBranch,
+    testId: "right-dock-tab-git-manager",
+    onActivate: (props) => props.onOpenGitManager?.(),
+  },
   {
     key: "files",
     label: "Files",
@@ -136,130 +153,11 @@ export const STATIC_OVERFLOW_VIEW_ENTRIES: readonly OverflowViewEntry[] = [
     render: (props) => wrapOverflowView(<InlineFilesView projectId={props.projectId} openFile={props.openFile} />),
   },
   {
-    key: "documents",
-    /*
-    FNXC:Navigation 2026-06-21-18:25:
-    Top-level Documents was renamed to Artifacts for FN-6890; keep the documents key, route, and test id stable while changing only the displayed label.
-    */
-    label: "Artifacts",
-    icon: FileText,
-    testId: "right-dock-tab-documents",
-    render: (props) => wrapOverflowView(
-      <DocumentsView
-        projectId={props.projectId}
-        addToast={props.addToast}
-        onOpenDetail={(task) => props.onOpenDetail?.(task)}
-        onSendSelectionToTask={props.onSendSelectionToTask}
-      />,
-    ),
-  },
-  {
-    key: "research",
-    label: "Research",
-    icon: Search,
-    testId: "right-dock-tab-research",
-    isVisible: ({ experimentalFeatures }) => experimentalFeatures?.researchView === true,
-    render: (props) => props.settingsLoaded === false ? null : wrapOverflowView(
-      <ResearchView
-        projectId={props.projectId}
-        addToast={props.addToast}
-        onOpenSettings={(section) => props.onOpenSettings?.(section)}
-        readinessVersion={props.readinessVersion ?? 0}
-      />,
-    ),
-  },
-  {
-    key: "insights",
-    label: "Insights",
-    icon: Sparkles,
-    testId: "right-dock-tab-insights",
-    isVisible: ({ experimentalFeatures }) => experimentalFeatures?.insights === true,
-    render: (props) => props.settingsLoaded === false ? null : wrapOverflowView(
-      <InsightsView
-        projectId={props.projectId}
-        addToast={props.addToast}
-        onClose={() => undefined}
-        onCreateTask={async (payload) => {
-          await props.onCreateTaskFromInsight?.(payload);
-        }}
-      />,
-    ),
-  },
-  {
-    key: "skills",
-    label: "Skills",
-    icon: Zap,
-    testId: "right-dock-tab-skills",
-    isVisible: ({ showSkillsTab }) => showSkillsTab === true,
-    render: (props) => wrapOverflowView(<SkillsView addToast={props.addToast} projectId={props.projectId} onClose={() => undefined} />),
-  },
-  {
-    key: "memory",
-    label: "Memory",
-    icon: Brain,
-    testId: "right-dock-tab-memory",
-    isVisible: ({ experimentalFeatures }) => experimentalFeatures?.memoryView === true,
-    render: (props) => props.settingsLoaded === false ? null : wrapOverflowView(
-      <MemoryView
-        addToast={props.addToast}
-        projectId={props.projectId}
-        onSendSelectionToTask={props.onSendSelectionToTask}
-      />,
-    ),
-  },
-  {
-    key: "secrets",
-    label: "Secrets",
-    icon: Lock,
-    testId: "right-dock-tab-secrets",
-    render: (props) => wrapOverflowView(<SecretsView addToast={props.addToast} />),
-  },
-  {
-    key: "evals",
-    label: "Evals",
-    icon: Target,
-    testId: "right-dock-tab-evals",
-    isVisible: ({ experimentalFeatures }) => experimentalFeatures?.evalsView === true,
-    render: (props) => props.settingsLoaded === false ? null : wrapOverflowView(
-      <EvalsView
-        projectId={props.projectId}
-        onOpenSettings={(section) => props.onOpenSettings?.(section)}
-        onOpenTaskDetail={(taskId) => props.onOpenTaskDetail?.(taskId)}
-      />,
-    ),
-  },
-  {
-    key: "goalsView",
-    label: "Goals",
-    icon: Target,
-    testId: "right-dock-tab-goals",
-    isVisible: ({ experimentalFeatures }) => experimentalFeatures?.goalsView === true,
-    render: (props) => props.settingsLoaded === false ? null : wrapOverflowView(
-      <GoalsView anchorGoalId={props.anchorGoalId} onNavigateToMission={(missionId) => props.onNavigateToMission?.(missionId)} />,
-    ),
-  },
-  {
-    key: "todos",
-    label: "Todos",
-    icon: CheckSquare,
-    testId: "right-dock-tab-todos",
-    isVisible: ({ todosEnabled }) => todosEnabled === true,
-    render: (props) => wrapOverflowView(
-      <TodoView
-        projectId={props.projectId}
-        addToast={props.addToast}
-        onPlanningMode={props.onPlanningMode}
-        onTaskCreated={props.onTaskCreated}
-      />,
-    ),
-  },
-  {
-    key: "devserver",
-    label: "Dev Server",
-    icon: Monitor,
-    testId: "right-dock-tab-devserver",
-    isVisible: ({ experimentalFeatures }) => experimentalFeatures?.devServerView === true,
-    render: (props) => props.settingsLoaded === false ? null : wrapOverflowView(<DevServerView addToast={props.addToast} projectId={props.projectId} />),
+    key: "automation",
+    label: "Automation",
+    icon: Clock,
+    testId: "right-dock-tab-automation",
+    onActivate: (props) => props.onOpenSchedules?.(),
   },
 ];
 

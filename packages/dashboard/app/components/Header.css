@@ -326,9 +326,6 @@ non-notched devices, so this is a no-op there. Pair with viewport-fit=cover (ind
   border-color: var(--todo);
 }
 
-.header-git-manager-btn {
-  position: relative;
-}
 
 .btn-badge {
   position: absolute;

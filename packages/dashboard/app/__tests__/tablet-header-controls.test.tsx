@@ -452,7 +452,7 @@ describe("tablet header controls", () => {
     expect(screen.getByTestId("project-selector-trigger")).toBeDefined();
   });
 
-  // ── Desktop still shows everything inline ──────────────────────
+  // ── Desktop keeps primary controls inline while tool actions move to the right dock ──────────────────────
 
   describe("desktop regression (contrasted with tablet)", () => {
     it("renders settings inline on desktop", () => {
@@ -460,9 +460,9 @@ describe("tablet header controls", () => {
       expect(screen.getByTitle("Settings")).toBeDefined();
     });
 
-    it("renders import from GitHub inline on desktop", () => {
+    it("does not render import from GitHub inline on desktop", () => {
       renderDesktopHeader();
-      expect(screen.getByTitle("Import from GitHub")).toBeDefined();
+      expect(screen.queryByTitle("Import from GitHub")).toBeNull();
     });
 
     it("renders terminal inline on desktop", () => {

@@ -35,9 +35,11 @@ On mobile viewports (`<=768px`), the sidebar is not rendered even when the defau
 
 The **Right Dock Panel** experiment is enabled by default. To disable it, open **Settings → Experimental Features** and turn off **Right Dock Panel**.
 
-When enabled on desktop or tablet project screens, the Header **More views** three-dots control becomes a right-panel toggle. It opens a persistent dock on the right side of the project content instead of the overflow dropdown, and the icon changes to communicate the panel toggle behavior. If Left Sidebar Navigation is also enabled and the Header view-toggle row is hidden, the same right-dock toggle remains available as a standalone Header icon.
+When enabled on desktop or tablet project screens, the Header right-panel toggle opens a persistent dock on the right side of the project content. If Left Sidebar Navigation is also enabled and the Header view-toggle row is hidden, the same right-dock toggle remains available as a standalone Header icon.
 
-The dock toolbar includes Files plus the same overflow destinations that would appear in the Header overflow menu, including gated experimental/plugin views only when their own flags or plugins are active. The dock opens to **Files** by default, then restores the last selected dock view from browser storage on later visits. Each docked view has an expand button that opens the same view in a resizable modal, and both the dock width and expanded modal size persist across reloads.
+The dock toolbar is a tools rail with exactly six destinations: **Activity**, **Activity Log**, **Import from GitHub**, **Git Manager**, **Files**, and **Automation**. The launcher tools reuse the same handlers as the former desktop Header toolbar buttons; **Files** remains the inline dock view, opens by default, and is the fallback when browser storage points at a removed dock key. Inline dock views have an expand button that opens the same view in a resizable modal, while action-only tools launch directly and are not expandable. Dock width and expanded modal size persist across reloads.
+
+Content views such as Artifacts, Research, Insights, Skills, Memory, Secrets, Evals, Goals, Todos, and Dev Server live in the left sidebar (or compact mobile navigation) rather than the right dock. The six tool buttons are no longer duplicated in the desktop top Header toolbar, and the former desktop overflow trigger is removed when it would otherwise be empty.
 
 On mobile viewports, the Right Dock never renders. The compact Header overflow and bottom `MobileNavBar` keep their existing behavior even when the experiment is enabled.
 
@@ -525,8 +527,8 @@ Todo View is an experimental full-height dashboard surface for managing per-proj
 > Available when `experimentalFeatures.todoView` is enabled.
 
 Navigation:
-- Desktop/tablet with Right Dock enabled: **Right Dock → Todos**
-- Desktop/tablet without the right dock / with the left-sidebar opt-out layout: **Header → More views → Todos**
+- Desktop/tablet with Left Sidebar Navigation enabled: **Left sidebar → Todos**
+- Desktop/tablet with the left-sidebar opt-out layout: **Header → More views → Todos**
 - Mobile: **More** sheet → **Todos**
 
 For full behavior, API contracts, and storage details, use the canonical [Todo View guide](./todo-view.md).

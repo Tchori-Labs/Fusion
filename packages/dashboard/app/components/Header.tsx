@@ -140,7 +140,6 @@ export function Header({
   onRunScript,
   onToggleTerminal,
   onOpenFiles,
-  filesOpen,
   todosEnabled,
   view = "board",
   onChangeView,
@@ -197,7 +196,6 @@ export function Header({
   const [isNodeSelectorOpen, setIsNodeSelectorOpen] = useState(false);
   const [isMobileProjectSwitchOpen, setIsMobileProjectSwitchOpen] = useState(false);
   const [isViewOverflowOpen, setIsViewOverflowOpen] = useState(false);
-  const [isDesktopOverflowOpen, setIsDesktopOverflowOpen] = useState(false);
   const [isScriptsOpen, setIsScriptsOpen] = useState(false);
   const [scripts, setScripts] = useState<Record<string, string>>({});
   const [scriptsLoading, setScriptsLoading] = useState(false);
@@ -207,8 +205,6 @@ export function Header({
   const [overflowScriptsLoading, setOverflowScriptsLoading] = useState(false);
   const overflowButtonRef = useRef<HTMLButtonElement>(null);
   const overflowMenuRef = useRef<HTMLDivElement>(null);
-  const desktopOverflowTriggerRef = useRef<HTMLButtonElement>(null);
-  const desktopOverflowRef = useRef<HTMLDivElement>(null);
   const mobileSearchRef = useRef<HTMLDivElement>(null);
   const mobileSearchInputRef = useRef<HTMLInputElement>(null);
   const terminalSubmenuOpenRef = useRef(false);
@@ -570,25 +566,6 @@ export function Header({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [isOverflowMenuOpen]);
 
-  // Close desktop overflow menu on outside click
-  useEffect(() => {
-    if (!isDesktopOverflowOpen) return;
-
-    const handleClickOutside = (e: MouseEvent) => {
-      if (
-        desktopOverflowRef.current &&
-        !desktopOverflowRef.current.contains(e.target as Node) &&
-        desktopOverflowTriggerRef.current &&
-        !desktopOverflowTriggerRef.current.contains(e.target as Node)
-      ) {
-        setIsDesktopOverflowOpen(false);
-      }
-    };
-
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [isDesktopOverflowOpen]);
-
   // Close node selector on outside click
   useEffect(() => {
     if (!isNodeSelectorOpen) return;
@@ -611,7 +588,6 @@ export function Header({
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         setIsViewOverflowOpen(false);
-        setIsDesktopOverflowOpen(false);
         if (terminalSubmenuOpenRef.current) {
           setIsTerminalSubmenuOpen(false);
           return;
@@ -1306,33 +1282,10 @@ export function Header({
           </div>
         )}
 
-        {/* Usage button - desktop only (moved to overflow on mobile/tablet) */}
-        {!isCompact && onOpenUsage && (
-          <button
-            className="btn-icon"
-            onClick={(event) => onOpenUsage(event.currentTarget.getBoundingClientRect())}
-            title={t("header.viewUsage", "View usage")}
-            data-testid="desktop-header-usage-btn"
-          >
-            <Activity size={16} />
-          </button>
-        )}
-
-        {/* Activity Log button - desktop only (moved to overflow on mobile/tablet) */}
-        {!isCompact && onOpenActivityLog && (
-          <button className="btn-icon" onClick={onOpenActivityLog} title={t("header.viewActivityLog", "View Activity Log")}>
-            <History size={16} />
-          </button>
-        )}
-
-        {/* Desktop actions */}
-        {!isCompact && !isDesktopShell && (
-          <button className="btn-icon" onClick={onOpenGitHubImport} title={t("header.importFromGitHub", "Import from GitHub")}>
-            <GitHubLogo size={16} />
-          </button>
-        )}
-
         {/*
+        FNXC:Navigation 2026-06-21-20:20:
+        FN-6882 moves desktop tool actions (Activity, Activity Log, GitHub Import, Git Manager, Files, Automation) out of the Header toolbar into the right-dock tools rail while compact overflow keeps those tools for mobile/tablet.
+
         FNXC:Navigation 2026-06-21-00:00:
         FN-6886 removes the header Lightbulb affordances because Planning Mode is now a primary left-sidebar destination after Command Center and a single canonical MobileNavBar More item on compact breakpoints.
         */}
@@ -1448,30 +1401,6 @@ export function Header({
           </div>
         )}
 
-        {/* Files button - desktop only (moved to overflow on mobile/tablet) */}
-        {!isCompact && onOpenFiles && (
-          <button
-            className={`btn-icon${filesOpen ? " btn-icon--active" : ""}`}
-            onClick={() => onOpenFiles()}
-            title={t("header.browseFiles", "Browse files")}
-            data-testid="files-toggle-btn"
-          >
-            <Folder size={16} />
-          </button>
-        )}
-
-        {/* Git Manager button - desktop only (moved to overflow on mobile/tablet) */}
-        {!isCompact && onOpenGitManager && (
-          <button
-            className="btn-icon header-git-manager-btn"
-            onClick={onOpenGitManager}
-            title={t("header.gitManager", "Git Manager")}
-            data-testid="git-manager-btn"
-          >
-            <GitBranch size={16} />
-            {stashOrphanCount > 0 ? <span className="btn-badge">{stashOrphanCount}</span> : null}
-          </button>
-        )}
 
         {/* Workflows - desktop only (moved to overflow on mobile/tablet) */}
         {!isCompact && onOpenWorkflowEditor && (
@@ -1485,44 +1414,6 @@ export function Header({
           </button>
         )}
 
-        {/* Desktop overflow menu for Nodes and Schedules */}
-        {!isCompact && (
-          <div style={{ position: "relative" }}>
-            <button
-              ref={desktopOverflowTriggerRef}
-              className="btn-icon"
-              onClick={() => setIsDesktopOverflowOpen((prev) => !prev)}
-              title={t("header.moreActions", "More actions")}
-              aria-label={t("header.moreActions", "More actions")}
-              aria-expanded={isDesktopOverflowOpen}
-              aria-haspopup="menu"
-              data-testid="desktop-overflow-trigger"
-            >
-              <MoreHorizontal size={16} />
-            </button>
-            {isDesktopOverflowOpen && (
-              <div
-                ref={desktopOverflowRef}
-                className="desktop-overflow-menu"
-                role="menu"
-                aria-label={t("header.moreActions", "More actions")}
-              >
-                <button
-                  className="view-toggle-overflow-item"
-                  onClick={() => {
-                    handleOverflowAction(onOpenSchedules);
-                    setIsDesktopOverflowOpen(false);
-                  }}
-                  role="menuitem"
-                  data-testid="desktop-overflow-schedules-btn"
-                >
-                  <Clock size={14} />
-                  <span>{t("header.automation", "Automation")}</span>
-                </button>
-              </div>
-            )}
-          </div>
-        )}
 
         {/*
         FNXC:Navigation 2026-06-21-13:48:

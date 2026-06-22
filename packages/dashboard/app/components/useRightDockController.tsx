@@ -22,6 +22,11 @@ export interface RightDockControllerInput {
   openDetailTask: (task: Task | TaskDetail, initialTab?: DetailTaskTab) => void;
   openFileInBrowser: (path: string, opts?: { workspace?: string; line?: number; col?: number }) => void;
   openSettings: (section?: string) => void;
+  onOpenUsage?: (anchorRect?: DOMRect | null) => void;
+  onOpenActivityLog?: () => void;
+  onOpenGitHubImport?: () => void;
+  onOpenGitManager?: () => void;
+  onOpenSchedules?: () => void;
   onSendSelectionToTask: (description: string) => void;
   onCreateTaskFromInsight: (payload: { insightId: string; title: string; description: string }) => Promise<void> | void;
   onNavigateToMission: (missionId: string) => void;
@@ -101,6 +106,11 @@ export function useRightDockController(input: RightDockControllerInput): RightDo
       addToast: input.addToast,
     },
     onOpenSettings: input.openSettings,
+    onOpenUsage: input.onOpenUsage,
+    onOpenActivityLog: input.onOpenActivityLog,
+    onOpenGitHubImport: input.onOpenGitHubImport,
+    onOpenGitManager: input.onOpenGitManager,
+    onOpenSchedules: input.onOpenSchedules,
     onOpenTaskDetail: (taskId: string) => {
       void fetchTaskDetail(taskId, input.projectId)
         .then((task) => input.openDetailTask(task as TaskDetail))

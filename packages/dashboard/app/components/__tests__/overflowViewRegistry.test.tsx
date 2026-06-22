@@ -3,32 +3,44 @@ import { getVisibleOverflowViewEntries, STATIC_OVERFLOW_VIEW_ENTRIES } from "../
 import type { PluginDashboardViewEntry } from "../../api";
 
 describe("overflowViewRegistry", () => {
-  it("keeps Files as the default first entry and Artifacts visible without a viewport gate", () => {
+  it("exposes exactly the six static right-dock tool destinations", () => {
     const entries = getVisibleOverflowViewEntries();
-    expect(entries[0]?.key).toBe("files");
-    const documentsEntry = entries.find((entry) => entry.key === "documents");
-    expect(documentsEntry?.label).toBe("Artifacts");
-    expect(documentsEntry?.testId).toBe("right-dock-tab-documents");
+    const keys = entries.map((entry) => entry.key);
+
+    expect(keys).toEqual(["usage", "activity-log", "github-import", "git-manager", "files", "automation"]);
+    expect(entries.map((entry) => entry.label)).toEqual([
+      "Activity",
+      "Activity Log",
+      "Import from GitHub",
+      "Git Manager",
+      "Files",
+      "Automation",
+    ]);
+    expect(entries.filter((entry) => entry.render).map((entry) => entry.key)).toEqual(["files"]);
+    expect(entries.filter((entry) => entry.onActivate).map((entry) => entry.key)).toEqual([
+      "usage",
+      "activity-log",
+      "github-import",
+      "git-manager",
+      "automation",
+    ]);
   });
 
-  it("matches Header feature gates for flag-controlled overflow destinations", () => {
-    const disabled = getVisibleOverflowViewEntries({
-      experimentalFeatures: {
-        insights: false,
-        memoryView: false,
-        devServerView: false,
-        researchView: false,
-        evalsView: false,
-        goalsView: false,
-      },
-      showSkillsTab: false,
-      todosEnabled: false,
-    }).map((entry) => entry.key);
-
-    expect(disabled).toEqual(["files", "documents", "secrets"]);
-    expect(disabled).not.toContain("stash-recovery");
-
-    const enabled = getVisibleOverflowViewEntries({
+  it("does not expose left-sidebar content views in the right-dock registry", () => {
+    const removedKeys = [
+      "documents",
+      "research",
+      "insights",
+      "skills",
+      "memory",
+      "secrets",
+      "stash-recovery",
+      "evals",
+      "goalsView",
+      "todos",
+      "devserver",
+    ];
+    const keys = getVisibleOverflowViewEntries({
       experimentalFeatures: {
         insights: true,
         memoryView: true,
@@ -41,10 +53,13 @@ describe("overflowViewRegistry", () => {
       todosEnabled: true,
     }).map((entry) => entry.key);
 
-    expect(enabled).toEqual(STATIC_OVERFLOW_VIEW_ENTRIES.map((entry) => entry.key));
+    expect(keys).toEqual(STATIC_OVERFLOW_VIEW_ENTRIES.map((entry) => entry.key));
+    for (const removedKey of removedKeys) {
+      expect(keys).not.toContain(removedKey);
+    }
   });
 
-  it("adds only non-primary plugin views after static entries", () => {
+  it("adds only non-primary plugin views after static tool entries", () => {
     const pluginDashboardViews: PluginDashboardViewEntry[] = [
       {
         pluginId: "plugin-a",
@@ -61,7 +76,13 @@ describe("overflowViewRegistry", () => {
     ];
 
     const entries = getVisibleOverflowViewEntries({ pluginDashboardViews });
-    expect(entries.slice(-2).map((entry) => entry.key)).toEqual([
+    expect(entries.map((entry) => entry.key)).toEqual([
+      "usage",
+      "activity-log",
+      "github-import",
+      "git-manager",
+      "files",
+      "automation",
       "plugin:plugin-b:audit",
       "plugin:plugin-a:tools",
     ]);

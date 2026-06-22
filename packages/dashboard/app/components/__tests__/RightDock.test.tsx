@@ -11,21 +11,33 @@ vi.mock("../../api", async (importOriginal) => {
   };
 });
 
-vi.mock("../DocumentsView", () => ({ DocumentsView: () => <div data-testid="mock-documents-view" /> }));
-vi.mock("../ResearchView", () => ({ ResearchView: () => <div data-testid="mock-research-view" /> }));
-vi.mock("../InsightsView", () => ({ InsightsView: () => <div data-testid="mock-insights-view" /> }));
-vi.mock("../EvalsView", () => ({ EvalsView: () => <div data-testid="mock-evals-view" /> }));
-vi.mock("../SkillsView", () => ({ SkillsView: () => <div data-testid="mock-skills-view" /> }));
-vi.mock("../MemoryView", () => ({ MemoryView: () => <div data-testid="mock-memory-view" /> }));
-vi.mock("../SecretsView", () => ({ SecretsView: () => <div data-testid="mock-secrets-view" /> }));
-vi.mock("../DevServerView", () => ({ DevServerView: () => <div data-testid="mock-devserver-view" /> }));
-vi.mock("../TodoView", () => ({ TodoView: () => <div data-testid="mock-todos-view" /> }));
-vi.mock("../GoalsView", () => ({ GoalsView: () => <div data-testid="mock-goals-view" /> }));
-
 const renderProps = {
   addToast: vi.fn(),
   projectId: "project-1",
 };
+
+const toolTabIds = [
+  "right-dock-tab-usage",
+  "right-dock-tab-activity-log",
+  "right-dock-tab-github-import",
+  "right-dock-tab-git-manager",
+  "right-dock-tab-files",
+  "right-dock-tab-automation",
+];
+
+const removedViewTabIds = [
+  "right-dock-tab-documents",
+  "right-dock-tab-research",
+  "right-dock-tab-insights",
+  "right-dock-tab-skills",
+  "right-dock-tab-memory",
+  "right-dock-tab-secrets",
+  "right-dock-tab-evals",
+  "right-dock-tab-goals",
+  "right-dock-tab-todos",
+  "right-dock-tab-devserver",
+  "right-dock-tab-stash-recovery",
+];
 
 describe("RightDock", () => {
   beforeEach(() => {
@@ -37,7 +49,7 @@ describe("RightDock", () => {
     window.localStorage.clear();
   });
 
-  it("renders Files by default and restores a persisted selected view", () => {
+  it("renders Files by default and restores only persisted inline views", () => {
     const onOpenChange = vi.fn();
     const { unmount } = render(
       <RightDock open={true} onOpenChange={onOpenChange} renderProps={renderProps} />,
@@ -46,15 +58,24 @@ describe("RightDock", () => {
     expect(screen.getByTestId("right-dock-tab-files")).toHaveAttribute("aria-selected", "true");
     expect(screen.getByTestId("right-dock-files-view")).toBeInTheDocument();
 
-    fireEvent.click(screen.getByTestId("right-dock-tab-secrets"));
-    expect(window.localStorage.getItem(RIGHT_DOCK_VIEW_STORAGE_KEY)).toBe("secrets");
+    fireEvent.click(screen.getByTestId("right-dock-tab-automation"));
+    expect(window.localStorage.getItem(RIGHT_DOCK_VIEW_STORAGE_KEY)).toBeNull();
     unmount();
 
     render(<RightDock open={true} onOpenChange={onOpenChange} renderProps={renderProps} />);
-    expect(screen.getByTestId("right-dock-tab-secrets")).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByTestId("right-dock-tab-files")).toHaveAttribute("aria-selected", "true");
   });
 
-  it("hides entries gated off by their matching Header flags", () => {
+  it("falls back to Files when storage points at a removed right-dock view", () => {
+    window.localStorage.setItem(RIGHT_DOCK_VIEW_STORAGE_KEY, "documents");
+    render(<RightDock open={true} onOpenChange={vi.fn()} renderProps={renderProps} />);
+
+    expect(screen.getByTestId("right-dock-tab-files")).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByTestId("right-dock-files-view")).toBeInTheDocument();
+    expect(screen.queryByTestId("right-dock-tab-documents")).toBeNull();
+  });
+
+  it("renders exactly the six right-dock tool entries and no removed content-view tabs", () => {
     render(
       <RightDock
         open={true}
@@ -62,26 +83,69 @@ describe("RightDock", () => {
         renderProps={renderProps}
         visibilityOptions={{
           experimentalFeatures: {
-            insights: false,
-            memoryView: false,
-            devServerView: false,
-            researchView: false,
-            evalsView: false,
-            goalsView: false,
+            insights: true,
+            memoryView: true,
+            devServerView: true,
+            researchView: true,
+            evalsView: true,
+            goalsView: true,
           },
-          showSkillsTab: false,
-          todosEnabled: false,
+          showSkillsTab: true,
+          todosEnabled: true,
         }}
       />,
     );
 
-    expect(screen.getByTestId("right-dock-tab-files")).toBeInTheDocument();
-    expect(screen.getByTestId("right-dock-tab-documents")).toHaveAttribute("aria-label", "Artifacts");
-    expect(screen.getByTestId("right-dock-tab-documents")).toHaveAttribute("title", "Artifacts");
-    expect(screen.getByTestId("right-dock-tab-secrets")).toBeInTheDocument();
-    expect(screen.queryByTestId("right-dock-tab-stash-recovery")).toBeNull();
-    expect(screen.queryByTestId("right-dock-tab-research")).toBeNull();
-    expect(screen.queryByTestId("right-dock-tab-insights")).toBeNull();
+    expect(screen.getAllByRole("tab").map((tab) => tab.getAttribute("data-testid"))).toEqual(toolTabIds);
+    expect(screen.getByTestId("right-dock-tab-usage")).toHaveAttribute("aria-label", "Activity");
+    expect(screen.getByTestId("right-dock-tab-activity-log")).toHaveAttribute("aria-label", "Activity Log");
+    expect(screen.getByTestId("right-dock-tab-github-import")).toHaveAttribute("aria-label", "Import from GitHub");
+    expect(screen.getByTestId("right-dock-tab-git-manager")).toHaveAttribute("aria-label", "Git Manager");
+    expect(screen.getByTestId("right-dock-tab-files")).toHaveAttribute("aria-label", "Files");
+    expect(screen.getByTestId("right-dock-tab-automation")).toHaveAttribute("aria-label", "Automation");
+    for (const removedId of removedViewTabIds) {
+      expect(screen.queryByTestId(removedId)).toBeNull();
+    }
+  });
+
+  it("clicking action tabs invokes handlers without replacing the inline Files body", () => {
+    const onOpenUsage = vi.fn();
+    const onOpenActivityLog = vi.fn();
+    const onOpenGitHubImport = vi.fn();
+    const onOpenGitManager = vi.fn();
+    const onOpenSchedules = vi.fn();
+    render(
+      <RightDock
+        open={true}
+        onOpenChange={vi.fn()}
+        renderProps={{
+          ...renderProps,
+          onOpenUsage,
+          onOpenActivityLog,
+          onOpenGitHubImport,
+          onOpenGitManager,
+          onOpenSchedules,
+        }}
+      />,
+    );
+
+    const actionAssertions: Array<[string, () => void, unknown[]]> = [
+      ["right-dock-tab-usage", onOpenUsage, [null]],
+      ["right-dock-tab-activity-log", onOpenActivityLog, []],
+      ["right-dock-tab-github-import", onOpenGitHubImport, []],
+      ["right-dock-tab-git-manager", onOpenGitManager, []],
+      ["right-dock-tab-automation", onOpenSchedules, []],
+    ];
+
+    for (const [tabId, handler, args] of actionAssertions) {
+      fireEvent.click(screen.getByTestId(tabId));
+      expect(handler).toHaveBeenCalledWith(...args);
+      expect(screen.getByTestId("right-dock-files-view")).toBeInTheDocument();
+      expect(screen.getByTestId("right-dock-tab-files")).toHaveAttribute("aria-selected", "true");
+    }
+
+    fireEvent.click(screen.getByTestId("right-dock-tab-files"));
+    expect(screen.getByTestId("right-dock-files-view")).toBeInTheDocument();
   });
 
   it("closes internally and clamps then persists resize width", () => {
@@ -110,47 +174,6 @@ describe("RightDock", () => {
     expect(screen.getByTestId("right-dock-resize-handle")).toHaveAttribute("aria-valuenow", "400");
   });
 
-  it("mounts every visible static registry view in the dock body without crashing", async () => {
-    render(
-      <RightDock
-        open={true}
-        onOpenChange={vi.fn()}
-        renderProps={renderProps}
-        visibilityOptions={{
-          experimentalFeatures: {
-            insights: true,
-            memoryView: true,
-            devServerView: true,
-            researchView: true,
-            evalsView: true,
-            goalsView: true,
-          },
-          showSkillsTab: true,
-          todosEnabled: true,
-        }}
-      />,
-    );
-
-    const expectedViews: Array<[string, string]> = [
-      ["right-dock-tab-files", "right-dock-files-view"],
-      ["right-dock-tab-documents", "mock-documents-view"],
-      ["right-dock-tab-research", "mock-research-view"],
-      ["right-dock-tab-insights", "mock-insights-view"],
-      ["right-dock-tab-skills", "mock-skills-view"],
-      ["right-dock-tab-memory", "mock-memory-view"],
-      ["right-dock-tab-secrets", "mock-secrets-view"],
-      ["right-dock-tab-evals", "mock-evals-view"],
-      ["right-dock-tab-goals", "mock-goals-view"],
-      ["right-dock-tab-todos", "mock-todos-view"],
-      ["right-dock-tab-devserver", "mock-devserver-view"],
-    ];
-
-    for (const [tabId, bodyId] of expectedViews) {
-      fireEvent.click(screen.getByTestId(tabId));
-      expect(await screen.findByTestId(bodyId)).toBeInTheDocument();
-    }
-  });
-
   it("renders the expanded modal through the same registry and restores focus on close", async () => {
     const onClose = vi.fn();
     const focusButton = document.createElement("button");
@@ -159,7 +182,7 @@ describe("RightDock", () => {
 
     render(
       <RightDockExpandModal
-        viewKey="secrets"
+        viewKey="files"
         renderProps={renderProps}
         onClose={onClose}
         returnFocusRef={{ current: focusButton }}
@@ -175,11 +198,23 @@ describe("RightDock", () => {
     focusButton.remove();
   });
 
+  it("does not render the expanded modal for action entries", () => {
+    render(
+      <RightDockExpandModal
+        viewKey="automation"
+        renderProps={renderProps}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByTestId("right-dock-expand-modal")).toBeNull();
+  });
+
   it("restores the expanded modal's persisted size", () => {
     window.localStorage.setItem("fusion:right-dock-expand-modal-size", JSON.stringify({ width: 640, height: 480 }));
     render(
       <RightDockExpandModal
-        viewKey="secrets"
+        viewKey="files"
         renderProps={renderProps}
         onClose={vi.fn()}
       />,
@@ -191,11 +226,11 @@ describe("RightDock", () => {
     });
   });
 
-  it("fires expand for the selected entry", () => {
+  it("fires expand for the selected inline entry only", () => {
     const onExpand = vi.fn();
     render(<RightDock open={true} onOpenChange={vi.fn()} renderProps={renderProps} onExpand={onExpand} />);
-    fireEvent.click(screen.getByTestId("right-dock-tab-secrets"));
+    fireEvent.click(screen.getByTestId("right-dock-tab-automation"));
     fireEvent.click(screen.getByTestId("right-dock-expand"));
-    expect(onExpand).toHaveBeenCalledWith("secrets");
+    expect(onExpand).toHaveBeenCalledWith("files");
   });
 });

@@ -74,9 +74,9 @@ describe("Header", () => {
     expect(container.querySelector(".shell-connection-status")).toBeNull();
   });
 
-  it("renders action buttons", () => {
+  it("renders desktop non-tool action buttons without toolbar tools", () => {
     renderHeader();
-    expect(screen.getByTitle("Import from GitHub")).toBeDefined();
+    expect(screen.queryByTitle("Import from GitHub")).toBeNull();
     expect(screen.getByTitle("Settings")).toBeDefined();
   });
 
@@ -104,9 +104,10 @@ describe("Header", () => {
     expect(screen.queryByTitle("Import from GitHub")).toBeNull();
   });
 
-  it("keeps GitHub import for mobile shell host", () => {
-    renderHeader({ shellHost: { kind: "mobile-shell" } });
-    expect(screen.getByTitle("Import from GitHub")).toBeDefined();
+  it("keeps GitHub import in compact overflow for mobile shell host", () => {
+    renderHeader({ shellHost: { kind: "mobile-shell" } }, "mobile");
+    fireEvent.click(screen.getByTitle("More header actions"));
+    expect(screen.getByText("Import from GitHub")).toBeDefined();
   });
 
   it("calls onOpenSettings when settings button is clicked", () => {
@@ -116,28 +117,19 @@ describe("Header", () => {
     expect(onOpenSettings).toHaveBeenCalled();
   });
 
-  it("calls onOpenFiles with zero arguments from desktop files button", () => {
-    const onOpenFiles = vi.fn();
-    renderHeader({ onOpenFiles }, "desktop");
-
-    fireEvent.click(screen.getByTestId("files-toggle-btn"));
-
-    expect(onOpenFiles).toHaveBeenCalledTimes(1);
-    expect(onOpenFiles.mock.calls[0]).toEqual([]);
+  it("does not render the desktop files button", () => {
+    renderHeader({ onOpenFiles: vi.fn() }, "desktop");
+    expect(screen.queryByTestId("files-toggle-btn")).toBeNull();
   });
 
-  it("calls onOpenGitHubImport when import button is clicked", () => {
-    const onOpenGitHubImport = vi.fn();
-    renderHeader({ onOpenGitHubImport });
-    fireEvent.click(screen.getByTitle("Import from GitHub"));
-    expect(onOpenGitHubImport).toHaveBeenCalled();
+  it("does not render the desktop GitHub import button", () => {
+    renderHeader({ onOpenGitHubImport: vi.fn() }, "desktop");
+    expect(screen.queryByTitle("Import from GitHub")).toBeNull();
   });
 
-  it("shows the stash orphan badge on the desktop Git Manager button", () => {
+  it("does not render the desktop Git Manager button", () => {
     renderHeader({ onOpenGitManager: noop, stashOrphanCount: 5 }, "desktop");
-    const button = screen.getByTestId("git-manager-btn");
-    expect(button).toHaveTextContent("5");
-    expect(button.querySelector(".btn-badge")?.textContent).toBe("5");
+    expect(screen.queryByTestId("git-manager-btn")).toBeNull();
   });
 
   it("shows the stash orphan badge on the compact Git Manager overflow item", () => {
@@ -610,9 +602,10 @@ describe("Header", () => {
   });
 
   describe("files button", () => {
-    it("renders files button on desktop when handler is provided", () => {
+    it("does not render files button on desktop when handler is provided", () => {
       renderHeader({ onOpenFiles: vi.fn() }, "desktop");
-      expect(screen.getByTitle("Browse files")).toBeDefined();
+      expect(screen.queryByTitle("Browse files")).toBeNull();
+      expect(screen.queryByTestId("files-toggle-btn")).toBeNull();
     });
 
     it("does not render files button on desktop when handler is omitted", () => {
@@ -620,16 +613,16 @@ describe("Header", () => {
       expect(screen.queryByTitle("Browse files")).toBeNull();
     });
 
-    it("calls onOpenFiles when desktop files button is clicked", () => {
+    it("does not call onOpenFiles from the removed desktop files button", () => {
       const onOpenFiles = vi.fn();
       renderHeader({ onOpenFiles }, "desktop");
-      fireEvent.click(screen.getByTitle("Browse files"));
-      expect(onOpenFiles).toHaveBeenCalled();
+      expect(screen.queryByTitle("Browse files")).toBeNull();
+      expect(onOpenFiles).not.toHaveBeenCalled();
     });
 
-    it("applies active class when files modal is open", () => {
+    it("does not render an active files shell when files modal is open on desktop", () => {
       renderHeader({ onOpenFiles: vi.fn(), filesOpen: true }, "desktop");
-      expect(screen.getByTitle("Browse files").className).toContain("btn-icon--active");
+      expect(screen.queryByTitle("Browse files")).toBeNull();
     });
 
     it("shows files action in mobile overflow menu", () => {
@@ -705,10 +698,10 @@ describe("Header", () => {
       expect(screen.queryByTitle("View usage")).toBeNull();
     });
 
-    it("renders usage button with correct title when onOpenUsage is provided on desktop", () => {
+    it("does not render usage button inline on desktop when onOpenUsage is provided", () => {
       renderHeader({ onOpenUsage: vi.fn() }, "desktop");
-      expect(screen.getByTitle("View usage")).toBeDefined();
-      expect(screen.getByTestId("desktop-header-usage-btn")).toBeDefined();
+      expect(screen.queryByTitle("View usage")).toBeNull();
+      expect(screen.queryByTestId("desktop-header-usage-btn")).toBeNull();
     });
 
     it("does not render usage button inline on mobile when onOpenUsage is provided", () => {
@@ -724,26 +717,11 @@ describe("Header", () => {
       expect(screen.getByTestId("overflow-usage-btn")).toBeDefined();
     });
 
-    it("calls onOpenUsage with button bounds when usage button is clicked on desktop", () => {
+    it("does not call onOpenUsage from the removed desktop toolbar button", () => {
       const onOpenUsage = vi.fn();
       renderHeader({ onOpenUsage }, "desktop");
-
-      const usageButton = screen.getByTestId("desktop-header-usage-btn") as HTMLButtonElement;
-      const mockRect = {
-        top: 12,
-        bottom: 52,
-        left: 820,
-        right: 860,
-        width: 40,
-        height: 40,
-        x: 820,
-        y: 12,
-        toJSON: () => ({}),
-      } as DOMRect;
-      usageButton.getBoundingClientRect = vi.fn(() => mockRect);
-
-      fireEvent.click(usageButton);
-      expect(onOpenUsage).toHaveBeenCalledWith(mockRect);
+      expect(screen.queryByTestId("desktop-header-usage-btn")).toBeNull();
+      expect(onOpenUsage).not.toHaveBeenCalled();
     });
 
     it("calls onOpenUsage with button bounds when usage button in overflow menu is clicked", () => {
@@ -781,9 +759,9 @@ describe("Header", () => {
       expect(screen.queryByTitle("View Activity Log")).toBeNull();
     });
 
-    it("renders activity log button with correct title when onOpenActivityLog is provided on desktop", () => {
+    it("does not render activity log button inline on desktop when onOpenActivityLog is provided", () => {
       renderHeader({ onOpenActivityLog: vi.fn() }, "desktop");
-      expect(screen.getByTitle("View Activity Log")).toBeDefined();
+      expect(screen.queryByTitle("View Activity Log")).toBeNull();
     });
 
     it("does not render activity log button inline on mobile when onOpenActivityLog is provided", () => {
@@ -798,11 +776,11 @@ describe("Header", () => {
       expect(screen.getByTestId("overflow-activity-log-btn")).toBeDefined();
     });
 
-    it("calls onOpenActivityLog when activity log button is clicked on desktop", () => {
+    it("does not call onOpenActivityLog from the removed desktop toolbar button", () => {
       const onOpenActivityLog = vi.fn();
       renderHeader({ onOpenActivityLog }, "desktop");
-      fireEvent.click(screen.getByTitle("View Activity Log"));
-      expect(onOpenActivityLog).toHaveBeenCalled();
+      expect(screen.queryByTitle("View Activity Log")).toBeNull();
+      expect(onOpenActivityLog).not.toHaveBeenCalled();
     });
 
     it("calls onOpenActivityLog when activity log button in overflow menu is clicked", () => {
@@ -1035,10 +1013,9 @@ describe("Header", () => {
   });
 
   describe("nodes button", () => {
-    it("omits Nodes button from desktop overflow because Nodes lives in Command Center", () => {
+    it("omits the empty desktop overflow trigger after Nodes and Automation moved elsewhere", () => {
       renderHeader({}, "desktop");
-      expect(screen.getByTestId("desktop-overflow-trigger")).toBeDefined();
-      fireEvent.click(screen.getByTestId("desktop-overflow-trigger"));
+      expect(screen.queryByTestId("desktop-overflow-trigger")).toBeNull();
       expect(screen.queryByTestId("desktop-overflow-nodes-btn")).toBeNull();
     });
 
@@ -1274,11 +1251,10 @@ describe("Header", () => {
   });
 
   describe("automation button", () => {
-    it("renders automation button in desktop overflow", () => {
+    it("does not render automation in a desktop overflow shell", () => {
       renderHeader({ onOpenSchedules: vi.fn() }, "desktop");
-      expect(screen.getByTestId("desktop-overflow-trigger")).toBeDefined();
-      fireEvent.click(screen.getByTestId("desktop-overflow-trigger"));
-      expect(screen.getByTestId("desktop-overflow-schedules-btn")).toBeDefined();
+      expect(screen.queryByTestId("desktop-overflow-trigger")).toBeNull();
+      expect(screen.queryByTestId("desktop-overflow-schedules-btn")).toBeNull();
     });
 
     it("does not render automation button inline on mobile", () => {
@@ -1286,18 +1262,16 @@ describe("Header", () => {
       expect(screen.queryByTitle("Automation")).toBeNull();
     });
 
-    it("calls onOpenSchedules when automation button is clicked from desktop overflow", () => {
+    it("does not call onOpenSchedules from the removed desktop overflow", () => {
       const onOpenSchedules = vi.fn();
       renderHeader({ onOpenSchedules }, "desktop");
-      fireEvent.click(screen.getByTestId("desktop-overflow-trigger"));
-      fireEvent.click(screen.getByTestId("desktop-overflow-schedules-btn"));
-      expect(onOpenSchedules).toHaveBeenCalled();
+      expect(screen.queryByTestId("desktop-overflow-schedules-btn")).toBeNull();
+      expect(onOpenSchedules).not.toHaveBeenCalled();
     });
 
-    it("has correct data-testid for testing on desktop", () => {
+    it("removes the desktop automation data-testid with the empty overflow trigger", () => {
       renderHeader({ onOpenSchedules: vi.fn() }, "desktop");
-      fireEvent.click(screen.getByTestId("desktop-overflow-trigger"));
-      expect(screen.getByTestId("desktop-overflow-schedules-btn")).toBeDefined();
+      expect(screen.queryByTestId("desktop-overflow-schedules-btn")).toBeNull();
     });
 
     it("includes automation in overflow menu on mobile", () => {

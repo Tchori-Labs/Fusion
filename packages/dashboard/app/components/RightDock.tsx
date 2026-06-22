@@ -41,10 +41,15 @@ export function persistRightDockOpen(open: boolean): void {
   }
 }
 
+function isInlineOverflowViewKey(key: string, options: OverflowViewVisibilityOptions): key is OverflowViewKey {
+  const entry = findOverflowViewEntry(key as OverflowViewKey, options);
+  return Boolean(entry?.render);
+}
+
 function readStoredRightDockView(options: OverflowViewVisibilityOptions): OverflowViewKey {
   if (typeof window === "undefined") return "files";
   const stored = window.localStorage.getItem(RIGHT_DOCK_VIEW_STORAGE_KEY);
-  return stored && isOverflowViewKeyVisible(stored, options) ? stored : "files";
+  return stored && isOverflowViewKeyVisible(stored, options) && isInlineOverflowViewKey(stored, options) ? stored : "files";
 }
 
 function persistRightDockWidth(width: number): void {
@@ -75,6 +80,9 @@ export interface RightDockProps {
 /*
 FNXC:Navigation 2026-06-21-00:00:
 The right dock is an auxiliary tablet/desktop surface: it remembers the last overflow destination, starts on Files when none is valid, and resizes from its left edge without changing the canonical Header/MobileNavBar active navigation state.
+
+FNXC:Navigation 2026-06-21-20:14:
+FN-6882 splits right-dock entries into launcher actions and inline views. Action tabs invoke their existing Header handlers without replacing the Files body; only inline entries persist selection or expand into the modal.
 */
 export function RightDock({
   open,
@@ -89,18 +97,26 @@ export function RightDock({
   const [width, setWidth] = useState(readStoredRightDockWidth);
 
   useEffect(() => {
-    if (!isOverflowViewKeyVisible(selectedKey, visibilityOptions)) {
+    if (!isOverflowViewKeyVisible(selectedKey, visibilityOptions) || !isInlineOverflowViewKey(selectedKey, visibilityOptions)) {
       setSelectedKey("files");
       persistRightDockView("files");
     }
   }, [selectedKey, visibilityOptions]);
 
-  const selectedEntry = findOverflowViewEntry(selectedKey, visibilityOptions) ?? entries[0];
+  const selectedEntry = (findOverflowViewEntry(selectedKey, visibilityOptions)?.render
+    ? findOverflowViewEntry(selectedKey, visibilityOptions)
+    : findOverflowViewEntry("files", visibilityOptions)) ?? entries.find((entry) => entry.render);
 
   const selectEntry = useCallback((key: OverflowViewKey) => {
+    const entry = findOverflowViewEntry(key, visibilityOptions);
+    if (entry?.onActivate) {
+      entry.onActivate(renderProps);
+      return;
+    }
+    if (!entry?.render) return;
     setSelectedKey(key);
     persistRightDockView(key);
-  }, []);
+  }, [renderProps, visibilityOptions]);
 
   const closeDock = useCallback(() => {
     persistRightDockOpen(false);
@@ -181,7 +197,7 @@ export function RightDock({
         <div className="right-dock__tabs" role="tablist" aria-label="Right dock views">
           {entries.map((entry) => {
             const Icon = entry.icon;
-            const selected = entry.key === selectedEntry.key;
+            const selected = Boolean(entry.render && entry.key === selectedEntry.key);
             return (
               <button
                 key={entry.key}
@@ -200,16 +216,18 @@ export function RightDock({
           })}
         </div>
         <div className="right-dock__actions">
-          <button
-            type="button"
-            className="btn-icon right-dock__expand"
-            aria-label={`Expand ${selectedEntry.label}`}
-            title={`Expand ${selectedEntry.label}`}
-            data-testid="right-dock-expand"
-            onClick={() => onExpand?.(selectedEntry.key)}
-          >
-            <Maximize2 size={16} />
-          </button>
+          {selectedEntry.render ? (
+            <button
+              type="button"
+              className="btn-icon right-dock__expand"
+              aria-label={`Expand ${selectedEntry.label}`}
+              title={`Expand ${selectedEntry.label}`}
+              data-testid="right-dock-expand"
+              onClick={() => onExpand?.(selectedEntry.key)}
+            >
+              <Maximize2 size={16} />
+            </button>
+          ) : null}
           <button
             type="button"
             className="btn-icon right-dock__close"
@@ -227,7 +245,7 @@ export function RightDock({
         <div className="right-dock__title" role="heading" aria-level={3}>{selectedEntry.label}</div>
       </div>
       <div className="right-dock__body" role="tabpanel" aria-label={selectedEntry.label} data-testid="right-dock-body">
-        {selectedEntry.render(renderProps)}
+        {selectedEntry.render?.(renderProps)}
       </div>
     </aside>
   );
