@@ -9,6 +9,7 @@ import { useColumnLabel } from "../i18n/labels";
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { sharedRehypePlugins, createMermaidCodeComponent } from "./markdownPipeline";
 import type { Task, TaskDetail, TaskAttachment, Column, ColumnId, MergeResult, Settings, GlobalSettings, AgentLogEntry, Agent, TaskPriority, TaskSourceIssue, WorkflowStepResult, GithubIssueAction } from "@fusion/core";
 import {
   DEFAULT_TASK_PRIORITY,
@@ -79,17 +80,30 @@ function isStringValue(value: unknown): value is string {
   return Object.prototype.toString.call(value) === STRING_OBJECT_TAG;
 }
 
+/*
+FNXC:Markdown 2026-06-23-03:30:
+The task DESCRIPTION (spec/prompt) + SUMMARY render via these components plus the
+shared rehype chain (sharedRehypePlugins) so they gain sanitized raw HTML
+(`<details>`/tables/`<kbd>`), drop HTML comments, and render ```mermaid diagrams —
+matching the shared markdown renderer. They KEEP their `.markdown-body` styling
+(NOT the `.mailbox-markdown` wrapper), so the look is unchanged for normal markdown.
+The file-path linkify `code` renderer is preserved as the fallback for non-mermaid
+code, so links AND html AND mermaid all work together.
+*/
+const markdownLinkifyCodeComponent: NonNullable<Components["code"]> = ({ children, ...props }) => {
+  const text = React.Children.toArray(children).join(EMPTY_MARKDOWN_CHILD_SEPARATOR);
+  const linkedChildren = linkifyFilePaths(text);
+  if (linkedChildren.length === 1 && linkedChildren[0]?.constructor === String) {
+    return <code {...props}>{children}</code>;
+  }
+  return <code {...props}>{linkedChildren}</code>;
+};
+
 const markdownLinkifyComponents: Components = {
   p: ({ children, ...props }) => <p {...props}>{linkifyReactChildren(children)}</p>,
   li: ({ children, ...props }) => <li {...props}>{linkifyReactChildren(children)}</li>,
-  code: ({ children, ...props }) => {
-    const text = React.Children.toArray(children).join(EMPTY_MARKDOWN_CHILD_SEPARATOR);
-    const linkedChildren = linkifyFilePaths(text);
-    if (linkedChildren.length === 1 && linkedChildren[0]?.constructor === String) {
-      return <code {...props}>{children}</code>;
-    }
-    return <code {...props}>{linkedChildren}</code>;
-  },
+  // Mermaid fences render as diagrams; all other code falls through to file-path linkify.
+  code: createMermaidCodeComponent("task-detail-mermaid-diagram", markdownLinkifyCodeComponent),
 };
 
 /**
@@ -3565,7 +3579,7 @@ export function TaskDetailContent({
             <div className="detail-section detail-summary">
               <h4>{t("taskDetail.summary.heading", "Summary")}</h4>
               <div className="markdown-body">
-                <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownLinkifyComponents}>
+                <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={sharedRehypePlugins} components={markdownLinkifyComponents}>
                   {task.summary}
                 </ReactMarkdown>
               </div>
@@ -3833,7 +3847,7 @@ export function TaskDetailContent({
               <div className="spec-loading"><LoadingSpinner label={t("taskDetail.spec.loading", "Loading specification…")} /></div>
             ) : workingTask.prompt ? (
               <div className="markdown-body">
-                <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownLinkifyComponents}>
+                <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={sharedRehypePlugins} components={markdownLinkifyComponents}>
                   {workingTask.prompt.replace(/^#\s+[^\n]*\n+/, "")}
                 </ReactMarkdown>
               </div>

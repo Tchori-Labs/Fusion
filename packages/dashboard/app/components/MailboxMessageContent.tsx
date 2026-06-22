@@ -1,51 +1,18 @@
 import { memo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import rehypeRaw from "rehype-raw";
-import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
-import type { Options as SanitizeSchema } from "rehype-sanitize";
 import type { Components } from "react-markdown";
 import type { PluggableList } from "unified";
 import { linkifyReactChildren } from "../utils/filePathLinkify";
-import { MermaidDiagram } from "./MermaidDiagram";
+import { sharedRehypePlugins, createMermaidCodeComponent } from "./markdownPipeline";
 
 /*
-FNXC:Markdown 2026-06-23-03:15:
-GitHub PR/issue bodies + comments (and mailbox/chat) embed raw HTML (`<details>`,
-`<summary>`, `<kbd>`, `<sub>`, tables), HTML comments (`<!-- -->`), and ```mermaid
-blocks. Previously raw HTML was escaped to literal text and mermaid showed as code.
-
-Pipeline (ORDER MATTERS): remark-gfm -> rehype-raw -> rehype-sanitize.
-- rehype-raw parses embedded HTML into the hast tree so it renders as real elements.
-  It also DROPS HTML comments by default, so `<!-- ... -->` never appears in output.
-- rehype-sanitize runs AFTER raw to strip XSS: <script>/<style>/<iframe>, event
-  handlers (onClick etc.), and javascript: URLs. Because these bodies come from
-  GitHub (untrusted), sanitize is mandatory — raw without sanitize would be an XSS
-  hole. Running sanitize last guarantees nothing injected via raw survives.
+FNXC:Markdown 2026-06-23-03:30:
+The sanitize schema, rehype plugin chain (rehype-raw -> rehype-sanitize), and the
+mermaid-aware code component now live in ./markdownPipeline so the task
+description + summary in TaskDetailModal share the exact same XSS posture. This
+component consumes those shared exports; see markdownPipeline.tsx for the rationale.
 */
-
-/*
-FNXC:Markdown 2026-06-23-03:15:
-Sanitize schema = rehype-sanitize defaultSchema (a conservative GitHub-like allow
-list that already permits details/summary/kbd/sub/sup/b/i/em/strong/a/img/code/pre/
-tables/br/hr/blockquote/lists/headings/span/div and strips script/style/event
-handlers/javascript: URLs) EXTENDED to ensure the `className` attribute survives on
-common elements (needed for our `language-*` code fences and styled wrappers). We do
-NOT widen tagNames beyond defaults, so script/style/iframe stay stripped.
-*/
-const mailboxSanitizeSchema: SanitizeSchema = {
-  ...defaultSchema,
-  attributes: {
-    ...defaultSchema.attributes,
-    // Preserve className on code/span/div/pre so language fences + wrapper styling work.
-    code: [...(defaultSchema.attributes?.code ?? []), "className"],
-    span: [...(defaultSchema.attributes?.span ?? []), "className"],
-    div: [...(defaultSchema.attributes?.div ?? []), "className"],
-    pre: [...(defaultSchema.attributes?.pre ?? []), "className"],
-    // `<details open>` disclosure state should round-trip.
-    details: [...(defaultSchema.attributes?.details ?? []), "open"],
-  },
-};
 
 const mailboxMarkdownComponents: Components = {
   p: ({ children, ...props }) => <p {...props}>{linkifyReactChildren(children)}</p>,
@@ -60,24 +27,9 @@ const mailboxMarkdownComponents: Components = {
       {children}
     </table>
   ),
-  /*
-  FNXC:Markdown 2026-06-23-03:15:
-  Code-block override: a fenced ```mermaid block arrives as `<code class="language-mermaid">`.
-  Render it via <MermaidDiagram>, which lazy-imports mermaid so the heavy library is
-  only pulled in when a diagram is present. All other code (inline + other languages)
-  keeps the default rendering.
-  */
-  code: ({ className, children, ...props }) => {
-    if (className === "language-mermaid") {
-      const chart = String(children ?? "").replace(/\n$/, "");
-      return <MermaidDiagram chart={chart} testId="mailbox-mermaid-diagram" />;
-    }
-    return (
-      <code className={className} {...props}>
-        {children}
-      </code>
-    );
-  },
+  // Code-block override: fenced ```mermaid renders as a diagram; all other code
+  // keeps default rendering. See createMermaidCodeComponent in markdownPipeline.
+  code: createMermaidCodeComponent("mailbox-mermaid-diagram"),
   // Open links in a new tab. Sanitize strips javascript: URLs and event handlers
   // before this runs, so href is safe.
   a: ({ children, ...props }) => (
@@ -88,8 +40,6 @@ const mailboxMarkdownComponents: Components = {
 };
 
 const remarkPlugins: PluggableList = [remarkGfm];
-// Raw must run before sanitize: parse HTML, then strip anything unsafe.
-const rehypePlugins: PluggableList = [rehypeRaw, [rehypeSanitize, mailboxSanitizeSchema]];
 
 interface MailboxMessageContentProps {
   /** Raw message body. Rendered as GitHub-flavored markdown. */
@@ -123,7 +73,7 @@ export const MailboxMessageContent = memo(function MailboxMessageContent({
     <div className={wrapperClass} data-testid={testId}>
       <ReactMarkdown
         remarkPlugins={remarkPlugins}
-        rehypePlugins={rehypePlugins}
+        rehypePlugins={sharedRehypePlugins}
         components={mailboxMarkdownComponents}
       >
         {content}
