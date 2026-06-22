@@ -3141,7 +3141,8 @@ export function TaskDetailContent({
               className={`detail-tab${activeTab === "documents" ? " detail-tab-active" : ""}`}
               onClick={() => setActiveTab("documents")}
             >
-              {t("taskDetail.tabs.documents", "Documents")}
+              {/* FNXC:ArtifactRegistry 2026-06-21-21:56: Keep the internal "documents" tab id stable for persisted task-modal state while presenting the expanded user-facing tab as Artifacts. */}
+              {t("taskDetail.tabs.documents", "Artifacts")}
             </button>
             <button
               className={`detail-tab${activeTab === "model" ? " detail-tab-active" : ""}`}

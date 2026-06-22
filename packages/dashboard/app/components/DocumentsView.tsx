@@ -1,10 +1,10 @@
 import "./DocumentsView.css";
 import { useState, useMemo, useCallback, useEffect, useRef, type ChangeEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { ArrowLeft, FileText, ChevronDown, ChevronUp, ChevronRight, RefreshCw, Search, X, Eye, EyeOff, Package } from "lucide-react";
+import { ArrowLeft, FileText, ChevronDown, ChevronUp, ChevronRight, RefreshCw, Search, X, Eye, EyeOff } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import type { ArtifactType, ArtifactWithTask, TaskDocumentWithTask, TaskDetail } from "@fusion/core";
+import type { ArtifactWithTask, TaskDocumentWithTask, TaskDetail } from "@fusion/core";
 import type { ToastType } from "../hooks/useToast";
 import { artifactMediaUrl, fetchTaskDetail, fetchWorkspaceFileContent, type MarkdownFileEntry } from "../api";
 import { useArtifacts } from "../hooks/useArtifacts";
@@ -13,6 +13,7 @@ import { useProjectMarkdownFiles } from "../hooks/useProjectMarkdownFiles";
 import { useSelectionComment } from "../hooks/useSelectionComment";
 import { SelectionCommentPopover } from "./SelectionCommentPopover";
 import { LoadingSpinner } from "./LoadingSpinner";
+import { ArtifactMedia, getArtifactTypeLabel } from "./ArtifactMedia";
 
 const MOBILE_BREAKPOINT = 768;
 
@@ -183,21 +184,6 @@ function TaskGroup({ taskId, taskTitle, documents, onOpenTask, renderMarkdownSta
   );
 }
 
-function getArtifactTypeLabel(t: ReturnType<typeof useTranslation<"app">>["t"], type: ArtifactType): string {
-  switch (type) {
-    case "image":
-      return t("documents.artifactTypeImage", "Image");
-    case "video":
-      return t("documents.artifactTypeVideo", "Video");
-    case "audio":
-      return t("documents.artifactTypeAudio", "Audio");
-    case "document":
-      return t("documents.artifactTypeDocument", "Document");
-    case "other":
-      return t("documents.artifactTypeOther", "Other");
-  }
-}
-
 function ArtifactCard({ artifact, projectId, onOpenTask }: ArtifactCardProps) {
   const { t } = useTranslation("app");
   const mediaUrl = artifactMediaUrl(artifact.id, projectId);
@@ -205,35 +191,10 @@ function ArtifactCard({ artifact, projectId, onOpenTask }: ArtifactCardProps) {
   const preview = artifact.content ? getContentPreview(artifact.content, 320) : artifact.description;
   const title = artifact.title || t("documents.untitledArtifact", "Untitled artifact");
 
-  const media = (() => {
-    switch (artifact.type) {
-      case "image":
-        return <img className="documents-artifact-media" src={mediaUrl} alt={title} loading="lazy" />;
-      case "video":
-        return <video className="documents-artifact-media" controls src={mediaUrl} aria-label={t("documents.artifactVideoLabel", "Video artifact: {{title}}", { title })} />;
-      case "audio":
-        return <audio className="documents-artifact-audio" controls src={mediaUrl} aria-label={t("documents.artifactAudioLabel", "Audio artifact: {{title}}", { title })} />;
-      case "document":
-        return (
-          <div className="documents-artifact-document" data-testid="artifact-document-preview">
-            <FileText size={16} />
-            <p>{preview || t("documents.noArtifactPreview", "No preview available.")}</p>
-          </div>
-        );
-      case "other":
-        return (
-          <a className="documents-artifact-generic" href={mediaUrl} target="_blank" rel="noreferrer" data-testid="artifact-other-link">
-            <Package size={16} />
-            {t("documents.openArtifactMedia", "Open artifact media")}
-          </a>
-        );
-    }
-  })();
-
   return (
     <article className="document-card documents-artifact-card" aria-label={t("documents.artifactCardLabel", "Artifact {{title}}", { title })}>
       <div className="documents-artifact-preview">
-        {media}
+        <ArtifactMedia artifact={artifact} mediaUrl={mediaUrl} title={title} preview={preview} t={t} />
       </div>
       <div className="documents-artifact-body">
         <div className="documents-artifact-header">

@@ -759,8 +759,8 @@ describe("TaskDetailModal", () => {
 
       // For an in-progress task (no workflow steps, no merge commit), the
       // top-level tabs are: Chat, Definition, Logs, Changes, Review, Comments,
-      // Documents, Model, Workflow, Stats, Routing.
-      const tabTexts = ["Chat", "Definition", "Logs", "Changes", "Review", "Comments", "Documents", "Model", "Workflow", "Stats", "Routing"];
+      // Artifacts, Model, Workflow, Stats, Routing.
+      const tabTexts = ["Chat", "Definition", "Logs", "Changes", "Review", "Comments", "Artifacts", "Model", "Workflow", "Stats", "Routing"];
       const tabs = screen.getAllByRole("button").filter((b) =>
         tabTexts.includes(b.textContent || "")
       );
