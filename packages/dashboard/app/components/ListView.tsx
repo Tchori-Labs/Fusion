@@ -179,7 +179,7 @@ function readSidebarWidth(projectId?: string): number {
   return fallbackWidth;
 }
 
-const LIST_SIDEBAR_MIN_WIDTH = 200; // FNXC:ListView 2026-06-21-01:42: The desktop task-list split sidebar minimum is 200 instead of 280 so users can shrink the left panel further on narrow desktop layouts while resize, keyboard, and ARIA paths share one clamp value.
+const LIST_SIDEBAR_MIN_WIDTH = 120; // FNXC:ListView 2026-06-21-22:31: The desktop task-list split sidebar minimum is 120 instead of 200 so users can shrink the left panel significantly further on narrow desktop layouts while resize, keyboard, and ARIA paths share one clamp value.
 const LIST_SIDEBAR_MAX_RATIO = 0.65;
 const LIST_SIDEBAR_KEYBOARD_STEP = 16;
 

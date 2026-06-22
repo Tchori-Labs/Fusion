@@ -1122,24 +1122,24 @@ describe("ListView", () => {
   it("supports keyboard resizing on the desktop split-pane handle", async () => {
     const viewportSpy = mockDesktopViewport();
     const clientWidthSpy = vi.spyOn(window.HTMLElement.prototype, "clientWidth", "get").mockReturnValue(1000);
-    localStorage.setItem(scopedStorageKey("kb-dashboard-list-sidebar-width"), "150");
+    localStorage.setItem(scopedStorageKey("kb-dashboard-list-sidebar-width"), "80");
     const tasks = [createMockTask({ id: "FN-001", title: "Task" })];
 
     renderListView({ tasks });
-    await waitFor(() => expect(screen.getByTestId("list-split-sidebar")).toHaveStyle({ width: "200px" }));
+    await waitFor(() => expect(screen.getByTestId("list-split-sidebar")).toHaveStyle({ width: "120px" }));
 
     const handle = screen.getByTestId("list-split-resize-handle");
     const startWidth = Number(handle.getAttribute("aria-valuenow"));
 
     expect(handle).toHaveAttribute("tabindex", "0");
-    expect(handle).toHaveAttribute("aria-valuemin", "200");
-    expect(Number(handle.getAttribute("aria-valuemax"))).toBeGreaterThanOrEqual(200);
+    expect(handle).toHaveAttribute("aria-valuemin", "120");
+    expect(Number(handle.getAttribute("aria-valuemax"))).toBeGreaterThanOrEqual(120);
 
     fireEvent.keyDown(handle, { key: "ArrowRight" });
     expect(Number(handle.getAttribute("aria-valuenow"))).toBeGreaterThan(startWidth);
     fireEvent.keyDown(handle, { key: "Home" });
-    expect(handle).toHaveAttribute("aria-valuenow", "200");
-    expect(screen.getByTestId("list-split-sidebar")).toHaveStyle({ width: "200px" });
+    expect(handle).toHaveAttribute("aria-valuenow", "120");
+    expect(screen.getByTestId("list-split-sidebar")).toHaveStyle({ width: "120px" });
     clientWidthSpy.mockRestore();
     viewportSpy.mockRestore();
   });
