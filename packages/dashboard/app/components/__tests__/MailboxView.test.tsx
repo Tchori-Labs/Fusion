@@ -1868,7 +1868,17 @@ describe("MailboxView", () => {
       expect(splitPaneBlock).toContain("border: var(--btn-border-width) solid var(--border);");
       expect(splitPaneBlock).toContain("background: var(--surface);");
 
-      expect(css).toMatch(/\.mailbox-view\s+\.mailbox-split-resize-handle\s*\{[^}]*cursor:\s*col-resize;[^}]*background:\s*color-mix\(in srgb,\s*var\(--border\)\s*70%,\s*transparent\);[^}]*\}/);
+      const resizeHandleBlockMatch = css.match(/\.mailbox-view\s+\.mailbox-split-resize-handle\s*\{([^}]*)\}/);
+      expect(resizeHandleBlockMatch).toBeTruthy();
+      const resizeHandleBlock = resizeHandleBlockMatch![1];
+      expect(resizeHandleBlock).toContain("width: var(--space-xs);");
+      expect(resizeHandleBlock).toContain("cursor: col-resize;");
+      expect(resizeHandleBlock).toContain("background: color-mix(in srgb, var(--border) 70%, transparent);");
+
+      const resizeHandleTargetBlockMatch = css.match(/\.mailbox-view\s+\.mailbox-split-resize-handle::before\s*\{([^}]*)\}/);
+      expect(resizeHandleTargetBlockMatch).toBeTruthy();
+      expect(resizeHandleTargetBlockMatch![1]).toContain("width: var(--space-sm);");
+      expect(css).toMatch(/\.mailbox-view\s+\.mailbox-split-resize-handle:hover::before,\s*\n\.mailbox-view\s+\.mailbox-split-resize-handle:active::before\s*\{[^}]*background:\s*color-mix\(in srgb,\s*var\(--todo\)\s*35%,\s*transparent\);[^}]*\}/);
 
       const splitEmptyBlockMatch = css.match(/\.mailbox-view\s+\.mailbox-split-empty\s*\{([^}]*)\}/);
       expect(splitEmptyBlockMatch).toBeTruthy();

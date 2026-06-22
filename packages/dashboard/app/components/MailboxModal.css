@@ -669,9 +669,13 @@
   min-height: 0;
 }
 
+/*
+FNXC:DashboardStyling 2026-06-21-23:40:
+FN-6912 requires the full-page Messages divider to read thinner between the message list and detail panes while preserving resize discoverability. Keep the visible handle narrow, but leave the hover/active pseudo-element wider so the drag and focus affordances do not become an un-grabbable sliver.
+*/
 .mailbox-view .mailbox-split-resize-handle {
   position: relative;
-  width: var(--space-sm);
+  width: var(--space-xs);
   flex-shrink: 0;
   cursor: col-resize;
   background: color-mix(in srgb, var(--border) 70%, transparent);
@@ -685,7 +689,7 @@
   top: 0;
   bottom: 0;
   left: 50%;
-  width: var(--space-xs);
+  width: var(--space-sm);
   transform: translateX(-50%);
 }
 
