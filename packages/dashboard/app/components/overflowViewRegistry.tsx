@@ -99,6 +99,14 @@ FNXC:Navigation 2026-06-22-00:00:
 Right-dock tools render INLINE inside the dock container, not as popup modals: usage, activity-log, and git-manager use each modal's `presentation="embedded"` mode instead of launching an overlay. (github-import and automation remain launcher actions here only until their left-sidebar/main destinations land, then they leave the dock.)
 */
 export const STATIC_OVERFLOW_VIEW_ENTRIES: readonly OverflowViewEntry[] = [
+  /* FNXC:Navigation 2026-06-22-00:20: Files is the first/default right-dock tool. */
+  {
+    key: "files",
+    label: "Files",
+    icon: Folder,
+    testId: "right-dock-tab-files",
+    render: (props) => wrapOverflowView(<DockFilesView projectId={props.projectId} openFile={props.openFile} />),
+  },
   {
     key: "usage",
     label: "Activity",
@@ -139,13 +147,6 @@ export const STATIC_OVERFLOW_VIEW_ENTRIES: readonly OverflowViewEntry[] = [
         presentation="embedded"
       />,
     ),
-  },
-  {
-    key: "files",
-    label: "Files",
-    icon: Folder,
-    testId: "right-dock-tab-files",
-    render: (props) => wrapOverflowView(<DockFilesView projectId={props.projectId} openFile={props.openFile} />),
   },
 ];
 

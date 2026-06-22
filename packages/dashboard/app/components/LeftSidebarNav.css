@@ -85,11 +85,11 @@ With the secondary divider removed the nav reads as one continuous list, so the 
 }
 
 /*
-FNXC:Navigation 2026-06-22-00:00:
-The secondary section keeps its top spacing but drops the divider line before the first secondary entry (Goals/Evals); the rule reads as one continuous nav list instead of two bordered groups.
+FNXC:Navigation 2026-06-22-00:30:
+The secondary section has no divider and no extra top padding, so the gap across the primary/secondary boundary (e.g. Compound -> Workflows) equals the --space-xs list/row rhythm and the nav reads as one continuous list.
 */
 .left-sidebar-nav__section--secondary {
-  padding-top: var(--space-sm);
+  padding-top: 0;
 }
 
 .left-sidebar-nav__item {

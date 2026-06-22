@@ -1289,9 +1289,15 @@ when supported, falling back to a min-width media breakpoint, that collapses to 
   border-color: var(--accent);
 }
 
+/*
+FNXC:Automations 2026-06-22-12:00:
+Selected automation row uses the theme accent token. --accent-subtle is not a defined token; fall back to a
+theme-derived subtle accent tint (color-mix house style) so the active state follows the active theme (incl. light)
+instead of resolving to a flat --card with no accent emphasis.
+*/
 .automation-list-row.active {
   border-color: var(--accent);
-  background: var(--accent-subtle, var(--card));
+  background: var(--accent-subtle, color-mix(in srgb, var(--accent) 10%, transparent));
 }
 
 .automation-list-row-name {
@@ -1964,53 +1970,60 @@ The embedded host fills its right-dock container; the inner shell drops overlay-
   border-radius: 0;
   resize: none;
   position: static;
+  /* Drive the dock-vs-expand layout off the embedded host's own width, not the viewport. */
+  container-type: inline-size;
+  container-name: gm-embedded;
 }
 
 /*
-FNXC:GitManager 2026-06-22-00:10:
-The embedded Git Manager renders inside the narrow right dock, so it must use the mobile single-column layout (section tabs as a horizontal strip above a full-width content pane) regardless of viewport width, mirroring the max-width:768px rules.
+FNXC:GitManager 2026-06-22-00:25:
+The embedded Git Manager adapts to its container width, not the viewport, so the SAME embedded render works in both the narrow right dock and the wide pop-out (expand) modal:
+- Wide container (expand modal): inherits the default desktop layout — vertical section sidebar + content (two-pane, like before).
+- Narrow container (dock, < 560px): section tabs become a horizontal strip above a full-width content pane, and each tab is compact (min-width:0, tight padding, inline icon+label) so MORE tabs fit in the strip at once. The content collapses to a single column.
 */
-.gm-modal--embedded .gm-layout {
-  flex-direction: column;
-}
+@container gm-embedded (max-width: 560px) {
+  .gm-modal--embedded .gm-layout {
+    flex-direction: column;
+  }
 
-.gm-modal--embedded .gm-sidebar {
-  flex: 0 0 auto;
-  flex-direction: row;
-  width: 100%;
-  min-width: 0;
-  min-height: calc(var(--space-2xl) + var(--space-md));
-  border-right: none;
-  border-bottom: 1px solid var(--border);
-  overflow-x: auto;
-  overflow-y: hidden;
-  padding: var(--space-xs) var(--space-sm);
-  gap: var(--space-xs);
-}
+  .gm-modal--embedded .gm-sidebar {
+    flex: 0 0 auto;
+    flex-direction: row;
+    width: 100%;
+    min-width: 0;
+    min-height: 0;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: var(--space-xs);
+    gap: calc(var(--space-xs) / 2);
+  }
 
-.gm-modal--embedded .gm-nav-item {
-  flex: 0 0 auto;
-  flex-direction: column;
-  gap: calc(var(--space-xs) / 2);
-  padding: var(--space-xs) var(--space-sm);
-  border-left: none;
-  border-bottom: 2px solid transparent;
-  min-width: calc(var(--space-2xl) + var(--space-xl));
-  text-align: center;
-  justify-content: center;
-}
+  .gm-modal--embedded .gm-nav-item {
+    flex: 0 0 auto;
+    flex-direction: row;
+    gap: var(--space-xs);
+    padding: calc(var(--space-xs) / 2) var(--space-xs);
+    border-left: none;
+    border-bottom: 2px solid transparent;
+    min-width: 0;
+    font-size: var(--font-size-xs);
+    white-space: nowrap;
+  }
 
-.gm-modal--embedded .gm-nav-item.active {
-  border-left-color: transparent;
-  border-bottom-color: var(--todo);
-}
+  .gm-modal--embedded .gm-nav-item.active {
+    border-left-color: transparent;
+    border-bottom-color: var(--todo);
+  }
 
-.gm-modal--embedded .gm-status-grid {
-  grid-template-columns: 1fr;
-}
+  .gm-modal--embedded .gm-status-grid {
+    grid-template-columns: 1fr;
+  }
 
-.gm-modal--embedded .gm-create-form {
-  flex-wrap: wrap;
+  .gm-modal--embedded .gm-create-form {
+    flex-wrap: wrap;
+  }
 }
 
 /* Main layout: sidebar + content */

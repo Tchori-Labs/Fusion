@@ -56,12 +56,19 @@ FN-6886 promotes Planning Mode into the main app content area. The embedded shel
 .planning-view {
   height: 100%;
   min-height: 0;
+  width: 100%;
+  flex: 1;
   display: flex;
   padding: var(--space-lg);
   overflow: hidden;
 }
 
+/*
+FNXC:PlanningMode 2026-06-22-15:30:
+FN-6886 full-view fix: embedded planning must fill the entire main-content pane with no awkward gaps. The flex/height chain is planning-view (flex:1, height:100%) -> planning-modal--embedded (flex:1, height:100%) -> planning-modal-body (flex:1, min-height:0). flex:1 + min-width:0 + min-height:0 on the embedded panel lets it consume all remaining width/height inside the flex .planning-view wrapper instead of collapsing to the base .modal 480px width.
+*/
 .planning-modal--embedded {
+  flex: 1;
   width: 100%;
   max-width: none;
   min-width: 0;
@@ -383,17 +390,26 @@ The embedded planning title must read like other embedded-view titles (Command C
   box-shadow: var(--focus-ring-strong);
 }
 
-/* Mobile: stack — only one pane visible at a time */
-@media (max-width: 768px) {
+/* Mobile: stack — only one pane visible at a time.
+   FNXC:PlanningMode 2026-06-22-15:30 covers both the landscape phone case
+   (max-height: 480px exceeds 768px wide) and portrait. */
+@media (max-width: 768px), (max-height: 480px) {
   /* Full-screen sheet — drop overlay padding so the modal fills the
      viewport instead of being pushed below it, and disable resize since
-     touchscreen users can't drag the corner grip anyway. */
+     touchscreen users can't drag the corner grip anyway.
+     FNXC:PlanningMode 2026-06-22-15:30: scope the viewport-takeover rules to
+     the NON-embedded (dialog) presentation only. The embedded panel
+     (.planning-modal--embedded) must NOT grab 100vw/100dvh — it lives inside
+     the main-content pane, so forcing full-viewport sizing made it overflow
+     the content area on mobile. The :not(.planning-modal--embedded) guard
+     keeps the modal full-screen sheet intact while letting the embedded view
+     fill only its own pane (handled by the .planning-view rules below). */
   .modal-overlay:has(.planning-modal) {
     padding-top: 0;
     align-items: stretch;
     justify-content: stretch;
   }
-  .modal.planning-modal {
+  .modal.planning-modal:not(.planning-modal--embedded) {
     width: 100vw;
     min-width: 0;
     max-width: 100vw;
@@ -405,11 +421,22 @@ The embedded planning title must read like other embedded-view titles (Command C
     border-radius: 0;
     resize: none;
   }
-  .modal.planning-modal[style*="--keyboard-overlap"] {
+  .modal.planning-modal:not(.planning-modal--embedded)[style*="--keyboard-overlap"] {
     height: var(--vv-height, 100dvh);
     max-height: var(--vv-height, 100dvh);
     transform: translateY(var(--vv-offset-top, 0px));
     will-change: transform;
+  }
+  /* FNXC:PlanningMode 2026-06-22-15:30: on mobile the embedded view should use
+     the full width of the (already-narrow) content pane — drop the outer
+     padding so the session list and detail panes are edge-to-edge, and keep
+     the height/flex chain filling the pane. */
+  .planning-view {
+    padding: var(--space-sm);
+  }
+  .planning-view .planning-modal--embedded {
+    width: 100%;
+    height: 100%;
   }
   .planning-modal-body--split {
     flex-direction: column;
@@ -1374,7 +1401,11 @@ The embedded planning title must read like other embedded-view titles (Command C
 
 /* Responsive */
 @media (max-width: 768px) {
-  .planning-modal {
+  /* FNXC:PlanningMode 2026-06-22-15:30: this legacy full-viewport sheet sizing
+     is for the dialog presentation only. The :not(.planning-modal--embedded)
+     guard prevents the embedded view from being yanked to 100vw/100dvh, which
+     would overflow the main-content pane it lives in on mobile. */
+  .planning-modal:not(.planning-modal--embedded) {
     width: 100vw;
     height: 100vh;
     height: 100dvh;

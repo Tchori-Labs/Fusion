@@ -962,4 +962,59 @@ The embedded root is a plain flow box that fills the host; the inner shell sheds
   resize: none;
 }
 
+/*
+FNXC:RightDockEmbedding 2026-06-22-12:30:
+Embedded "Import Tasks" main-content view must fit on screen and react to its OWN width, not the viewport.
+The shared two-pane code sets the list pane width via an inline flex-basis (default 360px) whenever the VIEWPORT is wide (canResizePanes => innerWidth > 860). In the embedded main area the host can be far narrower than the viewport, so that inline 360px list pane plus the preview overflowed horizontally.
+Fix (embedded variant only — modal path untouched): turn the embedded root into a query container (container-type: inline-size) and drive the layout off @container width.
+- Narrow container (default): stack list ABOVE preview in a single column; cap the list height and override the inline desktop flex-basis so nothing forces horizontal overflow. Long titles/repo names already truncate via .issue-title ellipsis / .issue-main min-width:0, and labels/branch info wrap.
+- Wide container (>= 720px): restore the two-pane row, but bound the list pane to a sane share of the container (clamp) instead of trusting the viewport-derived inline width.
+*/
+.github-import-embedded.right-dock-embedded-view {
+  container-type: inline-size;
+  container-name: github-import-embedded;
+}
+
+/* Default (narrow container): single stacked column. */
+.github-import-modal--embedded .github-import-workspace {
+  flex-direction: column;
+}
+
+/* Override the inline viewport-derived flex-basis so the list never forces overflow when stacked. */
+.github-import-modal--embedded .github-import-list-pane {
+  flex: 0 0 auto !important;
+  width: 100%;
+  max-height: 40cqh;
+  padding-right: 0;
+}
+
+.github-import-modal--embedded .github-import-preview-pane {
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+}
+
+/* Hide the col-resize handle when stacked; it only makes sense in the side-by-side layout. */
+.github-import-modal--embedded .github-import-workspace__resize-handle {
+  display: none;
+}
+
+@container github-import-embedded (min-width: 720px) {
+  .github-import-modal--embedded .github-import-workspace {
+    flex-direction: row;
+  }
+
+  /* Side-by-side again: bound the list pane to a share of the CONTAINER width, overriding the inline viewport width. */
+  .github-import-modal--embedded .github-import-list-pane {
+    flex: 0 1 clamp(240px, 38cqi, 420px) !important;
+    width: auto;
+    max-height: none;
+    padding-right: var(--space-md);
+  }
+
+  .github-import-modal--embedded .github-import-workspace__resize-handle {
+    display: block;
+  }
+}
+
 

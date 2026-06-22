@@ -28,6 +28,12 @@ The workflow selector trigger must match the project selector trigger styling: t
   border-radius: var(--radius-md);
   color: var(--text-muted);
   font: inherit;
+  /*
+  FNXC:WorkflowSwitcher 2026-06-22-00:10:
+  Match the project selector trigger height and font size: the project label uses 13px / line-height 1, so set the same here (the parent .workflow-switcher font-size is smaller). With identical padding + font-size + line-height the two triggers render the same height.
+  */
+  font-size: 13px;
+  line-height: 1;
   text-align: left;
   transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
 }
