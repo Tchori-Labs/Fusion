@@ -1986,29 +1986,36 @@ The embedded Git Manager adapts to its container width, not the viewport, so the
     flex-direction: column;
   }
 
+  /*
+  FNXC:GitManager 2026-06-22-01:00:
+  The dock tab strip is TALLER and each tab is NARROWER (icon stacked over a small label) so all section tabs are visible at once in the narrow dock without much horizontal scrolling.
+  */
   .gm-modal--embedded .gm-sidebar {
     flex: 0 0 auto;
     flex-direction: row;
     width: 100%;
     min-width: 0;
-    min-height: 0;
+    min-height: calc(var(--space-2xl) + var(--space-lg));
     border-right: none;
     border-bottom: 1px solid var(--border);
     overflow-x: auto;
     overflow-y: hidden;
-    padding: var(--space-xs);
+    padding: var(--space-xs) calc(var(--space-xs) / 2);
     gap: calc(var(--space-xs) / 2);
   }
 
   .gm-modal--embedded .gm-nav-item {
     flex: 0 0 auto;
-    flex-direction: row;
-    gap: var(--space-xs);
-    padding: calc(var(--space-xs) / 2) var(--space-xs);
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: calc(var(--space-xs) / 2);
+    padding: var(--space-xs) calc(var(--space-xs) / 2);
     border-left: none;
     border-bottom: 2px solid transparent;
     min-width: 0;
     font-size: var(--font-size-xs);
+    line-height: 1.1;
     white-space: nowrap;
   }
 
