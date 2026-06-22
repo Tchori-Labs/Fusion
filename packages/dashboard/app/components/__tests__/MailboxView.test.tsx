@@ -2013,9 +2013,12 @@ describe("MailboxView", () => {
       // Verify root element with data-testid
       expect(screen.getByTestId("mailbox-view")).toBeDefined();
 
-      // Verify header
-      const header = container.querySelector(".mailbox-header");
+      // FNXC:Navigation 2026-06-22-01:10: MailboxView migrated its bespoke
+      // .mailbox-header to the shared ViewHeader (.view-header) modeled after
+      // Command Center; assert the shared header element with the Mailbox title.
+      const header = container.querySelector(".view-header");
       expect(header).toBeTruthy();
+      expect(header?.querySelector(".view-header__title")?.textContent).toContain("Mailbox");
 
       // Verify tabs
       const tabs = container.querySelector(".mailbox-tabs");

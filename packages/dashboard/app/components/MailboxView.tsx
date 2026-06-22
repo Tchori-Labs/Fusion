@@ -39,6 +39,7 @@ import {
 } from "../api";
 import { MailboxMessageContent } from "./MailboxMessageContent";
 import { MessageComposer } from "./MessageComposer";
+import { ViewHeader } from "./ViewHeader";
 import { WorktrunkInstallApprovalDetails } from "./WorktrunkInstallApprovalDetails";
 import { subscribeSse } from "../sse-bus";
 import { useViewportMode } from "../hooks/useViewportMode";
@@ -1189,55 +1190,58 @@ export function MailboxView({
 
   return (
     <div className="mailbox-view" style={containerKeyboardStyle} data-testid="mailbox-view">
-      {/* Header */}
-      <div className="mailbox-header">
-        <div className="mailbox-title">
-          <Mail size={18} />
-          <span>{t("mailbox.title", "Mailbox")}</span>
-          {unreadCount > 0 && (
-            <span className="mailbox-unread-badge" data-testid="mailbox-unread-badge">
-              {unreadCount}
-            </span>
-          )}
-        </div>
-        <div className="mailbox-header-actions">
-          <button
-            className="btn btn-sm btn-primary"
-            onClick={handleOpenCompose}
-            title={t("mailbox.composeMessageTitle", "Compose message")}
-            data-testid="mailbox-header-compose"
-          >
-            <MessageSquare size={14} />
-            <span>{t("mailbox.compose", "Compose")}</span>
-          </button>
-          {activeTab === "inbox" && unreadCount > 0 && (
+      {/*
+      FNXC:Navigation 2026-06-22-01:10:
+      Mailbox adopts the shared ViewHeader (Command Center-modeled) for a consistent main-content title row. The unread count badge stays beside the title (preserving the mailbox-unread-badge test id), and Compose / Mark-all-read / Refresh controls move into the header actions cluster so they keep working. Tabs remain below the header as their own row.
+      */}
+      <ViewHeader
+        icon={Mail}
+        title={t("mailbox.title", "Mailbox")}
+        actions={
+          <>
+            {unreadCount > 0 && (
+              <span className="mailbox-unread-badge" data-testid="mailbox-unread-badge">
+                {unreadCount}
+              </span>
+            )}
             <button
-              className="btn btn-sm btn-secondary"
-              onClick={handleMarkAllRead}
-              title={t("mailbox.markAllReadTitle", "Mark all as read")}
-              data-testid="mailbox-mark-all-read"
+              className="btn btn-sm btn-primary"
+              onClick={handleOpenCompose}
+              title={t("mailbox.composeMessageTitle", "Compose message")}
+              data-testid="mailbox-header-compose"
             >
-              <CheckCheck size={14} />
-              <span>{t("mailbox.markAllRead", "Mark all read")}</span>
+              <MessageSquare size={14} />
+              <span>{t("mailbox.compose", "Compose")}</span>
             </button>
-          )}
-          <button
-            className="btn-icon"
-            onClick={() => {
-              if (activeTab === "inbox") loadInbox();
-              else if (activeTab === "outbox") loadOutbox();
-              else if (activeTab === "approvals") loadApprovals(approvalSubTab);
-              else if (selectedAgentId === ALL_AGENTS_MAILBOX_ID) loadAllAgentsMailbox();
-              else if (selectedAgentId) loadAgentMailbox(selectedAgentId);
-            }}
-            disabled={isLoading}
-            title={t("mailbox.refreshTitle", "Refresh")}
-            data-testid="mailbox-refresh"
-          >
-            {isLoading ? <Loader2 size={14} className="spin" /> : <RefreshCw size={14} />}
-          </button>
-        </div>
-      </div>
+            {activeTab === "inbox" && unreadCount > 0 && (
+              <button
+                className="btn btn-sm btn-secondary"
+                onClick={handleMarkAllRead}
+                title={t("mailbox.markAllReadTitle", "Mark all as read")}
+                data-testid="mailbox-mark-all-read"
+              >
+                <CheckCheck size={14} />
+                <span>{t("mailbox.markAllRead", "Mark all read")}</span>
+              </button>
+            )}
+            <button
+              className="btn-icon"
+              onClick={() => {
+                if (activeTab === "inbox") loadInbox();
+                else if (activeTab === "outbox") loadOutbox();
+                else if (activeTab === "approvals") loadApprovals(approvalSubTab);
+                else if (selectedAgentId === ALL_AGENTS_MAILBOX_ID) loadAllAgentsMailbox();
+                else if (selectedAgentId) loadAgentMailbox(selectedAgentId);
+              }}
+              disabled={isLoading}
+              title={t("mailbox.refreshTitle", "Refresh")}
+              data-testid="mailbox-refresh"
+            >
+              {isLoading ? <Loader2 size={14} className="spin" /> : <RefreshCw size={14} />}
+            </button>
+          </>
+        }
+      />
 
       {/* Tabs */}
       <div className="mailbox-tabs" data-testid="mailbox-tabs">

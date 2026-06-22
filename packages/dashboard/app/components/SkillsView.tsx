@@ -1,7 +1,8 @@
 import "./SkillsView.css";
 import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { Wrench, RefreshCw, X, ChevronRight, ChevronDown, AlertCircle, Loader2 } from "lucide-react";
+import { Zap, RefreshCw, X, ChevronRight, ChevronDown, AlertCircle, Loader2 } from "lucide-react";
+import { ViewHeader } from "./ViewHeader";
 import {
   fetchDiscoveredSkills,
   toggleExecutionSkill,
@@ -233,34 +234,34 @@ export function SkillsView({ projectId, addToast, onClose }: SkillsViewProps) {
 
   return (
     <div className="skills-view" data-testid="skills-view">
-      {/* Header */}
-      <div className="skills-view-header">
-        <div className="skills-view-title">
-          <h2>
-            <Wrench size={20} />
-            {t("skills.title", "Skills")}
-          </h2>
-          <span className="skills-view-count" aria-label={t("skills.discoveredCount", "{{count}} discovered skills", { count: discoveredSkills.length })}>{discoveredSkills.length} {t("skills.discovered", "discovered")}</span>
-        </div>
-
-        <div className="skills-view-actions">
-          <button
-            className="btn-icon skills-view-close touch-target"
-            onClick={onClose}
-            aria-label={t("skills.closeView", "Close skills view")}
-          >
-            <X size={16} />
-          </button>
-          <button
-            className="btn btn-sm touch-target"
-            onClick={() => void loadDiscoveredSkills()}
-            disabled={isLoadingDiscovered}
-          >
-            <RefreshCw size={14} className={isLoadingDiscovered ? "spin" : ""} />
-            {t("common.refresh", "Refresh")}
-          </button>
-        </div>
-      </div>
+      {/*
+      FNXC:Navigation 2026-06-22-01:10:
+      Skills adopts the shared ViewHeader (Command Center-modeled) for a consistent main-content title row. Icon matches the left-sidebar nav (Zap). The discovered-count badge plus Close and Refresh controls move into the header actions cluster so they keep working.
+      */}
+      <ViewHeader
+        icon={Zap}
+        title={t("skills.title", "Skills")}
+        actions={
+          <>
+            <span className="skills-view-count" aria-label={t("skills.discoveredCount", "{{count}} discovered skills", { count: discoveredSkills.length })}>{discoveredSkills.length} {t("skills.discovered", "discovered")}</span>
+            <button
+              className="btn-icon skills-view-close touch-target"
+              onClick={onClose}
+              aria-label={t("skills.closeView", "Close skills view")}
+            >
+              <X size={16} />
+            </button>
+            <button
+              className="btn btn-sm touch-target"
+              onClick={() => void loadDiscoveredSkills()}
+              disabled={isLoadingDiscovered}
+            >
+              <RefreshCw size={14} className={isLoadingDiscovered ? "spin" : ""} />
+              {t("common.refresh", "Refresh")}
+            </button>
+          </>
+        }
+      />
 
       {/* Scrollable content area */}
       <div className="skills-view-content">

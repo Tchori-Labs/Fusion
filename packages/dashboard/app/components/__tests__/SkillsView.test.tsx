@@ -565,11 +565,17 @@ describe("SkillsView", () => {
       });
     });
 
-    it("renders .skills-view-header and .skills-view-content sections", async () => {
+    it("renders the shared ViewHeader and .skills-view-content sections", async () => {
+      // FNXC:Navigation 2026-06-22-01:10: SkillsView migrated its bespoke
+      // .skills-view-header to the shared ViewHeader (.view-header) modeled
+      // after Command Center; assert the shared header element and that the
+      // content sections still render below it.
       render(<SkillsView addToast={mockAddToast} onClose={onClose} />);
 
       await waitFor(() => {
-        expect(document.querySelector(".skills-view-header")).toBeTruthy();
+        const header = document.querySelector(".view-header");
+        expect(header).toBeTruthy();
+        expect(header?.querySelector(".view-header__title")?.textContent).toContain("Skills");
         expect(document.querySelector(".skills-view-section")).toBeTruthy();
       });
     });

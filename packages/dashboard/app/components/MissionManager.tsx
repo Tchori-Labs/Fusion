@@ -4815,6 +4815,10 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
       aria-label={isInline ? undefined : t("missions.missionManagerAriaLabel", "Mission Manager")}
       data-testid="mission-manager-dialog"
     >
+      {/*
+      FNXC:Navigation 2026-06-22-01:10:
+      Missions keeps its own header element (not the shared ViewHeader component) because it owns a dynamic mobile title (mission title when one is selected), a back button for stacked list->detail nav, an inline-vs-modal padding variant, and the mission-header-title test id. To stay visually consistent with the Command Center-modeled ViewHeader, the title uses the same icon size (20) and 1.125rem title metric via .mission-manager__title.
+      */}
       <div className={`mission-manager__header${isInline ? " mission-manager__header--inline" : ""}`}>
         <div className="mission-manager__header-title">
           {selectedMission && (
@@ -4828,7 +4832,7 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
               <ChevronLeft size={18} />
             </button>
           )}
-          <Target size={18} className="mission-manager__header-icon" />
+          <Target size={20} className="mission-manager__header-icon" />
           <h2 className="mission-manager__title" data-testid="mission-header-title">
             <span className="mission-manager__title-text mission-manager__title-text--desktop">{t("missions.title", "Missions")}</span>
             <span className="mission-manager__title-text mission-manager__title-text--mobile">

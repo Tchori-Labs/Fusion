@@ -82,8 +82,12 @@
   gap: var(--space-sm);
 }
 
+/*
+FNXC:Navigation 2026-06-22-01:10:
+Title metric matches the shared ViewHeader (1.125rem) so the Missions header reads consistently with Command Center and the other normalized main-content views.
+*/
 .mission-manager__title {
-  font-size: var(--space-lg);
+  font-size: 1.125rem;
   font-weight: 600;
   margin: 0;
   color: var(--text);

@@ -3182,6 +3182,10 @@ export function ChatView({ projectId, addToast, experimentalFeatures }: ChatView
   const sidebarInlineStyle: React.CSSProperties | undefined = isMobile ? undefined : { width: `${sidebarWidth}px` };
 
   return (
+    /*
+    FNXC:Navigation 2026-06-22-01:10:
+    Chat deliberately does NOT adopt the shared ViewHeader. Unlike the other main-content views, .chat-view has no view-level title row to swap: its root is a height-sensitive two-pane flex-row (sidebar | thread) and each pane already owns its own header (chat-thread-header / chat-sidebar). The thread height is driven by flex:1 + the mobile-keyboard drift compensation applied directly to .chat-thread, so prepending a full-width column header would change the flex/height contract that those keyboard/scroll/resize paths depend on. Stacking a redundant "Chat" title above the existing thread header would also be visually duplicative. Consistency is therefore intentionally scoped to the views that have a single title row.
+    */
     <div className="chat-view">
       {/* Sidebar */}
       <div
