@@ -343,7 +343,7 @@ A prompt-mode workflow step can set its own model with:
 - `modelProvider`
 - `modelId`
 
-If both are set, step execution uses that model; otherwise it falls back to default model selection.
+If both are set, step execution uses that model; otherwise it falls back to default model selection. Dashboard node summaries show that unpinned prompt-step state as **Default model**.
 
 ## Default-On Behavior for New Tasks
 
