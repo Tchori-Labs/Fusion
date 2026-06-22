@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type RefObject } from "react";
+import { createPortal } from "react-dom";
 import { Maximize2, X } from "lucide-react";
 import { findOverflowViewEntry, type OverflowViewEntry, type OverflowViewKey, type OverflowViewRenderProps, type OverflowViewVisibilityOptions } from "./overflowViewRegistry";
 import { nextFloatingZ, currentFloatingZ } from "./floatingWindowStack";
@@ -303,7 +304,8 @@ export function RightDockExpandModal({
     zIndex,
   } as CSSProperties;
 
-  return (
+  // FNXC:FloatingWindow 2026-06-22-22:30: Portaled to document.body so this floating modal shares the ONE root stacking context with the other floating modals (FloatingWindow/terminal/New Task) — the shared 10100+ z stack only orders correctly across types when they all live at the document root.
+  return createPortal(
     <div className="modal-overlay open right-dock-expand-modal-overlay" role="dialog" aria-modal="false" aria-label={`${entry.label} expanded`} data-testid="right-dock-expand-modal">
       <div
         className="modal right-dock-expand-modal right-dock-expand-modal--floating"
@@ -343,6 +345,7 @@ export function RightDockExpandModal({
           {entry.render({ ...renderProps, surface: "expand" })}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

@@ -1,4 +1,5 @@
 import "./TerminalModal.css";
+import { createPortal } from "react-dom";
 import {
   useState,
   useEffect,
@@ -1823,7 +1824,8 @@ export function TerminalModal({ isOpen, onClose, initialCommand, initialCommandG
       : {}),
   } as CSSProperties;
 
-  return (
+  // FNXC:FloatingWindow 2026-06-22-22:30: Portaled to document.body so the terminal shares the ONE root stacking context with the other floating modals; the shared cross-type z stack only orders correctly when all panels live at the document root. Docked/floating/mobile are all position:fixed, so portaling does not change their placement.
+  return createPortal(
     <div
       className={overlayClassName}
       onMouseDown={handleOverlayMouseDown}
@@ -2295,6 +2297,7 @@ export function TerminalModal({ isOpen, onClose, initialCommand, initialCommandG
           </span>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

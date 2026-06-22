@@ -1,5 +1,6 @@
 import "./NewTaskModal.css";
 import { useState, useCallback, useEffect, useRef, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { DEFAULT_TASK_PRIORITY, type Task, type TaskCreateInput, type TaskPriority } from "@fusion/core";
 import { getErrorMessage } from "@fusion/core";
@@ -746,7 +747,8 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
     ? { left: `${position.x}px`, top: `${position.y}px`, width: `${size.width}px`, height: `${size.height}px`, zIndex }
     : keyboardStyle;
 
-  return (
+  // FNXC:FloatingWindow 2026-06-22-22:30: Portaled to document.body so the floating New Task dialog shares the ONE root stacking context with the other floating modals; the shared cross-type z stack only orders correctly at the document root. Mobile sheet is position:fixed, unaffected.
+  return createPortal(
     <div
       className="modal-overlay open new-task-modal-overlay"
       onKeyDown={handleKeyDown}
@@ -868,6 +870,7 @@ export function NewTaskModal({ isOpen, onClose, projectId, tasks, onCreateTask, 
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

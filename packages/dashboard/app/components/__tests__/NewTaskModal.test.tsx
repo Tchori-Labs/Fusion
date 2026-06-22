@@ -113,8 +113,9 @@ describe("NewTaskModal", () => {
       viewportOffsetTop: 50,
     });
 
-    const { container } = renderNewTaskModal();
-    const modal = container.querySelector(".new-task-modal");
+    renderNewTaskModal();
+    // FNXC: NewTaskModal portals to document.body, so query the modal from document (not the render container).
+    const modal = document.querySelector(".new-task-modal");
 
     expect(mockUseMobileKeyboard).toHaveBeenCalledWith({ enabled: true });
     expect(modal?.getAttribute("style")).toContain("--keyboard-overlap: 250px");
