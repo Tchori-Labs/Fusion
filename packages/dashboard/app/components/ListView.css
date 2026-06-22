@@ -26,10 +26,36 @@
   background: var(--surface);
 }
 
+/*
+FNXC:ListView 2026-06-22-23:30:
+Single compact header toolbar: count (secondary, left) + action group (right) on one row.
+align-items:center keeps the three controls a consistent height; flex-wrap is a last-resort overflow guard, not the default layout.
+*/
+.list-sidebar-controls__toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+}
+
 .list-sidebar-controls__actions {
   display: flex;
+  align-items: center;
   flex-wrap: wrap;
-  gap: var(--space-sm);
+  gap: var(--space-xs);
+  margin-left: auto;
+}
+
+/*
+FNXC:ListView 2026-06-22-23:30:
+View options was oversized (full-width stacked button). Render it as a compact icon+label btn-sm consistent with its row-mates.
+*/
+.list-sidebar-controls__actions .list-view-options-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: var(--space-xs) var(--space-sm);
+  white-space: nowrap;
 }
 
 .list-workflow-control {
@@ -88,6 +114,20 @@
 .list-stats {
   font-size: calc(var(--space-sm) + var(--space-xs) * 0.75);
   color: var(--text-muted);
+}
+
+/*
+FNXC:ListView 2026-06-22-23:30:
+Compact count for the single header row: smaller, dimmer, and non-dominant so the action group reads as primary. min-width:0 lets it truncate before forcing the row to wrap.
+*/
+.list-stats--compact {
+  margin: 0;
+  min-width: 0;
+  font-size: calc(var(--space-xs) * 2.5);
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Section expand/collapse controls */

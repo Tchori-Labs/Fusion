@@ -79,10 +79,15 @@ describe("TodoView", () => {
     mockUseTodoLists.mockReturnValue(createMockTodoLists());
   });
 
-  it("renders the docked view header", () => {
+  // FNXC:Todos 2026-06-22-09:30: FN-6781 removed the redundant in-view "Todos" title +
+  // subtitle — the right dock / left-sidebar nav already labels the view, so the list/detail
+  // layout owns the full height with no header above it. Assert the view mounts and the
+  // redundant header is gone.
+  it("renders the docked view without a redundant header", () => {
     render(<TodoView addToast={addToast} />);
-    expect(screen.getByRole("heading", { level: 2, name: "Todos" })).toBeInTheDocument();
-    expect(screen.getByText("Manage reusable todo lists for your project.")).toBeInTheDocument();
+    expect(screen.getByTestId("todo-view-root")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { level: 2, name: "Todos" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Manage reusable todo lists for your project.")).not.toBeInTheDocument();
   });
 
   it("renders sidebar with list names", () => {

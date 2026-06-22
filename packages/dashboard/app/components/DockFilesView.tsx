@@ -5,6 +5,7 @@ import { getErrorMessage } from "@fusion/core";
 import type { PluginDashboardViewContext } from "../plugins/types";
 import { fetchWorkspaceFileContent } from "../api";
 import { useWorkspaceFileBrowser } from "../hooks/useWorkspaceFileBrowser";
+import { getScopedItem, removeScopedItem, scopedKey, setScopedItem } from "../utils/projectStorage";
 import { FileBrowser } from "./FileBrowser";
 import { FileEditor } from "./FileEditor";
 import "./DockFilesView.css";
@@ -20,6 +21,13 @@ interface DockFilesViewProps {
   */
   layout?: "auto" | "two-pane";
 }
+
+/*
+FNXC:RightDockFiles 2026-06-22-23:30:
+The compact dock Files view and the popped-out (expand) Files view are SEPARATE component instances (one renders in the dock body, the other inside RightDockExpandModal). The currently-viewed file lived in each instance's local `selectedFile` state, so popping out always opened with no file selected.
+Share the current-file path through scoped localStorage (`kb-dashboard-dock-files-current`, keyed per project via projectStorage). Selecting/clearing a file writes the key; on mount each instance reads it so the expand opens the SAME file the dock was showing. A `storage` listener keeps both instances live-synced when the other tab/instance changes selection.
+*/
+const DOCK_FILES_CURRENT_KEY = "kb-dashboard-dock-files-current";
 
 /*
 FNXC:RightDockFiles 2026-06-22-00:00:
@@ -40,7 +48,36 @@ export function DockFilesView({ projectId, openFile, layout = "auto" }: DockFile
   const { entries, currentPath, setPath, loading, error, refresh } = useWorkspaceFileBrowser("project", true, projectId);
 
   // FNXC:RightDockFiles 2026-06-22-12:00: selected file drives the inline read-only viewer; null returns to the tree.
-  const [selectedFile, setSelectedFile] = useState<string | null>(null);
+  // FNXC:RightDockFiles 2026-06-22-23:30: initialize from the shared scoped-storage key so the expand pop-out opens the same file the dock is showing.
+  const [selectedFile, setSelectedFile] = useState<string | null>(() => getScopedItem(DOCK_FILES_CURRENT_KEY, projectId) || null);
+
+  /*
+  FNXC:RightDockFiles 2026-06-22-23:30:
+  Persist the current file to the shared scoped key and update local state in one place. Writing the key lets the OTHER instance (dock or expand) pick up the change on its next mount or via the `storage` listener below. An empty/null path clears the key (returns to the tree everywhere).
+  */
+  const selectFile = useCallback((path: string | null) => {
+    setSelectedFile(path);
+    if (path) {
+      setScopedItem(DOCK_FILES_CURRENT_KEY, path, projectId);
+    } else {
+      removeScopedItem(DOCK_FILES_CURRENT_KEY, projectId);
+    }
+  }, [projectId]);
+
+  // FNXC:RightDockFiles 2026-06-22-23:30: re-read the shared key when the project changes, and live-sync from cross-instance `storage` events so dock and expand stay in lockstep.
+  useEffect(() => {
+    setSelectedFile(getScopedItem(DOCK_FILES_CURRENT_KEY, projectId) || null);
+
+    if (typeof window === "undefined") return;
+    const watchedKey = scopedKey(DOCK_FILES_CURRENT_KEY, projectId);
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== watchedKey) return;
+      setSelectedFile(event.newValue || null);
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, [projectId]);
+
   const [content, setContent] = useState<string>("");
   const [contentLoading, setContentLoading] = useState(false);
   const [contentError, setContentError] = useState<string | null>(null);
@@ -76,7 +113,7 @@ export function DockFilesView({ projectId, openFile, layout = "auto" }: DockFile
     };
   }, [selectedFile, projectId, t]);
 
-  const handleBack = useCallback(() => setSelectedFile(null), []);
+  const handleBack = useCallback(() => selectFile(null), [selectFile]);
   const handlePopOut = useCallback(() => {
     if (selectedFile) openFile?.(selectedFile, { workspace: "project" });
   }, [openFile, selectedFile]);
@@ -101,7 +138,7 @@ export function DockFilesView({ projectId, openFile, layout = "auto" }: DockFile
         <FileBrowser
           entries={entries}
           currentPath={currentPath}
-          onSelectFile={(path) => setSelectedFile(path)}
+          onSelectFile={(path) => selectFile(path)}
           onNavigate={setPath}
           loading={loading}
           error={error}

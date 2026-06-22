@@ -186,14 +186,14 @@ export function CommandCenterControls({ projectId, colorTheme, themeMode, shadcn
             <div className="cc-overview-engine-nav" data-testid="command-center-engine-panel">
               <button
                 type="button"
-                className="btn btn-sm cc-overview-engine-nav-btn"
+                className="btn btn-secondary cc-overview-engine-nav-btn"
                 onClick={() => onChangeView("board")}
               >
                 {t("commandCenter.controls.engine.viewBoard", "View Board")}
               </button>
               <button
                 type="button"
-                className="btn btn-sm cc-overview-engine-nav-btn"
+                className="btn btn-secondary cc-overview-engine-nav-btn"
                 onClick={() => onChangeView("agents")}
               >
                 {t("commandCenter.controls.engine.viewAgents", "View Agents")}
