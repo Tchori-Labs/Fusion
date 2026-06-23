@@ -1948,22 +1948,36 @@ describe("QuickEntryBox", () => {
       expect(secondPayload.executionMode).toBeUndefined();
     });
 
-    it.each([
-      { label: "Plan", buttonId: "plan-button", callbackProp: "onPlanningMode" as const },
-      { label: "Subtask", buttonId: "subtask-button", callbackProp: "onSubtaskBreakdown" as const },
-    ])("clears Fast state after %s flow reset", async ({ buttonId, callbackProp }) => {
+    it("keeps Fast state after Plan handoff preserves the quick-add draft", async () => {
       const onPlanningMode = vi.fn();
-      const onSubtaskBreakdown = vi.fn();
-      renderQuickEntryBox({ onPlanningMode, onSubtaskBreakdown });
+      renderQuickEntryBox({ onPlanningMode });
 
       expandQuickEntry();
       const textarea = screen.getByTestId("quick-entry-input");
       fireEvent.click(screen.getByTestId("quick-entry-fast-toggle"));
-      fireEvent.change(textarea, { target: { value: `${callbackProp} input` } });
-      fireEvent.click(screen.getByTestId(buttonId));
+      fireEvent.change(textarea, { target: { value: "plan input" } });
+      fireEvent.click(screen.getByTestId("plan-button"));
 
       await waitFor(() => {
-        expect(callbackProp === "onPlanningMode" ? onPlanningMode : onSubtaskBreakdown).toHaveBeenCalled();
+        expect(onPlanningMode).toHaveBeenCalled();
+      });
+
+      expandQuickEntry();
+      expect(screen.getByTestId("quick-entry-fast-toggle").getAttribute("aria-pressed")).toBe("true");
+    });
+
+    it("clears Fast state after Subtask flow reset", async () => {
+      const onSubtaskBreakdown = vi.fn();
+      renderQuickEntryBox({ onSubtaskBreakdown });
+
+      expandQuickEntry();
+      const textarea = screen.getByTestId("quick-entry-input");
+      fireEvent.click(screen.getByTestId("quick-entry-fast-toggle"));
+      fireEvent.change(textarea, { target: { value: "subtask input" } });
+      fireEvent.click(screen.getByTestId("subtask-button"));
+
+      await waitFor(() => {
+        expect(onSubtaskBreakdown).toHaveBeenCalled();
       });
 
       expandQuickEntry();
@@ -1988,23 +2002,38 @@ describe("QuickEntryBox", () => {
       expect(screen.getByTestId("quick-entry-priority-button").textContent).toContain("Normal");
     });
 
-    it.each([
-      { label: "Plan", buttonId: "plan-button" },
-      { label: "Subtask", buttonId: "subtask-button" },
-    ])("resets priority to normal after %s flow", async ({ buttonId }) => {
+    it("keeps selected priority after Plan handoff preserves the quick-add draft", async () => {
       const onPlanningMode = vi.fn();
-      const onSubtaskBreakdown = vi.fn();
-      renderQuickEntryBox({ onPlanningMode, onSubtaskBreakdown });
+      renderQuickEntryBox({ onPlanningMode });
 
       expandQuickEntry();
       const textarea = screen.getByTestId("quick-entry-input");
-      fireEvent.change(textarea, { target: { value: `${buttonId} reset` } });
+      fireEvent.change(textarea, { target: { value: "plan priority" } });
       openPriorityMenu();
       fireEvent.click(screen.getByTestId("quick-entry-priority-option-urgent"));
-      fireEvent.click(screen.getByTestId(buttonId));
+      fireEvent.click(screen.getByTestId("plan-button"));
 
       await waitFor(() => {
-        expect(buttonId === "plan-button" ? onPlanningMode : onSubtaskBreakdown).toHaveBeenCalled();
+        expect(onPlanningMode).toHaveBeenCalled();
+      });
+
+      expandQuickEntry();
+      expect(screen.getByTestId("quick-entry-priority-button").textContent).toContain("Urgent");
+    });
+
+    it("resets priority to normal after Subtask flow", async () => {
+      const onSubtaskBreakdown = vi.fn();
+      renderQuickEntryBox({ onSubtaskBreakdown });
+
+      expandQuickEntry();
+      const textarea = screen.getByTestId("quick-entry-input");
+      fireEvent.change(textarea, { target: { value: "subtask reset" } });
+      openPriorityMenu();
+      fireEvent.click(screen.getByTestId("quick-entry-priority-option-urgent"));
+      fireEvent.click(screen.getByTestId("subtask-button"));
+
+      await waitFor(() => {
+        expect(onSubtaskBreakdown).toHaveBeenCalled();
       });
 
       expandQuickEntry();
@@ -2325,21 +2354,21 @@ describe("QuickEntryBox", () => {
       });
     });
 
-    it("calls onPlanningMode and clears input when Plan clicked", async () => {
+    it("calls onPlanningMode and preserves input draft when Plan clicked", async () => {
       const onPlanningMode = vi.fn();
-      const { props } = renderQuickEntryBox({ onPlanningMode });
+      renderQuickEntryBox({ onPlanningMode });
       expandQuickEntry();
-      const textarea = screen.getByTestId("quick-entry-input");
+      const textarea = screen.getByTestId("quick-entry-input") as HTMLTextAreaElement;
 
-      fireEvent.change(textarea, { target: { value: "Plan this task" } });
+      fireEvent.change(textarea, { target: { value: "  Plan this task  " } });
       fireEvent.click(screen.getByTestId("plan-button"));
 
       await waitFor(() => {
         expect(onPlanningMode).toHaveBeenCalledWith("Plan this task");
       });
 
-      // Input should be cleared
-      expect((textarea as HTMLTextAreaElement).value).toBe("");
+      expect(textarea.value).toBe("  Plan this task  ");
+      expect(localStorage.getItem(QUICK_ENTRY_STORAGE_KEY)).toBe("  Plan this task  ");
     });
 
     it("calls onSubtaskBreakdown and clears input when Subtask clicked", async () => {

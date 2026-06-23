@@ -1368,9 +1368,11 @@ export function QuickEntryBox({ onCreate, addToast, tasks = [], availableModels,
     } else {
       onPlanningMode?.(trimmed);
     }
-    // Clear the form after triggering planning mode
-    resetForm();
-  }, [description, onPlanningMode, workflowId, addToast, resetForm]);
+    /*
+    FNXC:QuickAddPlanningPreserve 2026-06-22-00:00:
+    Opening planning mode must preserve the quick-add description and scoped draft so exiting planning without creating tasks restores the user's text. The draft is cleared only by planning-completion handlers.
+    */
+  }, [description, onPlanningMode, workflowId, addToast, t]);
 
   const handleSubtaskClick = useCallback(() => {
     const trimmed = description.trim();

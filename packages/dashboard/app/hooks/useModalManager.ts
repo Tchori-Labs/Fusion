@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import type { Task, TaskDetail } from "@fusion/core";
 import type { SectionId } from "../components/SettingsModal";
 import type { ToastType } from "./useToast";
+import { removeScopedItem } from "../utils/projectStorage";
 
 export type DetailTaskTab =
   | "chat"
@@ -427,18 +428,29 @@ export function useModalManager(options: UseModalManagerOptions): ModalManager {
   const openModelOnboarding = useCallback(() => setModelOnboardingOpen(true), []);
   const closeModelOnboarding = useCallback(() => setModelOnboardingOpen(false), []);
 
+  const clearQuickAddPlanningDrafts = useCallback(() => {
+    /*
+    FNXC:QuickAddPlanningPreserve 2026-06-22-00:00:
+    Planning completion, not planning exit, is the only modal-manager transition that clears preserved quick-add drafts. Use the active project id so scoped drafts are removed from the correct workspace.
+    */
+    removeScopedItem("kb-quick-entry-text", options.projectId);
+    removeScopedItem("kb-inline-create-text", options.projectId);
+  }, [options.projectId]);
+
   const onPlanningTaskCreated = useCallback((task: Task, addToast: (message: string, type?: ToastType) => void) => {
     addToast(t("modalManager.createdFromPlanning", "Created {{id}} from planning mode", { id: task.id }), "success");
+    clearQuickAddPlanningDrafts();
     setIsPlanningOpen(false);
     setPlanningInitialPlan(null);
-  }, [t]);
+  }, [clearQuickAddPlanningDrafts, t]);
 
   const onPlanningTasksCreated = useCallback((tasks: Task[], addToast: (message: string, type?: ToastType) => void) => {
     const ids = tasks.map((task) => task.id).join(", ");
     addToast(t("modalManager.createdMultipleFromPlanning", "Created {{ids}} from planning mode", { ids }), "success");
+    clearQuickAddPlanningDrafts();
     setIsPlanningOpen(false);
     setPlanningInitialPlan(null);
-  }, [t]);
+  }, [clearQuickAddPlanningDrafts, t]);
 
   const onSubtaskTasksCreated = useCallback((tasks: Task[], addToast: (message: string, type?: ToastType) => void) => {
     const ids = tasks.map((task) => task.id).join(", ");
