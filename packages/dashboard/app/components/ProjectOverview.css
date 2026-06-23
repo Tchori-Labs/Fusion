@@ -13,7 +13,22 @@
 /*
 FNXC:DashboardHeader 2026-06-22-16:42:
 Dashboard overview uses the canonical ViewHeader at the top; the overview body owns padding, max-width, and vertical scrolling below that header so the header aligns with Artifacts/Skills while the project content keeps its readable width.
+
+FNXC:DashboardHeader 2026-06-22-16:55:
+The Dashboard header itself must remain the same full-width chrome as other main views (surface background, divider, shared padding from ViewHeader). Only the content below is centered/constrained; never put the header inside the 1400px overview body.
+
+FNXC:DashboardHeader 2026-06-22-17:20:
+Keep Dashboard on the canonical header model instead of changing every other view to match a flat Dashboard. Use a low-specificity :where() selector so theme-level Air/shadcn divider suppression can still override the divider color while Dashboard gets the same surface, single bottom divider, and full-width header chrome as the rest of the app.
 */
+.project-overview > :where(.view-header) {
+  width: 100%;
+  flex: 0 0 auto;
+  background: var(--surface);
+  border-bottom-style: solid;
+  border-bottom-width: 1px;
+  border-bottom-color: var(--border);
+}
+
 .project-overview__body {
   display: flex;
   flex: 1 1 auto;
@@ -138,7 +153,6 @@ Dashboard overview uses the canonical ViewHeader at the top; the overview body o
   display: inline-flex;
   align-items: center;
   gap: var(--space-sm);
-  padding: var(--space-xs) var(--space-sm);
 }
 
 /* --- Filter Tabs --- */

@@ -1,5 +1,5 @@
 import "./FileBrowser.css";
-import { useState, useCallback, useEffect, useMemo, useId } from "react";
+import { useState, useCallback, useEffect, useMemo, useId, useLayoutEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { X, Save, RotateCcw, Folder, FileType, ArrowLeft, ChevronDown, ChevronUp } from "lucide-react";
 import { useWorkspaceFileBrowser } from "../hooks/useWorkspaceFileBrowser";
@@ -81,7 +81,9 @@ export function FileBrowserModal({
   const { projectName, workspaces } = useWorkspaces(projectId);
   const [currentWorkspace, setCurrentWorkspace] = useState(initialWorkspace);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
-  const [isMobile, setIsMobile] = useState(false);
+  const modalRef = useRef<HTMLDivElement>(null);
+  const [viewportMobile, setViewportMobile] = useState(false);
+  const [modalNarrow, setModalNarrow] = useState(false);
   const [mobileView, setMobileView] = useState<"list" | "editor">("list");
   const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT_WIDTH);
   const [showLineNumbers, setShowLineNumbers] = useState(false);
@@ -115,7 +117,7 @@ export function FileBrowserModal({
 
   useEffect(() => {
     const checkMobile = () => {
-      setIsMobile(window.innerWidth <= MOBILE_BREAKPOINT);
+      setViewportMobile(window.innerWidth <= MOBILE_BREAKPOINT);
     };
 
     checkMobile();
@@ -123,12 +125,41 @@ export function FileBrowserModal({
     return () => window.removeEventListener("resize", checkMobile);
   }, []);
 
+  /*
+  FNXC:FileBrowser 2026-06-22-17:25:
+  The Files floating window can be resized narrower than the desktop two-pane layout while the browser viewport is still desktop-sized. Mirror Chat's ResizeObserver-driven responsive mode: once the modal itself is at mobile width, switch to the list/editor single-pane flow and hide the sidebar after a file opens.
+  */
+  useLayoutEffect(() => {
+    const element = modalRef.current;
+    if (!element || typeof ResizeObserver === "undefined") {
+      return;
+    }
+
+    const update = () => {
+      const measuredWidth = element.getBoundingClientRect().width || element.clientWidth || window.innerWidth;
+      setModalNarrow(measuredWidth <= MOBILE_BREAKPOINT);
+    };
+
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+
+  const isMobile = viewportMobile || modalNarrow;
+
   useEffect(() => {
     if (!selectedFile) {
       setMobileView("list");
     }
     setToolbarActionsExpanded(false);
   }, [selectedFile]);
+
+  useEffect(() => {
+    if (isMobile && selectedFile) {
+      setMobileView("editor");
+    }
+  }, [isMobile, selectedFile]);
 
   useEffect(() => {
     if (!initialFile) {
@@ -308,14 +339,14 @@ export function FileBrowserModal({
       dragHandleSelector=".file-browser-modal-header"
       className="floating-window--file-browser"
       defaultSize={{ width: 1120, height: 720 }}
-      minSize={{ width: 640, height: 420 }}
+      minSize={{ width: 360, height: 420 }}
       persistGeometryKey="fusion:files-modal-window"
     >
       {/*
        * FNXC:FileBrowser 2026-06-22-15:22:
        * The file browser modal uses the shared FloatingWindow shell so it is smoothly movable/resizable like Chat and task detail pop-outs, with a transparent non-blurring backdrop and its own title row as the drag handle.
        */}
-      <div className="modal file-browser-modal">
+      <div ref={modalRef} className={`modal file-browser-modal${isMobile ? " file-browser-modal--narrow" : ""}`}>
         <div className="modal-header file-browser-modal-header">
           <div className="file-browser-header-title">
             <Folder size={18} />
