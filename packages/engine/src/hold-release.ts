@@ -429,12 +429,17 @@ async function issueRelease(
   // the real mover; any other call that reserved performed a redundant no-op and
   // must release the slot it grabbed (FN-1415).
   const movedTaskObjects = new Set<object>();
-  const onMoved = (data: { task: object; to: string }): void => {
-    if (data.to === target) movedTaskObjects.add(data.task);
+  let sawMovedEventForTask = false;
+  const onMoved = (data: { task: Task; to: string }): void => {
+    if (data.to === target && data.task.id === task.id) {
+      sawMovedEventForTask = true;
+      movedTaskObjects.add(data.task);
+    }
   };
-  store.on("task:moved", onMoved);
+  store.on?.("task:moved", onMoved);
 
   try {
+    const originalColumn = task.column;
     const result = await store.moveTask(task.id, target, {
       moveSource: "scheduler",
       allocateWorktree:
@@ -442,7 +447,21 @@ async function issueRelease(
           ? (reservedNames) => deps.allocateWorktree!(task, reservedNames)
           : undefined,
     });
-    if (reservation && !movedTaskObjects.has(result)) {
+    /*
+    FNXC:WorkflowScheduling 2026-06-23-21:57:
+    The cutover scheduler uses hold/release in tests and older embedded stores that may not expose task:moved events. Treat a returned task that clearly moved from the original column to the target as the committed release so minimal stores do not leak reservations or falsely report a racing same-column no-op.
+
+    FNXC:WorkflowScheduling 2026-06-23-22:39:
+    Eventless-release fallback is scoped to the current task. Other cards moving to the same target column during the same sweep must not disable this task's fallback and leak its reservation.
+
+    FNXC:WorkflowScheduling 2026-06-23-22:59:
+    Void-returning legacy stores are ambiguous: no event plus no returned task cannot prove the current task moved. Require a returned current-task row before keeping the reservation so same-column no-ops do not leak slots.
+    */
+    const returnedMovedTask = !sawMovedEventForTask
+      && result?.id === task.id
+      && result.column === target
+      && originalColumn !== target;
+    if (reservation && !movedTaskObjects.has(result) && !returnedMovedTask) {
       // Same-column no-op: a racing sweep already moved this card to the target.
       reservation.release();
       schedulerLog.log(`Hold release for ${task.id} skipped — already at ${target} (racing sweep won)`);
@@ -463,7 +482,7 @@ async function issueRelease(
     );
     return false;
   } finally {
-    store.off("task:moved", onMoved);
+    store.off?.("task:moved", onMoved);
   }
 }
 
