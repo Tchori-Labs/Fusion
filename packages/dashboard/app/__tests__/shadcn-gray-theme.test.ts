@@ -43,6 +43,30 @@ describe("Shadcn Gray color theme", () => {
     expect(dividerBlock).not.toContain("border-left-color");
   });
 
+  it("pins shadcn-family UI controls to one font family while preserving mono content", () => {
+    const uiFontBlock = extractGroupedRuleBlock(themeData, '[data-color-theme^="shadcn"],');
+    const monoFontBlock = extractGroupedRuleBlock(themeData, '[data-color-theme^="shadcn"] code');
+
+    expect(uiFontBlock).toContain('[data-color-theme^="shadcn"] button');
+    expect(uiFontBlock).toContain('[data-color-theme^="shadcn"] input');
+    expect(uiFontBlock).toContain('[data-color-theme^="shadcn"] select');
+    expect(uiFontBlock).toContain('[data-color-theme^="shadcn"] textarea');
+    expect(uiFontBlock).toContain('[data-color-theme^="shadcn"] .modal');
+    expect(uiFontBlock).toContain("font-family: var(--font-primary);");
+    expect(monoFontBlock).toContain('[data-color-theme^="shadcn"] pre');
+    expect(monoFontBlock).toContain('[data-color-theme^="shadcn"] .font-mono');
+    expect(monoFontBlock).toContain("font-family: var(--font-mono);");
+  });
+
+  it("keeps glass theme modal overlays transparent and non-blurring", () => {
+    const glassModalOverlayBlock = extractSelectorBlock(themeData, '[data-color-theme="glass"] .modal-overlay');
+
+    expect(glassModalOverlayBlock).toContain("background: transparent;");
+    expect(glassModalOverlayBlock).toContain("backdrop-filter: none;");
+    expect(glassModalOverlayBlock).toContain("-webkit-backdrop-filter: none;");
+    expect(glassModalOverlayBlock).not.toContain("blur(");
+  });
+
   it("registers Shadcn Gray in core, dashboard options, and the dashboard bootstrap validator", () => {
     expect(CORE_COLOR_THEMES).toContain("shadcn-gray");
     expect(DASHBOARD_COLOR_THEMES).toContainEqual({

@@ -12,6 +12,7 @@ import { getErrorMessage } from "@fusion/core";
 import { linkifyFilePaths } from "../utils/filePathLinkify";
 import { formatRelativeTimeAgo } from "../utils/relativeTimeAgo";
 import { AgentAvatar } from "./AgentAvatar";
+import { ProviderIcon } from "./ProviderIcon";
 import { clampChatInputHeight, resolveChatInputOverflowY } from "../utils/chatInputAutosize";
 import { markdownComponents } from "./AgentLogViewer";
 import "./TaskChatTab.css";
@@ -28,6 +29,11 @@ interface TaskChatTabProps {
 }
 
 type AgentLogRole = AgentRole | undefined;
+
+type TaskChatModelInfo = {
+  provider: string;
+  modelId?: string;
+};
 
 type UserChatMessage = Pick<SteeringComment, "id" | "text" | "createdAt"> & { optimistic?: boolean };
 
@@ -95,6 +101,67 @@ function getRoleIcon(role: AgentLogRole): string | undefined {
     default:
       return undefined;
   }
+}
+
+function parseModelMarker(entry: AgentLogEntry): TaskChatModelInfo | null {
+  if (entry.type !== "text") return null;
+  const match = entry.text.match(/^(?:Triage|Executor|Reviewer) using model: (.+?)\/(.+)$/);
+  if (!match) return null;
+  return { provider: match[1], modelId: match[2] };
+}
+
+function makeModelInfo(provider: string | undefined, modelId: string | undefined): TaskChatModelInfo | null {
+  if (!provider) return null;
+  return modelId ? { provider, modelId } : { provider };
+}
+
+function getExplicitModelForRole(task: Task | TaskDetail, role: AgentLogRole): TaskChatModelInfo | null {
+  if (role === "triage" && task.planningModelProvider) {
+    return makeModelInfo(task.planningModelProvider, task.planningModelId);
+  }
+  if (role === "executor" && task.modelProvider) {
+    return makeModelInfo(task.modelProvider, task.modelId);
+  }
+  if ((role === "reviewer" || role === "merger") && task.validatorModelProvider) {
+    return makeModelInfo(task.validatorModelProvider, task.validatorModelId);
+  }
+  return null;
+}
+
+function getRuntimeModelForRole(entries: readonly AgentLogEntry[], role: AgentLogRole): TaskChatModelInfo | null {
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index];
+    if (entry.agent !== role) continue;
+    const parsed = parseModelMarker(entry);
+    if (parsed) return parsed;
+  }
+  return null;
+}
+
+function getModelForRole(task: Task | TaskDetail, role: AgentLogRole, entries: readonly AgentLogEntry[]): TaskChatModelInfo | null {
+  /*
+  FNXC:TaskDetailChat 2026-06-23-21:18:
+  Task-detail chat agent headers should identify the AI provider actually backing each role, not a generic/role avatar. Prefer explicit task model overrides because they are stable before logs stream, then fall back to the runtime "using model" log marker emitted by active planner/executor/reviewer sessions. Merger output uses the validator/reviewer lane provider because merge-fix/review flows share that model family in the UI.
+  */
+  return getExplicitModelForRole(task, role) ?? getRuntimeModelForRole(entries, role);
+}
+
+function TaskChatAgentIcon({ label, modelInfo, role }: { label: string; modelInfo: TaskChatModelInfo | null; role: AgentLogRole }) {
+  if (modelInfo?.provider) {
+    const title = modelInfo.modelId ? `${label}: ${modelInfo.provider}/${modelInfo.modelId}` : `${label}: ${modelInfo.provider}`;
+    return (
+      <span className="task-chat-provider-icon" title={title} aria-label={title}>
+        <ProviderIcon provider={modelInfo.provider} size="md" />
+      </span>
+    );
+  }
+
+  const avatarAgent = {
+    id: role ?? "agent",
+    name: label,
+    icon: getRoleIcon(role),
+  };
+  return <AgentAvatar agent={avatarAgent} className="task-chat-avatar" />;
 }
 
 function getEntryKey(entry: AgentLogEntry, index: number): string {
@@ -810,18 +877,14 @@ export function TaskChatTab({ task, projectId, active, addToast, sessionLive, on
               return <TaskChatUserMessage key={`user-${item.message.id}-${itemIndex}`} message={item.message} />;
             }
 
-            const avatarAgent = {
-              id: item.role ?? "agent",
-              name: item.label,
-              icon: getRoleIcon(item.role),
-            };
             const segments = segmentGroupEntries(item.entries);
             const latestEntryTimestamp = item.entries[item.entries.length - 1]?.timestamp ?? "";
             const relativeTime = formatRelativeTimeAgo(latestEntryTimestamp);
+            const modelInfo = getModelForRole(task, item.role, item.entries);
             return (
               <section className="task-chat-group" key={`${item.role ?? "agent"}-${itemIndex}`} aria-label={t("taskChat.agentMessages", "{{label}} messages", { label: item.label })}>
                 <header className="task-chat-group-header">
-                  <AgentAvatar agent={avatarAgent} className="task-chat-avatar" />
+                  <TaskChatAgentIcon label={item.label} modelInfo={modelInfo} role={item.role} />
                   <div>
                     <div className="task-chat-role-label">{item.label}</div>
                     <div className="task-chat-group-meta">

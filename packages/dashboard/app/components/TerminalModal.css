@@ -37,19 +37,24 @@ The override MUST out-specify the base `.modal-overlay` (which sets a dimmed bac
 /*
 FNXC:Terminal 2026-06-23-04:30:
 The terminal must NEVER dim or blur the page behind it, in ANY mode. The base .modal-overlay applies a dimmed background + blur; the docked/floating overrides killed it, but a terminal that is NEITHER (the mobile/default sheet) still fell back to the dim. This base terminal-overlay rule removes the dim+blur for every terminal state.
+
+FNXC:Terminal 2026-06-23-21:28:
+Theme-level modal backdrop rules can load after component CSS and reapply dim/blur, especially in glass themes. Use a higher-specificity terminal overlay selector and clear both standard and WebKit backdrop filters so docked and modal terminal surfaces never darken the app behind them.
 */
-.modal-overlay.terminal-modal-overlay {
+.modal-overlay.terminal-modal-overlay.terminal-modal-overlay {
   background: transparent;
   backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
-.modal-overlay.terminal-modal-overlay--docked,
-.modal-overlay.terminal-modal-overlay--floating {
+.modal-overlay.terminal-modal-overlay--docked.terminal-modal-overlay--docked,
+.modal-overlay.terminal-modal-overlay--floating.terminal-modal-overlay--floating {
   align-items: stretch;
   justify-content: flex-end;
   padding: 0;
   background: transparent;
   backdrop-filter: none;
+  -webkit-backdrop-filter: none;
   pointer-events: none;
 }
 

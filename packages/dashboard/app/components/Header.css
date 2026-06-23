@@ -134,12 +134,20 @@ non-notched devices, so this is a no-op there. Pair with viewport-fit=cover (ind
   /*
   FNXC:WorkflowControls 2026-06-23-20:05:
   Mobile places the workflow dropdown in the top header beside the logo/project switch. Match the 32px board/list toggle height, reduce row gaps, hide the text label/counts, and cap width aggressively so resizing does not crowd adjacent header controls.
+
+  FNXC:WorkflowControls 2026-06-23-20:58:
+  In narrow mobile board/list views the workflow selector should sit centered in the available space between the project dropdown and the board/list toggle, while the trigger height lines up exactly with the 32px view toggle. Let the slot flex across the remaining header row and clamp the trigger to a wider 104px-128px range so short names such as "Coding" render fully when the screen can support it.
+
+  FNXC:WorkflowControls 2026-06-23-21:12:
+  The mobile workflow dropdown must visually match the board/list segmented toggle height exactly. Pin the toolbar wrapper, switcher, and trigger to the same 32px border-box and remove inherited vertical padding/line-height drift so the top and bottom edges align pixel-for-pixel.
   */
   .header {
-    gap: var(--space-xs);
+    gap: var(--space-sm);
+    align-items: center;
   }
 
   .header-left {
+    flex: 1 1 auto;
     min-width: 0;
     gap: var(--space-xs);
   }
@@ -150,24 +158,35 @@ non-notched devices, so this is a no-op there. Pair with viewport-fit=cover (ind
   }
 
   .header-workflow-slot {
-    flex: 0 1 min(30vw, calc(var(--space-2xl) * 2.875));
-    justify-content: flex-start;
-    min-width: calc(var(--space-2xl) * 2);
-    max-width: min(30vw, calc(var(--space-2xl) * 2.875));
+    flex: 1 1 auto;
+    justify-content: center;
+    min-width: 0;
+    max-width: none;
   }
 
   .header-actions {
-    gap: var(--space-xs);
+    flex: 0 0 auto;
+    align-items: center;
+    gap: var(--space-sm);
   }
 
   .header-workflow-slot:empty {
     display: none;
   }
 
-  .header-workflow-slot .workflow-switcher {
-    width: 100%;
+  .header-workflow-slot .board-workflow-toolbar,
+  .header-workflow-slot .list-workflow-control {
     height: 32px;
+    align-items: center;
+  }
+
+  .header-workflow-slot .workflow-switcher {
+    width: clamp(calc(var(--space-2xl) * 3.25), 36vw, calc(var(--space-2xl) * 4));
+    height: 32px;
+    max-height: 32px;
     min-width: 0;
+    flex: 0 1 auto;
+    align-items: center;
   }
 
   .header-workflow-slot .workflow-switcher-label {
@@ -175,13 +194,17 @@ non-notched devices, so this is a no-op there. Pair with viewport-fit=cover (ind
   }
 
   .header-workflow-slot .workflow-switcher-trigger {
+    appearance: none;
     box-sizing: border-box;
     width: 100%;
     height: 32px;
     max-width: 100%;
     min-height: 32px;
+    max-height: 32px;
     padding: 0 var(--space-xs);
     font-size: 12px;
+    line-height: 1;
+    overflow: hidden;
   }
 
   .header-workflow-slot .workflow-switcher-trigger-main {

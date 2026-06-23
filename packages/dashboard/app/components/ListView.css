@@ -19,7 +19,8 @@
 
 /* FNXC:ListView 2026-06-23-23:42: No divider between the controls and quick-add. The controls row now carries action groups only; the aggregate top task count was removed while contextual section counts remain lower in the list.
 FNXC:ListView 2026-06-23-23:55: Bulk Edit, View, and New Task are one no-wrap action cluster so the primary list actions stay visually together instead of splitting across opposite edges or separate wrapped lines.
-FNXC:ListView 2026-06-23-00:25: The primary action cluster must stay on one physical row even when the list pane narrows; preserve max-content width and let the cluster scroll horizontally instead of wrapping individual actions onto separate lines. */
+FNXC:ListView 2026-06-23-00:25: The primary action cluster must stay on one physical row even when the list pane narrows; preserve max-content width and let the cluster scroll horizontally instead of wrapping individual actions onto separate lines.
+FNXC:ListView 2026-06-23-21:42: Center the Bulk Edit, View, and New Task cluster in both desktop sidebar controls and the mobile list toolbar so the primary actions read as a single balanced control group. */
 .list-sidebar-controls {
   display: flex;
   flex-direction: column;
@@ -32,7 +33,7 @@ FNXC:ListView 2026-06-23-00:25: The primary action cluster must stay on one phys
 .list-sidebar-controls__toolbar {
   display: flex;
   align-items: center;
-  justify-content: flex-start;
+  justify-content: center;
   gap: var(--space-sm);
   flex-wrap: wrap;
 }
@@ -41,7 +42,7 @@ FNXC:ListView 2026-06-23-00:25: The primary action cluster must stay on one phys
 .list-sidebar-controls__actions {
   display: flex;
   align-items: center;
-  justify-content: flex-start;
+  justify-content: center;
   flex: 0 1 auto;
   flex-wrap: nowrap;
   gap: var(--space-xs);
@@ -945,6 +946,7 @@ In the split sidebar the title cell must allow the title to wrap to two lines (h
   .list-toolbar {
     padding: var(--space-md);
     flex-wrap: wrap;
+    justify-content: center;
   }
 
   .list-create-area {
@@ -1153,6 +1155,11 @@ In the split sidebar the title cell must allow the title to wrap to two lines (h
     padding: var(--space-sm) var(--space-md);
     flex-wrap: wrap;
     gap: var(--space-sm);
+    justify-content: center;
+  }
+
+  .list-toolbar .list-action-cluster {
+    justify-content: center;
   }
 
   .list-selection-stats {

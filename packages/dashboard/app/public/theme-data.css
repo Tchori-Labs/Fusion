@@ -477,6 +477,33 @@ Shadcn-family themes should read as seamless app shells: header and modal-title 
   border-bottom-color: transparent;
 }
 
+/*
+FNXC:DashboardTheming 2026-06-23-00:07:
+All shadcn-family themes should use one UI font family across app chrome, forms, popovers, and buttons. Native controls do not reliably inherit the document font in every browser, so pin shadcn UI controls to --font-primary while preserving --font-mono for code-oriented text.
+*/
+[data-color-theme^="shadcn"],
+[data-color-theme^="shadcn"] body,
+[data-color-theme^="shadcn"] button,
+[data-color-theme^="shadcn"] input,
+[data-color-theme^="shadcn"] select,
+[data-color-theme^="shadcn"] textarea,
+[data-color-theme^="shadcn"] optgroup,
+[data-color-theme^="shadcn"] .btn,
+[data-color-theme^="shadcn"] .input,
+[data-color-theme^="shadcn"] .select,
+[data-color-theme^="shadcn"] .modal,
+[data-color-theme^="shadcn"] .card {
+  font-family: var(--font-primary);
+}
+
+[data-color-theme^="shadcn"] code,
+[data-color-theme^="shadcn"] pre,
+[data-color-theme^="shadcn"] kbd,
+[data-color-theme^="shadcn"] samp,
+[data-color-theme^="shadcn"] .font-mono {
+  font-family: var(--font-mono);
+}
+
 /* GRAPHITE - Dark graphite blacks */
 [data-color-theme="graphite"] {
   --surface-hover: color-mix(in srgb, var(--surface) 90%, var(--text) 10%);
@@ -5619,8 +5646,13 @@ body[data-color-theme="terminal"][data-theme="light"]::before {
 }
 
 [data-color-theme="glass"] .modal-overlay {
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+  /*
+  FNXC:ModalChrome 2026-06-23-21:36:
+  Even glass-style themes should keep modal overlays non-dimming/non-blurring; modal panels provide depth with shadows and their own translucent surfaces.
+  */
+  background: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 /* HORIZON - Warm sunset-inspired palette */

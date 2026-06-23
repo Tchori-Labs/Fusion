@@ -1597,11 +1597,16 @@ describe("ListView", () => {
   it("keeps the primary list action cluster on one physical row when the pane narrows", () => {
     const css = readFileSync("app/components/ListView.css", "utf8");
     const actionClusterRule = css.match(/\.list-action-cluster,\s*\n\.list-sidebar-controls__actions\s*\{[^}]*\}/)?.[0] ?? "";
+    const toolbarRule = css.match(/\.list-sidebar-controls__toolbar\s*\{[^}]*\}/)?.[0] ?? "";
+    const mobileToolbarRule = css.match(/@media\s*\(max-width:\s*768px\)[\s\S]*?\.list-toolbar\s*\{[^}]*padding:\s*var\(--space-sm\) var\(--space-md\);[^}]*\}/)?.[0] ?? "";
 
     expect(actionClusterRule).toContain("flex-wrap: nowrap");
+    expect(actionClusterRule).toContain("justify-content: center");
     expect(actionClusterRule).toContain("inline-size: max-content");
     expect(actionClusterRule).toContain("min-width: max-content");
     expect(actionClusterRule).toContain("overflow-x: auto");
+    expect(toolbarRule).toContain("justify-content: center");
+    expect(mobileToolbarRule).toContain("justify-content: center");
   });
 
   it("keeps Bulk Edit, View, and + New Task together in the mobile toolbar controls", () => {

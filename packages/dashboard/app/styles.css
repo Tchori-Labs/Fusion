@@ -639,11 +639,10 @@ html .column.drag-over * {
   transition: none !important;
 }
 
-[data-theme="light"] .modal-overlay,
 [data-theme="light"] .agent-detail-overlay,
 [data-theme="light"] .agent-dialog-overlay,
 [data-theme="light"] .chat-new-dialog-backdrop {
-  background: color-mix(in srgb, var(--text) 50%, transparent);
+  background: transparent;
 }
 
 [data-theme="light"] .modal-header {
@@ -1205,12 +1204,17 @@ body {
 
 
 /* === Modals === */
+/*
+FNXC:ModalChrome 2026-06-23-21:36:
+Modal and dock pop-out surfaces should not darken or blur the app behind them. Keep the overlay for positioning, stacking, and click/escape dismissal, but make it visually transparent; panel depth comes from each `.modal` box-shadow instead of a dimmed backdrop. This shared contract covers Git Manager, Terminal, Dev Server, Secrets, and future sidebar/tool modals without per-modal overrides.
+*/
 .modal-overlay {
   display: none;
   position: fixed;
   inset: 0;
-  background: color-mix(in srgb, var(--text) 60%, transparent);
-  backdrop-filter: blur(4px);
+  background: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
   /* Must remain above sticky top banners (e.g. onboarding/session resume cards). */
   z-index: 100;
   justify-content: center;

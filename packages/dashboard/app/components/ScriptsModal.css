@@ -1965,10 +1965,14 @@ queries already apply (the container-query rule above also fires and produces th
 /*
 FNXC:GitManager 2026-06-23-23:52:
 Sidebar-launched floating modals should not dim, blur, or block the app behind them. Match the Files/RightDock floating-window model: the overlay is transparent and click-through, while the Git Manager panel remains interactive. Dismissal stays on Escape/close button instead of backdrop click.
+
+FNXC:GitManager 2026-06-23-21:28:
+Theme-level modal backdrop rules can load after component CSS and reapply dim/blur, especially in glass themes. Use a higher-specificity modal overlay selector and clear both standard and WebKit backdrop filters so Git Manager never darkens the app behind it.
 */
-.modal-overlay.git-manager-modal-overlay {
+.modal-overlay.git-manager-modal-overlay.git-manager-modal-overlay {
   background: transparent;
   backdrop-filter: none;
+  -webkit-backdrop-filter: none;
   pointer-events: none;
 }
 

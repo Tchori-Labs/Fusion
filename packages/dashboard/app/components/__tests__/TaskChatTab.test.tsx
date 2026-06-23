@@ -425,6 +425,48 @@ describe("TaskChatTab", () => {
     expect(screen.getByText("legacy output")).toBeTruthy();
   });
 
+  it("renders provider icons for task chat roles from task model overrides", () => {
+    mockLogs([
+      makeEntry({ agent: "triage", text: "planning output" }),
+      makeEntry({ agent: "executor", text: "executor output" }),
+      makeEntry({ agent: "reviewer", text: "reviewer output" }),
+      makeEntry({ agent: "merger", text: "merger output" }),
+    ]);
+
+    render(
+      <TaskChatTab
+        task={makeTask({
+          planningModelProvider: "google",
+          planningModelId: "gemini-pro",
+          modelProvider: "openai",
+          modelId: "gpt-4o",
+          validatorModelProvider: "anthropic",
+          validatorModelId: "claude-sonnet-4-5",
+        })}
+        active
+        addToast={vi.fn()}
+      />,
+    );
+
+    expect(document.querySelector(".task-chat-provider-icon [data-provider='google']")).toBeTruthy();
+    expect(document.querySelector(".task-chat-provider-icon [data-provider='openai']")).toBeTruthy();
+    expect(document.querySelectorAll(".task-chat-provider-icon [data-provider='anthropic']")).toHaveLength(2);
+  });
+
+  it("renders provider icons for task chat roles from runtime model markers", () => {
+    mockLogs([
+      makeEntry({ agent: "triage", text: "Triage using model: google/gemini-pro" }),
+      makeEntry({ agent: "executor", text: "Executor using model: openai/gpt-4o" }),
+      makeEntry({ agent: "reviewer", text: "Reviewer using model: anthropic/claude-sonnet-4-5" }),
+    ]);
+
+    render(<TaskChatTab task={makeTask()} active addToast={vi.fn()} />);
+
+    expect(document.querySelector(".task-chat-provider-icon [data-provider='google']")).toBeTruthy();
+    expect(document.querySelector(".task-chat-provider-icon [data-provider='openai']")).toBeTruthy();
+    expect(document.querySelector(".task-chat-provider-icon [data-provider='anthropic']")).toBeTruthy();
+  });
+
   it("groups consecutive entries by agent role", () => {
     mockLogs([
       makeEntry({ agent: "executor", text: "first" }),

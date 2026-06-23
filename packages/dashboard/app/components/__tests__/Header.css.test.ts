@@ -32,7 +32,11 @@ describe("Header CSS", () => {
   });
 
   it("compacts the workflow portal in the mobile top header", () => {
-    expect(css).toMatch(/@media\s*\(max-width:\s*768px\)[\s\S]*?\.header-workflow-slot\s*\{[^}]*max-width:\s*min\(42vw,\s*calc\(var\(--space-2xl\) \* 4\)\);/);
+    expect(css).toMatch(/@media\s*\(max-width:\s*768px\)[\s\S]*?\.header-workflow-slot\s*\{[^}]*flex:\s*1 1 auto;[^}]*justify-content:\s*center;[^}]*max-width:\s*none;/);
+    expect(css).toMatch(/@media\s*\(max-width:\s*768px\)[\s\S]*?\.header-actions\s*\{[^}]*flex:\s*0 0 auto;[^}]*align-items:\s*center;[^}]*gap:\s*var\(--space-sm\);/);
+    expect(css).toMatch(/@media\s*\(max-width:\s*768px\)[\s\S]*?\.header-workflow-slot \.board-workflow-toolbar,\s*\n\s*\.header-workflow-slot \.list-workflow-control\s*\{[^}]*height:\s*32px;[^}]*align-items:\s*center;/);
+    expect(css).toMatch(/@media\s*\(max-width:\s*768px\)[\s\S]*?\.header-workflow-slot \.workflow-switcher\s*\{[^}]*width:\s*clamp\(calc\(var\(--space-2xl\) \* 3\.25\),\s*36vw,\s*calc\(var\(--space-2xl\) \* 4\)\);[^}]*height:\s*32px;[^}]*max-height:\s*32px;[^}]*align-items:\s*center;/);
+    expect(css).toMatch(/@media\s*\(max-width:\s*768px\)[\s\S]*?\.header-workflow-slot \.workflow-switcher-trigger\s*\{[^}]*appearance:\s*none;[^}]*height:\s*32px;[^}]*min-height:\s*32px;[^}]*max-height:\s*32px;[^}]*line-height:\s*1;[^}]*overflow:\s*hidden;/);
     expect(css).toMatch(/@media\s*\(max-width:\s*768px\)[\s\S]*?\.header-workflow-slot \.workflow-switcher-label\s*\{[^}]*display:\s*none;/);
     expect(css).toMatch(/@media\s*\(max-width:\s*768px\)[\s\S]*?\.header-workflow-slot \.workflow-switcher-counts\s*\{[^}]*display:\s*none;/);
   });
