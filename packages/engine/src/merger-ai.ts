@@ -195,6 +195,16 @@ export async function pruneExistingAiMergeWorktrees(
     try {
       entries = readdirSync(tempRoot).filter((entry) => entry.startsWith(prefix));
     } catch (err: unknown) {
+      /*
+      FNXC:AiMerge 2026-06-24-23:10:
+      An absent ai-merge search root is the NORMAL case, not an error: the clean-room directory
+      (e.g. `<repo>/.fusion/ai-merge`) is created lazily only when an AI-merge worktree is made, so a
+      workspace sub-repo that has never been AI-merged has no such dir. ENOENT therefore means
+      "nothing to prune" — skip it silently rather than emitting an alarming warning on every merge.
+      Only non-ENOENT failures are surfaced, and only a non-ENOENT failure on the system tmpdir
+      (which always exists) remains fatal.
+      */
+      if ((err as NodeJS.ErrnoException)?.code === "ENOENT") continue;
       await log(`AI merge pre-merge prune: failed to read ${tempRoot}: ${getErrorMessage(err)}`);
       if (tempRoot === tmpdir()) throw err;
       continue;
