@@ -59,6 +59,22 @@ export async function ensureGitRepositoryForProjectPath(
     return "existing";
   }
 
+  /*
+  FNXC:Workspace 2026-06-24-14:30:
+  Fallback workspace detection: when workspace.json is missing (e.g. project added via
+  dashboard or `fn project add`, which don't run the interactive workspace detection flow),
+  probe for git sub-repos. If found, persist workspace.json so future calls hit the fast
+  loadWorkspaceConfig path, and skip git init. This covers all registration surfaces: the
+  CLI interactive setup writes workspace.json explicitly, but dashboard POST /api/projects
+  and `fn project add` do not — without this fallback they would create a stray .git at the
+  workspace root because loadWorkspaceConfig returned null.
+  */
+  const detectedRepos = await detectWorkspaceRepos(projectPath);
+  if (detectedRepos.length > 0) {
+    await saveWorkspaceConfig(projectPath, { repos: detectedRepos });
+    return "existing";
+  }
+
   try {
     await runner("git", ["-C", projectPath, "init"], { timeout });
     return "initialized";

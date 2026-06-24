@@ -120,4 +120,24 @@ describe("ensureGitRepositoryForProjectPath", () => {
     // No .git should be created at the workspace root
     expect(existsSync(join(projectPath, ".git"))).toBe(false);
   });
+
+  it("detects workspace sub-repos and skips git init when workspace.json is missing", async () => {
+    const projectPath = tempDir("fusion-git-workspace-detect-");
+    // Create a real git sub-repo inside the project root (but no workspace.json)
+    const subRepo = join(projectPath, "repo-a");
+    mkdirSync(subRepo, { recursive: true });
+    await git(subRepo, ["init", "-b", "main"]);
+    await git(subRepo, ["config", "user.email", "test@test.com"]);
+    await git(subRepo, ["config", "user.name", "Test"]);
+    writeFileSync(join(subRepo, "README.md"), "# repo-a\n");
+    await git(subRepo, ["add", "README.md"]);
+    await git(subRepo, ["commit", "-m", "init"]);
+
+    const outcome = await ensureGitRepositoryForProjectPath(projectPath);
+
+    expect(outcome).toBe("existing");
+    expect(existsSync(join(projectPath, ".git"))).toBe(false);
+    // workspace.json should be auto-persisted so future calls hit the fast path
+    expect(existsSync(join(projectPath, ".fusion", "workspace.json"))).toBe(true);
+  });
 });
