@@ -78,8 +78,11 @@ export async function ensureGitRepositoryForProjectPath(
   if (!(await isWorkspaceModeExplicitlyDisabled(projectPath))) {
     const detectedRepos = await detectWorkspaceRepos(projectPath, runner, timeout);
     if (detectedRepos.length > 0) {
-      await saveWorkspaceConfig(projectPath, { repos: detectedRepos });
+      // Write config.json first so a failure here doesn't leave a stale workspace.json
+      // that would short-circuit loadWorkspaceConfig on the next call without the
+      // workspaceMode setting being persisted.
       await setWorkspaceModeInConfig(projectPath, true);
+      await saveWorkspaceConfig(projectPath, { repos: detectedRepos });
       return "existing";
     }
   }
@@ -229,12 +232,17 @@ async function setWorkspaceModeInConfig(projectPath: string, value: boolean): Pr
   let config: Record<string, unknown> = {};
   try {
     config = JSON.parse(await readFile(configPath, "utf-8")) as Record<string, unknown>;
-  } catch {
-    // config.json may not exist yet; start with empty object
+  } catch (err) {
+    // Only treat "file not found" as empty config; re-throw parse/permission errors
+    // so a corrupted config.json doesn't get silently clobbered with a fresh object.
+    if ((err as NodeJS.ErrnoException)?.code !== "ENOENT") throw err;
   }
-  const settings = (config.settings ?? {}) as Record<string, unknown>;
+  // Validate settings is a plain object before merging
+  if (typeof config.settings !== "object" || config.settings === null || Array.isArray(config.settings)) {
+    config.settings = {};
+  }
+  const settings = config.settings as Record<string, unknown>;
   settings.workspaceMode = value;
-  config.settings = settings;
   await mkdir(join(projectPath, ".fusion"), { recursive: true });
   await writeFile(configPath, JSON.stringify(config, null, 2), "utf-8");
 }
