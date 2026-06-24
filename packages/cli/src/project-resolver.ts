@@ -762,7 +762,7 @@ export async function registerProjectInteractive(
     const prefixInput = await rl.question(`\n  Task prefix [${suggestedPrefix}]: `);
     rl.close();
     const rawPrefix = prefixInput.trim().toUpperCase().replace(/[^A-Z]/g, "");
-    const prefix = rawPrefix.length >= 2 && rawPrefix.length <= 10 ? rawPrefix : suggestedPrefix;
+    const prefix = rawPrefix.length >= 2 && rawPrefix.length <= 5 ? rawPrefix : suggestedPrefix;
 
     await store.updateSettings({
       taskPrefix: prefix,
