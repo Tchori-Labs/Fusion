@@ -24,7 +24,7 @@ import {
 } from "@fusion/core";
 import { isNearDuplicateCanonicalInactive } from "../../../core/src/near-duplicate-canonical";
 import { resolveEffectiveAutoMerge } from "../../../core/src/task-merge";
-import { uploadAttachment, deleteAttachment, updateTask, pauseTask, unpauseTask, fetchTaskDetail, fetchSettings, fetchGlobalSettings, requestSpecRevision, rebuildTaskSpec, approvePlan, rejectPlan, refineTask, fetchWorkflowResults, assignTask, fetchAgents, fetchAgent, refreshPrStatus, fetchBoardWorkflows, updateTaskCustomFields, summarizeTitle, api } from "../api";
+import { uploadAttachment, deleteAttachment, updateTask, repairOverlapBlocker, pauseTask, unpauseTask, fetchTaskDetail, fetchSettings, fetchGlobalSettings, requestSpecRevision, rebuildTaskSpec, approvePlan, rejectPlan, refineTask, fetchWorkflowResults, assignTask, fetchAgents, fetchAgent, refreshPrStatus, fetchBoardWorkflows, updateTaskCustomFields, summarizeTitle, api } from "../api";
 import type { WorkflowFieldDefinition, CustomFieldRejection } from "../api";
 import { ApiRequestError } from "../api";
 import { TaskFieldsSection } from "./TaskFieldsSection";
@@ -692,6 +692,7 @@ export function TaskDetailContent({
       paused: task.paused === undefined ? fullDetail.paused : task.paused,
       userPaused: task.userPaused === undefined ? fullDetail.userPaused : task.userPaused,
       pausedReason: task.pausedReason === undefined ? fullDetail.pausedReason : task.pausedReason,
+      overlapBlockedBy: task.overlapBlockedBy === undefined ? undefined : fullDetail.overlapBlockedBy,
     } as TaskDetail)
     : ({ ...task, prompt: "" } as TaskDetail);
   const canRetryTask =
@@ -2466,41 +2467,31 @@ export function TaskDetailContent({
     if (!workingTask.overlapBlockedBy) return;
 
     const requestTaskId = task.id;
-    const previousOverlapBlockedBy = workingTask.overlapBlockedBy;
-    const previousStatus = workingTask.status;
-
-    setFullDetail((prev) => prev
-      ? {
-        ...prev,
-        overlapBlockedBy: undefined,
-        ...(previousStatus === "queued" ? { status: undefined } : {}),
-      }
-      : prev);
 
     try {
-      const updatedTask = await updateTask(task.id, {
-        overlapBlockedBy: null,
-        status: previousStatus === "queued" ? null : undefined,
-      }, projectId);
+      const result = await repairOverlapBlocker(task.id, { reason: "dashboard-clear-overlap-blocker" }, projectId);
       if (activeTaskIdRef.current !== requestTaskId) {
         return;
       }
-      setFullDetail((prev) => prev ? ({ ...prev, ...updatedTask } as TaskDetail) : (updatedTask as TaskDetail));
-      onTaskUpdated?.(updatedTask);
+      if (result.task) {
+        setFullDetail((prev) => prev ? ({ ...prev, ...result.task } as TaskDetail) : (result.task as TaskDetail));
+        onTaskUpdated?.(result.task);
+      } else {
+        const updatedTask = await fetchTaskDetail(task.id, projectId);
+        if (activeTaskIdRef.current !== requestTaskId) {
+          return;
+        }
+        setFullDetail((prev) => prev ? ({ ...prev, ...updatedTask } as TaskDetail) : updatedTask);
+        onTaskUpdated?.(updatedTask);
+      }
+      addToast(result.message, "success");
     } catch (err) {
       if (activeTaskIdRef.current !== requestTaskId) {
         return;
       }
-      setFullDetail((prev) => prev
-        ? {
-          ...prev,
-          overlapBlockedBy: previousOverlapBlockedBy,
-          ...(previousStatus === "queued" ? { status: previousStatus } : {}),
-        }
-        : prev);
       addToast(getErrorMessage(err), "error");
     }
-  }, [activeTaskIdRef, addToast, onTaskUpdated, projectId, task.id, workingTask.overlapBlockedBy, workingTask.status]);
+  }, [activeTaskIdRef, addToast, onTaskUpdated, projectId, task.id, workingTask.overlapBlockedBy]);
 
   const handleDepClick = useCallback(async (depId: string) => {
     try {

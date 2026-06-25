@@ -511,6 +511,74 @@ Expected touched paths:
     });
   });
 
+  describe("repairOverlapBlocker", () => {
+    async function writePrompt(taskId: string, scope: string[]) {
+      const dir = join(rootDir, ".fusion", "tasks", taskId);
+      await writeFile(
+        join(dir, "PROMPT.md"),
+        `# ${taskId}: repair fixture\n\n## File Scope\n\n${scope.map((entry) => `- \`${entry}\``).join("\n")}\n`,
+      );
+    }
+
+    it("clears stale false-positive overlap blockers through the store API", async () => {
+      const blocker = await store.createTask({ description: "Atlas blocker" });
+      const target = await store.createTask({ description: "Fusion target" });
+      await writePrompt(blocker.id, ["project.yml", "Tests/AtlasNotesMobileUITests/**"]);
+      await writePrompt(target.id, ["packages/core/**", "packages/engine/**"]);
+      await store.moveTask(blocker.id, "todo");
+      await store.moveTask(blocker.id, "in-progress");
+      await store.moveTask(target.id, "todo");
+      await store.updateTask(target.id, { status: "queued", overlapBlockedBy: blocker.id });
+
+      const result = await store.repairOverlapBlocker(target.id, { reason: "test" });
+
+      expect(result).toMatchObject({ repaired: true, statusCleared: true, previousOverlapBlockedBy: blocker.id, reason: "repaired" });
+      const repaired = await store.getTask(target.id);
+      expect(repaired?.overlapBlockedBy).toBeUndefined();
+      expect(repaired?.status).toBeUndefined();
+      expect(repaired?.log.at(-1)?.action).toContain(`Repaired stale overlap blocker: cleared ${blocker.id}`);
+    });
+
+    it("rejects repair when the stored blocker still overlaps", async () => {
+      const blocker = await store.createTask({ description: "Fusion blocker" });
+      const target = await store.createTask({ description: "Fusion target" });
+      await writePrompt(blocker.id, ["packages/engine/**"]);
+      await writePrompt(target.id, ["packages/engine/src/scheduler.ts"]);
+      await store.moveTask(blocker.id, "todo");
+      await store.moveTask(blocker.id, "in-progress");
+      await store.moveTask(target.id, "todo");
+      await store.updateTask(target.id, { status: "queued", overlapBlockedBy: blocker.id });
+
+      const result = await store.repairOverlapBlocker(target.id);
+
+      expect(result).toMatchObject({ repaired: false, statusCleared: false, reason: "scopes-still-overlap", currentOverlapBlockedBy: blocker.id });
+      const unchanged = await store.getTask(target.id);
+      expect(unchanged?.overlapBlockedBy).toBe(blocker.id);
+      expect(unchanged?.status).toBe("queued");
+    });
+
+    it("reroutes stale overlap blockers to another current overlap", async () => {
+      const stale = await store.createTask({ description: "stale blocker" });
+      const current = await store.createTask({ description: "current blocker" });
+      const target = await store.createTask({ description: "target" });
+      await writePrompt(stale.id, ["packages/core/**"]);
+      await writePrompt(current.id, ["packages/engine/**"]);
+      await writePrompt(target.id, ["packages/engine/src/scheduler.ts"]);
+      await store.moveTask(stale.id, "todo");
+      await store.moveTask(current.id, "todo");
+      await store.moveTask(current.id, "in-progress");
+      await store.moveTask(target.id, "todo");
+      await store.updateTask(target.id, { status: "queued", overlapBlockedBy: stale.id });
+
+      const result = await store.repairOverlapBlocker(target.id);
+
+      expect(result).toMatchObject({ repaired: true, statusCleared: false, reason: "rerouted-to-current-overlap", currentOverlapBlockedBy: current.id });
+      const rerouted = await store.getTask(target.id);
+      expect(rerouted?.overlapBlockedBy).toBe(current.id);
+      expect(rerouted?.status).toBe("queued");
+    });
+  });
+
   describe("FN-5216 File Scope sanitization on copy paths", () => {
     const validScopeEntry = "packages/cli/src/extension.ts";
     const invalidScopeEntries = [
