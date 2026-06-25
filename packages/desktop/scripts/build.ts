@@ -5,10 +5,18 @@ import { buildDashboardClient, packageRoot, workspaceRoot } from "./workspace-to
 const dashboardClientDir = join(workspaceRoot, "packages", "dashboard", "dist", "client");
 const desktopDistDir = join(packageRoot, "dist");
 const desktopClientDistDir = join(desktopDistDir, "client");
+// FNXC:DesktopBuild 2026-06-25-09:45:
+// Every workspace @fusion/* package and native (.node) module must stay external
+// to the Electron main/preload bundles — they resolve from node_modules at runtime.
+// @fusion/engine was missing here, so esbuild followed local-runtime.ts's dynamic
+// `import("@fusion/engine")` and tried to bundle engine's transitive node-pty
+// (@homebridge/node-pty-prebuilt-multiarch) native binaries, failing with
+// "No loader is configured for .node files" and breaking every desktop release build.
 const sharedExternals = [
   "electron",
   "@fusion/core",
   "@fusion/dashboard",
+  "@fusion/engine",
   "better-sqlite3",
 ];
 const mainExternals = sharedExternals;
