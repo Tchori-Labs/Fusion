@@ -82,7 +82,7 @@ export function SchedulingSection({ scopeBanner, form, setForm, globalMaxConcurr
             const num = Number(val);
             setForm((f) => ({ ...f, taskStuckTimeoutMs: val && num > 0 ? num * 60000 : undefined }));
         }}/>
-        <small>{t("settings.scheduling.timeoutInMinutesForDetectingStuckTasksWhen", "Timeout in minutes for detecting stuck tasks. When a task&apos;s agent session shows no activity for longer than this duration, the task is terminated and retried. Leave empty to disable. Suggested: 10.")}</small>
+        <small>{t("settings.scheduling.timeoutInMinutesForDetectingStuckTasksWhen", "Timeout in minutes for detecting stuck tasks. When a task's agent session shows no activity for longer than this duration, the task is terminated and retried. Leave empty to disable. Suggested: 10.")}</small>
       </div>
       <div className="form-group">
         <label htmlFor="staleHighFanoutBlockerAgeThresholdMs">{t("settings.scheduling.staleHighFanOutEscalationHours", "Stale High Fan-out Escalation (hours)")}</label>

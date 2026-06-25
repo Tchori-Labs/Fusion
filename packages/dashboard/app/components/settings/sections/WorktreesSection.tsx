@@ -97,7 +97,7 @@ export function WorktreesSection({ scopeBanner, form, setForm, gitRemotes, workt
                 onFailure: f.worktrunk?.onFailure ?? "fail",
             },
         }))}/>{t("settings.worktrees.enableWorktrunkIntegration", " Enable worktrunk integration ")}</label>
-        <small>{t("settings.worktrees.disabledByDefaultOptInWhenEnabledFusion", " Disabled by default (opt-in). When enabled, Fusion shells out to ")}<code>worktrunk</code>{t("settings.worktrees.forWorktreeCreateSyncPruneAndRemoveOperations", " for worktree create, sync, prune, and remove operations and follows worktrunk&apos;s directory layout. ")}</small>
+        <small>{t("settings.worktrees.disabledByDefaultOptInWhenEnabledFusion", " Disabled by default (opt-in). When enabled, Fusion shells out to ")}<code>worktrunk</code>{t("settings.worktrees.forWorktreeCreateSyncPruneAndRemoveOperations", " for worktree create, sync, prune, and remove operations and follows worktrunk's directory layout. ")}</small>
         {!worktrunkInstallVerified && form.worktrunk?.enabled !== true && (<small className="settings-muted">{t("settings.worktrees.installTheWorktrunkBinaryBelowToEnableThis", "Install the worktrunk binary below to enable this integration.")}</small>)}
       </div>
       <div className="form-group" data-testid="worktrunk-install-affordance">
@@ -148,7 +148,7 @@ export function WorktreesSection({ scopeBanner, form, setForm, gitRemotes, workt
           <option value="fallback-native">{t("settings.worktrees.fallBackToFusionsNativeWorktreeBackend", "Fall back to Fusion's native worktree backend")}</option>
         </select>
         <small>
-          <code>fail</code>{t("settings.worktrees.stopsOnWorktrunkErrorsForExplicitOperatorRecovery", " stops on worktrunk errors for explicit operator recovery; ")}<code>fallback-native</code>{t("settings.worktrees.keepsProgressMovingBySwitchingToFusionApos", " keeps progress moving by switching to Fusion&apos;s built-in worktree backend. ")}</small>
+          <code>fail</code>{t("settings.worktrees.stopsOnWorktrunkErrorsForExplicitOperatorRecovery", " stops on worktrunk errors for explicit operator recovery; ")}<code>fallback-native</code>{t("settings.worktrees.keepsProgressMovingBySwitchingToFusionApos", " keeps progress moving by switching to Fusion's built-in worktree backend. ")}</small>
       </div>
     </>);
 }
