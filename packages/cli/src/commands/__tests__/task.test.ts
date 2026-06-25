@@ -96,7 +96,8 @@ vi.mock("@fusion/core", async (importActual) => {
 });
 
 // Mock @fusion/engine
-vi.mock("@fusion/engine", () => ({ aiMergeTask: vi.fn() }));
+const { runAiMergeMock } = vi.hoisted(() => ({ runAiMergeMock: vi.fn() }));
+vi.mock("@fusion/engine", () => ({ runAiMerge: runAiMergeMock, aiMergeTask: runAiMergeMock }));
 
 // Mock @fusion/dashboard
 vi.mock("@fusion/dashboard", () => ({
@@ -155,7 +156,7 @@ import {
 import { GitHubClient, generatePrMetadata } from "@fusion/dashboard";
 import { createSession, submitResponse } from "@fusion/dashboard/planning";
 import { resolveProject } from "../../project-context.js";
-import { aiMergeTask } from "@fusion/engine";
+import { runAiMerge } from "@fusion/engine";
 
 const mockedExec = vi.mocked(exec);
 
@@ -1228,7 +1229,7 @@ describe("project-aware task command behavior", () => {
       isRegistered: true,
       store: resolvedStore,
     });
-    vi.mocked(aiMergeTask).mockResolvedValue({
+    vi.mocked(runAiMerge).mockResolvedValue({
       merged: true,
       task: makeTask({ id: "FN-123" }),
       branch: "fusion/fn-123",
@@ -1244,7 +1245,7 @@ describe("project-aware task command behavior", () => {
 
     expect(updateStep).toHaveBeenCalled();
     expect(logEntry).toHaveBeenCalled();
-    expect(aiMergeTask).toHaveBeenCalledWith(resolvedStore, "/test", "FN-123", expect.any(Object));
+    expect(runAiMerge).toHaveBeenCalledWith(resolvedStore, "/test", "FN-123", expect.any(Object));
     expect(duplicateTask).toHaveBeenCalledWith("FN-123");
     expect(refineTask).toHaveBeenCalledWith("FN-123", "more tests");
   });

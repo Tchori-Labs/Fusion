@@ -20,6 +20,7 @@ import {
   createSessionWithAgent,
   GENERATION_TIMEOUT_MS as PLANNING_GENERATION_TIMEOUT_MS,
   getSession,
+  parseAgentResponse,
   planningStreamManager,
   retrySession,
   setAiSessionStore as setPlanningAiSessionStore,
@@ -136,6 +137,149 @@ describe("session error recovery", () => {
     }
 
     await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it("recovers a streaming initial-turn prose response when the bounded reformat succeeds", async () => {
+    const errorEvents: string[] = [];
+    const questionEvents: string[] = [];
+
+    __setCreateFnAgent(
+      async () =>
+        createMockAgent([
+          "I should ask a question next, but I forgot the JSON wrapper.",
+          JSON.stringify({
+            type: "question",
+            data: { id: "q-reformatted", type: "text", question: "Recovered initial question" },
+          }),
+        ]),
+    );
+
+    const sessionId = await createSessionWithAgent(
+      "127.0.0.102",
+      "Streaming malformed first turn",
+      "/tmp/project",
+      taskStore,
+    );
+    const unsubscribe = planningStreamManager.subscribe(sessionId, (event) => {
+      if (event.type === "error") errorEvents.push(String(event.data));
+      if (event.type === "question") questionEvents.push(String((event.data as { id?: string }).id));
+    });
+
+    planningStreamManager.consumeInitialTurn(sessionId)?.();
+
+    await waitFor(() => aiSessionStore.get(sessionId)?.status === "awaiting_input");
+
+    const persisted = aiSessionStore.get(sessionId);
+    expect(persisted?.status).toBe("awaiting_input");
+    expect(persisted?.error).toBeNull();
+    expect(getSession(sessionId)?.currentQuestion?.id).toBe("q-reformatted");
+    expect(questionEvents).toContain("q-reformatted");
+    expect(errorEvents).toEqual([]);
+
+    unsubscribe();
+  });
+
+  it("keeps a streaming initial-turn parse failure retryable and recovers on retry", async () => {
+    const errorEvents: string[] = [];
+
+    __setCreateFnAgent(
+      async () =>
+        createMockAgent([
+          "I can help plan this, but this response is prose only.",
+          "Still prose only after the bounded reformat request.",
+        ]),
+    );
+
+    const sessionId = await createSessionWithAgent(
+      "127.0.0.103",
+      "Streaming unrecoverable first turn",
+      "/tmp/project",
+      taskStore,
+    );
+    const unsubscribe = planningStreamManager.subscribe(sessionId, (event) => {
+      if (event.type === "error") {
+        errorEvents.push(String(event.data));
+      }
+    });
+
+    planningStreamManager.consumeInitialTurn(sessionId)?.();
+
+    await waitFor(() => aiSessionStore.get(sessionId)?.status === "error");
+
+    const persistedError = aiSessionStore.get(sessionId);
+    expect(persistedError?.status).toBe("error");
+    expect(persistedError?.error).toContain("AI returned no valid JSON");
+    expect(JSON.parse(persistedError?.conversationHistory ?? "[]")).toHaveLength(0);
+    expect(errorEvents).toContainEqual(expect.stringContaining("AI returned no valid JSON"));
+    expect(getSession(sessionId)).toBeDefined();
+
+    __setCreateFnAgent(
+      async () =>
+        createMockAgent([
+          JSON.stringify({
+            type: "question",
+            data: { id: "q-retry-initial", type: "text", question: "Recovered retry question" },
+          }),
+        ]),
+    );
+
+    await retrySession(sessionId, "/tmp/project", undefined, taskStore);
+
+    const persistedRecovered = aiSessionStore.get(sessionId);
+    expect(persistedRecovered?.status).toBe("awaiting_input");
+    expect(persistedRecovered?.error).toBeNull();
+    expect(getSession(sessionId)?.currentQuestion?.id).toBe("q-retry-initial");
+
+    unsubscribe();
+  });
+
+  it("keeps a non-streaming initial-turn parse failure persisted for retry", async () => {
+    __setCreateFnAgent(
+      async () =>
+        createMockAgent([
+          "This non-streaming first response is prose only.",
+          "Still not JSON after the bounded reformat request.",
+        ]),
+    );
+
+    await expect(
+      createSession("127.0.0.104", "Non-streaming unrecoverable first turn", taskStore, "/tmp/project"),
+    ).rejects.toThrow("Failed to get first question from AI");
+
+    const failedSession = aiSessionStore.listActive().find((session) => session.type === "planning");
+    expect(failedSession?.status).toBe("error");
+    expect(failedSession?.id).toBeTruthy();
+    const sessionId = failedSession?.id as string;
+    expect(aiSessionStore.get(sessionId)?.error).toContain("AI returned no valid JSON");
+    expect(getSession(sessionId)).toBeDefined();
+
+    __setCreateFnAgent(
+      async () =>
+        createMockAgent([
+          JSON.stringify({
+            type: "question",
+            data: { id: "q-nonstream-retry", type: "text", question: "Recovered non-streaming retry" },
+          }),
+        ]),
+    );
+
+    await retrySession(sessionId, "/tmp/project", undefined, taskStore);
+
+    expect(aiSessionStore.get(sessionId)?.status).toBe("awaiting_input");
+    expect(aiSessionStore.get(sessionId)?.error).toBeNull();
+    expect(getSession(sessionId)?.currentQuestion?.id).toBe("q-nonstream-retry");
+  });
+
+  it("selects a valid planning JSON object over a larger unrelated JSON candidate", () => {
+    const parsed = parseAgentResponse(`Here is an unrelated object first:
+{"metadata":{"items":[{"label":"not planning","details":"${"x".repeat(200)}"}]}}
+The actual planning response is:
+{"type":"question","data":{"id":"q-small","type":"text","question":"What should we build?"}}`);
+
+    expect(parsed.type).toBe("question");
+    if (parsed.type === "question") {
+      expect(parsed.data.id).toBe("q-small");
+    }
   });
 
   it("captures planning parse failures as error state, preserves history, and allows retry", async () => {

@@ -1009,11 +1009,8 @@ async function getFirstQuestionFromAgent(
   }
 
   if (!parsed) {
-    // Clean up the failed startup session and release the underlying agent so
-    // an unparsable first response cannot leave model/transport handles behind
-    // in the long-running dashboard process.
-    sessions.delete(session.id);
-    unpersistSession(session.id);
+    const errorMessage = buildRetryableParseErrorMessage(lastError);
+    setSessionError(session, errorMessage);
     try {
       await session.agent.session.dispose?.();
     } catch (disposeErr) {
@@ -1024,9 +1021,7 @@ async function getFirstQuestionFromAgent(
       });
     }
     session.agent = undefined;
-    throw new Error(
-      `Failed to get first question from AI: ${lastError?.message || "Unknown error"}`
-    );
+    throw new Error(`Failed to get first question from AI: ${errorMessage}`);
   }
 
   if (parsed.type === "complete") {
@@ -1598,6 +1593,18 @@ async function maybeNotifyPlanningAwaitingInput(session: Session, question: Plan
 /** Max number of retry attempts when AI returns unparseable output */
 const MAX_PARSE_RETRIES = 1;
 
+/*
+FNXC:PlanningJsonRecovery 2026-06-24-20:58:
+Planning Mode malformed AI output must either recover through the bounded reformat prompt to a valid planning response or persist a retryable session error. Parser candidate selection therefore prefers valid planning-shaped JSON over unrelated larger JSON blobs embedded in model prose.
+*/
+
+function buildRetryableParseErrorMessage(error: Error | undefined): string {
+  const baseMessage = (error?.message || "Failed to parse AI response")
+    .replace(/\s*Please try again\.?\s*$/i, "")
+    .trim();
+  return `${baseMessage}. Retry this planning session or start a new one.`;
+}
+
 /**
  * Continue the AI conversation with a user message.
  *
@@ -1784,19 +1791,13 @@ async function continueAgentConversation(session: Session, message: string): Pro
     }
 
     if (!parsed) {
-      // All attempts exhausted — emit actionable error
-      const errorMsg = `${lastError?.message || "Failed to parse AI response"} You can try responding again or start a new planning session.`;
+      // All attempts exhausted — emit actionable, retryable error without duplicated "Please try again" suffixes.
+      const errorMsg = buildRetryableParseErrorMessage(lastError);
       diagnostics.error(
         "All parse attempts exhausted for session",
         { sessionId: session.id, message: errorMsg, operation: "parse-exhausted" }
       );
-      session.error = errorMsg;
-      session.updatedAt = new Date();
-      persistSession(session, "error", errorMsg);
-      planningStreamManager.broadcast(session.id, {
-        type: "error",
-        data: errorMsg,
-      });
+      setSessionError(session, errorMsg);
       return;
     }
 
@@ -1846,18 +1847,52 @@ async function continueAgentConversation(session: Session, message: string): Pro
  *
  * Returns the extracted JSON string or null if nothing usable is found.
  */
+function isPlanningResponseShape(parsed: unknown): parsed is PlanningResponse {
+  if (
+    typeof parsed !== "object" ||
+    parsed === null ||
+    !("type" in parsed) ||
+    !("data" in parsed)
+  ) {
+    return false;
+  }
+
+  const typed = parsed as { type: string; data: unknown };
+  return (
+    (typed.type === "question" || typed.type === "complete") &&
+    typed.data !== null &&
+    typed.data !== undefined
+  );
+}
+
+function parseJsonCandidateForShape(candidate: string): unknown | undefined {
+  try {
+    return JSON.parse(candidate);
+  } catch {
+    try {
+      return JSON.parse(repairJson(candidate));
+    } catch {
+      return undefined;
+    }
+  }
+}
+
 function extractJsonCandidate(text: string): string | null {
   if (!text || !text.trim()) return null;
 
-  // 1. Try markdown code blocks first (most reliable)
-  const codeBlockMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-  if (codeBlockMatch?.[1]) {
-    const candidate = codeBlockMatch[1].trim();
-    if (candidate.startsWith("{")) return candidate;
-  }
+  // 1. Try markdown code blocks first (most reliable when they contain a planning response).
+  const codeBlockMatches = [...text.matchAll(/```(?:json)?\s*([\s\S]*?)\s*```/g)];
+  const codeBlockCandidates = codeBlockMatches
+    .map((match) => match[1]?.trim())
+    .filter((candidate): candidate is string => Boolean(candidate?.startsWith("{")));
+  const planningCodeBlock = codeBlockCandidates.find((candidate) =>
+    isPlanningResponseShape(parseJsonCandidateForShape(candidate)),
+  );
+  if (planningCodeBlock) return planningCodeBlock;
+  if (codeBlockCandidates.length > 0) return codeBlockCandidates[0];
 
-  // 2. Find all top-level brace-delimited objects using balanced brace counting
-  const candidates: Array<{ start: number; end: number; text: string }> = [];
+  // 2. Find all top-level brace-delimited objects using balanced brace counting.
+  const candidates: Array<{ start: number; end: number; text: string; parsed?: unknown }> = [];
   for (let i = 0; i < text.length; i++) {
     if (text[i] === "{") {
       let depth = 0;
@@ -1882,26 +1917,24 @@ function extractJsonCandidate(text: string): string | null {
         if (ch === "}") depth--;
         if (depth === 0) {
           const candidate = text.slice(i, j + 1).trim();
-          // Only accept candidates that parse as valid JSON
-          try {
-            JSON.parse(candidate);
-            candidates.push({ start: i, end: j, text: candidate });
-          } catch {
-            // Not valid JSON, skip
-          }
+          candidates.push({ start: i, end: j, text: candidate, parsed: parseJsonCandidateForShape(candidate) });
           break;
         }
       }
     }
   }
 
-  // Pick the largest valid candidate (most likely the full response)
-  if (candidates.length > 0) {
-    candidates.sort((a, b) => b.text.length - a.text.length);
-    return candidates[0].text;
+  const planningCandidate = candidates.find((candidate) => isPlanningResponseShape(candidate.parsed));
+  if (planningCandidate) return planningCandidate.text;
+
+  // Pick the largest valid JSON candidate only after planning-shaped candidates are ruled out.
+  const validCandidates = candidates.filter((candidate) => candidate.parsed !== undefined);
+  if (validCandidates.length > 0) {
+    validCandidates.sort((a, b) => b.text.length - a.text.length || a.start - b.start);
+    return validCandidates[0].text;
   }
 
-  // 3. Last resort: try the full trimmed text
+  // 3. Last resort: try the full trimmed text so repairJson can close truncated objects.
   const trimmed = text.trim();
   if (trimmed.startsWith("{")) return trimmed;
 
@@ -2003,20 +2036,8 @@ export function parseAgentResponse(text: string): PlanningResponse {
   }
 
   // Validate structure
-  if (
-    typeof parsed === "object" &&
-    parsed !== null &&
-    "type" in parsed &&
-    "data" in parsed
-  ) {
-    const typed = parsed as { type: string; data: unknown };
-    if (
-      (typed.type === "question" || typed.type === "complete") &&
-      typed.data !== null &&
-      typed.data !== undefined
-    ) {
-      return parsed as PlanningResponse;
-    }
+  if (isPlanningResponseShape(parsed)) {
+    return parsed;
   }
 
   diagnostics.error("Invalid response structure from AI", { parsedSnippet: JSON.stringify(parsed).slice(0, 500), operation: "parse-validate" });

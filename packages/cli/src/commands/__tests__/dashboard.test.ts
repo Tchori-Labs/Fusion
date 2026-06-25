@@ -756,6 +756,7 @@ vi.mock("@fusion/engine", async (importOriginal) => {
     PrMonitor,
     PrCommentHandler,
     aiMergeTask,
+    runAiMerge: aiMergeTask,
     CronRunner,
     createAiPromptExecutor,
     SelfHealingManager,
