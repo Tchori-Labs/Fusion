@@ -28,6 +28,9 @@ FN-7013 re-confirms the `pnpm test`-blocking premise is stale: FN-5048 removed t
 
 FNXC:CI 2026-06-25-17:44:
 FN-7035 split the two new hard-cap crossers (`ChatView.core.test.tsx` and `notifier.test.ts`) into focused sibling suites rather than grandfathering them. Six existing grandfathered entries were re-ratcheted to current counts after organic test and feature growth; `store.ts` and `types.ts` drift was left out of scope for a follow-up. Wholesale god-file shrink remains long-term deferred work for dedicated refactors.
+
+FNXC:CI 2026-06-25-22:08:
+FN-7046 repaired the deferred `store.ts`/`types.ts` line-count drift by re-ratcheting only those two baseline ceilings after organic Code Review workflow-step and MCP configuration growth. Wholesale god-file shrink remains long-term deferred work for dedicated refactors, and unrelated line-count violations must not be bundled into this scoped repair.
 */
 // Repo-wide guard: hand-written source files may not exceed a hard line-count
 // cap (MAX_LINES). This stops the next god-file from being born while leaving
