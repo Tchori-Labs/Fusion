@@ -5,13 +5,16 @@ import { postMergeOptionalGroupNode } from "@fusion/core";
 import { WorkflowGraphExecutor, type WorkflowNodeHandler } from "../workflow-graph-executor.js";
 
 /*
-FNXC:WorkflowPostMerge 2026-06-26-09:00:
-Graph-native post-merge steps (U7 spike). A post-merge optional-group node wired off
-`merge-attempt` success must, WITH the `graphNativePostMerge` flag ON, run AFTER the
-merge seam and record a WorkflowStepResult with phase:"post-merge". WITH the flag OFF
+FNXC:WorkflowPostMerge 2026-06-26-15:30:
+Graph-native post-merge steps. `graphNativePostMerge` is DEFAULT-ON; a post-merge
+optional-group node wired off `merge-attempt` success runs AFTER the merge seam and
+records a WorkflowStepResult with phase:"post-merge". An explicit opt-out
+(`graphNativePostMerge: false`) DISABLES graph-native post-merge execution for that run:
 the merge region stays collapsed and the post-merge node is never reached — it records
-nothing via the graph (the legacy merger still owns post-merge). Post-merge failures are
-non-blocking: the run still completes with the merge-success outcome.
+nothing. There is NO legacy merger fallback anymore (the merger-side post-merge path was
+removed in U7c), so an opt-out simply means post-merge work does not run via the graph.
+Post-merge failures are non-blocking: the run still completes with the merge-success
+outcome.
 */
 
 const POST_MERGE_ID = "post-merge-docs";

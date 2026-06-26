@@ -304,13 +304,15 @@ export class WorkflowGraphExecutor {
       [WORKFLOW_ID_CONTEXT_KEY]: ir.name || "unknown",
     };
     /*
-     * FNXC:WorkflowPostMerge 2026-06-26-09:00:
-     * Graph-native post-merge steps, gated by the default-OFF `graphNativePostMerge`
-     * experimental flag. The merge-policy region is collapsed into ONE legacy merge
+     * FNXC:WorkflowPostMerge 2026-06-26-15:30:
+     * Graph-native post-merge steps, gated by the DEFAULT-ON `graphNativePostMerge`
+     * experimental flag (in DEFAULT_ON_EXPERIMENTAL_FEATURES; an explicit `false`
+     * opts out). The merge-policy region is collapsed into ONE legacy merge
      * seam (see `runLegacyMergeSeam` + the `isMergeRegionKind` branch in
      * `traverseChildren`), so a node wired off `merge-attempt` success is normally
-     * never traversed. With the flag ON we let traversal continue past a SUCCESSFUL
-     * merge to those post-merge entry nodes.
+     * never traversed. With the flag ON (the default) we let traversal continue past a
+     * SUCCESSFUL merge to those post-merge entry nodes; an explicit opt-out (`false`)
+     * leaves the set empty and skips the post-merge hop.
      *
      * `postMergeEntryNodeIds` = the (deterministic, id-sorted) set of edge targets `t`
      * such that an edge leaves a merge-region node to `t`, where `t` is itself NOT a
@@ -769,12 +771,27 @@ export class WorkflowGraphExecutor {
            * the merge region stays exactly as collapsed before.
            */
           for (const entryId of postMergeEntryNodeIds) {
-            const postMerge = await walk(entryId);
-            // A post-merge entry node is never an enclosing rework head, so a
-            // ReworkSignal here would be malformed IR; ignore it rather than bubble a
-            // rework loop out of the merge boundary. Result is intentionally discarded
-            // (non-blocking).
-            void postMerge;
+            /*
+             * FNXC:WorkflowPostMerge 2026-06-26-15:30:
+             * Post-merge traversal must NEVER fail an already-merged run (non-blocking
+             * contract). A malformed post-merge IR or any traversal throw is caught,
+             * logged via the task log sink, and we CONTINUE to the next entry — the
+             * merged task still completes with the merge-success `aggregate`. Without
+             * this guard a throw would propagate out of the executor and flip a merged
+             * task into an executor failure.
+             */
+            try {
+              const postMerge = await walk(entryId);
+              // A post-merge entry node is never an enclosing rework head, so a
+              // ReworkSignal here would be malformed IR; ignore it rather than bubble a
+              // rework loop out of the merge boundary. Result is intentionally discarded
+              // (non-blocking).
+              void postMerge;
+            } catch (err) {
+              this.deps.logTaskEntry?.(
+                `[post-merge] traversal error: ${err instanceof Error ? err.message : String(err)}`,
+              );
+            }
           }
           continue;
         }

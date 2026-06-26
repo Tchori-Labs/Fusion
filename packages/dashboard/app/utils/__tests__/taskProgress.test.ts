@@ -3,7 +3,7 @@ import type { Task } from "@fusion/core";
 import { getUnifiedTaskProgress } from "../taskProgress";
 
 /*
-FNXC:WorkflowSteps 2026-06-25 — graph-native progress model (plan U3).
+FNXC:WorkflowSteps 2026-06-25-00:00 — graph-native progress model (plan U3).
 These tests pin the render-state contract that the progress bar / Workflow tab rely on:
 - names resolve from result.workflowStepName (no DB-row name lookup), with a raw-id fallback;
 - a "pending" result with a startedAt and no completedAt is the `running` state, vs bare `pending`;

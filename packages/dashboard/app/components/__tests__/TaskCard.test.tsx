@@ -1909,7 +1909,7 @@ describe("TaskCard", () => {
     expect(screen.queryByText("1 steps")).toBeNull();
   });
 
-  // FNXC:WorkflowSteps 2026-06-25 — graph-written results drive the card progress; names come from
+  // FNXC:WorkflowSteps 2026-06-25-00:00 — graph-written results drive the card progress; names come from
   // result.workflowStepName (with raw-id fallback), and advisory_failure (amber) is visually distinct
   // from failed (red). No board-level name lookup is involved.
   it("renders workflow checks after normal steps with graph-written statuses and phase badges", () => {

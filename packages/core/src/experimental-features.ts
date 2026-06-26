@@ -28,18 +28,19 @@ const RETIRED_EXPERIMENTAL_FEATURES = new Set<string>([
 ]);
 
 /*
-FNXC:WorkflowPostMerge 2026-06-26-09:00:
-Post-merge workflow steps run GRAPH-NATIVE behind this default-OFF experimental flag
-(U7 spike). When OFF (the default — the key is absent from DEFAULT_*_SETTINGS so
-`isExperimentalFeatureEnabled` returns false), the merge-region stays collapsed exactly
-as before: the graph routes merge-attempt success straight to `end` and the merger still
-owns post-merge steps from the legacy table — zero behavior change, byte-identical
-builtin:coding traversal. When ON, the graph executor lets traversal continue past a
-SUCCESSFUL merge to any post-merge optional-group node reachable from the merge region,
-running it via the same optional-group execution+recording path (phase:"post-merge",
-non-blocking failures). This unit is additive + reversible: a later unit removes the
-legacy merger post-merge path. Mirrors the WORKFLOW_INTERPRETER_DUAL_OBSERVE_FLAG read
-plumbing (named constant + `isExperimentalFeatureEnabled`).
+FNXC:WorkflowPostMerge 2026-06-26-15:30:
+Post-merge workflow steps run GRAPH-NATIVE behind this DEFAULT-ON experimental flag
+(see DEFAULT_ON_EXPERIMENTAL_FEATURES above). With the flag ON (the default — present in
+DEFAULT_ON_EXPERIMENTAL_FEATURES so `isExperimentalFeatureEnabled` returns true unless an
+explicit `false` opts out), the graph executor lets traversal continue past a SUCCESSFUL
+merge to any post-merge optional-group node reachable from the merge region, running it via
+the same optional-group execution+recording path (phase:"post-merge", non-blocking
+failures). The graph is the SOLE owner of post-merge execution: U7c deleted the legacy
+merger post-merge path entirely, so there is no legacy-table fallback — post-merge work runs
+exactly once via the graph. An explicit `graphNativePostMerge: false` opts out and leaves the
+merge-region collapsed (merge-attempt success routes straight to `end`). Mirrors the
+WORKFLOW_INTERPRETER_DUAL_OBSERVE_FLAG read plumbing (named constant +
+`isExperimentalFeatureEnabled`).
 */
 export const GRAPH_NATIVE_POST_MERGE_FLAG = "graphNativePostMerge" as const;
 
