@@ -1541,7 +1541,9 @@
         "maxConcurrent": "Max concurrent tasks",
         "maxTriageConcurrent": "Max triage concurrent",
         "maxWorktrees": "Max worktrees",
-        "title": "Concurrency"
+        "title": "Concurrency",
+        "runningGlobal": "{{count}} running (all projects)",
+        "runningProject": "{{count}} running (this project)"
       },
       "engine": {
         "description": "Stopping the engine halts all AI work.",

@@ -20,9 +20,20 @@ const DEBOUNCE_MS = 500;
 type GlobalConcurrencyStatus = "idle" | "loading" | "loaded" | "error";
 
 // FNXC:GlobalConcurrencyControls 2026-06-25-22:45: Module-level singleton cache + subscriber set is the single source of truth shared by every mounted hook instance.
-const cache: { value: number | null; status: GlobalConcurrencyStatus } = {
+/*
+FNXC:GlobalConcurrencyControls 2026-06-26-06:26:
+The shared global-concurrency store carries read-only utilization counts (`currentlyActive` and `projectsActive`) alongside the editable cap so footer consumers can show live running-agent counts without adding backend writes or breaking the Command Center's existing cap-only UI.
+*/
+const cache: {
+  value: number | null;
+  status: GlobalConcurrencyStatus;
+  currentlyActive: number | null;
+  projectsActive: Record<string, number>;
+} = {
   value: null,
   status: "idle",
+  currentlyActive: null,
+  projectsActive: {},
 };
 const subscribers = new Set<() => void>();
 let inFlight: Promise<void> | null = null;
@@ -31,9 +42,16 @@ function notify() {
   for (const subscriber of subscribers) subscriber();
 }
 
-function setCache(next: { value: number | null; status: GlobalConcurrencyStatus }) {
+function setCache(next: {
+  value: number | null;
+  status: GlobalConcurrencyStatus;
+  currentlyActive?: number | null;
+  projectsActive?: Record<string, number>;
+}) {
   cache.value = next.value;
   cache.status = next.status;
+  if (next.currentlyActive !== undefined) cache.currentlyActive = next.currentlyActive;
+  if (next.projectsActive !== undefined) cache.projectsActive = next.projectsActive;
   notify();
 }
 
@@ -45,7 +63,12 @@ function ensureFetched(force = false): Promise<void> {
   inFlight = (async () => {
     try {
       const result = await fetchGlobalConcurrency();
-      setCache({ value: result.globalMaxConcurrent, status: "loaded" });
+      setCache({
+        value: result.globalMaxConcurrent,
+        status: "loaded",
+        currentlyActive: result.currentlyActive,
+        projectsActive: result.projectsActive,
+      });
     } catch {
       // Keep the previous value; non-interactive while in error state.
       setCache({ value: cache.value, status: "error" });
@@ -63,6 +86,8 @@ export interface UseGlobalConcurrencyResult {
   interactive: boolean;
   status: GlobalConcurrencyStatus;
   saveState: "idle" | "saving" | "saved" | "error";
+  currentlyActive: number;
+  projectActiveCount: (projectId?: string) => number;
   setValue: (raw: string) => void;
 }
 
@@ -110,7 +135,7 @@ export function useGlobalConcurrency(opts?: { activeWhen?: boolean }): UseGlobal
     setSaveState("saving");
     void updateGlobalConcurrency({ globalMaxConcurrent: v })
       .then(() => {
-        // Notifies ALL subscribers → both sliders re-sync to the persisted value.
+        // Notifies ALL subscribers → both sliders re-sync to the persisted value while keeping last-known read-only utilization counts until the next forced revalidate.
         setCache({ value: v, status: "loaded" });
         dirtyRef.current = false;
         pendingValueRef.current = null;
@@ -175,6 +200,12 @@ export function useGlobalConcurrency(opts?: { activeWhen?: boolean }): UseGlobal
     };
   }, [commit]);
 
+  const countsAreLoaded = cache.status === "loaded";
+  const projectActiveCount = useCallback((projectId?: string) => {
+    if (!countsAreLoaded || !projectId) return 0;
+    return cache.projectsActive[projectId] ?? 0;
+  }, [countsAreLoaded]);
+
   return {
     value: currentValue,
     min: SLIDER_MIN,
@@ -183,6 +214,8 @@ export function useGlobalConcurrency(opts?: { activeWhen?: boolean }): UseGlobal
     interactive: cache.status === "loaded",
     status: cache.status,
     saveState,
+    currentlyActive: countsAreLoaded ? (cache.currentlyActive ?? 0) : 0,
+    projectActiveCount,
     setValue,
   };
 }

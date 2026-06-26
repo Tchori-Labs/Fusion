@@ -23,6 +23,8 @@ const legacyMocks = vi.hoisted(() => ({
   fetchConfig: vi.fn(),
   fetchSettings: vi.fn(),
   updateSettings: vi.fn(),
+  fetchGlobalConcurrency: vi.fn(),
+  updateGlobalConcurrency: vi.fn(),
 }));
 
 vi.mock("../../api", () => apiMocks);
@@ -31,10 +33,25 @@ vi.mock("../../versionCheck", () => ({
   setAutoReloadEnabled: vi.fn(),
 }));
 
-async function openMenu() {
-  render(<EngineControlMenu projectId="proj_123" />);
+async function openMenu(projectId: string | undefined = "proj_123") {
+  render(<EngineControlMenu projectId={projectId} />);
   fireEvent.click(screen.getByTestId("engine-control-menu-trigger"));
   await screen.findByTestId("engine-control-menu");
+}
+
+function mockGlobalConcurrency(overrides: Partial<{
+  globalMaxConcurrent: number;
+  currentlyActive: number;
+  queuedCount: number;
+  projectsActive: Record<string, number>;
+}> = {}) {
+  legacyMocks.fetchGlobalConcurrency.mockResolvedValue({
+    globalMaxConcurrent: 6,
+    currentlyActive: 3,
+    queuedCount: 0,
+    projectsActive: { proj_123: 2 },
+    ...overrides,
+  });
 }
 
 describe("EngineControlMenu", () => {
@@ -47,6 +64,13 @@ describe("EngineControlMenu", () => {
     legacyMocks.fetchConfig.mockResolvedValue({ maxConcurrent: 2, rootDir: "/workspace/project" });
     legacyMocks.fetchSettings.mockResolvedValue({ ...defaultSettings });
     legacyMocks.updateSettings.mockResolvedValue({ ...defaultSettings });
+    mockGlobalConcurrency();
+    legacyMocks.updateGlobalConcurrency.mockResolvedValue({
+      globalMaxConcurrent: 6,
+      currentlyActive: 3,
+      queuedCount: 0,
+      projectsActive: { proj_123: 2 },
+    });
   });
 
   afterEach(() => {
@@ -97,7 +121,7 @@ describe("EngineControlMenu", () => {
 
     await waitFor(() => expect(screen.getAllByTestId("engine-control-pause-triage-btn")).toHaveLength(2));
     const pauseButton = screen.getAllByTestId("engine-control-pause-triage-btn")[1];
-    expect(pauseButton).toBeDisabled();
+    await waitFor(() => expect(pauseButton).toBeDisabled());
     expect(pauseButton).toHaveTextContent(/resume scheduling/i);
   });
 
@@ -150,6 +174,93 @@ describe("EngineControlMenu", () => {
     expect(await screen.findByLabelText(/max concurrent tasks/i)).toHaveAttribute("max", "50");
     expect(screen.getByLabelText(/max triage concurrent/i)).toHaveAttribute("max", "50");
     expect(screen.getByLabelText(/max worktrees/i)).toHaveAttribute("max", "50");
+  });
+
+  it("renders running counts and current-use markers with clamped slider positions", async () => {
+    legacyMocks.fetchSettings.mockResolvedValue({
+      ...defaultSettings,
+      maxConcurrent: 50,
+    });
+    mockGlobalConcurrency({
+      globalMaxConcurrent: 40,
+      currentlyActive: 40,
+      projectsActive: { proj_123: 90 },
+    });
+
+    await openMenu();
+
+    expect(await screen.findByTestId("engine-control-global-running")).toHaveTextContent("40 running (all projects)");
+    expect(screen.getByTestId("engine-control-project-running")).toHaveTextContent("90 running (this project)");
+    expect(screen.getByTestId("engine-control-global-use-marker")).toHaveStyle({ "--use-pct": "100%" });
+    expect(screen.getByTestId("engine-control-project-use-marker")).toHaveStyle({ "--use-pct": "100%" });
+  });
+
+  it("positions current-use markers at zero and mid-track for representative running counts", async () => {
+    mockGlobalConcurrency({
+      globalMaxConcurrent: 33,
+      currentlyActive: 17,
+      projectsActive: { proj_123: 0 },
+    });
+
+    await openMenu();
+
+    expect(await screen.findByTestId("engine-control-global-use-marker")).toHaveStyle({ "--use-pct": "50%" });
+    expect(screen.getByTestId("engine-control-project-use-marker")).toHaveStyle({ "--use-pct": "0%" });
+  });
+
+  it("defaults the current-project running count to zero for empty projectsActive and missing projectId", async () => {
+    mockGlobalConcurrency({
+      globalMaxConcurrent: 6,
+      currentlyActive: 0,
+      projectsActive: {},
+    });
+
+    await openMenu(undefined);
+
+    expect(await screen.findByTestId("engine-control-global-running")).toHaveTextContent("0 running (all projects)");
+    expect(screen.getByTestId("engine-control-project-running")).toHaveTextContent("0 running (this project)");
+    expect(screen.getByTestId("engine-control-global-use-marker")).toHaveStyle({ "--use-pct": "0%" });
+    expect(screen.getByTestId("engine-control-project-use-marker")).toHaveStyle({ "--use-pct": "0%" });
+  });
+
+  it("does not render running counts or markers while global concurrency is loading", async () => {
+    let resolveGlobalConcurrency!: (value: {
+      globalMaxConcurrent: number;
+      currentlyActive: number;
+      queuedCount: number;
+      projectsActive: Record<string, number>;
+    }) => void;
+    legacyMocks.fetchGlobalConcurrency.mockReturnValue(new Promise((resolve) => {
+      resolveGlobalConcurrency = resolve;
+    }));
+
+    await openMenu();
+
+    expect(screen.queryByTestId("engine-control-global-running")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("engine-control-project-running")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("engine-control-global-use-marker")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("engine-control-project-use-marker")).not.toBeInTheDocument();
+
+    await act(async () => {
+      resolveGlobalConcurrency({
+        globalMaxConcurrent: 6,
+        currentlyActive: 3,
+        queuedCount: 0,
+        projectsActive: { proj_123: 2 },
+      });
+    });
+  });
+
+  it("does not render running counts or markers when global concurrency fails to load", async () => {
+    legacyMocks.fetchGlobalConcurrency.mockRejectedValue(new Error("global concurrency unavailable"));
+
+    await openMenu();
+
+    await screen.findByRole("alert");
+    expect(screen.queryByTestId("engine-control-global-running")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("engine-control-project-running")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("engine-control-global-use-marker")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("engine-control-project-use-marker")).not.toBeInTheDocument();
   });
 
   it("persists a slider value of 50 through the debounced settings save", async () => {

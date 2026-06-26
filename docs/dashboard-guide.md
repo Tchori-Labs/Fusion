@@ -994,7 +994,7 @@ Use this panel when upgrading a project with pre-FN-6245/FN-6277 in-review rows 
 
 ### Executor footer engine controls
 
-The global AI engine stop/start control and triage pause/resume control live in the executor footer status bar rather than the header. Select the small engine-controls button beside the executor state badge, or select the state text such as **Running**, to open the footer popover. The popover includes **Stop AI engine** / **Start AI engine**, **Pause triage** / **Resume scheduling**, and live scheduler sliders for max concurrent tasks, max triage concurrency, and max worktrees. Slider changes save through the existing `/api/settings` path with the same debounced behavior used by Command Center controls; no separate backend route is required.
+The global AI engine stop/start control and triage pause/resume control live in the executor footer status bar rather than the header. Select the small engine-controls button beside the executor state badge, or select the state text such as **Running**, to open the footer popover. The popover includes **Stop AI engine** / **Start AI engine**, **Pause triage** / **Resume scheduling**, and live scheduler sliders for max concurrent tasks, max triage concurrency, and max worktrees. The global and current-project concurrency sliders also show how many agents are running and a dot on the slider track for current use, clamped to the track when usage exceeds the configured cap. Slider changes save through the existing `/api/settings` path with the same debounced behavior used by Command Center controls; no separate backend route is required.
 
 ### Engine status banner
 

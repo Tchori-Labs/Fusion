@@ -1531,7 +1531,9 @@
         "maxConcurrent": "",
         "maxTriageConcurrent": "",
         "maxWorktrees": "",
-        "title": ""
+        "title": "",
+        "runningGlobal": "",
+        "runningProject": ""
       },
       "engine": {
         "description": "",

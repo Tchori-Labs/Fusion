@@ -110,9 +110,32 @@
   font-family: var(--font-mono);
 }
 
+.engine-control-menu__slider-meta {
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+}
+
+.engine-control-menu__range-wrap {
+  --engine-control-range-thumb-size: var(--space-md);
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
 .engine-control-menu__range {
   width: 100%;
   accent-color: var(--accent);
+}
+
+/* FNXC:GlobalConcurrencyControls 2026-06-26-06:26: The current-use marker reuses the global .status-dot convention and is positioned with logical inset properties so utilization is visible on LTR/RTL slider tracks without intercepting drag input. */
+.engine-control-menu__use-marker {
+  --use-pct: 0%;
+  --use-offset: 0%;
+  position: absolute;
+  inset-block-start: 50%;
+  inset-inline-start: var(--use-offset, var(--use-pct));
+  transform: translate(-50%, -50%);
+  pointer-events: none;
 }
 
 .engine-control-menu__error {

@@ -1,5 +1,5 @@
 import "./EngineControlMenu.css";
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import { DEFAULT_PROJECT_SETTINGS } from "@fusion/core";
 import { Pause, Play, SlidersHorizontal, Square } from "lucide-react";
@@ -52,6 +52,18 @@ function getConcurrencySliderMax(key: keyof ConcurrencyValues, value: number) {
 
 function getErrorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
+}
+
+function getUseMarkerRatio(current: number, min: number, max: number) {
+  if (max <= min) return 0;
+  return clamp((current - min) / (max - min), 0, 1);
+}
+
+function getUseMarkerStyle(ratio: number): CSSProperties {
+  return {
+    "--use-pct": `${ratio * 100}%`,
+    "--use-offset": `calc((var(--engine-control-range-thumb-size) / 2) + ((100% - var(--engine-control-range-thumb-size)) * ${ratio}))`,
+  } as CSSProperties;
 }
 
 /*
@@ -193,6 +205,11 @@ export const EngineControlMenu = forwardRef<EngineControlMenuHandle, EngineContr
         : concurrencySaveState === "error"
           ? t("commandCenter.controls.status.saveError", "Save failed")
           : t("commandCenter.controls.status.ready", "Ready");
+  const globalCountsLoaded = gc.status === "loaded";
+  const projectActive = gc.projectActiveCount(projectId);
+  const maxConcurrentSliderMax = getConcurrencySliderMax("maxConcurrent", concurrencyValues.maxConcurrent);
+  const globalUseMarkerRatio = getUseMarkerRatio(gc.currentlyActive, gc.min, gc.sliderMax);
+  const projectUseMarkerRatio = getUseMarkerRatio(projectActive, CONCURRENCY_SLIDER_LIMITS.maxConcurrent.min, maxConcurrentSliderMax);
 
   return (
     <div className="engine-control-menu" ref={menuRef}>
@@ -253,16 +270,31 @@ export const EngineControlMenu = forwardRef<EngineControlMenuHandle, EngineContr
                 {t("settings.scheduling.maximumConcurrentAgentsAcrossAllProjects", "Maximum concurrent agents across all projects")}
                 <strong>{gc.value}</strong>
               </span>
-              <input
-                id="engine-control-global-max-concurrent"
-                className="engine-control-menu__range input"
-                type="range"
-                min={gc.min}
-                max={gc.sliderMax}
-                value={gc.value}
-                disabled={!gc.interactive}
-                onChange={(event) => gc.setValue(event.target.value)}
-              />
+              {globalCountsLoaded ? (
+                <span className="engine-control-menu__slider-meta" data-testid="engine-control-global-running">
+                  {t("commandCenter.controls.concurrency.runningGlobal", "{{count}} running (all projects)", { count: gc.currentlyActive })}
+                </span>
+              ) : null}
+              <span className="engine-control-menu__range-wrap">
+                <input
+                  id="engine-control-global-max-concurrent"
+                  className="engine-control-menu__range input"
+                  type="range"
+                  min={gc.min}
+                  max={gc.sliderMax}
+                  value={gc.value}
+                  disabled={!gc.interactive}
+                  onChange={(event) => gc.setValue(event.target.value)}
+                />
+                {globalCountsLoaded ? (
+                  <span
+                    className="status-dot status-dot--online engine-control-menu__use-marker"
+                    style={getUseMarkerStyle(globalUseMarkerRatio)}
+                    data-testid="engine-control-global-use-marker"
+                    aria-hidden="true"
+                  />
+                ) : null}
+              </span>
             </label>
             {gc.status === "error" ? <p className="engine-control-menu__error" role="alert">{t("commandCenter.controls.concurrency.error", "Unable to load concurrency settings")}</p> : null}
           </div>
@@ -274,26 +306,45 @@ export const EngineControlMenu = forwardRef<EngineControlMenuHandle, EngineContr
                 {saveLabel}
               </span>
             </div>
+            {/**
+              FNXC:GlobalConcurrencyControls 2026-06-26-06:26:
+              The footer concurrency panel now shows read-only utilization counts next to the editable caps so operators can compare running agents against limits without opening another dashboard surface. Counts render only after the shared global-concurrency hook is loaded to avoid presenting a stale zero as live truth.
+            */}
             <label className="engine-control-menu__slider" htmlFor="engine-control-max-concurrent">
               <span className="engine-control-menu__slider-label">
                 {t("commandCenter.controls.concurrency.maxConcurrent", "Max concurrent tasks")}
                 <strong>{concurrencyValues.maxConcurrent}</strong>
               </span>
-              <input
-                id="engine-control-max-concurrent"
-                className="engine-control-menu__range input"
-                type="range"
-                min={CONCURRENCY_SLIDER_LIMITS.maxConcurrent.min}
-                max={getConcurrencySliderMax("maxConcurrent", concurrencyValues.maxConcurrent)}
-                value={concurrencyValues.maxConcurrent}
-                disabled={concurrencyState.status === "loading"}
-                onChange={(event) => updateConcurrencyValue(
-                  "maxConcurrent",
-                  event.target.value,
-                  CONCURRENCY_SLIDER_LIMITS.maxConcurrent.min,
-                  getConcurrencySliderMax("maxConcurrent", concurrencyValues.maxConcurrent),
-                )}
-              />
+              {globalCountsLoaded ? (
+                <span className="engine-control-menu__slider-meta" data-testid="engine-control-project-running">
+                  {t("commandCenter.controls.concurrency.runningProject", "{{count}} running (this project)", { count: projectActive })}
+                </span>
+              ) : null}
+              <span className="engine-control-menu__range-wrap">
+                <input
+                  id="engine-control-max-concurrent"
+                  className="engine-control-menu__range input"
+                  type="range"
+                  min={CONCURRENCY_SLIDER_LIMITS.maxConcurrent.min}
+                  max={maxConcurrentSliderMax}
+                  value={concurrencyValues.maxConcurrent}
+                  disabled={concurrencyState.status === "loading"}
+                  onChange={(event) => updateConcurrencyValue(
+                    "maxConcurrent",
+                    event.target.value,
+                    CONCURRENCY_SLIDER_LIMITS.maxConcurrent.min,
+                    maxConcurrentSliderMax,
+                  )}
+                />
+                {globalCountsLoaded ? (
+                  <span
+                    className="status-dot status-dot--online engine-control-menu__use-marker"
+                    style={getUseMarkerStyle(projectUseMarkerRatio)}
+                    data-testid="engine-control-project-use-marker"
+                    aria-hidden="true"
+                  />
+                ) : null}
+              </span>
             </label>
             <label className="engine-control-menu__slider" htmlFor="engine-control-max-triage-concurrent">
               <span className="engine-control-menu__slider-label">
