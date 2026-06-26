@@ -190,7 +190,14 @@ import {
   assertProjectRootDir,
 } from "./project-root-guard.js";
 import { generateTaskLineageId, normalizeTaskCommitAssociation } from "./task-lineage.js";
-import { createDistributedTaskIdAllocator, reconcileTaskIdState, resolveLocalNodeId, type DistributedTaskIdAllocator } from "./distributed-task-id.js";
+import {
+  commitDistributedTaskIdReservationInExistingTransaction,
+  createDistributedTaskIdAllocator,
+  reconcileTaskIdState,
+  resolveLocalNodeId,
+  rollbackDistributedTaskIdReservationForFailedCreateInExistingTransaction,
+  type DistributedTaskIdAllocator,
+} from "./distributed-task-id.js";
 import { detectStalledReview } from "./stalled-review-detector.js";
 import { computeRetrySummary } from "./retry-summary.js";
 import { archiveAsSameAgentDuplicate, findSameAgentDuplicates } from "./duplicate-intake.js";
@@ -3663,13 +3670,25 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
    * for backward compatibility and debugging. Create paths must call this variant
    * so duplicate IDs fail safely instead of overwriting existing rows.
    */
-  private async atomicCreateTaskJson(dir: string, task: Task, operation: string): Promise<void> {
+  private async atomicCreateTaskJson(
+    dir: string,
+    task: Task,
+    operation: string,
+    reservationCommit?: { reservationId: string; nodeId: string },
+  ): Promise<void> {
     const id = this.getTaskIdFromDir(dir);
     let deletedAt: string | undefined;
     this.db.transactionImmediate(() => {
       deletedAt = this.getSoftDeletedWriteConflict(id, task);
       if (deletedAt) return;
       this.insertTaskWithFtsRecovery(task, operation);
+      if (reservationCommit) {
+        /*
+        FNXC:TaskIdReservation 2026-06-26-00:00:
+        A distributed reservation is `committed` iff the corresponding `tasks` row is inserted in the same SQLite transaction. Disk artifacts are guarded separately after this transaction, but the reservation flip must never be a later durability point.
+        */
+        commitDistributedTaskIdReservationInExistingTransaction(this.db, reservationCommit);
+      }
     });
     if (deletedAt) {
       this.throwSoftDeletedWriteBlocked(id, deletedAt, operation);
@@ -4285,7 +4304,7 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
     options?: {
       onSummarize?: (description: string) => Promise<string | null>;
       settings?: { autoSummarizeTitles?: boolean };
-      createTaskWithId?: (taskId: string) => Promise<Task>;
+      createTaskWithId?: (taskId: string, reservationCommit: { reservationId: string; nodeId: string }) => Promise<Task>;
     },
   ): Promise<Task> {
     const settings = await this.getSettingsFast();
@@ -4299,21 +4318,50 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
 
     let createdTask: Task | null = null;
     try {
+      const reservationCommit = { reservationId: reservation.reservationId, nodeId };
       createdTask = options?.createTaskWithId
-        ? await options.createTaskWithId(reservation.taskId)
-        : await this.createTaskWithReservedId(input, { taskId: reservation.taskId });
-      await allocator.commitDistributedTaskIdReservation({
-        reservationId: reservation.reservationId,
-        nodeId,
-      });
+        ? await options.createTaskWithId(reservation.taskId, reservationCommit)
+        : await this.createTaskWithReservedId(input, { taskId: reservation.taskId, reservationCommit });
       return createdTask;
     } catch (error) {
-      await allocator.abortDistributedTaskIdReservation({
-        reservationId: reservation.reservationId,
-        nodeId,
-        reason: "failed-create",
-      }).catch(() => undefined);
+      await this.rollbackFailedDistributedReservationCreate(
+        reservation.taskId,
+        { reservationId: reservation.reservationId, nodeId },
+        error,
+      ).catch(() => undefined);
       throw error;
+    }
+  }
+
+  private async rollbackFailedDistributedReservationCreate(
+    taskId: string,
+    reservationCommit: { reservationId: string; nodeId: string },
+    cause: unknown,
+  ): Promise<void> {
+    const dir = this.taskDir(taskId);
+    if (this.isWatching) this.taskCache.delete(taskId);
+    this.db.transactionImmediate(() => {
+      this.deleteTaskById(taskId);
+      rollbackDistributedTaskIdReservationForFailedCreateInExistingTransaction(this.db, {
+        reservationId: reservationCommit.reservationId,
+        nodeId: reservationCommit.nodeId,
+        reason: "failed-create",
+      });
+      this.insertRunAuditEventRow({
+        taskId,
+        domain: "database",
+        mutationType: "task:reservation-commit-rolled-back",
+        target: taskId,
+        metadata: {
+          reservationId: reservationCommit.reservationId,
+          nodeId: reservationCommit.nodeId,
+          reason: "failed-create",
+          error: cause instanceof Error ? cause.message : String(cause),
+        },
+      });
+    });
+    if (existsSync(dir)) {
+      await rm(dir, { recursive: true, force: true });
     }
   }
 
@@ -4551,14 +4599,14 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
     // U7c: selection seeds are optional-group node ids (not materialized
     // `workflow_steps` rows), so a failed task creation strands nothing to clean.
     const task: Task = await this.createTaskWithDistributedReservation(input, {
-      createTaskWithId: async (taskId) => {
+      createTaskWithId: async (taskId, reservationCommit) => {
         await this.assertNoDependencyCycle(taskId, input.dependencies ?? [], "createTask");
         return this._createTaskInternal(
           input,
           title,
           resolvedWorkflowSteps,
           taskId,
-          { invokeTaskCreatedHook: shouldInvokeTaskCreatedHook && !hasPendingSummarization },
+          { invokeTaskCreatedHook: shouldInvokeTaskCreatedHook && !hasPendingSummarization, reservationCommit },
         );
       },
     });
@@ -4651,6 +4699,7 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
       prompt?: string;
       applyDefaultWorkflowSteps?: boolean;
       invokeTaskCreatedHook?: boolean;
+      reservationCommit?: { reservationId: string; nodeId: string };
     },
   ): Promise<Task> {
     if (!input.description?.trim()) {
@@ -4744,6 +4793,7 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
       updatedAt: options.updatedAt,
       promptOverride: options.prompt,
       invokeTaskCreatedHook: options.invokeTaskCreatedHook,
+      reservationCommit: options.reservationCommit,
     });
 
     // Record the inherited workflow selection now that the task row exists.
@@ -4816,6 +4866,7 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
       updatedAt?: string;
       promptOverride?: string;
       invokeTaskCreatedHook?: boolean;
+      reservationCommit?: { reservationId: string; nodeId: string };
     },
   ): Promise<Task> {
     const now = options?.createdAt ?? new Date().toISOString();
@@ -4885,7 +4936,7 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
     this.assertTaskIdAvailable(id);
 
     const dir = this.taskDir(id);
-    await this.atomicCreateTaskJson(dir, task, "createTask");
+    await this.atomicCreateTaskJson(dir, task, "createTask", options?.reservationCommit);
 
     // Update cache if watcher is active
     if (this.isWatching) this.taskCache.set(id, { ...task });
@@ -5059,7 +5110,7 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
     const now = new Date().toISOString();
 
     return this.createTaskWithDistributedReservation({ description: sourceTask.description }, {
-      createTaskWithId: async (newId) => {
+      createTaskWithId: async (newId, reservationCommit) => {
         // FN-5077: duplicated drift-stripped fragments may normalize to null and should remain unset.
         const normalizedTitle = normalizeTitleForTaskId(sourceTask.title, newId);
         if (normalizedTitle.changed) {
@@ -5090,7 +5141,7 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
         this.assertTaskIdAvailable(newId);
 
         const newDir = this.taskDir(newId);
-        await this.atomicCreateTaskJson(newDir, newTask, "duplicateTask");
+        await this.atomicCreateTaskJson(newDir, newTask, "duplicateTask", reservationCommit);
         const sanitizedPrompt = sanitizeFileScopeInPromptContent(sourceTask.prompt);
         if (sanitizedPrompt.dropped.length > 0) {
           storeLog.log(`[file-scope-sanitize] duplicate ${newId} from ${id}: dropped=[${sanitizedPrompt.dropped.join(",")}]`);
@@ -5137,7 +5188,7 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
     }
 
     return this.createTaskWithDistributedReservation({ description: feedback.trim() }, {
-      createTaskWithId: async (newId) => {
+      createTaskWithId: async (newId, reservationCommit) => {
         // FN-5077: keep deterministic "Refinement" fallback when normalized refinement label is unusable (null).
         const normalizedTitle = normalizeTitleForTaskId(`Refinement: ${sourceLabel}`, newId);
         if (normalizedTitle.changed) {
@@ -5179,7 +5230,7 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
         this.assertTaskIdAvailable(newId);
 
         const newDir = this.taskDir(newId);
-        await this.atomicCreateTaskJson(newDir, newTask, "refineTask");
+        await this.atomicCreateTaskJson(newDir, newTask, "refineTask", reservationCommit);
         const prompt = `# ${newTask.title}\n\n${newTask.description}\n`;
         const sanitizedPrompt = sanitizeFileScopeInPromptContent(prompt);
         await mkdir(newDir, { recursive: true });

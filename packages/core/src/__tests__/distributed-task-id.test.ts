@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { Database } from "../db.js";
-import { createDistributedTaskIdAllocator, DistributedTaskIdError, reconcileTaskIdState } from "../distributed-task-id.js";
+import {
+  createDistributedTaskIdAllocator,
+  DistributedTaskIdError,
+  reconcileTaskIdState,
+  rollbackDistributedTaskIdReservationForFailedCreateInExistingTransaction,
+} from "../distributed-task-id.js";
 
 describe("distributed-task-id allocator", () => {
   const createAllocator = () => {
@@ -41,6 +46,24 @@ describe("distributed-task-id allocator", () => {
     expect(aborted.committedClusterTaskCount).toBe(reservation.committedClusterTaskCount);
     const state = await allocator.getDistributedTaskIdState({ prefix: "FN" });
     expect(state.burnedReservationCount).toBe(1);
+  });
+
+  it("rolls back a committed failed-create reservation and preserves sequence permanence", async () => {
+    const { db, allocator } = createAllocator();
+    const first = await allocator.reserveDistributedTaskId({ prefix: "FN", nodeId: "node-a" });
+    await allocator.commitDistributedTaskIdReservation({ reservationId: first.reservationId, nodeId: "node-a" });
+
+    const rolledBack = db.transaction(() => rollbackDistributedTaskIdReservationForFailedCreateInExistingTransaction(db, {
+      reservationId: first.reservationId,
+      nodeId: "node-a",
+      reason: "failed-create",
+    }));
+    const second = await allocator.reserveDistributedTaskId({ prefix: "FN", nodeId: "node-a" });
+    const state = await allocator.getDistributedTaskIdState({ prefix: "FN" });
+
+    expect(rolledBack).toMatchObject({ taskId: "FN-001", sequence: 1, committedClusterTaskCount: 0 });
+    expect(second.taskId).toBe("FN-002");
+    expect(state).toMatchObject({ committedClusterTaskCount: 0, burnedReservationCount: 1, nextSequence: 3 });
   });
 
   it("expired reservations cannot be committed and count as burned", async () => {

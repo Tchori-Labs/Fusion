@@ -163,8 +163,7 @@ function getNextSequenceFloor(db: Database, prefix: string): number {
   return nextSequence;
 }
 
-function ensureStateRow(db: Database, prefix: string): void {
-  const nowIso = new Date().toISOString();
+function ensureStateRow(db: Database, prefix: string, nowIso = new Date().toISOString()): void {
   const nextSequence = getNextSequenceFloor(db, prefix);
   db.prepare(
     `INSERT OR IGNORE INTO distributed_task_id_state (
@@ -177,6 +176,148 @@ function ensureStateRow(db: Database, prefix: string): void {
          updatedAt = ?
      WHERE prefix = ?`,
   ).run(nextSequence, nowIso, prefix);
+}
+
+function expireDistributedTaskIdReservationsInExistingTransaction(db: Database, nowIso: string): number {
+  const result = db.prepare(
+    `UPDATE distributed_task_id_reservations
+     SET status = 'expired', reason = 'expired', abortedAt = ?
+     WHERE status = 'reserved' AND expiresAt <= ?`,
+  ).run(nowIso, nowIso) as { changes?: number };
+  return result.changes ?? 0;
+}
+
+/**
+ * FNXC:TaskIdReservation 2026-06-26-00:00:
+ * Distributed reservation commits must be composable into the caller's task-row insert transaction. This helper intentionally takes no allocator lock and opens no SQLite transaction so TaskStore can commit `distributed_task_id_reservations` and `tasks` atomically without better-sqlite3 nested-transaction failures.
+ */
+export function commitDistributedTaskIdReservationInExistingTransaction(
+  db: Database,
+  input: DistributedTaskIdCommitInput,
+  nowIso = new Date().toISOString(),
+): DistributedTaskIdCommitResult {
+  expireDistributedTaskIdReservationsInExistingTransaction(db, nowIso);
+  const row = db
+    .prepare(
+      `SELECT reservationId, prefix, nodeId, sequence, taskId, status, reason, expiresAt, committedAt, abortedAt
+       FROM distributed_task_id_reservations
+       WHERE reservationId = ?`,
+    )
+    .get(input.reservationId) as ReservationRow | undefined;
+
+  if (!row) {
+    throw new DistributedTaskIdError("reservation not found", "reservation_not_found");
+  }
+  if (row.nodeId !== input.nodeId) {
+    throw new DistributedTaskIdError("reservation belongs to a different node", "reservation_not_owned");
+  }
+  if (row.status === "expired") {
+    throw new DistributedTaskIdError("reservation has expired", "reservation_expired");
+  }
+  if (row.status !== "reserved") {
+    throw new DistributedTaskIdError("reservation already finalized", "reservation_finalized");
+  }
+
+  db.prepare(
+    `UPDATE distributed_task_id_reservations
+     SET status = 'committed', committedAt = ?, updatedAt = ?
+     WHERE reservationId = ?`,
+  ).run(nowIso, nowIso, row.reservationId);
+
+  ensureStateRow(db, row.prefix, nowIso);
+  db.prepare(
+    `UPDATE distributed_task_id_state
+     SET committedClusterTaskCount = committedClusterTaskCount + 1,
+         lastCommittedTaskId = ?,
+         updatedAt = ?
+     WHERE prefix = ?`,
+  ).run(row.taskId, nowIso, row.prefix);
+
+  const state = db
+    .prepare(
+      "SELECT committedClusterTaskCount FROM distributed_task_id_state WHERE prefix = ?",
+    )
+    .get(row.prefix) as { committedClusterTaskCount: number };
+  db.bumpLastModified();
+
+  return {
+    reservationId: row.reservationId,
+    taskId: row.taskId,
+    sequence: row.sequence,
+    committedClusterTaskCount: state.committedClusterTaskCount,
+    committedAt: nowIso,
+  };
+}
+
+/**
+ * FNXC:TaskIdReservation 2026-06-26-00:00:
+ * Post-insert create failures must burn the distributed ID without leaving a committed reservation. This transaction-participating rollback moves reserved or committed create reservations to `aborted`, recomputes committed counters, and preserves the reservation row so FN-5105 sequence permanence still prevents ID reuse.
+ */
+export function rollbackDistributedTaskIdReservationForFailedCreateInExistingTransaction(
+  db: Database,
+  input: DistributedTaskIdAbortInput,
+  nowIso = new Date().toISOString(),
+): DistributedTaskIdAbortResult {
+  expireDistributedTaskIdReservationsInExistingTransaction(db, nowIso);
+  const row = db
+    .prepare(
+      `SELECT reservationId, prefix, nodeId, sequence, taskId, status, reason, expiresAt, committedAt, abortedAt
+       FROM distributed_task_id_reservations
+       WHERE reservationId = ?`,
+    )
+    .get(input.reservationId) as ReservationRow | undefined;
+
+  if (!row) {
+    throw new DistributedTaskIdError("reservation not found", "reservation_not_found");
+  }
+  if (row.nodeId !== input.nodeId) {
+    throw new DistributedTaskIdError("reservation belongs to a different node", "reservation_not_owned");
+  }
+  if (row.status === "expired") {
+    throw new DistributedTaskIdError("reservation has expired", "reservation_expired");
+  }
+  if (row.status !== "reserved" && row.status !== "committed" && row.status !== "aborted") {
+    throw new DistributedTaskIdError("reservation already finalized", "reservation_finalized");
+  }
+
+  if (row.status !== "aborted") {
+    db.prepare(
+      `UPDATE distributed_task_id_reservations
+       SET status = 'aborted', reason = ?, committedAt = NULL, abortedAt = ?, updatedAt = ?
+       WHERE reservationId = ?`,
+    ).run(input.reason, nowIso, nowIso, row.reservationId);
+  }
+
+  ensureStateRow(db, row.prefix, nowIso);
+  const count = db
+    .prepare(
+      "SELECT COUNT(*) AS count FROM distributed_task_id_reservations WHERE prefix = ? AND status = 'committed'",
+    )
+    .get(row.prefix) as { count: number };
+  const lastCommitted = db
+    .prepare(
+      `SELECT taskId FROM distributed_task_id_reservations
+       WHERE prefix = ? AND status = 'committed'
+       ORDER BY sequence DESC
+       LIMIT 1`,
+    )
+    .get(row.prefix) as { taskId: string } | undefined;
+  db.prepare(
+    `UPDATE distributed_task_id_state
+     SET committedClusterTaskCount = ?,
+         lastCommittedTaskId = ?,
+         updatedAt = ?
+     WHERE prefix = ?`,
+  ).run(count.count, lastCommitted?.taskId ?? null, nowIso, row.prefix);
+  db.bumpLastModified();
+
+  return {
+    reservationId: row.reservationId,
+    taskId: row.taskId,
+    sequence: row.sequence,
+    committedClusterTaskCount: count.count,
+    abortedAt: nowIso,
+  };
 }
 
 export function reconcileTaskIdState(db: Database): string[] {
@@ -240,14 +381,7 @@ export function createDistributedTaskIdAllocator(db: Database): DistributedTaskI
     }
   };
 
-  const expireReservations = (nowIso: string): number => {
-    const result = db.prepare(
-      `UPDATE distributed_task_id_reservations
-       SET status = 'expired', reason = 'expired', abortedAt = ?
-       WHERE status = 'reserved' AND expiresAt <= ?`,
-    ).run(nowIso, nowIso) as { changes?: number };
-    return result.changes ?? 0;
-  };
+  const expireReservations = (nowIso: string): number => expireDistributedTaskIdReservationsInExistingTransaction(db, nowIso);
 
   const taskIdExists = (prefix: string, sequence: number): boolean => {
     const taskId = formatDistributedTaskId(prefix, sequence);
@@ -319,59 +453,7 @@ export function createDistributedTaskIdAllocator(db: Database): DistributedTaskI
     commitDistributedTaskIdReservation: async (input) =>
       withLock(async () => {
         const nowIso = new Date().toISOString();
-        return db.transaction(() => {
-          expireReservations(nowIso);
-          const row = db
-            .prepare(
-              `SELECT reservationId, prefix, nodeId, sequence, taskId, status, reason, expiresAt, committedAt, abortedAt
-               FROM distributed_task_id_reservations
-               WHERE reservationId = ?`,
-            )
-            .get(input.reservationId) as ReservationRow | undefined;
-
-          if (!row) {
-            throw new DistributedTaskIdError("reservation not found", "reservation_not_found");
-          }
-          if (row.nodeId !== input.nodeId) {
-            throw new DistributedTaskIdError("reservation belongs to a different node", "reservation_not_owned");
-          }
-          if (row.status === "expired") {
-            throw new DistributedTaskIdError("reservation has expired", "reservation_expired");
-          }
-          if (row.status !== "reserved") {
-            throw new DistributedTaskIdError("reservation already finalized", "reservation_finalized");
-          }
-
-          db.prepare(
-            `UPDATE distributed_task_id_reservations
-             SET status = 'committed', committedAt = ?, updatedAt = ?
-             WHERE reservationId = ?`,
-          ).run(nowIso, nowIso, row.reservationId);
-
-          ensureStateRow(db, row.prefix);
-          db.prepare(
-            `UPDATE distributed_task_id_state
-             SET committedClusterTaskCount = committedClusterTaskCount + 1,
-                 lastCommittedTaskId = ?,
-                 updatedAt = ?
-             WHERE prefix = ?`,
-          ).run(row.taskId, nowIso, row.prefix);
-
-          const state = db
-            .prepare(
-              "SELECT committedClusterTaskCount FROM distributed_task_id_state WHERE prefix = ?",
-            )
-            .get(row.prefix) as { committedClusterTaskCount: number };
-          db.bumpLastModified();
-
-          return {
-            reservationId: row.reservationId,
-            taskId: row.taskId,
-            sequence: row.sequence,
-            committedClusterTaskCount: state.committedClusterTaskCount,
-            committedAt: nowIso,
-          };
-        });
+        return db.transaction(() => commitDistributedTaskIdReservationInExistingTransaction(db, input, nowIso));
       }),
     abortDistributedTaskIdReservation: async (input) =>
       withLock(async () => {
