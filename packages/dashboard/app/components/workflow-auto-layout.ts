@@ -158,6 +158,9 @@ export function autoLayout(
   /*
    * FNXC:WorkflowContainerEdges 2026-06-26-08:05:
    * Auto-layout must space graph layers by the widest rendered node in each prior layer. Container nodes render wider than cards, so fixed card-width layer spacing can place the next optional-group/foreach/loop on top of the previous container's source handle.
+   *
+   * FNXC:WorkflowContainerEdges 2026-06-27-22:16:
+   * The invariant is run-length based, not single-container based: every layer in a consecutive optional-group/foreach/loop sequence must advance by that layer's rendered width so N adjacent containers keep visible target/source edge handles.
    */
   const layerMaxWidths = new Map<number, number>();
   for (const [layerIndex, layerIds] of layers) {

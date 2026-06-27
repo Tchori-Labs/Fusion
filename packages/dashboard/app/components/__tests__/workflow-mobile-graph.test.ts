@@ -133,7 +133,7 @@ describe("buildMobileWorkflowGraph", () => {
     expect(rows[1].summary).toBe("Gate (blocks)");
   });
 
-  it("summarizes Browser Verification container connections for built-in mobile outlines", () => {
+  it("summarizes consecutive optional-group container connections for built-in mobile outlines", () => {
     for (const [name, ir, incoming] of [
       ["coding", BUILTIN_CODING_WORKFLOW_IR, "execute"],
       ["stepwise", BUILTIN_STEPWISE_CODING_WORKFLOW_IR, "steps"],
@@ -141,13 +141,21 @@ describe("buildMobileWorkflowGraph", () => {
       const { nodes, edges } = irToFlow(workflowDef(ir));
       const rows = buildMobileWorkflowGraph(nodes, edges, ir.version === "v2" ? ir.columns : []);
       const browserVerification = rows.find((row) => row.id === "browser-verification");
+      const codeReview = rows.find((row) => row.id === "code-review");
       const incomingRow = rows.find((row) => row.id === incoming);
 
       expect(browserVerification?.kind, name).toBe("optional-group");
+      expect(codeReview?.kind, name).toBe("optional-group");
       expect(incomingRow?.outgoing.some((out) => out.target === "browser-verification"), name).toBe(true);
       expect(browserVerification?.outgoing.map((out) => [out.target, out.label]), name).toEqual(
         expect.arrayContaining([
           ["code-review", "success"],
+          ["end", "failure"],
+        ]),
+      );
+      expect(codeReview?.outgoing.map((out) => [out.target, out.label]), name).toEqual(
+        expect.arrayContaining([
+          ["review", "success"],
           ["end", "failure"],
         ]),
       );

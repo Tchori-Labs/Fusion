@@ -292,6 +292,23 @@ function fallbackWidthForNode(node: WorkflowIrNode): number {
   return groupTemplateConfigOf(node) ? FOREACH_GROUP_WIDTH : WF_CARD_WIDTH;
 }
 
+function fallbackHeightForNode(node: WorkflowIrNode): number {
+  return groupTemplateConfigOf(node) ? FOREACH_GROUP_HEIGHT : WF_CARD_HEIGHT;
+}
+
+function isContainerNode(node: WorkflowIrNode): boolean {
+  return Boolean(groupTemplateConfigOf(node));
+}
+
+function verticalSpansOverlap(
+  a: { y: number },
+  aHeight: number,
+  b: { y: number },
+  bHeight: number,
+): boolean {
+  return a.y < b.y + bHeight && b.y < a.y + aHeight;
+}
+
 /**
  * FNXC:WorkflowContainerEdges 2026-06-26-07:30:
  * Container nodes are much wider than step cards, so fallback graph layout must advance by each rendered node width. Fixed index spacing lets optional-group/foreach/loop backgrounds overlap adjacent handles, making correct top-level edges look visually disconnected in the workflow editor.
@@ -304,6 +321,32 @@ function fallbackXPositionsForNodes(nodes: readonly WorkflowIrNode[], originX = 
     nextX += fallbackWidthForNode(node) + WF_FALLBACK_NODE_GAP;
   }
   return positions;
+}
+
+function hasUsableTopLevelLayout(def: WorkflowDefinition): boolean {
+  if (!def.ir.nodes.every((node) => Boolean(def.layout?.[node.id]))) return false;
+
+  const byId = new Map(def.ir.nodes.map((node) => [node.id, node] as const));
+  for (const edge of def.ir.edges) {
+    if (edge.kind === "rework") continue;
+    const source = byId.get(edge.from);
+    const target = byId.get(edge.to);
+    const sourcePos = def.layout?.[edge.from];
+    const targetPos = def.layout?.[edge.to];
+    if (!source || !target || !sourcePos || !targetPos) continue;
+    if (!isContainerNode(source) && !isContainerNode(target)) continue;
+    if (!verticalSpansOverlap(sourcePos, fallbackHeightForNode(source), targetPos, fallbackHeightForNode(target))) continue;
+
+    const sourceRight = sourcePos.x + fallbackWidthForNode(source);
+    const targetRight = targetPos.x + fallbackWidthForNode(target);
+    if (sourcePos.x <= targetPos.x) {
+      if (sourceRight > targetPos.x) return false;
+    } else if (targetRight > sourcePos.x) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 /** CSS class for an edge given its condition + rework kind. Rework takes
@@ -365,10 +408,13 @@ export function irToFlow(def: WorkflowDefinition): {
   /*
    * FNXC:WorkflowContainerEdges 2026-06-26-07:58:
    * Built-in workflow layouts can lag behind newly inserted container nodes. Mixing stale saved positions with fallback-only optional-group/foreach/loop positions reintroduces overlapping handles, so an incomplete top-level layout falls back as one coherent graph instead of preserving disconnected partial coordinates.
+   *
+   * FNXC:WorkflowContainerEdges 2026-06-27-22:15:
+   * A layout can also be complete-but-stale after consecutive 560px containers are inserted into a formerly card-spaced path. The read-only graph does not run auto-layout, so reject saved top-level coordinates only when a connected optional-group/foreach/loop span actually overlaps another node in the same visual row. This preserves intentional compact or vertical custom layouts while repairing stale container-handle occlusion.
    */
-  const hasCompleteTopLevelLayout = def.ir.nodes.every((node) => Boolean(def.layout?.[node.id]));
+  const useSavedTopLevelLayout = hasUsableTopLevelLayout(def);
   const stepNodes = def.ir.nodes.map((node): FlowNode<WorkflowFlowNodeData> => {
-    const pos = hasCompleteTopLevelLayout ? def.layout?.[node.id] : undefined;
+    const pos = useSavedTopLevelLayout ? def.layout?.[node.id] : undefined;
     const kind = editorKind(node);
     const column = isV2(def.ir) ? node.column : undefined;
     const colIndex = column ? columns.findIndex((c) => c.id === column) : -1;

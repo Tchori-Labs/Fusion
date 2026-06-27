@@ -35,6 +35,7 @@ import {
   cascadeDelete,
   COLUMN_BAND_HEIGHT,
   WF_CARD_WIDTH,
+  WF_FALLBACK_NODE_GAP,
   WF_CARD_MAX_WIDTH,
   WF_CARD_HEIGHT,
   FOREACH_GROUP_WIDTH,
@@ -76,6 +77,27 @@ function assertContainerHandles(kind: "optional-group" | "foreach" | "loop", dat
     expect(root?.querySelectorAll(".react-flow__handle.source")).toHaveLength(1);
   } finally {
     unmount();
+  }
+}
+
+function assertRunDoesNotOverlap(
+  name: string,
+  nodes: FlowNode<WorkflowFlowNodeData>[],
+  run: readonly string[],
+  gap = 0,
+): void {
+  const byId = new Map(nodes.map((node) => [node.id, node] as const));
+  for (let index = 0; index < run.length - 1; index++) {
+    const currentId = run[index];
+    const nextId = run[index + 1];
+    const current = byId.get(currentId);
+    const next = byId.get(nextId);
+    expect(current, `${name} ${currentId}`).toBeTruthy();
+    expect(next, `${name} ${nextId}`).toBeTruthy();
+    expect(
+      next!.position.x,
+      `${name} ${currentId}->${nextId} should leave rendered-width gap`,
+    ).toBeGreaterThanOrEqual(current!.position.x + nodeWidth(current!) + gap);
   }
 }
 
@@ -374,11 +396,12 @@ describe("workflow-flow-mapping v2 round-trip", () => {
       { id: "start", type: "start", position: { x: 0, y: 0 }, data: { kind: "start", label: "start", column: "todo" } },
       { id: "end", type: "end", position: { x: 100, y: 0 }, data: { kind: "end", label: "end", column: "todo" } },
     ];
-    const staleIr = flowToIr("wf", nodes, [], nextColumns).ir;
+    const startToEnd = [{ id: "e-start-end", source: "start", target: "end", data: { condition: "success" } }];
+    const staleIr = flowToIr("wf", nodes, startToEnd, nextColumns).ir;
     expect(() => parseWorkflowIr(staleIr)).toThrow(/references undefined column 'todo'/);
 
     const reconciled = reconcileNodeColumns(nodes.filter((node) => !isColumnBandNode(node.id)), nextColumns);
-    const { ir: out } = flowToIr("wf", [...columnsToBandNodes(nextColumns), ...reconciled], [], nextColumns);
+    const { ir: out } = flowToIr("wf", [...columnsToBandNodes(nextColumns), ...reconciled], startToEnd, nextColumns);
 
     expect(() => parseWorkflowIr(out)).not.toThrow();
     if (out.version !== "v2") throw new Error("expected v2");
@@ -912,7 +935,9 @@ describe("workflow-flow-mapping foreach + rework round-trip", () => {
       kind: "optional-group" | "foreach" | "loop";
     }> = [
       { name: "coding browser verification", ir: BUILTIN_CODING_WORKFLOW_IR, id: "browser-verification", kind: "optional-group" },
+      { name: "coding code review", ir: BUILTIN_CODING_WORKFLOW_IR, id: "code-review", kind: "optional-group" },
       { name: "stepwise browser verification", ir: BUILTIN_STEPWISE_CODING_WORKFLOW_IR, id: "browser-verification", kind: "optional-group" },
+      { name: "stepwise code review", ir: BUILTIN_STEPWISE_CODING_WORKFLOW_IR, id: "code-review", kind: "optional-group" },
       { name: "stepwise foreach", ir: BUILTIN_STEPWISE_CODING_WORKFLOW_IR, id: "steps", kind: "foreach" },
       { name: "coding inserted loop", ir: codingWithLoop, id: "diagnostic-loop", kind: "loop" },
       { name: "stepwise inserted loop", ir: stepwiseWithLoop, id: "post-steps-loop", kind: "loop" },
@@ -954,6 +979,55 @@ describe("workflow-flow-mapping foreach + rework round-trip", () => {
       expect(nodes.filter((node) => node.parentId === testCase.id).every((node) => node.zIndex! > group!.zIndex!), testCase.name).toBe(true);
     }
 
+    assertRunDoesNotOverlap("coding consecutive fallback", irToFlow(makeDef(BUILTIN_CODING_WORKFLOW_IR)).nodes, [
+      "execute",
+      "browser-verification",
+      "code-review",
+      "review",
+    ]);
+    assertRunDoesNotOverlap("stepwise consecutive fallback", irToFlow(makeDef(BUILTIN_STEPWISE_CODING_WORKFLOW_IR)).nodes, [
+      "steps",
+      "browser-verification",
+      "code-review",
+      "review",
+    ]);
+
+    const consecutiveMixedContainers: WorkflowDefinition["ir"] = {
+      version: "v2",
+      name: "mixed-containers",
+      columns: BUILTIN_CODING_WORKFLOW_IR.columns,
+      nodes: [
+        { id: "start", kind: "start", column: "todo" },
+        {
+          id: "optional",
+          kind: "optional-group",
+          column: "in-progress",
+          config: { defaultOn: false, template: { nodes: [], edges: [] } },
+        },
+        {
+          id: "foreach",
+          kind: "foreach",
+          column: "in-progress",
+          config: { source: "task-steps", template: { nodes: [], edges: [] } },
+        },
+        {
+          id: "loop",
+          kind: "loop",
+          column: "in-progress",
+          config: { maxIterations: 2, template: { nodes: [], edges: [] } },
+        },
+        { id: "end", kind: "end", column: "done" },
+      ],
+      edges: [
+        { from: "start", to: "optional", condition: "success" },
+        { from: "optional", to: "foreach", condition: "success" },
+        { from: "foreach", to: "loop", condition: "success" },
+        { from: "loop", to: "end", condition: "success" },
+      ],
+    };
+    const mixedFlow = irToFlow(makeDef(consecutiveMixedContainers));
+    assertRunDoesNotOverlap("mixed consecutive containers", mixedFlow.nodes, ["optional", "foreach", "loop", "end"]);
+
     const staleBuiltInLayout: WorkflowDefinition["layout"] = {
       start: { x: 60, y: 160 },
       execute: { x: 230, y: 160 },
@@ -973,6 +1047,50 @@ describe("workflow-flow-mapping foreach + rework round-trip", () => {
         expect(targetRight, `stale layout ${edge.source}->${edge.target} should not overlap`).toBeLessThanOrEqual(source.position.x);
       }
     }
+
+    const completeButStaleLayout = Object.fromEntries(
+      BUILTIN_CODING_WORKFLOW_IR.nodes.map((node, index) => [node.id, { x: 60 + index * 170, y: 160 }]),
+    );
+    const { nodes: completeStaleNodes } = irToFlow(makeDef(BUILTIN_CODING_WORKFLOW_IR, completeButStaleLayout));
+    const completeStaleById = new Map(completeStaleNodes.map((node) => [node.id, node] as const));
+    expect(completeStaleById.get("browser-verification")?.position.x).not.toBe(completeButStaleLayout["browser-verification"].x);
+    assertRunDoesNotOverlap("complete stale coding layout", completeStaleNodes, [
+      "execute",
+      "browser-verification",
+      "code-review",
+      "review",
+    ], WF_FALLBACK_NODE_GAP);
+
+    const compactManualIr: WorkflowDefinition["ir"] = {
+      version: "v2",
+      name: "compact-manual-containers",
+      columns: BUILTIN_CODING_WORKFLOW_IR.columns,
+      nodes: [
+        { id: "start", kind: "start", column: "todo" },
+        { id: "optional", kind: "optional-group", column: "in-progress", config: { template: { nodes: [], edges: [] } } },
+        { id: "review", kind: "prompt", column: "in-progress", config: { prompt: "review" } },
+        { id: "vertical", kind: "optional-group", column: "in-progress", config: { template: { nodes: [], edges: [] } } },
+        { id: "end", kind: "end", column: "done" },
+      ],
+      edges: [
+        { from: "start", to: "optional", condition: "success" },
+        { from: "optional", to: "review", condition: "success" },
+        { from: "review", to: "vertical", condition: "success" },
+        { from: "vertical", to: "end", condition: "success" },
+      ],
+    };
+    const compactManualLayout: WorkflowDefinition["layout"] = {
+      start: { x: 40, y: 160 },
+      optional: { x: 280, y: 160 },
+      review: { x: 850, y: 160 },
+      vertical: { x: 850, y: 460 },
+      end: { x: 1420, y: 460 },
+    };
+    const { nodes: compactManualNodes } = irToFlow(makeDef(compactManualIr, compactManualLayout));
+    const compactManualById = new Map(compactManualNodes.map((node) => [node.id, node] as const));
+    expect(compactManualById.get("optional")?.position).toEqual(compactManualLayout.optional);
+    expect(compactManualById.get("review")?.position).toEqual(compactManualLayout.review);
+    expect(compactManualById.get("vertical")?.position).toEqual(compactManualLayout.vertical);
   });
 
   // FNXC:WorkflowOptionalGroup 2026-06-21-11:30: Deleting an optional-group must

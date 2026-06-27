@@ -1,8 +1,9 @@
 import { describe, it, expect } from "vitest";
 import type { Node as FlowNode, Edge as FlowEdge } from "@xyflow/react";
-import type { WorkflowIrColumn } from "@fusion/core";
+import { BUILTIN_CODING_WORKFLOW_IR, BUILTIN_STEPWISE_CODING_WORKFLOW_IR } from "@fusion/core";
+import type { WorkflowDefinition, WorkflowIrColumn } from "@fusion/core";
 import type { WorkflowFlowNodeData } from "../nodes/WorkflowNodeTypes";
-import { autoLayout, applyAutoLayout } from "../workflow-auto-layout";
+import { autoLayout, applyAutoLayout, WF_AUTO_LAYOUT_GAP_X } from "../workflow-auto-layout";
 import {
   strictColumnForY,
   bandTop,
@@ -10,6 +11,7 @@ import {
   COLUMN_BAND_HEIGHT,
   FOREACH_GROUP_WIDTH,
   WF_CARD_MAX_WIDTH,
+  irToFlow,
 } from "../workflow-flow-mapping";
 
 type N = FlowNode<WorkflowFlowNodeData>;
@@ -49,6 +51,59 @@ const COLUMNS_3: WorkflowIrColumn[] = [
 /** Mid-band y for a column index (a stable starting placement). */
 function midBand(index: number): number {
   return bandTop(index) + COLUMN_BAND_HEIGHT / 2;
+}
+
+function workflowDef(ir: WorkflowDefinition["ir"]): WorkflowDefinition {
+  return {
+    id: ir.name,
+    kind: "workflow",
+    name: ir.name,
+    description: "",
+    ir,
+    layout: {},
+    createdAt: "2024-01-01T00:00:00.000Z",
+    updatedAt: "2024-01-01T00:00:00.000Z",
+  };
+}
+
+function nodeWidthFromFlow(node: FlowNode<WorkflowFlowNodeData>): number {
+  return typeof node.style?.width === "number" ? node.style.width : WF_CARD_MAX_WIDTH;
+}
+
+function assertAutoLayoutRunConnected(
+  name: string,
+  def: WorkflowDefinition,
+  run: readonly string[],
+): void {
+  const columns = def.ir.version === "v2" ? def.ir.columns : [];
+  const flow = irToFlow(def);
+  const byId = new Map(flow.nodes.map((candidate) => [candidate.id, candidate] as const));
+  const positions = autoLayout(flow.nodes, flow.edges, columns);
+
+  for (const id of run) {
+    const node = byId.get(id);
+    const position = positions.get(id);
+    expect(node, `${name} ${id} node`).toBeTruthy();
+    expect(position, `${name} ${id} position`).toBeTruthy();
+    if (node && position && node.data.column) {
+      expect(strictColumnForY(position.y, columns), `${name} ${id} column`).toBe(node.data.column);
+    }
+  }
+
+  for (let index = 0; index < run.length - 1; index++) {
+    const currentId = run[index];
+    const nextId = run[index + 1];
+    const current = byId.get(currentId)!;
+    const next = byId.get(nextId)!;
+    const currentPosition = positions.get(currentId)!;
+    const nextPosition = positions.get(nextId)!;
+    expect(
+      nextPosition.x,
+      `${name} ${currentId}->${nextId} should leave rendered-width gap`,
+    ).toBeGreaterThanOrEqual(currentPosition.x + nodeWidthFromFlow(current) + WF_AUTO_LAYOUT_GAP_X);
+    expect(current.type, `${name} ${currentId} type`).toBe(current.data.kind);
+    expect(next.type, `${name} ${nextId} type`).toBe(next.data.kind);
+  }
 }
 
 describe("autoLayout — v2 (column-preserving)", () => {
@@ -170,8 +225,61 @@ describe("autoLayout — foreach / unreachable / cycles", () => {
     ];
     const pos = autoLayout(nodes, [edge("start", "verify"), edge("verify", "review"), edge("review", "end")], COLUMNS_3);
 
-    expect(pos.get("verify")!.x).toBeGreaterThanOrEqual(pos.get("start")!.x + WF_CARD_MAX_WIDTH);
-    expect(pos.get("review")!.x).toBeGreaterThanOrEqual(pos.get("verify")!.x + FOREACH_GROUP_WIDTH);
+    expect(pos.get("verify")!.x).toBeGreaterThanOrEqual(pos.get("start")!.x + WF_CARD_MAX_WIDTH + WF_AUTO_LAYOUT_GAP_X);
+    expect(pos.get("review")!.x).toBeGreaterThanOrEqual(pos.get("verify")!.x + FOREACH_GROUP_WIDTH + WF_AUTO_LAYOUT_GAP_X);
+  });
+
+  it("keeps built-in consecutive container runs connected in the editor layout", () => {
+    assertAutoLayoutRunConnected("coding", workflowDef(BUILTIN_CODING_WORKFLOW_IR), [
+      "execute",
+      "browser-verification",
+      "code-review",
+      "review",
+    ]);
+    assertAutoLayoutRunConnected("stepwise", workflowDef(BUILTIN_STEPWISE_CODING_WORKFLOW_IR), [
+      "steps",
+      "browser-verification",
+      "code-review",
+      "review",
+    ]);
+  });
+
+  it("keeps consecutive optional-group foreach and loop containers connected", () => {
+    const synthetic: WorkflowDefinition["ir"] = {
+      version: "v2",
+      name: "container-run",
+      columns: COLUMNS_3,
+      nodes: [
+        { id: "start", kind: "start", column: "triage" },
+        {
+          id: "optional",
+          kind: "optional-group",
+          column: "in-progress",
+          config: { defaultOn: false, template: { nodes: [], edges: [] } },
+        },
+        {
+          id: "foreach",
+          kind: "foreach",
+          column: "in-progress",
+          config: { source: "task-steps", template: { nodes: [], edges: [] } },
+        },
+        {
+          id: "loop",
+          kind: "loop",
+          column: "in-progress",
+          config: { maxIterations: 2, template: { nodes: [], edges: [] } },
+        },
+        { id: "end", kind: "end", column: "done" },
+      ],
+      edges: [
+        { from: "start", to: "optional", condition: "success" },
+        { from: "optional", to: "foreach", condition: "success" },
+        { from: "foreach", to: "loop", condition: "success" },
+        { from: "loop", to: "end", condition: "success" },
+      ],
+    };
+
+    assertAutoLayoutRunConnected("synthetic", workflowDef(synthetic), ["optional", "foreach", "loop", "end"]);
   });
 
   it("repositions a foreach group but leaves its parentId children untouched", () => {
