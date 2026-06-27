@@ -197,6 +197,7 @@ describe("Merge gate (.github/workflows/pr-checks.yml)", () => {
     expect(testGateScript).toContain("node scripts/check-no-test-timeout-appeasement.mjs");
     expect(testGateScript).toContain("node scripts/check-changeset-format.mjs");
     expect(testGateScript).toContain("pnpm --filter @fusion/engine test:core");
+    expect(testGateScript).toContain("pnpm --filter @fusion/core test:pg-gate");
     expect(testGateScript).toContain("pnpm --filter @runfusion/fusion test:ci-shape");
   });
 

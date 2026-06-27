@@ -699,11 +699,14 @@ export async function moveTaskInternalImpl(store: TaskStore, id: string, toColum
             agentId: internal.runContext?.agentId,
             runId: internal.runContext?.runId,
           });
+          // FNXC:PostgresCutover 2026-06-27-10:25:
+          // Thread the outer move transaction so cancel + upsert commit
+          // atomically with the handoff (no orphaned merge-gate items on rollback).
           await store.createCompletionHandoffWorkflowWork(task, {
             runId: internal.runContext?.runId,
             now: internal.now,
             source: internal.evidence?.reason,
-          });
+          }, tx);
           await recordRunAuditEventWithinTransaction(tx, {
             taskId: id,
             agentId: internal.runContext?.agentId ?? "system",

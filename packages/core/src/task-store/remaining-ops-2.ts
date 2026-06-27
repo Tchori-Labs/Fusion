@@ -630,7 +630,10 @@ export async function updateWorkflowSettingValuesImpl(store: TaskStore, workflow
     });
   }
 
-export async function cancelActiveWorkflowWorkItemsForTaskImpl(store: TaskStore, taskId: string, opts: { kinds?: WorkflowWorkItemKind[]; now?: string; lastError?: string | null; excludeIds?: string[] } = {},): Promise<WorkflowWorkItem[]> {
+export async function cancelActiveWorkflowWorkItemsForTaskImpl(store: TaskStore, taskId: string, opts: { kinds?: WorkflowWorkItemKind[]; now?: string; lastError?: string | null; excludeIds?: string[] } = {}, tx?: import("../postgres/data-layer.js").DbTransaction): Promise<WorkflowWorkItem[]> {
+    // FNXC:PostgresCutover 2026-06-27-10:20:
+    // Accept an optional outer transaction so handoff-to-review can thread the
+    // move tx through, ensuring cancel + upsert commit atomically with the move.
     // No dedicated async helper; the composite is: list active items, then
     // transition each to 'cancelled'. In backend mode, do this without a
     // sync transactionImmediate (each transition is independently atomic).
@@ -647,7 +650,7 @@ export async function cancelActiveWorkflowWorkItemsForTaskImpl(store: TaskStore,
             leaseOwner: null,
             leaseExpiresAt: null,
             lastError: opts.lastError ?? item.lastError ?? "cancelled-by-user-hard-cancel",
-          }),
+          }, tx),
         );
       }
       return results;

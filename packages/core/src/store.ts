@@ -1190,8 +1190,8 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   async projectMergeRequestToWorkflowWorkItem( taskId: string, opts: MergeRequestWorkflowProjectionOptions = {}, ): Promise<WorkflowWorkItem | null> {
     return projectMergeRequestToWorkflowWorkItemImpl(this, taskId, opts);
   }
-  async createCompletionHandoffWorkflowWork( task: Pick<Task, "id" | "autoMerge" | "priority">, opts: { runId?: string; now?: string; source?: string } = {}, ): Promise<WorkflowWorkItem> {
-    return createCompletionHandoffWorkflowWorkImpl(this, task, opts);
+  async createCompletionHandoffWorkflowWork( task: Pick<Task, "id" | "autoMerge" | "priority">, opts: { runId?: string; now?: string; source?: string } = {}, tx?: import("./postgres/data-layer.js").DbTransaction, ): Promise<WorkflowWorkItem> {
+    return createCompletionHandoffWorkflowWorkImpl(this, task, opts, tx);
   }
   public getWorkflowWorkItemByIdentity( runId: string, taskId: string, nodeId: string, kind: WorkflowWorkItemKind, ): WorkflowWorkItem | null {
     return getWorkflowWorkItemByIdentityImpl(this, runId, taskId, nodeId, kind);
@@ -1203,11 +1203,11 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   /**
    * FNXC:RuntimeWorkflowAsync 2026-06-24-16:30:
    */
-  async upsertWorkflowWorkItem(input: WorkflowWorkItemUpsertInput): Promise<WorkflowWorkItem> {
-    return upsertWorkflowWorkItemImpl(this, input);
+  async upsertWorkflowWorkItem(input: WorkflowWorkItemUpsertInput, tx?: import("./postgres/data-layer.js").DbTransaction): Promise<WorkflowWorkItem> {
+    return upsertWorkflowWorkItemImpl(this, input, tx);
   }
-  async transitionWorkflowWorkItem( id: string, state: WorkflowWorkItemState, patch: WorkflowWorkItemTransitionPatch = {}, ): Promise<WorkflowWorkItem> {
-    return transitionWorkflowWorkItemImpl(this, id, state, patch);
+  async transitionWorkflowWorkItem( id: string, state: WorkflowWorkItemState, patch: WorkflowWorkItemTransitionPatch = {}, tx?: import("./postgres/data-layer.js").DbTransaction, ): Promise<WorkflowWorkItem> {
+    return transitionWorkflowWorkItemImpl(this, id, state, patch, tx);
   }
 
   /**
@@ -1229,8 +1229,8 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   public listWorkflowWorkItemsForTaskSync(taskId: string, opts: { kinds?: WorkflowWorkItemKind[] } = {}): WorkflowWorkItem[] {
     return listWorkflowWorkItemsForTaskSyncImpl(this, taskId, opts);
   }
-  async cancelActiveWorkflowWorkItemsForTask( taskId: string, opts: { kinds?: WorkflowWorkItemKind[]; now?: string; lastError?: string | null; excludeIds?: string[] } = {}, ): Promise<WorkflowWorkItem[]> {
-    return cancelActiveWorkflowWorkItemsForTaskImpl(this, taskId, opts);
+  async cancelActiveWorkflowWorkItemsForTask( taskId: string, opts: { kinds?: WorkflowWorkItemKind[]; now?: string; lastError?: string | null; excludeIds?: string[] } = {}, tx?: import("./postgres/data-layer.js").DbTransaction, ): Promise<WorkflowWorkItem[]> {
+    return cancelActiveWorkflowWorkItemsForTaskImpl(this, taskId, opts, tx);
   }
   async listDueWorkflowWorkItems(filter: WorkflowWorkItemDueFilter = {}): Promise<WorkflowWorkItem[]> {
     return listDueWorkflowWorkItemsImpl(this, filter);

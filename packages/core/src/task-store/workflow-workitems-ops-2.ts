@@ -15,11 +15,12 @@ import "../builtin-traits.js";
 import {__setTaskActivityLogLimitsForTesting} from "../task-store/comments.js";
 import {upsertWorkflowWorkItem as upsertWorkflowWorkItemAsync, transitionWorkflowWorkItem as transitionWorkflowWorkItemAsync, getWorkflowWorkItem as getWorkflowWorkItemAsync} from "../task-store/async-workflow-workitems.js";
 import type {WorkflowWorkItemRow} from "../task-store/row-types.js";
+import type {DbTransaction} from "../postgres/data-layer.js";
 
-export async function upsertWorkflowWorkItemImpl(store: TaskStore, input: WorkflowWorkItemUpsertInput): Promise<WorkflowWorkItem> {
+export async function upsertWorkflowWorkItemImpl(store: TaskStore, input: WorkflowWorkItemUpsertInput, tx?: DbTransaction): Promise<WorkflowWorkItem> {
     if (store.backendMode) {
       const layer = store.asyncLayer!;
-      return upsertWorkflowWorkItemAsync(layer, input);
+      return upsertWorkflowWorkItemAsync(layer, input, tx);
     }
     return store.db.transactionImmediate(() => {
       const existing = store.db
@@ -83,10 +84,10 @@ export async function upsertWorkflowWorkItemImpl(store: TaskStore, input: Workfl
     });
   }
 
-export async function transitionWorkflowWorkItemImpl(store: TaskStore, id: string, state: WorkflowWorkItemState, patch: WorkflowWorkItemTransitionPatch = {},): Promise<WorkflowWorkItem> {
+export async function transitionWorkflowWorkItemImpl(store: TaskStore, id: string, state: WorkflowWorkItemState, patch: WorkflowWorkItemTransitionPatch = {}, tx?: DbTransaction,): Promise<WorkflowWorkItem> {
     if (store.backendMode) {
       const layer = store.asyncLayer!;
-      return transitionWorkflowWorkItemAsync(layer, id, state, patch);
+      return transitionWorkflowWorkItemAsync(layer, id, state, patch, tx);
     }
     return store.transitionWorkflowWorkItemSync(id, state, patch);
   }

@@ -112,13 +112,12 @@ pgTest("handoff-to-review transactional invariant (PostgreSQL)", () => {
    * tx. So an outer rollback leaves committed workflow_work_items — an
    * atomicity violation of VAL-DATA-013.
    *
-   * `it.fails` asserts the test currently FAILS (the bug is present). The gate
-   * stays green while the bug is unfixed; when #12 is fixed (threading the
-   * outer `tx` into createCompletionHandoffWorkflowWork), this test will PASS
-   * and `it.fails` will flip red, prompting conversion to a strict `it`.
-   * This is the regression guard that proves the test catches the invariant.
+   * FNXC:PostgresCutover 2026-06-27-10:30:
+   * The outer tx is now threaded into createCompletionHandoffWorkflowWork,
+   * so the workflow work item commits/rolls back with the handoff. This test
+   * now passes (converted from it.fails to it).
    */
-  it.fails("rollback of the outer handoff tx must not leave orphaned workflow work items (#12)", async () => {
+  it("rollback of the outer handoff tx must not leave orphaned workflow work items (#12)", async () => {
     const store = h.store();
     const task = await store.createTask({ description: "handoff rollback", column: "in-progress" });
 
@@ -140,6 +139,7 @@ pgTest("handoff-to-review transactional invariant (PostgreSQL)", () => {
         await store.createCompletionHandoffWorkflowWork(
           { id: task.id, autoMerge: true, priority: 0 },
           { runId: "run-rollback", now: new Date().toISOString(), source: "rollback-test" },
+          tx,
         );
         // Force the outer transaction to roll back.
         throw new Error("__force_rollback__");

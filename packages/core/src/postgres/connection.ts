@@ -165,6 +165,19 @@ export async function createConnectionSetFromUrl(
     onWarning(warning);
   }
 
+  // FNXC:PostgresCutover 2026-06-27-10:35:
+  // Multi-project isolation warning: when using an external DATABASE_URL,
+  // schema names (project/central/archive) are fixed. Two projects pointing
+  // at the same DATABASE_URL will share the same schemas, causing cross-project
+  // data leakage. The embedded mode avoids this (one PG per ~/.fusion/ dir).
+  if (backend.mode === "external") {
+    onWarning(
+      "WARNING: External DATABASE_URL shares fixed schema names (project/central/archive). " +
+      "Two projects pointing at the same DATABASE_URL will share data. " +
+      "Use a distinct database per project for isolation."
+    );
+  }
+
   const runtimeUrl = backend.runtimeUrl;
   if (!runtimeUrl) {
     throw new Error(

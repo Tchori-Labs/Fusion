@@ -107,7 +107,7 @@ export async function projectMergeRequestToWorkflowWorkItemImpl(store: TaskStore
     });
   }
 
-export async function createCompletionHandoffWorkflowWorkImpl(store: TaskStore, task: Pick<Task, "id" | "autoMerge" | "priority">, opts: { runId?: string; now?: string; source?: string } = {},): Promise<WorkflowWorkItem> {
+export async function createCompletionHandoffWorkflowWorkImpl(store: TaskStore, task: Pick<Task, "id" | "autoMerge" | "priority">, opts: { runId?: string; now?: string; source?: string } = {}, tx?: import("../postgres/data-layer.js").DbTransaction): Promise<WorkflowWorkItem> {
     const autoMerge = task.autoMerge !== false;
     const runId = opts.runId ?? `completion-handoff:${task.id}:${randomUUID()}`;
     const nodeId = autoMerge ? "merge-gate" : "merge-manual-hold";
@@ -127,7 +127,7 @@ export async function createCompletionHandoffWorkflowWorkImpl(store: TaskStore, 
         excludeIds: [existing.id],
         now: opts.now,
         lastError: "superseded-by-completion-handoff",
-      });
+      }, tx);
       if (!store.backendMode) {
         store.insertCompletionHandoffWorkflowWorkAudit(task, existing, autoMerge, opts.source);
       }
@@ -138,7 +138,7 @@ export async function createCompletionHandoffWorkflowWorkImpl(store: TaskStore, 
       kinds: ["merge", "manual-hold"],
       now: opts.now,
       lastError: "superseded-by-completion-handoff",
-    });
+    }, tx);
     const item = await store.upsertWorkflowWorkItem({
       runId,
       taskId: task.id,
@@ -147,7 +147,7 @@ export async function createCompletionHandoffWorkflowWorkImpl(store: TaskStore, 
       state: autoMerge ? "runnable" : "manual-required",
       blockedReason: autoMerge ? null : "autoMerge:false",
       now: opts.now,
-    });
+    }, tx);
     if (!store.backendMode) {
       store.insertCompletionHandoffWorkflowWorkAudit(task, item, autoMerge, opts.source);
     }

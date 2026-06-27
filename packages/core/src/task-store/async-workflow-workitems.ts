@@ -119,8 +119,13 @@ export async function getWorkflowWorkItem(
 export async function upsertWorkflowWorkItem(
   layer: AsyncDataLayer,
   input: WorkflowWorkItemUpsertInput,
+  existingTx?: DbTransaction,
 ): Promise<WorkflowWorkItem> {
-  return layer.transactionImmediate(async (tx) => {
+  // FNXC:PostgresCutover 2026-06-27-10:15:
+  // Accept an optional existing transaction so callers can thread an outer tx
+  // through (e.g. handoff-to-review in moves.ts). If no tx is provided, a new
+  // transactionImmediate is opened (preserving existing behavior).
+  const doWork = async (tx: DbTransaction): Promise<WorkflowWorkItem> => {
     // Read the existing row (if any) keyed on the composite unique constraint.
     const existingRows = await tx
       .select()
@@ -212,7 +217,8 @@ export async function upsertWorkflowWorkItem(
     });
 
     return row;
-  });
+  };
+  return existingTx ? doWork(existingTx) : layer.transactionImmediate(doWork);
 }
 
 /**
@@ -235,8 +241,11 @@ export async function transitionWorkflowWorkItem(
   id: string,
   state: WorkflowWorkItemState,
   patch: WorkflowWorkItemTransitionPatch = {},
+  existingTx?: DbTransaction,
 ): Promise<WorkflowWorkItem> {
-  return layer.transactionImmediate(async (tx) => {
+  // FNXC:PostgresCutover 2026-06-27-10:15:
+  // Accept an optional existing transaction for outer-tx threading.
+  const doWork = async (tx: DbTransaction): Promise<WorkflowWorkItem> => {
     const now = patch.now ?? new Date().toISOString();
     const existingRows = await tx
       .select()
@@ -293,7 +302,8 @@ export async function transitionWorkflowWorkItem(
     });
 
     return rowToWorkflowWorkItem(updated);
-  });
+  };
+  return existingTx ? doWork(existingTx) : layer.transactionImmediate(doWork);
 }
 
 /**
