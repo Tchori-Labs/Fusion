@@ -22,6 +22,7 @@ import { PluginStore } from "../plugin-store.js";
 import { SecretsStore } from "../secrets-store.js";
 import { type ActivityLogSnapshot, type TaskMetadataSnapshot, toTaskMetadataRecord, validateSnapshotEnvelope } from "../shared-mesh-state.js";
 import { createAsyncDistributedTaskIdAllocator } from "./async-allocator.js";
+import { getWorkflowRow, listWorkflowRows } from "../async-workflow-store.js";
 import { compactTaskActivityLog } from "./comments.js";
 import { type TaskRow } from "./persistence.js";
 import { ActivityLogRow } from "./row-types.js";
@@ -222,6 +223,19 @@ export async function listWorkflowDefinitionsImpl(store: TaskStore,
 
 export async function readAllWorkflowDefinitionsImpl(store: TaskStore): Promise<WorkflowDefinition[]> {
     if (store.workflowDefinitionsCache) return store.workflowDefinitionsCache;
+    // FNXC:WorkflowDefinitions 2026-06-27-06:00:
+    // PG backend mode reads custom workflow rows from project.workflows via the
+    // AsyncDataLayer (the sync store.db SELECT throws). Builtins are merged the
+    // same way in both backends. Every caller already awaits this method.
+    if (store.backendMode) {
+      const layer = store.getAsyncLayer();
+      if (!layer) {
+        throw new Error("workflow definitions: AsyncDataLayer not initialized in backend mode");
+      }
+      const rows = await listWorkflowRows(layer);
+      store.workflowDefinitionsCache = [...BUILTIN_WORKFLOWS, ...rows.map((row) => store.toWorkflowDefinition(row))];
+      return store.workflowDefinitionsCache;
+    }
     const rows = store.db.prepare("SELECT * FROM workflows ORDER BY createdAt ASC").all() as Array<{
       id: string;
       name: string;
@@ -246,6 +260,16 @@ export async function getWorkflowDefinitionImpl(store: TaskStore,
         if (!requiredPluginId || !(await store.isPluginInstalled(requiredPluginId))) return undefined;
       }
       return { ...builtin, ir: store.applyBuiltInPromptOverridesSync(id, builtin.ir) };
+    }
+    // FNXC:WorkflowDefinitions 2026-06-27-06:00: PG backend reads the custom row
+    // from project.workflows via the AsyncDataLayer; sync store.db otherwise.
+    if (store.backendMode) {
+      const layer = store.getAsyncLayer();
+      if (!layer) {
+        throw new Error("workflow definition: AsyncDataLayer not initialized in backend mode");
+      }
+      const asyncRow = await getWorkflowRow(layer, id);
+      return asyncRow ? store.toWorkflowDefinition(asyncRow) : undefined;
     }
     const row = store.db.prepare("SELECT * FROM workflows WHERE id = ?").get(id) as
       | {
