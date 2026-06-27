@@ -822,7 +822,14 @@ export const registerProjectRoutes: ApiRouteRegistrar = (ctx) => {
         const tasks = await projectStore.listTasks({ slim: true });
         const activeCols = new Set(["triage", "todo", "in-progress", "in-review"]);
         const activeTaskCount = tasks.filter((t) => activeCols.has(t.column)).length;
-        const inFlightAgentCount = tasks.filter((t) => t.column === "in-progress").length;
+        /*
+         * FNXC:GlobalConcurrencyControls 2026-06-26-23:46:
+         * Project health In-Flight Agents is a live read-layer count, not persisted slot bookkeeping.
+         * Include active triage planners using the same `triage` + `planning` + not-paused predicate that gates `maxTriageConcurrent`, so project-level health matches FN-7097's global running-agent count without mutating stored health.
+         */
+        const inFlightAgentCount = tasks.filter(
+          (t) => t.column === "in-progress" || (t.column === "triage" && t.status === "planning" && !t.paused),
+        ).length;
         const totalTasksCompleted = tasks.filter((t) => t.column === "done" || t.column === "archived").length;
 
         // Get central health metadata (if available) to preserve non-count fields

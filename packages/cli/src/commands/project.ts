@@ -82,6 +82,11 @@ export interface ProjectInfoData {
   defaultProject: boolean;
 }
 
+interface TaskCountSummary {
+  byColumn: Record<string, number>;
+  activeTriagePlannerCount: number;
+}
+
 /**
  * Format a path for display, showing relative path when possible.
  */
@@ -116,7 +121,7 @@ function formatLastActivity(timestamp?: string | null): string {
 /**
  * Get task counts by column for a project.
  */
-async function getTaskCounts(projectPath: string): Promise<Record<string, number>> {
+async function getTaskCounts(projectPath: string): Promise<TaskCountSummary> {
   try {
     const store = new TaskStore(projectPath);
     await store.init();
@@ -126,13 +131,17 @@ async function getTaskCounts(projectPath: string): Promise<Record<string, number
     for (const col of COLUMNS) {
       counts[col] = 0;
     }
+    let activeTriagePlannerCount = 0;
     for (const task of tasks) {
       counts[task.column] = (counts[task.column] || 0) + 1;
+      if (task.column === "triage" && task.status === "planning" && !task.paused) {
+        activeTriagePlannerCount += 1;
+      }
     }
-    return counts;
+    return { byColumn: counts, activeTriagePlannerCount };
   } catch {
     // Return empty counts if we can't read the project
-    return {};
+    return { byColumn: {}, activeTriagePlannerCount: 0 };
   }
 }
 
@@ -143,17 +152,17 @@ async function getProjectHealth(central: CentralCore, projectId: string): Promis
   return central.getProjectHealth(projectId);
 }
 
-function getLiveInFlightAgentCount(taskCounts: Record<string, number>): number {
+function getLiveInFlightAgentCount(taskCounts: TaskCountSummary): number {
   /*
-   * FNXC:CLIProjectHealth 2026-06-26-18:25:
+   * FNXC:CLIProjectHealth 2026-06-26-23:46:
    * FN-7081 confirmed central projectHealth.inFlightAgentCount is slot/health bookkeeping that can be stale or zero in the default in-process runtime.
-   * User-visible In-Flight Agents must mirror FN-7080's dashboard read route by deriving the live count from tasks currently in the in-progress column without mutating persisted health rows.
+   * User-visible In-Flight Agents must mirror the dashboard read route and FN-7097's global running-agent count by deriving live agents from in-progress tasks plus active triage planners (`triage` + `planning` + not paused) without mutating persisted health rows.
    */
-  return taskCounts["in-progress"] ?? 0;
+  return (taskCounts.byColumn["in-progress"] ?? 0) + taskCounts.activeTriagePlannerCount;
 }
 
 function buildDisplayHealth(
-  taskCounts: Record<string, number>,
+  taskCounts: TaskCountSummary,
   health?: ProjectHealth
 ): NonNullable<ProjectInfoData["health"]> {
   return {
@@ -207,7 +216,7 @@ export async function runProjectList(options: ProjectListOptions = {}): Promise<
           updatedAt: project.updatedAt,
           lastActivityAt: health?.lastActivityAt ?? project.lastActivityAt,
           health: displayHealth,
-          taskCounts,
+          taskCounts: taskCounts.byColumn,
           defaultProject: defaultProject?.id === project.id,
         };
       })
@@ -499,10 +508,10 @@ export async function runProjectShow(name?: string): Promise<void> {
           console.log(`  Status: (not registered)`);
           console.log();
           const counts = await getTaskCounts(detected.path);
-          const total = Object.values(counts).reduce((a, b) => a + b, 0);
+          const total = Object.values(counts.byColumn).reduce((a, b) => a + b, 0);
           if (total > 0) {
             console.log(`  Tasks: ${total} total`);
-            for (const [col, count] of Object.entries(counts)) {
+            for (const [col, count] of Object.entries(counts.byColumn)) {
               if (count > 0) {
                 console.log(`    ${COLUMN_LABELS[col as Column]}: ${count}`);
               }
@@ -552,10 +561,10 @@ export async function runProjectShow(name?: string): Promise<void> {
 
     console.log();
     console.log(`  Tasks:`);
-    const total = Object.values(taskCounts).reduce((a, b) => a + b, 0);
+    const total = Object.values(taskCounts.byColumn).reduce((a, b) => a + b, 0);
     console.log(`    Total: ${total}`);
     for (const col of COLUMNS) {
-      const count = taskCounts[col] || 0;
+      const count = taskCounts.byColumn[col] || 0;
       if (count > 0) {
         console.log(`    ${COLUMN_LABELS[col]}: ${count}`);
       }

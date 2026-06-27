@@ -643,6 +643,8 @@ fn project remove my-app --force
 
 Subcommands: `list|ls`, `add`, `remove|rm`, `show`, `info`, `set-default|default`, `detect`.
 
+`fn project list` and `fn project show/info` report `In-Flight Agents` from live task state: in-progress executors plus triage planners whose task is in `triage` with `status === "planning"` and is not paused. The readout intentionally ignores stale persisted `projectHealth.inFlightAgentCount` bookkeeping.
+
 `fn project add` registers an existing directory with Fusion. If the directory
 does not contain a Git repository yet, Fusion runs a minimal `git init` during
 registration and fails the registration if Git is unavailable.

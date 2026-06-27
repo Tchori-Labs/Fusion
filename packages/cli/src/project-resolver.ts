@@ -256,7 +256,12 @@ export async function resolveProject(options: ResolveOptions = {}): Promise<Reso
     // 4. Has .fusion/ but not registered
     if (interactive) {
       console.log(`\n  Found fn project at ${fusionDir} but it's not registered.`);
-      const identity = readProjectIdentity(fusionDir);
+      /*
+       * FNXC:CLIProjectIdentity 2026-06-27-00:00:
+       * Project identity files live inside the project `.fusion` directory; cwd-based orphan restore must not read or stamp the project root.
+       */
+      const projectFusionDir = join(fusionDir, ".fusion");
+      const identity = readProjectIdentity(projectFusionDir);
 
       if (identity) {
         const recover = await promptConfirm(
@@ -274,7 +279,7 @@ export async function resolveProject(options: ResolveOptions = {}): Promise<Reso
             const recoveredProject = ensured.project;
             await central.updateProject(recoveredProject.id, { status: "active" });
             try {
-              writeProjectIdentity(fusionDir, {
+              writeProjectIdentity(projectFusionDir, {
                 id: recoveredProject.id,
                 createdAt: recoveredProject.createdAt,
               });
@@ -315,7 +320,7 @@ export async function resolveProject(options: ResolveOptions = {}): Promise<Reso
           // Activate the project (registration sets it to 'initializing')
           await central.updateProject(newProject.id, { status: "active" });
           try {
-            writeProjectIdentity(fusionDir, {
+            writeProjectIdentity(projectFusionDir, {
               id: newProject.id,
               createdAt: newProject.createdAt,
             });
@@ -332,7 +337,7 @@ export async function resolveProject(options: ResolveOptions = {}): Promise<Reso
                   { directory: fusionDir },
                 );
               }
-              writeProjectIdentity(fusionDir, {
+              writeProjectIdentity(projectFusionDir, {
                 id: newProject.id,
                 createdAt: newProject.createdAt,
               });
@@ -827,9 +832,9 @@ export async function unregisterProject(
 /**
  * Get detailed project info including runtime metrics and task counts.
  *
- * FNXC:CLIProjectHealth 2026-06-26-18:31:
+ * FNXC:CLIProjectHealth 2026-06-26-23:46:
  * This resolver returns raw central health for metadata compatibility, so `health.inFlightAgentCount` remains persisted bookkeeping.
- * Callers that display live running-agent counts must derive them from `taskCounts["in-progress"]` instead of rendering the raw health field.
+ * Callers that display live running-agent counts must not render the raw health field; derive from slim task state with the FN-7097 predicate (`in-progress` plus `triage`/`planning`/not-paused) instead.
  */
 export async function getProjectInfo(name?: string): Promise<{
   project: ResolvedProject;
