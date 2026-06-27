@@ -1,9 +1,10 @@
-import { useEffect, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import { Power } from "lucide-react";
 import { DEFAULT_PROJECT_SETTINGS, type ColorTheme, type ThemeMode } from "@fusion/core";
 import { fetchConfig, fetchSettings, updateSettings } from "../../api/legacy";
 import { useAppSettings } from "../../hooks/useAppSettings";
+import { useConfirm } from "../../hooks/useConfirm";
 // FNXC:GlobalConcurrencyControls 2026-06-25-22:45: Concurrency card adopts the shared global-concurrency hook so it and the footer EngineControlMenu read/write ONE source of truth (no more duplicated fetch/debounce/clobber logic).
 import { useGlobalConcurrency } from "../../hooks/useGlobalConcurrency";
 import { ThemeDropdown } from "../ThemeDropdown";
@@ -47,6 +48,12 @@ const CONCURRENCY_SLIDER_LIMITS: Record<keyof ConcurrencyValues, { min: number; 
   maxWorktrees: { min: 1, max: 50 },
 };
 
+const CONCURRENCY_SETTING_LABEL_KEYS: Record<keyof ConcurrencyValues, { key: string; defaultValue: string }> = {
+  maxConcurrent: { key: "commandCenter.controls.concurrency.maxConcurrent", defaultValue: "Max concurrent tasks" },
+  maxTriageConcurrent: { key: "commandCenter.controls.concurrency.maxTriageConcurrent", defaultValue: "Max triage concurrent" },
+  maxWorktrees: { key: "commandCenter.controls.concurrency.maxWorktrees", defaultValue: "Max worktrees" },
+};
+
 /*
 FNXC:CommandCenter 2026-06-21-00:00:
 Operator concurrency sliders must allow dragging each scheduler capacity control up to 50 by default while still expanding beyond 50 for already-persisted higher values so FN-6768 truthful readouts remain intact.
@@ -74,6 +81,10 @@ function getUseMarkerStyle(ratio: number): CSSProperties {
   } as CSSProperties;
 }
 
+function getChangedConcurrencyKeys(values: ConcurrencyValues, persisted: ConcurrencyValues) {
+  return (Object.keys(values) as Array<keyof ConcurrencyValues>).filter((key) => values[key] !== persisted[key]);
+}
+
 function StatusPill({ paused, label }: { paused: boolean; label: string }) {
   return (
     <span className="cc-controls-status-pill">
@@ -85,6 +96,7 @@ function StatusPill({ paused, label }: { paused: boolean; label: string }) {
 
 export function CommandCenterControls({ projectId, colorTheme, themeMode, shadcnCustomColors = {}, resolvedThemeMode = themeMode === "light" ? "light" : "dark", onColorThemeChange, onThemeModeChange, onShadcnCustomColorsChange = () => {}, onChangeView }: CommandCenterControlsProps) {
   const { t } = useTranslation("app");
+  const { confirm } = useConfirm();
   const {
     globalPaused,
     toggleGlobalPause,
@@ -93,6 +105,12 @@ export function CommandCenterControls({ projectId, colorTheme, themeMode, shadcn
   const [concurrencyState, setConcurrencyState] = useState<AsyncState<ConcurrencyValues>>({ status: "loading", data: null, error: null });
   const [concurrencyDirty, setConcurrencyDirty] = useState(false);
   const [concurrencySaveState, setConcurrencySaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const persistedConcurrencyRef = useRef<ConcurrencyValues>(DEFAULT_CONCURRENCY_VALUES);
+  const pendingConcurrencyKeyRef = useRef<keyof ConcurrencyValues | null>(null);
+  const concurrencyConfirmOpenRef = useRef(false);
+  const [pendingGlobalConcurrencyValue, setPendingGlobalConcurrencyValue] = useState<number | null>(null);
+  const [globalConcurrencyDirty, setGlobalConcurrencyDirty] = useState(false);
+  const globalConcurrencyConfirmOpenRef = useRef(false);
   // FNXC:GlobalConcurrencyControls 2026-06-25-22:45: No activeWhen — the card is mounted only while visible, so it fetches on mount and flushes pending writes on unmount via the shared hook.
   const gc = useGlobalConcurrency();
 
@@ -105,13 +123,17 @@ export function CommandCenterControls({ projectId, colorTheme, themeMode, shadcn
       try {
         const [config, settings] = await Promise.all([fetchConfig(projectId), fetchSettings(projectId)]);
         if (!cancelled) {
+          const persistedValues = {
+            maxConcurrent: settings.maxConcurrent ?? config.maxConcurrent ?? DEFAULT_CONCURRENCY_VALUES.maxConcurrent,
+            maxTriageConcurrent: settings.maxTriageConcurrent ?? DEFAULT_CONCURRENCY_VALUES.maxTriageConcurrent,
+            maxWorktrees: settings.maxWorktrees ?? DEFAULT_CONCURRENCY_VALUES.maxWorktrees,
+          };
+          persistedConcurrencyRef.current = persistedValues;
+          pendingConcurrencyKeyRef.current = null;
+          concurrencyConfirmOpenRef.current = false;
           setConcurrencyState({
             status: "loaded",
-            data: {
-              maxConcurrent: settings.maxConcurrent ?? config.maxConcurrent ?? DEFAULT_CONCURRENCY_VALUES.maxConcurrent,
-              maxTriageConcurrent: settings.maxTriageConcurrent ?? DEFAULT_CONCURRENCY_VALUES.maxTriageConcurrent,
-              maxWorktrees: settings.maxWorktrees ?? DEFAULT_CONCURRENCY_VALUES.maxWorktrees,
-            },
+            data: persistedValues,
             error: null,
           });
         }
@@ -130,26 +152,80 @@ export function CommandCenterControls({ projectId, colorTheme, themeMode, shadcn
     };
   }, [projectId, t]);
 
+  /*
+  FNXC:CommandCenter 2026-06-26-00:00:
+  Concurrency edits mutate live scheduler capacity, so the card must ask for explicit operator confirmation after a slider settles. The UI still updates optimistically while dragging, but cancel, close, backdrop, and Escape all revert to the last persisted values without calling updateSettings.
+
+  FNXC:CommandCenter 2026-06-26-18:08:
+  If multiple per-project sliders change inside one debounce window, the confirmation must name every changed scheduler setting before saving the combined update so no capacity change persists silently under another slider's dialog.
+  */
   useEffect(() => {
-    if (!concurrencyDirty || !concurrencyState.data) return;
+    if (!concurrencyDirty || !concurrencyState.data || concurrencyConfirmOpenRef.current) return;
     const values = concurrencyState.data;
     const timeoutId = setTimeout(() => {
-      setConcurrencySaveState("saving");
-      void updateSettings(values, projectId)
-        .then(async () => {
-          await refresh();
+      const persisted = persistedConcurrencyRef.current;
+      const changedKeys = getChangedConcurrencyKeys(values, persisted);
+      if (changedKeys.length === 0) {
+        setConcurrencyDirty(false);
+        pendingConcurrencyKeyRef.current = null;
+        return;
+      }
+
+      concurrencyConfirmOpenRef.current = true;
+      const changeSummary = changedKeys.map((key) => {
+        const labelMeta = CONCURRENCY_SETTING_LABEL_KEYS[key];
+        return t(
+          "commandCenter.controls.concurrency.confirmChangeSummaryItem",
+          "{{setting}} from {{oldValue}} to {{newValue}}",
+          { setting: t(labelMeta.key, labelMeta.defaultValue), oldValue: persisted[key], newValue: values[key] },
+        );
+      });
+      const message = changedKeys.length === 1
+        ? t(
+          "commandCenter.controls.concurrency.confirmMessage",
+          "Change {{setting}}?",
+          { setting: changeSummary[0] },
+        )
+        : t(
+          "commandCenter.controls.concurrency.confirmMultipleMessage",
+          "Change these concurrency settings: {{settings}}?",
+          { settings: changeSummary.join("; ") },
+        );
+      void confirm({
+        title: t("commandCenter.controls.concurrency.confirmTitle", "Confirm concurrency change"),
+        message,
+        confirmLabel: t("commandCenter.controls.concurrency.confirmSave", "Save change"),
+        cancelLabel: t("commandCenter.controls.concurrency.confirmCancel", "Cancel"),
+      }).then((confirmed) => {
+        concurrencyConfirmOpenRef.current = false;
+        if (!confirmed) {
+          setConcurrencyState({ status: "loaded", data: persistedConcurrencyRef.current, error: null });
           setConcurrencyDirty(false);
-          setConcurrencySaveState("saved");
-        })
-        .catch(() => {
-          setConcurrencySaveState("error");
-        });
+          pendingConcurrencyKeyRef.current = null;
+          setConcurrencySaveState("idle");
+          return;
+        }
+
+        setConcurrencySaveState("saving");
+        void updateSettings(values, projectId)
+          .then(async () => {
+            await refresh();
+            persistedConcurrencyRef.current = values;
+            setConcurrencyDirty(false);
+            pendingConcurrencyKeyRef.current = null;
+            setConcurrencySaveState("saved");
+          })
+          .catch(() => {
+            setConcurrencySaveState("error");
+          });
+      });
     }, CONCURRENCY_SAVE_DEBOUNCE_MS);
     return () => clearTimeout(timeoutId);
-  }, [concurrencyDirty, concurrencyState.data, projectId, refresh]);
+  }, [confirm, concurrencyDirty, concurrencyState.data, projectId, refresh, t]);
 
   const updateConcurrencyValue = (key: keyof ConcurrencyValues, rawValue: string, min: number, max: number) => {
     const nextValue = clamp(Number(rawValue), min, max);
+    pendingConcurrencyKeyRef.current = key;
     setConcurrencyState((current) => ({
       status: "loaded",
       data: { ...(current.data ?? DEFAULT_CONCURRENCY_VALUES), [key]: nextValue },
@@ -159,12 +235,61 @@ export function CommandCenterControls({ projectId, colorTheme, themeMode, shadcn
     setConcurrencySaveState("idle");
   };
 
+  const updateGlobalConcurrencyValue = (rawValue: string) => {
+    const nextValue = clamp(Number(rawValue), gc.min, gc.sliderMax);
+    setPendingGlobalConcurrencyValue(nextValue);
+    setGlobalConcurrencyDirty(true);
+  };
+
+  /*
+  FNXC:CommandCenter 2026-06-26-00:00:
+  The Command Center global-cap slider shares useGlobalConcurrency with the footer EngineControlMenu, so confirmation is card-local: drag into pending state, confirm once after settle, then call gc.setValue exactly once so the hook's existing debounce and footer behavior remain unchanged.
+  */
+  useEffect(() => {
+    if (!globalConcurrencyDirty || pendingGlobalConcurrencyValue === null || !gc.interactive || globalConcurrencyConfirmOpenRef.current) return;
+    const nextValue = pendingGlobalConcurrencyValue;
+    const persistedValue = gc.value;
+    const timeoutId = setTimeout(() => {
+      if (nextValue === persistedValue) {
+        setPendingGlobalConcurrencyValue(null);
+        setGlobalConcurrencyDirty(false);
+        return;
+      }
+
+      globalConcurrencyConfirmOpenRef.current = true;
+      void confirm({
+        title: t("commandCenter.controls.concurrency.confirmTitle", "Confirm concurrency change"),
+        message: t(
+          "commandCenter.controls.concurrency.confirmMessage",
+          "Change {{setting}} from {{oldValue}} to {{newValue}}?",
+          {
+            setting: t("settings.scheduling.globalMaxConcurrent", "Global Max Concurrent"),
+            oldValue: persistedValue,
+            newValue: nextValue,
+          },
+        ),
+        confirmLabel: t("commandCenter.controls.concurrency.confirmSave", "Save change"),
+        cancelLabel: t("commandCenter.controls.concurrency.confirmCancel", "Cancel"),
+      }).then((confirmed) => {
+        globalConcurrencyConfirmOpenRef.current = false;
+        if (confirmed) {
+          gc.setValue(String(nextValue));
+        }
+        setPendingGlobalConcurrencyValue(null);
+        setGlobalConcurrencyDirty(false);
+      });
+    }, CONCURRENCY_SAVE_DEBOUNCE_MS);
+    return () => clearTimeout(timeoutId);
+  }, [confirm, gc.interactive, gc.setValue, gc.value, globalConcurrencyDirty, pendingGlobalConcurrencyValue, t]);
+
   const effectiveGlobalPaused = globalPaused;
   const concurrencyValues = concurrencyState.data ?? DEFAULT_CONCURRENCY_VALUES;
   const globalCountsLoaded = gc.status === "loaded";
   const projectActive = gc.projectActiveCount(projectId);
+  const globalSliderValue = pendingGlobalConcurrencyValue ?? gc.value;
+  const globalSliderMax = Math.max(gc.sliderMax, globalSliderValue);
   const maxConcurrentSliderMax = getConcurrencySliderMax("maxConcurrent", concurrencyValues.maxConcurrent);
-  const globalUseMarkerRatio = getUseMarkerRatio(gc.currentlyActive, gc.min, gc.sliderMax);
+  const globalUseMarkerRatio = getUseMarkerRatio(gc.currentlyActive, gc.min, globalSliderMax);
   const projectUseMarkerRatio = getUseMarkerRatio(projectActive, CONCURRENCY_SLIDER_LIMITS.maxConcurrent.min, maxConcurrentSliderMax);
   // FNXC:GlobalConcurrencyControls 2026-06-25-22:45: Mirror the per-project slider save-state labels for the shared global cap.
   // FNXC:GlobalConcurrencyControls 2026-06-26-06:05: Explicit load-error branch — a failed initial load leaves saveState "idle", so the label otherwise fell through to "Ready" while the slider was disabled and an error alert shown.
@@ -284,7 +409,7 @@ export function CommandCenterControls({ projectId, colorTheme, themeMode, shadcn
             <label className="cc-controls-slider cc-controls-slider--global" htmlFor="cc-global-max-concurrent">
               <span className="cc-controls-slider-label">
                 {t("settings.scheduling.globalMaxConcurrent", "Global Max Concurrent")}
-                <strong>{gc.value}</strong>
+                <strong>{globalSliderValue}</strong>
               </span>
               <small className="cc-controls-slider-caption">{t("settings.scheduling.maximumConcurrentAgentsAcrossAllProjects", "Maximum concurrent agents across all projects")}</small>
               {globalCountsLoaded ? (
@@ -298,10 +423,10 @@ export function CommandCenterControls({ projectId, colorTheme, themeMode, shadcn
                   className="cc-controls-touch-slider"
                   type="range"
                   min={gc.min}
-                  max={gc.sliderMax}
-                  value={gc.value}
+                  max={globalSliderMax}
+                  value={globalSliderValue}
                   disabled={!gc.interactive}
-                  onChange={(event) => gc.setValue(event.target.value)}
+                  onChange={(event) => updateGlobalConcurrencyValue(event.target.value)}
                 />
                 {globalCountsLoaded ? (
                   <span

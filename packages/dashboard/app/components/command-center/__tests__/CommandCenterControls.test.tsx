@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { CommandCenterControls } from "../CommandCenterControls";
 import { COLOR_THEMES } from "../../themeOptions";
+import { ConfirmDialogProvider } from "../../../hooks/useConfirm";
 
 const commandCenterControlsCss = readFileSync(
   join(process.cwd(), "app/components/command-center/CommandCenterControls.css"),
@@ -45,13 +46,15 @@ vi.mock("../../../hooks/useAppSettings", () => ({
 
 function renderControls(projectId?: string) {
   return render(
-    <CommandCenterControls
-      projectId={projectId}
-      colorTheme="default"
-      themeMode="dark"
-      onColorThemeChange={vi.fn()}
-      onThemeModeChange={vi.fn()}
-    />,
+    <ConfirmDialogProvider>
+      <CommandCenterControls
+        projectId={projectId}
+        colorTheme="default"
+        themeMode="dark"
+        onColorThemeChange={vi.fn()}
+        onThemeModeChange={vi.fn()}
+      />
+    </ConfirmDialogProvider>,
   );
 }
 
@@ -59,6 +62,27 @@ async function flushPromises() {
   await act(async () => {
     await Promise.resolve();
   });
+}
+
+async function advanceConfirmDebounce() {
+  await act(async () => {
+    vi.advanceTimersByTime(500);
+    await Promise.resolve();
+  });
+}
+
+function getConfirmDialog() {
+  return screen.getByRole("dialog", { name: /confirm concurrency change/i });
+}
+
+async function clickConfirmSave() {
+  fireEvent.click(within(getConfirmDialog()).getByRole("button", { name: /save change/i }));
+  await flushPromises();
+}
+
+async function clickConfirmCancel() {
+  fireEvent.click(within(getConfirmDialog()).getByRole("button", { name: /cancel/i }));
+  await flushPromises();
 }
 
 beforeEach(() => {
@@ -185,44 +209,91 @@ describe("CommandCenterControls", () => {
     expect(within(section).queryByTestId("cc-project-use-marker")).toBeNull();
   });
 
-  it("persists shared global cap slider changes without mutating project settings", async () => {
+  it("gates the global cap slider behind confirmation before persisting", async () => {
     renderControls("project-a");
 
     await flushPromises();
     const section = screen.getByTestId("cc-controls-concurrency");
-    const slider = within(section).getByLabelText(/global max concurrent/i);
+    const slider = within(section).getByLabelText(/global max concurrent/i) as HTMLInputElement;
     fireEvent.change(slider, { target: { value: "10" } });
 
-    await act(async () => {
-      vi.advanceTimersByTime(500);
-      await Promise.resolve();
-    });
+    await advanceConfirmDebounce();
+
+    expect(getConfirmDialog()).toHaveTextContent("Change Global Max Concurrent from 8 to 10?");
+    expect(mocks.updateGlobalConcurrency).not.toHaveBeenCalled();
+    expect(mocks.updateSettings).not.toHaveBeenCalled();
+
+    await clickConfirmSave();
+    await advanceConfirmDebounce();
 
     expect(mocks.updateGlobalConcurrency).toHaveBeenCalledWith({ globalMaxConcurrent: 10 });
+    expect(mocks.updateGlobalConcurrency).toHaveBeenCalledTimes(1);
     expect(mocks.updateSettings).not.toHaveBeenCalled();
   });
 
-  it("persists bounded concurrency slider changes and refreshes settings", async () => {
+  it.each([
+    {
+      name: "Max concurrent tasks",
+      label: /max concurrent tasks/i,
+      value: "7",
+      expected: { maxConcurrent: 7, maxTriageConcurrent: 2, maxWorktrees: 4 },
+    },
+    {
+      name: "Max triage concurrent",
+      label: /max triage concurrent/i,
+      value: "6",
+      expected: { maxConcurrent: 2, maxTriageConcurrent: 6, maxWorktrees: 4 },
+    },
+    {
+      name: "Max worktrees",
+      label: /max worktrees/i,
+      value: "12",
+      expected: { maxConcurrent: 2, maxTriageConcurrent: 2, maxWorktrees: 12 },
+    },
+  ])("gates the $name slider behind confirmation before persisting", async ({ name, label, value, expected }) => {
     renderControls("project-a");
 
     await flushPromises();
     const section = screen.getByTestId("cc-controls-concurrency");
-    const slider = within(section).getByLabelText(/max concurrent tasks/i);
-    fireEvent.change(slider, { target: { value: "7" } });
+    const slider = within(section).getByLabelText(label) as HTMLInputElement;
+    fireEvent.change(slider, { target: { value } });
 
-    await act(async () => {
-      vi.advanceTimersByTime(500);
-      await Promise.resolve();
-    });
+    await advanceConfirmDebounce();
 
-    expect(mocks.updateSettings).toHaveBeenCalledWith(
-      { maxConcurrent: 7, maxTriageConcurrent: 2, maxWorktrees: 4 },
-      "project-a",
-    );
+    expect(getConfirmDialog()).toHaveTextContent(`Change ${name} from ${name === "Max worktrees" ? 4 : 2} to ${value}?`);
+    expect(mocks.updateSettings).not.toHaveBeenCalled();
+
+    await clickConfirmSave();
+
+    expect(mocks.updateSettings).toHaveBeenCalledWith(expected, "project-a");
     expect(mocks.refresh).toHaveBeenCalledTimes(1);
   });
 
-  it("persists concurrency slider changes at the default maximum of 50", async () => {
+  it("confirms all per-project slider changes made inside one debounce before persisting", async () => {
+    renderControls("project-a");
+
+    await flushPromises();
+    const section = screen.getByTestId("cc-controls-concurrency");
+    fireEvent.change(within(section).getByLabelText(/max concurrent tasks/i), { target: { value: "7" } });
+    fireEvent.change(within(section).getByLabelText(/max worktrees/i), { target: { value: "12" } });
+
+    await advanceConfirmDebounce();
+
+    const dialog = getConfirmDialog();
+    expect(dialog).toHaveTextContent("Change these concurrency settings");
+    expect(dialog).toHaveTextContent("Max concurrent tasks from 2 to 7");
+    expect(dialog).toHaveTextContent("Max worktrees from 4 to 12");
+    expect(mocks.updateSettings).not.toHaveBeenCalled();
+
+    await clickConfirmSave();
+
+    expect(mocks.updateSettings).toHaveBeenCalledWith(
+      { maxConcurrent: 7, maxTriageConcurrent: 2, maxWorktrees: 12 },
+      "project-a",
+    );
+  });
+
+  it("persists concurrency slider changes at the default maximum of 50 after confirmation", async () => {
     renderControls("project-a");
 
     await flushPromises();
@@ -230,10 +301,8 @@ describe("CommandCenterControls", () => {
     const slider = within(section).getByLabelText(/max concurrent tasks/i);
     fireEvent.change(slider, { target: { value: "50" } });
 
-    await act(async () => {
-      vi.advanceTimersByTime(500);
-      await Promise.resolve();
-    });
+    await advanceConfirmDebounce();
+    await clickConfirmSave();
 
     expect(mocks.updateSettings).toHaveBeenCalledWith(
       { maxConcurrent: 50, maxTriageConcurrent: 2, maxWorktrees: 4 },
@@ -241,7 +310,7 @@ describe("CommandCenterControls", () => {
     );
   });
 
-  it("persists concurrency slider changes without a project id", async () => {
+  it("persists concurrency slider changes without a project id after confirmation", async () => {
     renderControls(undefined);
 
     await flushPromises();
@@ -249,15 +318,78 @@ describe("CommandCenterControls", () => {
     const slider = within(section).getByLabelText(/max worktrees/i);
     fireEvent.change(slider, { target: { value: "12" } });
 
-    await act(async () => {
-      vi.advanceTimersByTime(500);
-      await Promise.resolve();
-    });
+    await advanceConfirmDebounce();
+    await clickConfirmSave();
 
     expect(mocks.updateSettings).toHaveBeenCalledWith(
       { maxConcurrent: 2, maxTriageConcurrent: 2, maxWorktrees: 12 },
       undefined,
     );
+  });
+
+  it("cancels per-project concurrency changes and reverts the slider without saving", async () => {
+    renderControls("project-a");
+
+    await flushPromises();
+    const section = screen.getByTestId("cc-controls-concurrency");
+    const slider = within(section).getByLabelText(/max concurrent tasks/i) as HTMLInputElement;
+    fireEvent.change(slider, { target: { value: "9" } });
+    expect(slider.value).toBe("9");
+
+    await advanceConfirmDebounce();
+    await clickConfirmCancel();
+
+    expect(slider.value).toBe("2");
+    expect(mocks.updateSettings).not.toHaveBeenCalled();
+  });
+
+  it("dismisses per-project concurrency changes with Escape and reverts without saving", async () => {
+    renderControls("project-a");
+
+    await flushPromises();
+    const section = screen.getByTestId("cc-controls-concurrency");
+    const slider = within(section).getByLabelText(/max triage concurrent/i) as HTMLInputElement;
+    fireEvent.change(slider, { target: { value: "5" } });
+
+    await advanceConfirmDebounce();
+    fireEvent.keyDown(document, { key: "Escape" });
+    await flushPromises();
+
+    expect(slider.value).toBe("2");
+    expect(mocks.updateSettings).not.toHaveBeenCalled();
+  });
+
+  it("dismisses global concurrency changes via backdrop and reverts without saving", async () => {
+    renderControls("project-a");
+
+    await flushPromises();
+    const section = screen.getByTestId("cc-controls-concurrency");
+    const slider = within(section).getByLabelText(/global max concurrent/i) as HTMLInputElement;
+    fireEvent.change(slider, { target: { value: "11" } });
+    expect(slider.value).toBe("11");
+
+    await advanceConfirmDebounce();
+    fireEvent.click(getConfirmDialog().parentElement!);
+    await flushPromises();
+
+    expect(slider.value).toBe("8");
+    await advanceConfirmDebounce();
+    expect(mocks.updateGlobalConcurrency).not.toHaveBeenCalled();
+  });
+
+  it("does not open a confirmation or save for no-op slider settles", async () => {
+    renderControls("project-a");
+
+    await flushPromises();
+    const section = screen.getByTestId("cc-controls-concurrency");
+    fireEvent.change(within(section).getByLabelText(/global max concurrent/i), { target: { value: "8" } });
+    fireEvent.change(within(section).getByLabelText(/max worktrees/i), { target: { value: "4" } });
+
+    await advanceConfirmDebounce();
+
+    expect(screen.queryByRole("dialog", { name: /confirm concurrency change/i })).toBeNull();
+    expect(mocks.updateGlobalConcurrency).not.toHaveBeenCalled();
+    expect(mocks.updateSettings).not.toHaveBeenCalled();
   });
 
   it("renders persisted concurrency settings without stale default drift", async () => {
@@ -339,6 +471,7 @@ describe("CommandCenterControls", () => {
     await flushPromises();
     const section = screen.getByTestId("cc-controls-concurrency");
     const sliders = [
+      within(section).getByLabelText(/global max concurrent/i),
       within(section).getByLabelText(/max concurrent tasks/i),
       within(section).getByLabelText(/max triage concurrent/i),
       within(section).getByLabelText(/max worktrees/i),
@@ -365,10 +498,8 @@ describe("CommandCenterControls", () => {
     const slider = within(section).getByLabelText(/max concurrent tasks/i);
     fireEvent.change(slider, { target: { value: "8" } });
 
-    await act(async () => {
-      vi.advanceTimersByTime(500);
-      await Promise.resolve();
-    });
+    await advanceConfirmDebounce();
+    await clickConfirmSave();
 
     expect(within(section).getByText(/save failed/i)).toBeDefined();
   });
