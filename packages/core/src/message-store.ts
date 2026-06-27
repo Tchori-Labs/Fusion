@@ -208,7 +208,21 @@ export class MessageStore extends EventEmitter<MessageStoreEvents> {
     this.emit("message:received", message);
 
     if (message.toType === "agent" && this.onMessageToAgent) {
-      this.onMessageToAgent(message);
+      // FNXC:PostgresBackend 2026-06-27-06:30:
+      // The agent-delivery hook (agent-heartbeat.handleMessageToAgent) reads the
+      // sync AgentStore, which throws in PG backend mode (AgentStore is not yet
+      // ported). The message is already persisted at this point, so a wake-hook
+      // failure must NOT fail the send — log and degrade (agent wake-on-message
+      // stays disabled in PG mode until AgentStore is ported) rather than 500.
+      try {
+        this.onMessageToAgent(message);
+      } catch (err) {
+        messageStoreLog.warn(
+          `MessageStore onMessageToAgent hook failed for id=${message.id} (send still succeeded): ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
     }
 
     return message;
