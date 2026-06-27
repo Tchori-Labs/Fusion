@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { renderHook, act } from "@testing-library/react";
+import { renderHook, act, fireEvent } from "@testing-library/react";
 import { useExecutorStats } from "../useExecutorStats";
 import * as apiModule from "../../api";
 import type { Task } from "@fusion/core";
@@ -19,6 +19,10 @@ describe("useExecutorStats", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers();
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      get: () => "visible",
+    });
     mockFetchExecutorStats.mockResolvedValue({
       globalPause: false,
       enginePaused: false,
@@ -446,7 +450,7 @@ describe("useExecutorStats", () => {
 
   describe("error handling", () => {
     it("sets error state when API call fails", async () => {
-      mockFetchExecutorStats.mockRejectedValue(new Error("Network error"));
+      mockFetchExecutorStats.mockRejectedValue(new Error("Request failed: 500"));
 
       const { result } = renderHook(() => useExecutorStats([]));
 
@@ -454,11 +458,11 @@ describe("useExecutorStats", () => {
         await vi.advanceTimersByTimeAsync(100);
       });
 
-      expect(result.current.error).toBe("Network error");
+      expect(result.current.error).toBe("Request failed: 500");
     });
 
     it("clears error on successful refresh", async () => {
-      mockFetchExecutorStats.mockRejectedValueOnce(new Error("Network error"));
+      mockFetchExecutorStats.mockRejectedValueOnce(new Error("Request failed: 500"));
 
       const { result } = renderHook(() => useExecutorStats([]));
 
@@ -466,7 +470,7 @@ describe("useExecutorStats", () => {
         await vi.advanceTimersByTimeAsync(100);
       });
 
-      expect(result.current.error).toBe("Network error");
+      expect(result.current.error).toBe("Request failed: 500");
 
       mockFetchExecutorStats.mockResolvedValueOnce({
         globalPause: false,
@@ -474,6 +478,124 @@ describe("useExecutorStats", () => {
         maxConcurrent: 4,
       });
 
+      await act(async () => {
+        await result.current.refresh();
+      });
+
+      expect(result.current.error).toBeNull();
+    });
+
+    it("surfaces a first-ever transient fetch failure when no last-good stats exist", async () => {
+      mockFetchExecutorStats.mockRejectedValueOnce(new Error("Load failed"));
+
+      const { result } = renderHook(() => useExecutorStats([]));
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(100);
+      });
+
+      expect(result.current.error).toBe("Load failed");
+    });
+
+    it("suppresses a single transient failure after a prior success and keeps last-good stats", async () => {
+      const { result } = renderHook(() => useExecutorStats([]));
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(100);
+      });
+      expect(result.current.error).toBeNull();
+      expect(result.current.stats.maxConcurrent).toBe(4);
+
+      mockFetchExecutorStats.mockRejectedValueOnce(new Error("Load failed"));
+
+      await act(async () => {
+        await result.current.refresh();
+      });
+
+      expect(result.current.error).toBeNull();
+      expect(result.current.stats.maxConcurrent).toBe(4);
+    });
+
+    it("surfaces sustained consecutive transient failures after the debounce threshold", async () => {
+      const { result } = renderHook(() => useExecutorStats([]));
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(100);
+      });
+
+      mockFetchExecutorStats.mockRejectedValueOnce(new Error("Load failed"));
+      await act(async () => {
+        await result.current.refresh();
+      });
+      expect(result.current.error).toBeNull();
+
+      mockFetchExecutorStats.mockRejectedValueOnce(new Error("Failed to fetch"));
+      await act(async () => {
+        await result.current.refresh();
+      });
+
+      expect(result.current.error).toBe("Failed to fetch");
+    });
+
+    it("resets the transient failure counter after a successful refresh", async () => {
+      const { result } = renderHook(() => useExecutorStats([]));
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(100);
+      });
+
+      mockFetchExecutorStats.mockRejectedValueOnce(new Error("Load failed"));
+      await act(async () => {
+        await result.current.refresh();
+      });
+      expect(result.current.error).toBeNull();
+
+      mockFetchExecutorStats.mockResolvedValueOnce({
+        globalPause: false,
+        enginePaused: false,
+        maxConcurrent: 6,
+      });
+      await act(async () => {
+        await result.current.refresh();
+      });
+      expect(result.current.error).toBeNull();
+      expect(result.current.stats.maxConcurrent).toBe(6);
+
+      mockFetchExecutorStats.mockRejectedValueOnce(new Error("Failed to fetch"));
+      await act(async () => {
+        await result.current.refresh();
+      });
+
+      expect(result.current.error).toBeNull();
+    });
+
+    it("keeps visibility-resume suppression ahead of transient failure debounce", async () => {
+      const { result } = renderHook(() => useExecutorStats([]));
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(100);
+      });
+
+      Object.defineProperty(document, "visibilityState", {
+        configurable: true,
+        get: () => "hidden",
+      });
+      act(() => {
+        fireEvent(document, new Event("visibilitychange"));
+      });
+      Object.defineProperty(document, "visibilityState", {
+        configurable: true,
+        get: () => "visible",
+      });
+      act(() => {
+        fireEvent(document, new Event("visibilitychange"));
+      });
+
+      mockFetchExecutorStats.mockRejectedValueOnce(new Error("Load failed"));
+      await act(async () => {
+        await result.current.refresh();
+      });
+      mockFetchExecutorStats.mockRejectedValueOnce(new Error("Failed to fetch"));
       await act(async () => {
         await result.current.refresh();
       });

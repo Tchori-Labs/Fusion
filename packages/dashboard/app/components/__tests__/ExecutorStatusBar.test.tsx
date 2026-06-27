@@ -553,6 +553,27 @@ describe("ExecutorStatusBar", () => {
   });
 
   describe("error state", () => {
+    it.each(["desktop", "mobile"] as const)("keeps populated stats on %s when a transient stats-fetch blip is debounced", (viewportMode) => {
+      viewportModeMock.value = viewportMode;
+      vi.mocked(mockUseExecutorStats).mockReturnValue({
+        stats: defaultStats,
+        loading: false,
+        error: null,
+        refresh: vi.fn(),
+      });
+
+      render(<ExecutorStatusBar tasks={emptyTasks} />);
+
+      const statusBar = screen.getByRole("status");
+      expect(statusBar).toHaveTextContent("Queued");
+      expect(statusBar).toHaveTextContent("Running");
+      expect(statusBar).toHaveTextContent("Blocked");
+      expect(statusBar).toHaveTextContent("In Review");
+      expect(statusBar).not.toHaveClass("executor-status-bar--connecting");
+      expect(statusBar.querySelector(".executor-status-bar--connecting")).toBeNull();
+      expect(screen.queryByText("Connecting…")).not.toBeInTheDocument();
+    });
+
     it("shows error message when error is present", () => {
       vi.mocked(mockUseExecutorStats).mockReturnValue({
         stats: defaultStats,
@@ -568,7 +589,8 @@ describe("ExecutorStatusBar", () => {
       expect(statusBar).toHaveClass("executor-status-bar--error");
     });
 
-    it("shows connecting state instead of suspension error text", () => {
+    it.each(["desktop", "mobile"] as const)("shows connecting state for sustained suspension errors on %s", (viewportMode) => {
+      viewportModeMock.value = viewportMode;
       vi.mocked(mockUseExecutorStats).mockReturnValue({
         stats: defaultStats,
         loading: false,

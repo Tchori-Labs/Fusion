@@ -3,9 +3,14 @@ import type { Task } from "@fusion/core";
 import { fetchExecutorStats } from "../api";
 import type { ExecutorStats, ExecutorState } from "../api";
 import { isTaskStuck } from "../utils/taskStuck";
-import { isVisibilityResumeError, useTabVisibilitySuspension } from "./visibilitySuspension";
+import { isLikelyTabSuspensionError, isVisibilityResumeError, useTabVisibilitySuspension } from "./visibilitySuspension";
 
 const POLL_INTERVAL_MS = 5000; // 5 seconds - different from useProjectHealth's 10s
+/*
+ * FNXC:ExecutorStatusBar 2026-06-27-00:00:
+ * Executor stats polling can hit one-off tab-suspension-like fetch errors while the tab remains visible. Keep the last-good footer stats through one transient poll so the bottom bar does not flash "Connecting…"; only sustained consecutive transient failures may surface the connection state.
+ */
+const TRANSIENT_FAILURE_THRESHOLD = 2;
 
 export interface UseExecutorStatsResult {
   /** Aggregated executor statistics */
@@ -123,6 +128,7 @@ export function useExecutorStats(tasks: Task[], projectId?: string, taskStuckTim
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const hasFetchedStatsRef = useRef(false);
+  const consecutiveFailuresRef = useRef(0);
   const visibilitySuspension = useTabVisibilitySuspension();
 
   const shouldSuppressVisibilityResumeError = useCallback((errorMessage: string): boolean => {
@@ -138,9 +144,10 @@ export function useExecutorStats(tasks: Task[], projectId?: string, taskStuckTim
 
     try {
       setLoading(true);
-      setError(null);
       const data = await fetchExecutorStats(projectId);
+      consecutiveFailuresRef.current = 0;
       hasFetchedStatsRef.current = true;
+      setError(null);
       setApiData(data);
     } catch (err) {
       if (err instanceof Error && err.name === "AbortError") {
@@ -148,9 +155,18 @@ export function useExecutorStats(tasks: Task[], projectId?: string, taskStuckTim
         return;
       }
       const errorMessage = err instanceof Error ? err.message : "Failed to fetch executor stats";
-      if (!shouldSuppressVisibilityResumeError(errorMessage)) {
-        setError(errorMessage);
+      if (shouldSuppressVisibilityResumeError(errorMessage)) {
+        return;
       }
+      if (hasFetchedStatsRef.current && isLikelyTabSuspensionError(errorMessage)) {
+        consecutiveFailuresRef.current += 1;
+        if (consecutiveFailuresRef.current >= TRANSIENT_FAILURE_THRESHOLD) {
+          setError(errorMessage);
+        }
+        return;
+      }
+      consecutiveFailuresRef.current = 0;
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
