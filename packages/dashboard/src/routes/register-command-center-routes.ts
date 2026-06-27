@@ -181,6 +181,10 @@ export const registerCommandCenterRoutes: ApiRouteRegistrar = (ctx) => {
       const groupBy = resolveGroupBy(req.query);
       const granularity = resolveTokenGranularity(req.query);
       const settings = await store.getGlobalSettingsStore().getSettings();
+      // FNXC:PostgresCutover 2026-06-27-09:40:
+      // These sync analytics functions are not yet ported to AsyncDataLayer.
+      // In backend mode, return 503 instead of letting store.getDatabase() throw.
+      if (store.backendMode) throw new ApiError(503, "Token analytics not yet available in PG backend mode");
       const result = aggregateTokenAnalytics(store.getDatabase(), {
         from: range.from,
         to: range.to,
@@ -243,6 +247,7 @@ export const registerCommandCenterRoutes: ApiRouteRegistrar = (ctx) => {
     try {
       const store = await getScopedStore(req);
       const range = resolveRange(req.query);
+      if (store.backendMode) throw new ApiError(503, "Tool analytics not yet available in PG backend mode");
       const result = aggregateToolAnalytics(store.getDatabase(), {
         from: range.from,
         to: range.to,
@@ -289,6 +294,7 @@ export const registerCommandCenterRoutes: ApiRouteRegistrar = (ctx) => {
     try {
       const store = await getScopedStore(req);
       const range = resolveRange(req.query);
+      if (store.backendMode) throw new ApiError(503, "Productivity analytics not yet available in PG backend mode");
       const result = aggregateProductivityAnalytics(store.getDatabase(), {
         from: range.from,
         to: range.to,
@@ -340,6 +346,7 @@ export const registerCommandCenterRoutes: ApiRouteRegistrar = (ctx) => {
       const store = await getScopedStore(req);
       const range = resolveRange(req.query);
       const settings = await store.getGlobalSettingsStore().getSettings();
+      if (store.backendMode) throw new ApiError(503, "Team analytics not yet available in PG backend mode");
       const result = aggregateTeamAnalytics(store.getDatabase(), {
         from: range.from,
         to: range.to,
@@ -389,6 +396,7 @@ export const registerCommandCenterRoutes: ApiRouteRegistrar = (ctx) => {
     try {
       const store = await getScopedStore(req);
       const range = resolveRange(req.query);
+      if (store.backendMode) throw new ApiError(503, "GitHub issue analytics not yet available in PG backend mode");
       const result = aggregateGithubIssueAnalytics(store.getDatabase(), {
         from: range.from,
         to: range.to,
@@ -432,6 +440,7 @@ export const registerCommandCenterRoutes: ApiRouteRegistrar = (ctx) => {
     try {
       const store = await getScopedStore(req);
       const range = resolveRange(req.query);
+      if (store.backendMode) throw new ApiError(503, "Signal analytics not yet available in PG backend mode");
       const result = aggregateSignalsAnalytics(store.getDatabase(), {
         from: range.from,
         to: range.to,
@@ -481,6 +490,7 @@ export const registerCommandCenterRoutes: ApiRouteRegistrar = (ctx) => {
   router.get("/command-center/live", async (req, res) => {
     try {
       const store = await getScopedStore(req);
+      if (store.backendMode) throw new ApiError(503, "Live snapshot not yet available in PG backend mode");
       const result = composeLiveSnapshot(store.getDatabase());
       res.json(result);
     } catch (err: unknown) {

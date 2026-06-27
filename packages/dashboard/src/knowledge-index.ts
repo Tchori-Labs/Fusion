@@ -371,6 +371,11 @@ export async function refreshKnowledgeForTask(
     });
     if (options?.now) input.now = options.now;
 
+    // FNXC:PostgresCutover 2026-06-27-09:50:
+    // Knowledge index uses sync SQLite; skip in backend mode.
+    if (store.isBackendMode?.() ?? store.backendMode) {
+      return null;
+    }
     const { page } = upsertKnowledgePage(store.getDatabase(), input);
     return page;
   } catch (err) {

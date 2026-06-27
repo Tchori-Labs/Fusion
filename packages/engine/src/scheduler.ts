@@ -1520,12 +1520,23 @@ export class Scheduler {
         // also keep their worktree, but after the stuck-kill budget is exhausted they
         // will never merge, so superseding re-implementation tasks (for example FN-4177
         // replaced by FN-4198) must not stay queued behind them. (FN-4200)
+        // FNXC:PostgresCutover 2026-06-27-09:30:
+        // Pre-compute handoff markers before the .filter() because
+        // getCompletionHandoffAcceptedMarker is async and cannot be awaited
+        // inside a synchronous filter callback. Without this, the Promise
+        // object is always !== null, making handoffAccepted incorrectly true.
+        const handoffMarkerMap = new Map<string, boolean>();
+        if (settings.mergeRequestContractShadowEnabled === true) {
+          for (const t of tasks) {
+            if (t.column === "in-review") {
+              handoffMarkerMap.set(t.id, (await this.store.getCompletionHandoffAcceptedMarker(t.id)) !== null);
+            }
+          }
+        }
         const inReviewWithWorktree = tasks.filter(
           (t) => t.column === "in-review" && shouldHoldActiveFileScopeLease(t, tasks, {
             mergeRequestContractShadowEnabled: settings.mergeRequestContractShadowEnabled,
-            handoffAccepted: settings.mergeRequestContractShadowEnabled === true
-              ? this.store.getCompletionHandoffAcceptedMarker(t.id) !== null
-              : false,
+            handoffAccepted: handoffMarkerMap.get(t.id) ?? false,
             schedulingDependencyOptions,
           }),
         );
@@ -2207,12 +2218,21 @@ export class Scheduler {
           activeScopeColumns.set(task.id, task.column);
         }
 
+        // FNXC:PostgresCutover 2026-06-27-09:30:
+        // Pre-compute handoff markers before the .filter() because
+        // getCompletionHandoffAcceptedMarker is async.
+        const reviewHandoffMarkerMap = new Map<string, boolean>();
+        if (settings.mergeRequestContractShadowEnabled === true) {
+          for (const t of tasks) {
+            if (t.column === "in-review") {
+              reviewHandoffMarkerMap.set(t.id, (await this.store.getCompletionHandoffAcceptedMarker(t.id)) !== null);
+            }
+          }
+        }
         const inReviewWithWorktree = tasks.filter(
           (task) => task.column === "in-review" && shouldHoldActiveFileScopeLease(task, tasks, {
             mergeRequestContractShadowEnabled: settings.mergeRequestContractShadowEnabled,
-            handoffAccepted: settings.mergeRequestContractShadowEnabled === true
-              ? this.store.getCompletionHandoffAcceptedMarker(task.id) !== null
-              : false,
+            handoffAccepted: reviewHandoffMarkerMap.get(task.id) ?? false,
             schedulingDependencyOptions,
           }),
         );

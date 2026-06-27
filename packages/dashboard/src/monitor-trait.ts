@@ -136,6 +136,13 @@ export async function runMonitorOnRegression(
   deps: MonitorDeps,
 ): Promise<MonitorRegressionOutcome> {
   const { store, config, nowMs } = deps;
+  // FNXC:PostgresCutover 2026-06-27-09:45:
+  // monitor-trait uses sync analytics functions (ingestIncidentSignal,
+  // countRecentAutoFixTasks) that are not yet ported to AsyncDataLayer.
+  // Guard in backend mode rather than letting store.getDatabase() throw.
+  if (store.backendMode) {
+    return { kind: "absorbed", incidentId: "", existingFixTaskId: null, reason: "monitor-trait not yet available in PG backend mode" };
+  }
   const db = store.getDatabase();
 
   let incidentId: string;

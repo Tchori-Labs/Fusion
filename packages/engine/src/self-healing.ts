@@ -3866,7 +3866,7 @@ export class SelfHealingManager {
         if (!blocker || !shouldHoldActiveFileScopeLease(blocker, allTasks, {
           mergeRequestContractShadowEnabled: settings.mergeRequestContractShadowEnabled,
           handoffAccepted: settings.mergeRequestContractShadowEnabled === true
-            ? this.store.getCompletionHandoffAcceptedMarker(blocker.id) !== null
+            ? (await this.store.getCompletionHandoffAcceptedMarker(blocker.id)) !== null
             : false,
         })) return false;
         const dependentScope = await getFilteredFileScope(dependent.id);
@@ -4994,7 +4994,7 @@ export class SelfHealingManager {
         if (!blocker || !shouldHoldActiveFileScopeLease(blocker, allTasks, {
           mergeRequestContractShadowEnabled: settings.mergeRequestContractShadowEnabled,
           handoffAccepted: settings.mergeRequestContractShadowEnabled === true
-            ? this.store.getCompletionHandoffAcceptedMarker(blocker.id) !== null
+            ? (await this.store.getCompletionHandoffAcceptedMarker(blocker.id)) !== null
             : false,
         })) return false;
 
