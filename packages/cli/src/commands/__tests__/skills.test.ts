@@ -390,11 +390,15 @@ describe("runSkillsInstall", () => {
     );
   });
 
+  /*
+  FNXC:CliSkills 2026-06-27-17:10:
+  runSkillsInstall awaits the spawned child's "exit" event before resolving (skills.ts:193), so
+  `await runSkillsInstall(...)` already completes after the mock fires exit. The prior fixed 100ms
+  post-await sleeps were dead wall-clock time (FN-5048: no fixed sleeps where an await already gates
+  completion); removed without weakening any assertion.
+  */
   it("spawns npx with correct args for install all skills", async () => {
     await runSkillsInstall(["firebase/agent-skills"]);
-
-    // Wait for async spawn to complete
-    await new Promise((r) => setTimeout(r, 100));
 
     expect(mocks.spawn).toHaveBeenCalledWith(
       "npx",
@@ -406,9 +410,6 @@ describe("runSkillsInstall", () => {
   it("spawns npx with correct args for specific skill", async () => {
     await runSkillsInstall(["firebase/agent-skills"], { skill: "firebase-basics" });
 
-    // Wait for async spawn to complete
-    await new Promise((r) => setTimeout(r, 100));
-
     expect(mocks.spawn).toHaveBeenCalledWith(
       "npx",
       ["skills", "add", "firebase/agent-skills", "--skill", "firebase-basics", "-y", "-a", "pi"],
@@ -418,9 +419,6 @@ describe("runSkillsInstall", () => {
 
   it("prints success message on successful install", async () => {
     await runSkillsInstall(["firebase/agent-skills"]);
-
-    // Wait for async spawn to complete
-    await new Promise((r) => setTimeout(r, 100));
 
     expect(consoleLogSpy).toHaveBeenCalledWith(
       expect.stringContaining("Installed skill from firebase/agent-skills"),
@@ -440,9 +438,6 @@ describe("runSkillsInstall", () => {
     mocks.spawn.mockReturnValueOnce(errorChild);
 
     await runSkillsInstall(["firebase/agent-skills"]);
-
-    // Wait for async spawn to complete
-    await new Promise((r) => setTimeout(r, 100));
 
     expect(consoleErrorSpy).toHaveBeenCalledWith(
       expect.stringContaining("Failed to install skill"),
