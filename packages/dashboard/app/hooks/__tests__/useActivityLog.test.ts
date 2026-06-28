@@ -123,9 +123,14 @@ describe("useActivityLog", () => {
       expect(mockFetchActivityLog).toHaveBeenCalledTimes(1);
     });
 
-    // Advance time — should not trigger another fetch
-    vi.useRealTimers();
-    await new Promise((r) => setTimeout(r, 100));
+    // FNXC:ActivityLogTests 2026-06-27-17:10:
+    // Prove the negative (no auto-refresh poll fires when autoRefresh:false) with
+    // fake timers instead of a real wall-clock sleep. The hook polls every
+    // POLL_INTERVAL_MS (5000ms); advancing well past two intervals deterministically
+    // exercises the disabled-interval path with zero real wait (FN-5048: no slow tests).
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(12_000);
+    });
 
     expect(mockFetchActivityLog).toHaveBeenCalledTimes(1);
   });
