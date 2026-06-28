@@ -1,3 +1,4 @@
+import { taskHasManualOpenPullRequest } from "./task-helpers.js";
 import type { BranchGroup, Settings, Task, WorkflowStepResult } from "./types.js";
 
 export interface MergeTargetResolution {
@@ -58,12 +59,17 @@ export function resolveEffectiveAutoMerge(
  * reconciled separately. Distinct from
  * `resolveEffectiveAutoMerge`, which resolves the effective boolean and would
  * (incorrectly for processing gates) starve the manual-required parking path.
+ *
+ * FNXC:PrAutoMergeGate 2026-06-28-00:33:
+ * FN-7182: a dashboard-created open PR is a human handoff, so exclude it from all automatic merge processing and self-healing recovery until the human merges or closes the PR.
+ * This mirrors the `autoMerge:false` in-review gate while preserving manual Merge PR/manual done paths and pipeline PRs without `manual: true`.
+ * Shared-branch member integration still bypasses this function via `allowInReviewMergeProcessing(... ) || isSharedBranchGroupMemberIntegration(task)`, so a manual PR on a shared member can still be integrated to its group branch; group-to-default promotion remains gated separately.
  */
 export function allowsAutoMergeProcessing(
-  task: Pick<Task, "autoMerge">,
+  task: Pick<Task, "autoMerge" | "prInfo" | "prInfos">,
   settings: Pick<Settings, "autoMerge">,
 ): boolean {
-  return settings.autoMerge !== false || task.autoMerge === true;
+  return (settings.autoMerge !== false || task.autoMerge === true) && !taskHasManualOpenPullRequest(task);
 }
 
 // Resolves group → default-branch PROMOTION auto-merge. See resolveEffectiveAutoMerge for the per-task member→group-integration step; the two are distinct and must not be conflated.

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import type { StepStatus } from "../types.js";
+import type { PrInfo, StepStatus } from "../types.js";
 import {
   BLOCKING_TASK_STATUSES,
   HARD_BLOCKING_TASK_STATUSES,
@@ -28,6 +28,19 @@ const baseCompletionTask = {
   dependencies: [] as string[],
   blockedBy: undefined as string | undefined,
 };
+
+function prInfo(overrides: Partial<PrInfo> = {}): PrInfo {
+  return {
+    url: "https://github.com/owner/repo/pull/1",
+    number: 1,
+    status: "open",
+    title: "PR",
+    headBranch: "fusion/fn-001",
+    baseBranch: "main",
+    commentCount: 0,
+    ...overrides,
+  };
+}
 
 describe("resolveEffectiveAutoMerge", () => {
   it("prefers explicit true over global false", () => {
@@ -81,6 +94,51 @@ describe("allowsAutoMergeProcessing", () => {
     expect(allowsAutoMergeProcessing({ autoMerge: undefined }, { autoMerge: true })).toBe(true);
     expect(allowsAutoMergeProcessing({ autoMerge: true }, { autoMerge: true })).toBe(true);
     expect(allowsAutoMergeProcessing({ autoMerge: false }, { autoMerge: true })).toBe(true);
+  });
+
+  it("blocks an open or draft manually-created PR even when global auto-merge is on", () => {
+    expect(allowsAutoMergeProcessing({
+      autoMerge: undefined,
+      prInfos: [prInfo({ manual: true })],
+    }, { autoMerge: true })).toBe(false);
+    expect(allowsAutoMergeProcessing({
+      autoMerge: undefined,
+      prInfos: [prInfo({ manual: true, status: "draft" })],
+    }, { autoMerge: true })).toBe(false);
+  });
+
+  it("does not block once a manually-created PR is closed or merged", () => {
+    expect(allowsAutoMergeProcessing({
+      autoMerge: undefined,
+      prInfos: [prInfo({ manual: true, status: "merged" })],
+    }, { autoMerge: true })).toBe(true);
+    expect(allowsAutoMergeProcessing({
+      autoMerge: undefined,
+      prInfos: [prInfo({ manual: true, status: "closed" })],
+    }, { autoMerge: true })).toBe(true);
+  });
+
+  it("does not block a pipeline-created open PR without the manual flag", () => {
+    expect(allowsAutoMergeProcessing({
+      autoMerge: undefined,
+      prInfos: [prInfo()],
+    }, { autoMerge: true })).toBe(true);
+  });
+
+  it("preserves no-PR and explicit override behavior", () => {
+    expect(allowsAutoMergeProcessing({ autoMerge: undefined }, { autoMerge: true })).toBe(true);
+    expect(allowsAutoMergeProcessing({ autoMerge: true }, { autoMerge: false })).toBe(true);
+  });
+
+  it("checks the legacy single prInfo and multi prInfos shapes", () => {
+    expect(allowsAutoMergeProcessing({
+      autoMerge: undefined,
+      prInfo: prInfo({ manual: true }),
+    }, { autoMerge: true })).toBe(false);
+    expect(allowsAutoMergeProcessing({
+      autoMerge: undefined,
+      prInfos: [prInfo({ number: 1 }), prInfo({ number: 2, manual: true })],
+    }, { autoMerge: true })).toBe(false);
   });
 });
 

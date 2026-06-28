@@ -2634,8 +2634,45 @@ describe("PR conflict refresh + reclaim routes", () => {
     const res = await REQUEST(buildApp(), "POST", `/api/tasks/${task.id}/pr/create`, JSON.stringify({ title: "New PR", body: "New PR body" }), { "content-type": "application/json" });
 
     expect(res.status).toBe(201);
-    expect(store.addPrInfo).toHaveBeenCalledWith(task.id, expect.objectContaining({ number: 901 }));
+    expect(store.addPrInfo).toHaveBeenCalledWith(task.id, expect.objectContaining({ number: 901, manual: true }));
     expect(store.updatePrInfo).not.toHaveBeenCalled();
+  });
+
+  it("create-PR stores freshly created PRs as manual handoffs", async () => {
+    process.env.GITHUB_REPOSITORY = "owner/repo";
+    const task = { ...FAKE_TASK_DETAIL, id: "FN-901", column: "in-review", prInfo: undefined, prInfos: undefined };
+    (store.getTask as ReturnType<typeof vi.fn>).mockResolvedValue(task);
+
+    vi.spyOn(GitHubClient.prototype, "findPrForBranch").mockResolvedValue(null);
+    vi.spyOn(GitHubClient.prototype, "createPr").mockResolvedValue({
+      url: "https://github.com/owner/repo/pull/902",
+      number: 902,
+      status: "open",
+      title: "New",
+      headBranch: "fusion/fn-901",
+      baseBranch: "main",
+      commentCount: 0,
+    } as any);
+    mockExecFile.mockImplementationOnce((file, argsOrCb, maybeOptions, maybeCb) => {
+      const cb =
+        typeof maybeCb === "function"
+          ? maybeCb
+          : typeof maybeOptions === "function"
+            ? maybeOptions
+            : typeof argsOrCb === "function"
+              ? argsOrCb
+              : null;
+      expect(file).toBe("git");
+      expect(Array.isArray(argsOrCb) ? argsOrCb : []).toEqual(["push", "-u", "origin", "fusion/fn-901"]);
+      if (cb) queueMicrotask(() => cb(null, { stdout: "", stderr: "" }));
+      return undefined as never;
+    });
+
+    const res = await REQUEST(buildApp(), "POST", `/api/tasks/${task.id}/pr/create`, JSON.stringify({ title: "New PR", body: "New PR body" }), { "content-type": "application/json" });
+
+    expect(res.status).toBe(201);
+    expect(store.updatePrInfo).toHaveBeenCalledWith(task.id, expect.objectContaining({ number: 902, manual: true }));
+    expect(store.addPrInfo).not.toHaveBeenCalled();
   });
 
   it("queues conflict reclaim during refresh when mergeable is conflicting", async () => {
@@ -2707,6 +2744,7 @@ describe("PR conflict refresh + reclaim routes", () => {
         headBranch: "fusion/fn-901",
         baseBranch: "main",
         commentCount: 0,
+        manual: true,
       },
     };
     (store.getTask as ReturnType<typeof vi.fn>).mockResolvedValue(task);
@@ -2731,6 +2769,11 @@ describe("PR conflict refresh + reclaim routes", () => {
     const res = await REQUEST(buildApp({ engine } as any), "POST", `/api/tasks/${task.id}/pr/refresh`, JSON.stringify({}), { "content-type": "application/json" });
     expect(res.status).toBe(200);
     expect(res.body.conflictReclaimQueued).toBe(false);
+    expect(store.updatePrInfoByNumber).toHaveBeenCalledWith(
+      task.id,
+      task.prInfo.number,
+      expect.objectContaining({ manual: true }),
+    );
     expect(reclaimSpy).not.toHaveBeenCalled();
   });
 

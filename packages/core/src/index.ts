@@ -712,7 +712,6 @@ export {
   hasTitleIdDrift,
   normalizeTitleForTaskId,
 } from "./task-title-id-drift.js";
-export { getPrimaryPrInfo } from "./task-helpers.js";
 export {
   IN_REVIEW_STALL_DEADLOCK_PAUSE_REASON,
   MANUAL_RETRY_RESET_COUNTER_KEYS,
@@ -807,6 +806,7 @@ export type {
   DependencyBlockedTodoReport,
   DependencyBlockedTodoReportContext,
 } from "./dependency-blocked-todo-report.js";
+export { getPrimaryPrInfo, taskHasManualOpenPullRequest } from "./task-helpers.js";
 export {
   getTaskMergeBlocker,
   getTaskHardMergeBlocker,

@@ -954,6 +954,12 @@ export interface PrInfo {
   commentCount: number;
   isDraft?: boolean;
   draft?: boolean;
+  /**
+   * FNXC:PrAutoMergeGate 2026-06-28-00:33:
+   * FN-7182: `true` means this PR was created or linked by the dashboard Create PR action as an explicit human handoff.
+   * Pipeline PR-merge-strategy PRs leave this unset so automatic PR-mode merging keeps working. PrInfo is persisted as JSON, so this provenance flag needs no SQLite migration.
+   */
+  manual?: boolean;
   autoMergeOnGreen?: boolean;
   autoMergeStrategy?: "merge" | "squash" | "rebase";
   lastMergeError?: string;

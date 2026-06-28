@@ -3174,7 +3174,40 @@ describe("Pause/Unpause endpoints", () => {
       expect(findSpy).toHaveBeenCalledWith(expect.objectContaining({ head: "fusion/fn-001", state: "all" }));
       expect(createSpy).not.toHaveBeenCalled();
       expect(pushSpy).not.toHaveBeenCalledWith(["push", "-u", "origin", "fusion/fn-001"], expect.anything(), expect.anything());
+      expect(store.updatePrInfo).toHaveBeenCalledWith("FN-001", expect.objectContaining({ number: 77, manual: true }));
+      expect(res.body).toEqual(expect.objectContaining({ number: 77, manual: true }));
       expect(store.logEntry).toHaveBeenCalledWith("FN-001", "Linked existing PR", "PR #77: https://github.com/owner/repo/pull/77");
+
+      if (originalEnv) process.env.GITHUB_REPOSITORY = originalEnv;
+      else delete process.env.GITHUB_REPOSITORY;
+    });
+
+    it("stores linked PRs with manual provenance when appending to an existing PR list", async () => {
+      const originalEnv = process.env.GITHUB_REPOSITORY;
+      process.env.GITHUB_REPOSITORY = "owner/repo";
+      (store.getTask as ReturnType<typeof vi.fn>).mockResolvedValue({
+        ...mockInReviewTask,
+        prInfo: mockPrInfo,
+        prInfos: [mockPrInfo],
+      });
+      const existingPr = { ...mockPrInfo, number: 88, url: "https://github.com/owner/repo/pull/88" };
+      vi.spyOn(GitHubClient.prototype, "findPrForBranch").mockResolvedValue(existingPr);
+      const createSpy = vi.spyOn(GitHubClient.prototype, "createPr").mockResolvedValue(mockPrInfo);
+      const pushSpy = vi.spyOn(resolveDiffBaseModule, "runGitCommand").mockResolvedValue("ok");
+
+      const res = await REQUEST(
+        buildApp(),
+        "POST",
+        "/api/tasks/KB-001/pr/create",
+        JSON.stringify({ title: "Test PR", body: "Test body" }),
+        { "Content-Type": "application/json" }
+      );
+
+      expect(res.status).toBe(201);
+      expect(createSpy).not.toHaveBeenCalled();
+      expect(pushSpy).not.toHaveBeenCalledWith(["push", "-u", "origin", "fusion/fn-001"], expect.anything(), expect.anything());
+      expect(store.addPrInfo).toHaveBeenCalledWith("FN-001", expect.objectContaining({ number: 88, manual: true }));
+      expect(res.body).toEqual(expect.objectContaining({ number: 88, manual: true }));
 
       if (originalEnv) process.env.GITHUB_REPOSITORY = originalEnv;
       else delete process.env.GITHUB_REPOSITORY;
@@ -3200,6 +3233,8 @@ describe("Pause/Unpause endpoints", () => {
       expect(findSpy).toHaveBeenCalled();
       expect(pushSpy).toHaveBeenCalledWith(["push", "-u", "origin", "fusion/fn-001"], "/fake/root", 60_000);
       expect(createSpy).toHaveBeenCalledWith(expect.objectContaining({ head: "fusion/fn-001" }));
+      expect(store.updatePrInfo).toHaveBeenCalledWith("FN-001", expect.objectContaining({ number: 42, manual: true }));
+      expect(res.body).toEqual(expect.objectContaining({ number: 42, manual: true }));
       expect(store.logEntry).toHaveBeenCalledWith("FN-001", "Created PR", "PR #42: https://github.com/owner/repo/pull/42");
 
       if (originalEnv) process.env.GITHUB_REPOSITORY = originalEnv;
@@ -3663,6 +3698,51 @@ describe("Pause/Unpause endpoints", () => {
       expect(store.updatePrInfo).toHaveBeenCalledWith(
         "FN-002",
         expect.objectContaining({ number: 42, status: "merged", lastCheckedAt: expect.any(String) }),
+      );
+    });
+
+    it("preserves manual PR provenance during batch status refresh", async () => {
+      (store.getTask as ReturnType<typeof vi.fn>).mockResolvedValue({
+        ...FAKE_TASK_DETAIL,
+        id: "FN-003",
+        updatedAt: new Date(Date.now() - 10 * 60 * 1000).toISOString(),
+        prInfo: {
+          url: "https://github.com/owner/repo/pull/43",
+          number: 43,
+          status: "open" as const,
+          title: "PR 43",
+          headBranch: "feature/43",
+          baseBranch: "main",
+          commentCount: 0,
+          manual: true,
+        },
+      });
+
+      vi.spyOn(GitHubClient.prototype, "getBatchPrStatus").mockResolvedValue(new Map([
+        [43, {
+          url: "https://github.com/owner/repo/pull/43",
+          number: 43,
+          status: "open",
+          title: "PR 43 refreshed",
+          headBranch: "feature/43",
+          baseBranch: "main",
+          commentCount: 2,
+        }],
+      ]));
+
+      const res = await REQUEST(
+        buildApp(),
+        "POST",
+        "/api/github/batch/status",
+        JSON.stringify({ taskIds: ["FN-003"] }),
+        { "Content-Type": "application/json" },
+      );
+
+      expect(res.status).toBe(200);
+      expect(res.body.results["FN-003"].prInfo.manual).toBe(true);
+      expect(store.updatePrInfo).toHaveBeenCalledWith(
+        "FN-003",
+        expect.objectContaining({ number: 43, manual: true, lastCheckedAt: expect.any(String) }),
       );
     });
 

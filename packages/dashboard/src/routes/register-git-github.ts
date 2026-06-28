@@ -2299,6 +2299,7 @@ async function mergeTaskPr(
       ...mergedPrInfo,
       autoMergeOnGreen: task.prInfo.autoMergeOnGreen,
       autoMergeStrategy: task.prInfo.autoMergeStrategy,
+      manual: task.prInfo.manual,
       lastMergeError: undefined,
       lastMergeErrorAt: undefined,
       draft: mergedPrInfo.draft ?? mergedPrInfo.isDraft,
@@ -2402,6 +2403,7 @@ export async function refreshPrInBackground(
         autoMergeStrategy: prior?.autoMergeStrategy,
         lastMergeError: prior?.lastMergeError,
         lastMergeErrorAt: prior?.lastMergeErrorAt,
+        manual: prior?.manual,
         draft: mergeStatus.prInfo.draft ?? mergeStatus.prInfo.isDraft,
         lastCheckedAt: new Date().toISOString(),
         lastReviewDecision: reviewSnapshot.decision,
@@ -4634,7 +4636,11 @@ export function registerGitGitHubRoutes(ctx: ApiRoutesContext): void {
     for (const match of matchingTasks) {
       if (match.resourceType === "pr") {
         const current = match.current as PrInfo;
-        const next = { ...(badgeData as Omit<PrInfo, "lastCheckedAt">), lastCheckedAt: checkedAt };
+        /*
+        FNXC:PrAutoMergeGate 2026-06-28-01:39:
+        FN-7182: GitHub status refresh payloads do not carry Fusion provenance. Preserve `manual` so a badge refresh cannot erase the human PR handoff and re-enable auto-merge.
+        */
+        const next: PrInfo = { ...current, ...(badgeData as Omit<PrInfo, "lastCheckedAt">), manual: current.manual, lastCheckedAt: checkedAt };
         const changed = hasPrBadgeFieldsChanged(current, badgeData as Omit<PrInfo, "lastCheckedAt">);
         if (changed || current.lastCheckedAt !== checkedAt) {
           await scopedStore.updatePrInfo(match.id, next);
@@ -4827,7 +4833,9 @@ export function registerGitGitHubRoutes(ctx: ApiRoutesContext): void {
             }
 
             const updatedPrInfo: PrInfo = {
+              ...task.prInfo,
               ...prInfo,
+              manual: task.prInfo.manual,
               lastCheckedAt: refreshedAt,
             };
             await scopedStore.updatePrInfo(taskId, updatedPrInfo);
@@ -4939,10 +4947,10 @@ export function registerGitGitHubRoutes(ctx: ApiRoutesContext): void {
 
       let prInfo: PrInfo;
       if (existingPr) {
-        prInfo = existingPr;
+        prInfo = { ...existingPr, manual: true };
       } else {
         await runGitCommand(["push", "-u", "origin", branchName], scopedStore.getRootDir(), 60_000);
-        prInfo = await client.createPr({
+        const createdPrInfo = await client.createPr({
           owner,
           repo,
           title: prTitle,
@@ -4950,8 +4958,13 @@ export function registerGitGitHubRoutes(ctx: ApiRoutesContext): void {
           head: branchName,
           base,
         });
+        prInfo = { ...createdPrInfo, manual: true };
       }
 
+      /*
+      FNXC:PrAutoMergeGate 2026-06-28-00:33:
+      FN-7182: Create PR is an explicit human handoff. Persist `manual: true` only for dashboard-created/linked PRs so automatic merge processing stands down while manual Merge PR and PR monitor completion still work.
+      */
       // Store PR info
       if (existingPrs.length > 0) {
         await scopedStore.addPrInfo(task.id, prInfo);
@@ -5442,6 +5455,7 @@ export function registerGitGitHubRoutes(ctx: ApiRoutesContext): void {
             autoMergeStrategy: priorPr.autoMergeStrategy,
             lastMergeError: priorPr.lastMergeError,
             lastMergeErrorAt: priorPr.lastMergeErrorAt,
+            manual: priorPr.manual,
             draft: mergeStatus.prInfo.draft ?? mergeStatus.prInfo.isDraft,
             lastCheckedAt: new Date().toISOString(),
             lastReviewDecision: reviewSnapshot.decision,
