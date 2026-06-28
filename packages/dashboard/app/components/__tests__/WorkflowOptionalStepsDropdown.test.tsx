@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, fireEvent, cleanup, within } from "@testing-library/react";
 import { useState } from "react";
@@ -21,6 +22,16 @@ const STEP_TWO: ResolvedWorkflowOptionalStep = {
   phase: "post-implementation",
   defaultOn: false,
 };
+
+const STEP_WITHOUT_DESCRIPTION: ResolvedWorkflowOptionalStep = {
+  templateId: "docs",
+  name: "Docs",
+  icon: "file-text",
+  phase: "post-implementation",
+  defaultOn: false,
+};
+
+const DROPDOWN_CSS = readFileSync("app/components/WorkflowOptionalStepsDropdown.css", "utf8");
 
 // Controlled host: parent owns the enabled set, mirroring the create surfaces.
 function Host({
@@ -57,6 +68,21 @@ function expectSharedButtonTrigger(trigger: HTMLElement) {
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+});
+
+describe("WorkflowOptionalStepsDropdown CSS", () => {
+  it("uses canonical dropdown theme tokens for the portal panel", () => {
+    expect(DROPDOWN_CSS).toContain("background: var(--surface);");
+    expect(DROPDOWN_CSS).toContain("border: 1px solid var(--border);");
+    expect(DROPDOWN_CSS).toContain("border-radius: var(--radius);");
+    expect(DROPDOWN_CSS).toContain("box-shadow: var(--shadow-lg);");
+  });
+
+  it("does not keep hardcoded color or px fallbacks in tokenized rules", () => {
+    expect(DROPDOWN_CSS).not.toMatch(/var\(--[^,]+,\s*#/);
+    expect(DROPDOWN_CSS).not.toMatch(/var\(--[^,]+,\s*\d+px/);
+    expect(DROPDOWN_CSS).not.toContain("#4f7cff");
+  });
 });
 
 describe("WorkflowOptionalStepsDropdown", () => {
@@ -121,6 +147,37 @@ describe("WorkflowOptionalStepsDropdown", () => {
     const panel = screen.getByTestId("wf-optional-steps-dropdown-panel");
     expect(panel).toHaveAttribute("role", "listbox");
     expect(within(panel).getByText("Browser Verification")).toBeTruthy();
+  });
+
+  it("renders open-panel data states for multiple selections and optional descriptions", () => {
+    render(<Host steps={[STEP, STEP_WITHOUT_DESCRIPTION, STEP_TWO]} initial={["browser-verification", "test-review"]} />);
+    fireEvent.click(screen.getByTestId("wf-optional-steps-dropdown-trigger"));
+
+    const panel = screen.getByTestId("wf-optional-steps-dropdown-panel");
+    const selectedWithDescription = within(panel).getByTestId(
+      "wf-optional-steps-dropdown-option-browser-verification",
+    );
+    const unselectedWithoutDescription = within(panel).getByTestId("wf-optional-steps-dropdown-option-docs");
+    const secondSelected = within(panel).getByTestId("wf-optional-steps-dropdown-option-test-review");
+
+    expect(selectedWithDescription).toHaveAttribute("role", "option");
+    expect(selectedWithDescription).toHaveAttribute("aria-checked", "true");
+    expect(within(selectedWithDescription).getByText("Verify web application functionality using browser automation")).toBeTruthy();
+    expect(unselectedWithoutDescription).toHaveAttribute("role", "option");
+    expect(unselectedWithoutDescription).toHaveAttribute("aria-checked", "false");
+    expect(within(unselectedWithoutDescription).queryByText("Verify web application functionality using browser automation")).toBeNull();
+    expect(secondSelected).toHaveAttribute("role", "option");
+    expect(secondSelected).toHaveAttribute("aria-checked", "true");
+  });
+
+  it("keeps option rows accessible when the open panel starts with zero selected", () => {
+    render(<Host steps={[STEP_WITHOUT_DESCRIPTION]} />);
+    fireEvent.click(screen.getByTestId("wf-optional-steps-dropdown-trigger"));
+
+    const option = screen.getByTestId("wf-optional-steps-dropdown-option-docs");
+    expect(option).toHaveAttribute("role", "option");
+    expect(option).toHaveAttribute("aria-checked", "false");
+    expect(within(option).getByText("Docs")).toBeTruthy();
   });
 
   it("closes on Escape", () => {
