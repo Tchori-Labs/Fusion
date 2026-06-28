@@ -3432,7 +3432,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    * Returns aggregated array of { pluginId, view } objects.
    */
   router.get("/plugins/dashboard-views", async (_req: Request, res: Response) => {
-    const views = options?.pluginLoader?.getPluginDashboardViews() ?? [];
+    const views = await options?.pluginLoader?.getPluginDashboardViews() ?? [];
     res.json(views);
   });
 

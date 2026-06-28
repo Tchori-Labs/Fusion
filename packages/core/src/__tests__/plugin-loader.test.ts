@@ -1969,7 +1969,7 @@ export default plugin;
     it("returns empty array when no plugins loaded", async () => {
       await pluginStore.init();
       const loader = new PluginLoader({ pluginStore, taskStore: mockTaskStore });
-      expect(loader.getPluginDashboardViews()).toEqual([]);
+      await expect(loader.getPluginDashboardViews()).resolves.toEqual([]);
     });
 
     it("returns aggregated views from a single plugin", async () => {
@@ -1985,7 +1985,7 @@ export default plugin;
         ],
       } as FusionPlugin);
 
-      const views = loader.getPluginDashboardViews();
+      const views = await loader.getPluginDashboardViews();
       expect(views.map((entry) => entry.pluginId + ":" + entry.view.viewId)).toEqual([
         "views-a:graph",
         "views-a:timeline",
@@ -2009,7 +2009,7 @@ export default plugin;
         dashboardViews: [{ viewId: "timeline", label: "Timeline", componentPath: "./timeline.js" }],
       } as FusionPlugin);
 
-      const views = loader.getPluginDashboardViews();
+      const views = await loader.getPluginDashboardViews();
       expect(views).toHaveLength(2);
       expect(views.map((entry) => entry.pluginId + ":" + entry.view.viewId)).toEqual([
         "views-a:graph",
@@ -2040,7 +2040,7 @@ export default plugin;
         ],
       } as FusionPlugin);
 
-      expect(loader.getPluginDashboardViews()).toEqual([
+      await expect(loader.getPluginDashboardViews()).resolves.toEqual([
         {
           pluginId: "views-shape",
           view: {
@@ -2054,6 +2054,112 @@ export default plugin;
           },
         },
       ]);
+    });
+
+    it("serves current on-disk manifest dashboard-view metadata when the loaded module is stale", async () => {
+      await pluginStore.init();
+      const pluginDir = join(rootDir, "generic-nav-plugin");
+      await mkdir(pluginDir, { recursive: true });
+      const entryPath = join(pluginDir, "bundled.js");
+      await writeFile(entryPath, "export default {};\n");
+      const currentDashboardViews = [
+        {
+          viewId: "overview",
+          label: "Current Overview",
+          componentPath: "./dashboard/overview.js",
+          icon: "Boxes",
+          placement: "primary" as const,
+          order: 10,
+        },
+        {
+          viewId: "details",
+          label: "Current Details",
+          componentPath: "./dashboard/details.js",
+          icon: "Network",
+          placement: "more" as const,
+          description: "Fresh manifest metadata",
+        },
+      ];
+      const currentManifest = {
+        ...makeManifest({ id: "generic-nav-plugin", name: "Generic Nav Plugin" }),
+        dashboardViews: currentDashboardViews,
+      };
+      await writeFile(join(pluginDir, "manifest.json"), JSON.stringify(currentManifest));
+      await pluginStore.registerPlugin({ manifest: currentManifest as PluginManifest, path: entryPath });
+
+      const loader = new PluginLoader({ pluginStore, taskStore: mockTaskStore });
+      (loader as any).plugins.set("generic-nav-plugin", {
+        manifest: makeManifest({ id: "generic-nav-plugin", name: "Generic Nav Plugin" }),
+        state: "started",
+        hooks: {},
+        dashboardViews: [
+          {
+            viewId: "overview",
+            label: "Stale Overview",
+            componentPath: "./dashboard/overview.js",
+            icon: "Sparkles",
+            placement: "overflow",
+          },
+        ],
+      } as FusionPlugin);
+
+      await expect(loader.getPluginDashboardViews()).resolves.toEqual([
+        { pluginId: "generic-nav-plugin", view: currentDashboardViews[0] },
+        { pluginId: "generic-nav-plugin", view: currentDashboardViews[1] },
+      ]);
+    });
+
+    it("treats an empty on-disk dashboardViews array as current metadata", async () => {
+      await pluginStore.init();
+      const pluginDir = join(rootDir, "generic-empty-plugin");
+      await mkdir(pluginDir, { recursive: true });
+      const entryPath = join(pluginDir, "dist", "index.js");
+      await mkdir(join(pluginDir, "dist"), { recursive: true });
+      await writeFile(entryPath, "export default {};\n");
+      const currentManifest = {
+        ...makeManifest({ id: "generic-empty-plugin", name: "Generic Empty Plugin" }),
+        dashboardViews: [],
+      };
+      await writeFile(join(pluginDir, "manifest.json"), JSON.stringify(currentManifest));
+      await pluginStore.registerPlugin({ manifest: currentManifest as PluginManifest, path: entryPath });
+
+      const loader = new PluginLoader({ pluginStore, taskStore: mockTaskStore });
+      (loader as any).plugins.set("generic-empty-plugin", {
+        manifest: makeManifest({ id: "generic-empty-plugin", name: "Generic Empty Plugin" }),
+        state: "started",
+        hooks: {},
+        dashboardViews: [{ viewId: "old", label: "Old", componentPath: "./old.js", icon: "Sparkles" }],
+      } as FusionPlugin);
+
+      await expect(loader.getPluginDashboardViews()).resolves.toEqual([]);
+    });
+
+    it("treats a valid on-disk manifest without dashboardViews as no current nav entries", async () => {
+      await pluginStore.init();
+      const pluginDir = join(rootDir, "generic-removed-views-plugin");
+      await mkdir(pluginDir, { recursive: true });
+      const entryPath = join(pluginDir, "dist", "index.js");
+      await mkdir(join(pluginDir, "dist"), { recursive: true });
+      await writeFile(entryPath, "export default {};\n");
+      const currentManifest = makeManifest({
+        id: "generic-removed-views-plugin",
+        name: "Generic Removed Views Plugin",
+      });
+      await writeFile(join(pluginDir, "manifest.json"), JSON.stringify(currentManifest));
+      await pluginStore.registerPlugin({ manifest: currentManifest as PluginManifest, path: entryPath });
+
+      const loader = new PluginLoader({ pluginStore, taskStore: mockTaskStore });
+      (loader as any).plugins.set("generic-removed-views-plugin", {
+        manifest: {
+          ...makeManifest({ id: "generic-removed-views-plugin", name: "Generic Removed Views Plugin" }),
+          dashboardViews: [{ viewId: "old", label: "Old", componentPath: "./old.js", icon: "Sparkles" }],
+        },
+        state: "started",
+        hooks: {},
+        dashboardViews: [{ viewId: "old", label: "Old", componentPath: "./old.js", icon: "Sparkles" }],
+      } as FusionPlugin);
+
+      await expect(loader.getPluginDashboardViews()).resolves.toEqual([]);
     });
   });
 

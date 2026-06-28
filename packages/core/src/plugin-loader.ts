@@ -11,8 +11,7 @@
 
 import { basename, dirname, extname, isAbsolute, join, resolve } from "node:path";
 import { existsSync, readdirSync, statSync } from "node:fs";
-import { stat } from "node:fs/promises";
-import { copyFile } from "node:fs/promises";
+import { copyFile, readFile, stat } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 import { EventEmitter } from "node:events";
 import type { TaskStore } from "./store.js";
@@ -49,6 +48,10 @@ import { scanPluginSecurity } from "./plugin-security-scan.js";
 // Minimum Fusion version for plugin compatibility checks (can be expanded later)
 const MINIMUM_FUSION_VERSION = "0.1.0";
 let moduleImportVersion = 0;
+const PLUGIN_MANIFEST_PARENT_DIR_NAMES = new Set(["dist", "build", "lib", "src"]);
+type CurrentManifestDashboardViewsResult =
+  | { found: true; dashboardViews: PluginDashboardViewDefinition[] }
+  | { found: false };
 
 /**
  * Resolve the actual loadable entry FILE path for a plugin directory. Node ESM
@@ -1074,14 +1077,95 @@ export class PluginLoader extends EventEmitter<{
     });
   }
 
+  private async resolveCurrentManifestPath(pluginEntryPath: string): Promise<string | null> {
+    const candidates = new Set<string>();
+
+    try {
+      const entryStats = await stat(pluginEntryPath);
+      if (entryStats.isDirectory()) {
+        candidates.add(join(pluginEntryPath, "manifest.json"));
+      }
+    } catch {
+      // The entry file can be temporarily absent during rebuilds; still try the
+      // package-root candidates derived from the persisted loadable path.
+    }
+
+    const entryDir = dirname(pluginEntryPath);
+    candidates.add(join(entryDir, "manifest.json"));
+
+    if (PLUGIN_MANIFEST_PARENT_DIR_NAMES.has(basename(entryDir))) {
+      candidates.add(join(dirname(entryDir), "manifest.json"));
+    }
+
+    for (const candidate of candidates) {
+      try {
+        const candidateStats = await stat(candidate);
+        if (candidateStats.isFile()) {
+          return candidate;
+        }
+      } catch {
+        // Try the next candidate so unusual installs keep falling back safely.
+      }
+    }
+
+    return null;
+  }
+
+  private async getCurrentManifestDashboardViews(pluginId: string): Promise<CurrentManifestDashboardViewsResult> {
+    let installation: PluginInstallation;
+    try {
+      installation = await this.options.pluginStore.getPlugin(pluginId);
+    } catch (err) {
+      this.log.warn(`Could not refresh dashboard views for ${pluginId}:`, err);
+      return { found: false };
+    }
+
+    const pluginPath = this.resolvePluginPath(installation.path);
+    const manifestPath = await this.resolveCurrentManifestPath(pluginPath);
+    if (!manifestPath) {
+      return { found: false };
+    }
+
+    let manifest: unknown;
+    try {
+      manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+    } catch (err) {
+      this.log.warn(`Could not read dashboard-view manifest metadata for ${pluginId}:`, err);
+      return { found: false };
+    }
+
+    const validation = validatePluginManifest(manifest);
+    if (!validation.valid) {
+      this.log.warn(`Could not refresh dashboard views for ${pluginId}: ${validation.errors.join(", ")}`);
+      return { found: false };
+    }
+
+    const dashboardViews = (manifest as { dashboardViews?: unknown }).dashboardViews;
+    if (dashboardViews === undefined) {
+      return { found: true, dashboardViews: [] };
+    }
+
+    return { found: true, dashboardViews: dashboardViews as PluginDashboardViewDefinition[] };
+  }
+
   /**
    * Get all top-level dashboard view definitions from loaded plugins.
+   *
+   * FNXC:Plugins 2026-06-28-12:30:
+   * Navigation metadata must come from the current on-disk manifest when present because dashboard component bundles can update immediately after a rebuild while the loaded plugin module instance remains cached. Reading manifest dashboardViews here keeps desktop and mobile nav icon/label/placement in sync with the served in-view bundle for every plugin, without per-plugin pins.
+   *
+   * FNXC:Plugins 2026-06-28-19:58:
+   * A valid manifest that omits dashboardViews is authoritative and means the rebuilt plugin now exposes no top-level views. Do not fall back to stale module dashboardViews after a successful manifest read; fallback is only for missing/unreadable/invalid manifests.
    */
-  getPluginDashboardViews(): Array<{ pluginId: string; view: PluginDashboardViewDefinition }> {
+  async getPluginDashboardViews(): Promise<Array<{ pluginId: string; view: PluginDashboardViewDefinition }>> {
     const views: Array<{ pluginId: string; view: PluginDashboardViewDefinition }> = [];
     for (const [pluginId, plugin] of this.plugins) {
-      if (plugin.dashboardViews) {
-        for (const view of plugin.dashboardViews) {
+      const currentManifestDashboardViews = await this.getCurrentManifestDashboardViews(pluginId);
+      const dashboardViews = currentManifestDashboardViews.found
+        ? currentManifestDashboardViews.dashboardViews
+        : plugin.dashboardViews;
+      if (dashboardViews) {
+        for (const view of dashboardViews) {
           views.push({ pluginId, view });
         }
       }

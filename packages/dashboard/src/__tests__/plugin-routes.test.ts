@@ -100,7 +100,7 @@ function createMockPluginLoader(overrides: Partial<PluginLoader> = {}): PluginLo
     getPluginUiSlots: vi.fn().mockReturnValue([]),
     getPluginUiContributions: vi.fn().mockReturnValue([]),
     getPluginRuntimes: vi.fn().mockReturnValue([]),
-    getPluginDashboardViews: vi.fn().mockReturnValue([]),
+    getPluginDashboardViews: vi.fn().mockResolvedValue([]),
     createRouteContext: vi.fn(async (pluginId: string, overrides?: { taskStore?: TaskStore; settings?: Record<string, unknown>; resolveProjectTaskStore?: (projectId: string) => Promise<TaskStore> }) => ({
       pluginId,
       taskStore: overrides?.taskStore ?? createMockTaskStore(),
@@ -1243,7 +1243,7 @@ describe("GET /api/plugins/dashboard-views", () => {
   });
 
   it("returns 200 with empty array when no plugins have dashboard views", async () => {
-    (pluginLoader.getPluginDashboardViews as ReturnType<typeof vi.fn>).mockReturnValue([]);
+    (pluginLoader.getPluginDashboardViews as ReturnType<typeof vi.fn>).mockResolvedValue([]);
     const res = await performGet(buildApp(), "/api/plugins/dashboard-views");
     expect(res.status).toBe(200);
     expect(res.body).toEqual([]);
@@ -1264,7 +1264,7 @@ describe("GET /api/plugins/dashboard-views", () => {
         },
       },
     ];
-    (pluginLoader.getPluginDashboardViews as ReturnType<typeof vi.fn>).mockReturnValue(mockViews);
+    (pluginLoader.getPluginDashboardViews as ReturnType<typeof vi.fn>).mockResolvedValue(mockViews);
 
     const res = await performGet(buildApp(), "/api/plugins/dashboard-views");
 
@@ -1272,8 +1272,40 @@ describe("GET /api/plugins/dashboard-views", () => {
     expect(res.body).toEqual(mockViews);
   });
 
+  it("awaits refreshed loader dashboard-view metadata before responding", async () => {
+    const refreshedViews = [
+      {
+        pluginId: "generic-nav-plugin",
+        view: {
+          viewId: "overview",
+          label: "Current Overview",
+          componentPath: "./dashboard/overview.js",
+          icon: "Boxes",
+          placement: "primary",
+        },
+      },
+      {
+        pluginId: "generic-reports-plugin",
+        view: {
+          viewId: "reports",
+          label: "Current Reports",
+          componentPath: "./dashboard/reports.js",
+          icon: "FileText",
+          placement: "more",
+        },
+      },
+    ];
+    (pluginLoader.getPluginDashboardViews as ReturnType<typeof vi.fn>).mockResolvedValue(refreshedViews);
+
+    const res = await performGet(buildApp(), "/api/plugins/dashboard-views");
+
+    expect(res.status).toBe(200);
+    expect(pluginLoader.getPluginDashboardViews).toHaveBeenCalledTimes(1);
+    expect(res.body).toEqual(refreshedViews);
+  });
+
   it("returns exactly pluginLoader dashboard-view entries (no synthesized plugin rows)", async () => {
-    (pluginLoader.getPluginDashboardViews as ReturnType<typeof vi.fn>).mockReturnValue([
+    (pluginLoader.getPluginDashboardViews as ReturnType<typeof vi.fn>).mockResolvedValue([
       {
         pluginId: "with-view",
         view: {
@@ -1295,7 +1327,7 @@ describe("GET /api/plugins/dashboard-views", () => {
   });
 
   it("keeps dashboard-views payload separate from ui-slots payload", async () => {
-    (pluginLoader.getPluginDashboardViews as ReturnType<typeof vi.fn>).mockReturnValue([
+    (pluginLoader.getPluginDashboardViews as ReturnType<typeof vi.fn>).mockResolvedValue([
       {
         pluginId: "fusion-plugin-roadmap",
         view: {
