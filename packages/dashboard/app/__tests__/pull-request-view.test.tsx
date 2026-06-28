@@ -37,8 +37,9 @@ function makeSummary(over: Partial<PrDetail["summary"]> = {}): PrDetail["summary
 }
 
 function makeDetail(over: Partial<PrDetail> = {}): PrDetail {
+  const id = over.id ?? "PR-1";
   return {
-    id: "PR-1",
+    id,
     sourceType: "task",
     sourceId: "FN-1",
     repo: "owner/repo",
@@ -57,6 +58,125 @@ function makeDetail(over: Partial<PrDetail> = {}): PrDetail {
     ...over,
   };
 }
+
+function makeList(): PrDetail[] {
+  return [
+    makeDetail({ id: "PR-1", repo: "owner/repo", headBranch: "feature/x", prNumber: 42 }),
+    makeDetail({ id: "PR-2", repo: "owner/other", headBranch: "feature/y", prNumber: 7 }),
+  ];
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+describe("PullRequestView list mode", () => {
+  it("renders project PRs when mounted without an id or detail", async () => {
+    render(<PullRequestView loadPullRequests={vi.fn(async () => makeList())} />);
+
+    const list = await screen.findByTestId("pr-list");
+    expect(list).toBeTruthy();
+    expect(screen.getAllByTestId("pr-list-item")).toHaveLength(2);
+    expect(screen.getByText("owner/repo")).toBeTruthy();
+    expect(screen.getByText("#42")).toBeTruthy();
+    expect(screen.queryByTestId("pr-view-empty")).toBeNull();
+  });
+
+  it("shows a bounded loading state while the list fetch is in flight", async () => {
+    const pending = deferred<PrDetail[]>();
+    render(<PullRequestView loadPullRequests={() => pending.promise} />);
+
+    expect(await screen.findByTestId("pr-list-loading")).toBeTruthy();
+    pending.resolve(makeList());
+    expect(await screen.findByTestId("pr-list")).toBeTruthy();
+    expect(screen.queryByTestId("pr-list-loading")).toBeNull();
+  });
+
+  it("shows the list empty state for zero active PRs without spinning", async () => {
+    render(<PullRequestView loadPullRequests={vi.fn(async () => [])} />);
+
+    expect(await screen.findByTestId("pr-list-empty")).toBeTruthy();
+    expect(screen.queryByTestId("pr-list-loading")).toBeNull();
+    expect(screen.queryByTestId("pr-view-empty")).toBeNull();
+  });
+
+  it("shows a list error state when the list fetch fails", async () => {
+    render(<PullRequestView loadPullRequests={vi.fn(async () => { throw new Error("network down"); })} />);
+
+    expect(await screen.findByTestId("pr-list-error")).toHaveTextContent("network down");
+    expect(screen.queryByTestId("pr-list-loading")).toBeNull();
+  });
+
+  it("loads selected PR detail and returns back to the list", async () => {
+    const list = makeList();
+    const loadPullRequest = vi.fn(async (id: string) => makeDetail({ id, repo: "owner/selected", prNumber: 99 }));
+    render(<PullRequestView loadPullRequests={vi.fn(async () => list)} loadPullRequest={loadPullRequest} />);
+
+    fireEvent.click((await screen.findAllByTestId("pr-list-item"))[1]);
+
+    await waitFor(() => expect(loadPullRequest).toHaveBeenCalledWith("PR-2"));
+    expect(await screen.findByTestId("pr-view")).toBeTruthy();
+    expect(screen.getByText("owner/selected")).toBeTruthy();
+    fireEvent.click(screen.getByTestId("pr-back-to-list"));
+    expect(await screen.findByTestId("pr-list")).toBeTruthy();
+  });
+
+  it("does not enter list mode for parent-supplied detail, explicit null detail, or explicit ids", async () => {
+    const loadPullRequests = vi.fn(async () => makeList());
+    const { rerender } = render(<PullRequestView detail={makeDetail()} loadPullRequests={loadPullRequests} />);
+
+    expect(screen.getByTestId("pr-view")).toBeTruthy();
+    expect(screen.queryByTestId("pr-list")).toBeNull();
+    expect(screen.queryByTestId("pr-back-to-list")).toBeNull();
+    expect(loadPullRequests).not.toHaveBeenCalled();
+
+    rerender(<PullRequestView detail={null} loadPullRequests={loadPullRequests} />);
+    expect(screen.getByTestId("pr-view-empty")).toBeTruthy();
+    expect(screen.queryByTestId("pr-list")).toBeNull();
+    expect(screen.queryByTestId("pr-back-to-list")).toBeNull();
+    expect(loadPullRequests).not.toHaveBeenCalled();
+
+    const loadPullRequest = vi.fn(async () => makeDetail({ id: "PR-9", repo: "owner/explicit" }));
+    rerender(<PullRequestView pullRequestId="PR-9" loadPullRequest={loadPullRequest} loadPullRequests={loadPullRequests} />);
+
+    await waitFor(() => expect(loadPullRequest).toHaveBeenCalledWith("PR-9"));
+    expect(await screen.findByText("owner/explicit")).toBeTruthy();
+    expect(screen.queryByTestId("pr-list")).toBeNull();
+    expect(screen.queryByTestId("pr-back-to-list")).toBeNull();
+    expect(loadPullRequests).not.toHaveBeenCalled();
+  });
+
+  it("enters list mode when a host forwards an undefined detail prop", async () => {
+    const loadPullRequests = vi.fn(async () => makeList());
+    render(<PullRequestView detail={undefined} loadPullRequests={loadPullRequests} />);
+
+    expect(await screen.findByTestId("pr-list")).toBeTruthy();
+    expect(screen.getAllByTestId("pr-list-item")).toHaveLength(2);
+    expect(screen.queryByTestId("pr-view-empty")).toBeNull();
+    expect(loadPullRequests).toHaveBeenCalledTimes(1);
+  });
+
+  it("refreshes the list on fusion store-changed events", async () => {
+    const loadPullRequests = vi
+      .fn<() => Promise<PrDetail[]>>()
+      .mockResolvedValueOnce([makeDetail({ id: "PR-1", repo: "owner/first", prNumber: 1 })])
+      .mockResolvedValueOnce([makeDetail({ id: "PR-2", repo: "owner/second", prNumber: 2 })]);
+    render(<PullRequestView loadPullRequests={loadPullRequests} />);
+
+    expect(await screen.findByText("owner/first")).toBeTruthy();
+    window.dispatchEvent(new Event("fusion:store-changed"));
+
+    await waitFor(() => expect(loadPullRequests).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText("owner/second")).toBeTruthy();
+    expect(screen.queryByText("owner/first")).toBeNull();
+  });
+});
 
 describe("PullRequestView per-node-state rendering", () => {
   it("creating → 'Creating PR…' placeholder", () => {

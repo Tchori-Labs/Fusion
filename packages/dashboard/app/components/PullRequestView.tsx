@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   GitPullRequest,
@@ -71,8 +71,10 @@ export interface PullRequestViewProps {
   projectId?: string;
   /** Override the action dispatcher (tests). Defaults to the POST routes. */
   onAction?: (kind: ActionKind, id: string, body?: Record<string, unknown>) => Promise<PrDetail>;
-  /** Override the fetcher (tests). */
+  /** Override the detail fetcher (tests). */
   loadPullRequest?: (id: string) => Promise<PrDetail>;
+  /** Override the list fetcher (tests). */
+  loadPullRequests?: () => Promise<PrDetail[]>;
 }
 
 function defaultLoad(projectId?: string) {
@@ -80,6 +82,14 @@ function defaultLoad(projectId?: string) {
     const q = projectId ? `?projectId=${encodeURIComponent(projectId)}` : "";
     const res = await api<{ pullRequest: PrDetail }>(`/pull-requests/${id}${q}`);
     return res.pullRequest;
+  };
+}
+
+function defaultLoadList(projectId?: string) {
+  return async (): Promise<PrDetail[]> => {
+    const q = projectId ? `?projectId=${encodeURIComponent(projectId)}` : "";
+    const res = await api<{ pullRequests: PrDetail[] }>(`/pull-requests${q}`);
+    return res.pullRequests;
   };
 }
 
@@ -102,46 +112,75 @@ function ChecksIcon({ rollup }: { rollup: string }) {
   return <span className="pr-icon-none">—</span>;
 }
 
+const PR_LOAD_TIMEOUT_MS = 15000;
+
+async function withPrTimeout<T>(promise: Promise<T>, message: string): Promise<T> {
+  const timeout = new Promise<T>((_, reject) =>
+    setTimeout(() => reject(new Error(message)), PR_LOAD_TIMEOUT_MS),
+  );
+  return Promise.race([promise, timeout]);
+}
+
 export function PullRequestView(props: PullRequestViewProps) {
   const { t } = useTranslation("app");
-  const { detail: detailProp, pullRequestId, projectId, onAction, loadPullRequest } = props;
+  const { detail: detailProp, pullRequestId, projectId, onAction, loadPullRequest, loadPullRequests } = props;
+  // FNXC:PullRequests 2026-06-27-22:59: Optional host props may forward `detail={undefined}` while no PR is selected. Treat only concrete detail values (including explicit null) as controlled detail mode so undefined still follows the no-id list invariant.
+  const hasDetailProp = detailProp !== undefined;
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<PrDetail | null>(detailProp ?? null);
   const [error, setError] = useState<string | null>(null);
+  const [pullRequests, setPullRequests] = useState<PrDetail[]>([]);
+  const [listError, setListError] = useState<string | null>(null);
   const [busy, setBusy] = useState<ActionKind | null>(null);
   const [confirmingMerge, setConfirmingMerge] = useState(false);
-  // FNXC:PullRequests 2026-06-23-00:45: `loading` is true ONLY while a fetch is in flight. Previously detail===null always rendered the spinner, so with no pullRequestId (nothing to load) the view hung on "Loading PR…" forever. Now no-id → empty state, and the fetch is time-bounded so a hung request surfaces an error instead of spinning indefinitely.
+  // FNXC:PullRequests 2026-06-27-00:00: `loading` and `listLoading` are true ONLY while a fetch is in flight. No-id now enters bounded list mode so the sidebar shows active project PRs; explicit empty/detail states still never hang on an endless spinner.
   const [loading, setLoading] = useState(false);
+  const [listLoading, setListLoading] = useState(false);
 
-  const load = loadPullRequest ?? defaultLoad(projectId);
-  const dispatch = onAction ?? defaultAction(projectId);
+  const load = useMemo(() => loadPullRequest ?? defaultLoad(projectId), [loadPullRequest, projectId]);
+  const loadList = useMemo(() => loadPullRequests ?? defaultLoadList(projectId), [loadPullRequests, projectId]);
+  const dispatch = useMemo(() => onAction ?? defaultAction(projectId), [onAction, projectId]);
+  const activePullRequestId = pullRequestId ?? selectedId ?? undefined;
+  const isListMode = !hasDetailProp && !pullRequestId && !selectedId;
+  const canReturnToList = !hasDetailProp && !pullRequestId && Boolean(selectedId);
 
   const refresh = useCallback(async () => {
-    if (detailProp) {
-      setDetail(detailProp);
-      return;
-    }
-    if (!pullRequestId) {
-      // Nothing to load — show the empty state, never an indefinite spinner.
+    if (hasDetailProp) {
+      setDetail(detailProp ?? null);
       setError(null);
       setLoading(false);
-      setDetail(null);
+      return;
+    }
+    if (!activePullRequestId) {
+      /*
+      FNXC:PullRequests 2026-06-27-00:00:
+      The right-dock Pull Requests tab and main-content pull-requests view mount this component with no PR id. No-id must mean project PR list mode, not the old empty detail state, so active PRs remain visible and selectable from every host.
+      */
+      try {
+        setError(null);
+        setListError(null);
+        setListLoading(true);
+        setDetail(null);
+        setPullRequests(await withPrTimeout(loadList(), "Timed out loading pull requests"));
+      } catch (err) {
+        setPullRequests([]);
+        setListError(err instanceof Error ? err.message : t("pr.view.listError", "Failed to load pull requests"));
+      } finally {
+        setListLoading(false);
+      }
       return;
     }
     try {
       setError(null);
       setLoading(true);
       // Time-bound the fetch (15s) so a hung request resolves into an error state.
-      const PR_LOAD_TIMEOUT_MS = 15000;
-      const timeout = new Promise<PrDetail>((_, reject) =>
-        setTimeout(() => reject(new Error("Timed out loading pull request")), PR_LOAD_TIMEOUT_MS),
-      );
-      setDetail(await Promise.race([load(pullRequestId), timeout]));
+      setDetail(await withPrTimeout(load(activePullRequestId), "Timed out loading pull request"));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load PR");
     } finally {
       setLoading(false);
     }
-  }, [detailProp, pullRequestId, load]);
+  }, [activePullRequestId, detailProp, hasDetailProp, load, loadList, t]);
 
   useEffect(() => {
     void refresh();
@@ -151,11 +190,11 @@ export function PullRequestView(props: PullRequestViewProps) {
   // uses. We listen for the lightweight "store-changed" window event the SSE
   // bridge dispatches; each tick re-reads authoritative state from the route.
   useEffect(() => {
-    if (detailProp || !pullRequestId) return;
+    if (hasDetailProp) return;
     const handler = () => void refresh();
     window.addEventListener("fusion:store-changed", handler);
     return () => window.removeEventListener("fusion:store-changed", handler);
-  }, [detailProp, pullRequestId, refresh]);
+  }, [hasDetailProp, refresh]);
 
   const runAction = useCallback(
     async (kind: ActionKind, body?: Record<string, unknown>) => {
@@ -175,6 +214,76 @@ export function PullRequestView(props: PullRequestViewProps) {
     [detail, dispatch],
   );
 
+  const viewHeader = <ViewHeader icon={GitPullRequest} title={t("pr.view.title", "Pull Requests")} />;
+
+  if (isListMode) {
+    if (listError) {
+      return (
+        <div className="pr-view pr-view--error" data-testid="pr-list-error">
+          {viewHeader}
+          <div className="pr-list-state pr-list-state--error">
+            <AlertTriangle size={16} /> {listError}
+          </div>
+        </div>
+      );
+    }
+    if (listLoading) {
+      return (
+        <div className="pr-view pr-view--loading" data-testid="pr-list-loading">
+          {viewHeader}
+          <div className="pr-list-state">{t("pr.view.listLoading", "Loading pull requests…")}</div>
+        </div>
+      );
+    }
+    if (pullRequests.length === 0) {
+      return (
+        <div className="pr-view pr-view--empty" data-testid="pr-list-empty">
+          {viewHeader}
+          <div className="pr-list-state">
+            <GitPullRequest size={16} /> {t("pr.view.listEmpty", "No active pull requests to show.")}
+          </div>
+        </div>
+      );
+    }
+    return (
+      <div className="pr-view" data-testid="pr-list">
+        {viewHeader}
+        <div className="pr-list-title">{t("pr.view.listTitle", "Active pull requests")}</div>
+        <div className="pr-list-items">
+          {pullRequests.map((pullRequest) => (
+            <button
+              key={pullRequest.id}
+              type="button"
+              className="pr-list-item"
+              data-testid="pr-list-item"
+              aria-label={t("pr.view.listItemLabel", "Open pull request {{repo}} {{number}}", {
+                repo: pullRequest.repo,
+                number: pullRequest.prNumber != null ? `#${pullRequest.prNumber}` : pullRequest.headBranch,
+              })}
+              onClick={() => {
+                setError(null);
+                setLoading(true);
+                setSelectedId(pullRequest.id);
+              }}
+            >
+              <span className="pr-list-item-main">
+                <span className="pr-list-item-repo">{pullRequest.repo}</span>
+                {pullRequest.prNumber != null && <span className="pr-list-item-number">#{pullRequest.prNumber}</span>}
+                <span className="pr-list-item-branch">{pullRequest.headBranch}</span>
+              </span>
+              <span className="pr-list-item-meta">
+                <span className={`pr-identity-state pr-identity-state--${pullRequest.state}`}>{pullRequest.state}</span>
+                <span className="pr-list-item-checks">
+                  <ChecksIcon rollup={pullRequest.summary.checksRollup} /> {pullRequest.summary.checksRollup}
+                </span>
+              </span>
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   if (error && !detail) {
     return (
       <div className="pr-view pr-view--error" data-testid="pr-view-error">
@@ -183,7 +292,7 @@ export function PullRequestView(props: PullRequestViewProps) {
     );
   }
   if (!detail) {
-    // FNXC:PullRequests 2026-06-23-00:45: Only show the spinner while actually fetching; otherwise (no PR id / nothing to load / timed out) show the empty state so the view never hangs on an endless "Loading PR…".
+    // FNXC:PullRequests 2026-06-27-00:00: Only show the detail spinner while actually fetching an explicit PR; list mode owns no-id loading/empty/error so the view never hangs on an endless "Loading PR…".
     if (loading) {
       return (
         <div className="pr-view pr-view--loading" data-testid="pr-view-loading">
@@ -204,13 +313,18 @@ export function PullRequestView(props: PullRequestViewProps) {
   FNXC:PullRequests 2026-06-22-01:00:
   Added the shared ViewHeader (GitPullRequest icon, matching the left-sidebar nav) at the top of every populated PR state so the view reads consistently with other main-content views. The PR-specific identity row (repo/number/branch/state) stays below it. ViewHeader supplies the standard --space-lg top/side padding; the view body must not repeat the top padding.
   */
-  const viewHeader = <ViewHeader icon={GitPullRequest} title={t("pr.view.title", "Pull Requests")} />;
+  const backToListControl = canReturnToList ? (
+    <button type="button" className="pr-back-to-list btn" data-testid="pr-back-to-list" onClick={() => setSelectedId(null)}>
+      {t("pr.view.backToList", "Back to list")}
+    </button>
+  ) : null;
 
   // ── creating ───────────────────────────────────────────────────────────────
   if (state === "creating") {
     return (
       <div className="pr-view" data-testid="pr-view" data-state="creating">
         {viewHeader}
+        {backToListControl}
         <PrIdentityHeader detail={detail} />
         <div className="pr-placeholder" data-testid="pr-creating">
           <Clock size={16} /> {t("pr.view.creating", "Creating PR…")}
@@ -224,6 +338,7 @@ export function PullRequestView(props: PullRequestViewProps) {
     return (
       <div className="pr-view" data-testid="pr-view" data-state="failed">
         {viewHeader}
+        {backToListControl}
         <PrIdentityHeader detail={detail} />
         <div className="pr-error-reason" data-testid="pr-failed">
           <AlertTriangle size={16} className="pr-icon-failure" />
@@ -250,6 +365,7 @@ export function PullRequestView(props: PullRequestViewProps) {
     return (
       <div className="pr-view" data-testid="pr-view" data-state="unverified">
         {viewHeader}
+        {backToListControl}
         <PrIdentityHeader detail={detail} />
         <div className="pr-notice pr-notice--unverified" data-testid="pr-unverified">
           <Clock size={16} /> {t("pr.view.verifyingGithub", "Verifying with GitHub…")}
@@ -275,6 +391,7 @@ export function PullRequestView(props: PullRequestViewProps) {
   return (
     <div className="pr-view" data-testid="pr-view" data-state={state}>
       {viewHeader}
+      {backToListControl}
       <PrIdentityHeader detail={detail} />
 
       {/* responding banner */}

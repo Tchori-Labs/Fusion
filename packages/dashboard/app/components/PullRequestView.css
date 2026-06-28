@@ -26,6 +26,102 @@ The view now renders the shared ViewHeader at the top, which supplies the --spac
   color: var(--color-error);
 }
 
+/* list mode */
+.pr-list-title {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.pr-list-items {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+
+.pr-list-item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, var(--space-xs));
+  background: var(--surface, transparent);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.pr-list-item:hover,
+.pr-list-item:focus-visible {
+  border-color: var(--accent, var(--border));
+  background: var(--surface-2, transparent);
+}
+
+.pr-list-item-main,
+.pr-list-item-meta,
+.pr-list-item-checks,
+.pr-list-state {
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+}
+
+.pr-list-item-main {
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.pr-list-item-meta {
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.pr-list-item-repo {
+  font-weight: 600;
+}
+
+.pr-list-item-number {
+  color: var(--accent, var(--text));
+}
+
+.pr-list-item-branch {
+  color: var(--text-muted);
+  font-family: var(--font-mono, monospace);
+  font-size: 0.85em;
+  overflow-wrap: anywhere;
+}
+
+.pr-list-item-checks {
+  color: var(--text-muted);
+  font-size: 0.85em;
+}
+
+.pr-list-state {
+  color: var(--text-muted);
+}
+
+.pr-list-state--error {
+  color: var(--color-error);
+}
+
+.pr-back-to-list {
+  align-self: flex-start;
+}
+
+@media (max-width: 768px) {
+  .pr-list-item {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .pr-list-item-meta {
+    justify-content: flex-start;
+  }
+}
+
 /* identity header */
 .pr-identity {
   display: flex;
