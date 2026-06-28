@@ -23,8 +23,12 @@ vi.mock("../TaskCard", () => ({
   }),
 }));
 vi.mock("../WorktreeGroup", () => ({
-  WorktreeGroup: () => (
-    <div data-testid="worktree-group" />
+  WorktreeGroup: ({ label, activeTasks, queuedTasks }: { label: string; activeTasks: Task[]; queuedTasks: Task[] }) => (
+    <div data-testid="worktree-group" data-label={label} data-active-count={activeTasks.length} data-queued-count={queuedTasks.length}>
+      <span>{label}</span>
+      {activeTasks.map((task) => <div key={task.id} data-testid={`group-active-${task.id}`}>{task.id}</div>)}
+      {queuedTasks.map((task) => <div key={task.id} data-testid={`group-queued-${task.id}`}>{task.id}</div>)}
+    </div>
   ),
 }));
 vi.mock("../QuickEntryBox", () => ({
@@ -94,6 +98,7 @@ beforeEach(() => {
 const defaultProps = {
   column: "triage" as ColumnType,
   maxConcurrent: 2,
+  showWorktreeGrouping: false,
   onMoveTask: vi.fn().mockResolvedValue({} as Task),
   onOpenDetail: vi.fn(),
   addToast: vi.fn(),
@@ -239,6 +244,96 @@ describe("Column workflow mode (U9)", () => {
       />,
     );
     await waitFor(() => expect(screen.queryByTestId("column-inline-feedback")).toBeNull());
+  });
+});
+
+describe("Column worktree grouping setting", () => {
+  it("keeps the default-off legacy in-progress worktree grouping behavior", () => {
+    const assigned = { ...makeTask("FN-001"), column: "in-progress" as ColumnType, worktree: "/repo/.worktrees/amber-finch" };
+    render(<Column {...defaultProps} column="in-progress" tasks={[assigned]} allTasks={[assigned]} />);
+
+    expect(screen.getByTestId("worktree-group")).toHaveAttribute("data-label", "amber-finch");
+    expect(screen.getByTestId("group-active-FN-001")).toBeInTheDocument();
+    expect(screen.queryByTestId("task-FN-001")).toBeNull();
+  });
+
+  it("renders workflow processing columns as plain cards when the setting is off", () => {
+    const assigned = { ...makeTask("FN-002"), column: "exec" as ColumnType, worktree: "/repo/.worktrees/workflow-wren" };
+    render(
+      <Column
+        {...defaultProps}
+        column={"exec" as ColumnType}
+        workflowMode
+        columnDisplayName="Executing"
+        columnFlags={{ countsTowardWip: true }}
+        tasks={[assigned]}
+        allTasks={[assigned]}
+      />,
+    );
+
+    expect(screen.queryByTestId("worktree-group")).toBeNull();
+    expect(screen.queryByText("workflow-wren")).toBeNull();
+    expect(screen.getByTestId("task-FN-002")).toBeInTheDocument();
+  });
+
+  it("groups workflow processing tasks by worktree when the setting is on", () => {
+    const assigned = { ...makeTask("FN-003"), column: "exec" as ColumnType, worktree: "/repo/.worktrees/workflow-hawk" };
+    const unassigned = { ...makeTask("FN-004"), column: "exec" as ColumnType };
+    const queued = { ...makeTask("FN-005"), column: "todo" as ColumnType };
+    render(
+      <Column
+        {...defaultProps}
+        column={"exec" as ColumnType}
+        workflowMode
+        columnDisplayName="Executing"
+        columnFlags={{ countsTowardWip: true }}
+        showWorktreeGrouping
+        tasks={[assigned, unassigned]}
+        allTasks={[assigned, unassigned, queued]}
+      />,
+    );
+
+    expect(screen.getByText("workflow-hawk")).toBeInTheDocument();
+    expect(screen.getByText("Unassigned")).toBeInTheDocument();
+    expect(screen.getByText("Up Next")).toBeInTheDocument();
+    expect(screen.getByTestId("group-active-FN-003")).toBeInTheDocument();
+    expect(screen.getByTestId("group-active-FN-004")).toBeInTheDocument();
+    expect(screen.getByTestId("group-queued-FN-005")).toBeInTheDocument();
+    expect(screen.queryByTestId("task-FN-003")).toBeNull();
+  });
+
+  it("does not leave worktree shells in empty processing columns", () => {
+    const { rerender } = render(
+      <Column
+        {...defaultProps}
+        column={"exec" as ColumnType}
+        workflowMode
+        columnDisplayName="Executing"
+        columnFlags={{ countsTowardWip: true }}
+        showWorktreeGrouping
+        tasks={[]}
+        allTasks={[]}
+      />,
+    );
+
+    expect(screen.queryByTestId("worktree-group")).toBeNull();
+    expect(screen.getByText("No tasks")).toBeInTheDocument();
+
+    rerender(
+      <Column
+        {...defaultProps}
+        column={"exec" as ColumnType}
+        workflowMode
+        columnDisplayName="Executing"
+        columnFlags={{ countsTowardWip: true }}
+        showWorktreeGrouping={false}
+        tasks={[]}
+        allTasks={[]}
+      />,
+    );
+
+    expect(screen.queryByTestId("worktree-group")).toBeNull();
+    expect(screen.getByText("No tasks")).toBeInTheDocument();
   });
 });
 
