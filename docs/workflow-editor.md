@@ -138,7 +138,7 @@ Fusion ships built-in workflows as read-only references:
 - `builtin:stepwise-coding` — a graph variant that models per-step parse, execute, review, and rework structure.
 - `builtin:design` — a UI-heavy work path with a gated design/UX review before standard review and merge.
 
-Built-ins can be viewed, exported, and used as templates, but their graph, columns, field declarations, and setting declarations are not editable. Their per-project setting **values** are editable from the Settings panel's Values tab.
+Built-ins can be viewed, exported, and used as templates, but their graph, columns, field declarations, and setting declarations are not editable. Their per-project setting **values** are editable from the Settings panel's Values tab. Selectable built-ins all use a capacity-released queue column (`todo` or a workflow-specific backlog) that dispatches to the active WIP column through the standard hold/release sweep.
 
 To customize behavior, create a workflow from **Blank** or copy a built-in/custom workflow with **Duplicate to customize**. Tasks select a workflow by workflow id. Agents and automation can discover workflows with `fn_workflow_list`, assign one to an existing task with `fn_workflow_select`, or pass `workflow_id` when creating tasks through `fn_task_create` / delegation tools.
 

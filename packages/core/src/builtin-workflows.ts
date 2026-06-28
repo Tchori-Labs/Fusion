@@ -6,8 +6,8 @@ import { BUILTIN_STEPWISE_CODING_WORKFLOW_IR } from "./builtin-stepwise-coding-w
 import { BUILTIN_WORKFLOW_SETTINGS } from "./builtin-workflow-settings.js";
 import { builtinPromptConfig } from "./builtin-workflow-prompts.js";
 import type { WorkflowDefinition } from "./workflow-definition-types.js";
-import type { WorkflowIr, WorkflowIrNode } from "./workflow-ir-types.js";
-import { DEFAULT_WORKFLOW_COLUMN_IDS, parseWorkflowIr } from "./workflow-ir.js";
+import type { WorkflowIr, WorkflowIrColumn, WorkflowIrNode } from "./workflow-ir-types.js";
+import { parseWorkflowIr } from "./workflow-ir.js";
 
 /** Prefix marking a workflow as a read-only built-in template. */
 export const BUILTIN_WORKFLOW_ID_PREFIX = "builtin:";
@@ -51,14 +51,25 @@ interface BuiltinSpec {
   nodes: Array<{ id: string; kind: WorkflowIr["nodes"][number]["kind"]; config?: Record<string, unknown> }>;
 }
 
-const V1_LINEAR_NODE_KINDS = new Set<WorkflowIrNode["kind"]>(["start", "prompt", "script", "gate", "end"]);
-
 function defaultColumnForLinearNode(node: WorkflowIrNode): string {
   const seam = node.config?.seam;
   if (seam === "execute") return "in-progress";
   if (seam === "review") return "in-review";
   if (seam === "merge") return "in-review";
   return "todo";
+}
+
+function canonicalBuiltinWorkflowColumns(): WorkflowIrColumn[] {
+  if (BUILTIN_CODING_WORKFLOW_IR.version !== "v2") {
+    throw new Error("builtin coding workflow must be v2 to provide canonical columns");
+  }
+  return BUILTIN_CODING_WORKFLOW_IR.columns.map((column) => ({
+    ...column,
+    traits: column.traits.map((trait) => ({
+      ...trait,
+      config: trait.config ? { ...trait.config } : undefined,
+    })),
+  }));
 }
 
 /** Build a linear IR (start → nodes… → end) with simple x-spaced layout. */
@@ -82,20 +93,23 @@ function linear(spec: BuiltinSpec): WorkflowDefinition {
   nodes.forEach((node, i) => {
     layout[node.id] = { x: 60 + i * 170, y: 160 };
   });
-  const hasV2OnlyNode = nodes.some((node) => !V1_LINEAR_NODE_KINDS.has(node.kind));
-  const ir = hasV2OnlyNode
-    ? parseWorkflowIr({
-        version: "v2",
-        name: spec.name,
-        columns: DEFAULT_WORKFLOW_COLUMN_IDS.map((id) => ({ id, name: id, traits: [] })),
-        nodes: nodes.map((node) => (node.column ? node : { ...node, column: defaultColumnForLinearNode(node) })),
-        edges,
-      })
-    : parseWorkflowIr({ version: "v1", name: spec.name, nodes, edges });
+  /*
+   * FNXC:Workflows 2026-06-28-00:00:
+   * Linear built-ins must mirror BUILTIN_CODING_WORKFLOW_IR column traits because the post-cutover hold/release sweep is the only todo→in-progress dispatcher. Both formerly-v1 linear graphs (quick-fix, review-heavy, design) and v2-only compound-engineering need todo hold(capacity), in-progress wip, and in-review merge traits or their cards strand in Todo.
+   */
+  const ir = parseWorkflowIr({
+    version: "v2",
+    name: spec.name,
+    columns: canonicalBuiltinWorkflowColumns(),
+    nodes: nodes.map((node) => (node.column ? node : { ...node, column: defaultColumnForLinearNode(node) })),
+    edges,
+  });
+  if (ir.version !== "v2" || !ir.columns.find((column) => column.id === "todo")?.traits.some((trait) => trait.trait === "hold")) {
+    throw new Error(`linear built-in workflow '${spec.id}' must synthesize a hold-capacity todo column`);
+  }
   // Attach the moved-key settings catalog (U1/U3, R4) so every built-in workflow
   // carries its declarations through the resolver path (resolveWorkflowIrById →
-  // resolveEffectiveSettings). v1 graphs upgrade to v2 on parse, so the parsed IR
-  // is v2 and can carry `settings`. Defaults are byte-equal to legacy
+  // resolveEffectiveSettings). Defaults are byte-equal to legacy
   // DEFAULT_PROJECT_SETTINGS literals, so this is behavior-inert.
   if (ir.version === "v2") {
     ir.settings = BUILTIN_WORKFLOW_SETTINGS;

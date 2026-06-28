@@ -21,6 +21,9 @@ Agents may select or change a workflow only when the user explicitly requested t
 
 FNXC:Docs 2026-06-21-12:00:
 FN-6906 makes non-coding built-in prompts artifact-oriented: marketing drafts, lead enrichment/outreach, and design previews are persisted with fn_task_document_write, while fn_artifact_register remains conditional until the artifact tool is available.
+
+FNXC:WorkflowRuntime 2026-06-28-08:10:
+Selectable built-in workflows must share the canonical dispatch traits: their held work enters through a capacity-released `todo`/backlog column and moves to the first WIP execution column via the hold/release sweep, so non-default built-ins do not need a separate dispatcher.
 -->
 
 Fusion workflows define the task lifecycle policy that moves work from an idea to delivery. The default coding path is **Plan/Triage → Execute → Workflow steps → Review → Merge**, but that path is now represented as a workflow selection rather than only as fixed engine behavior. A task with no explicit workflow resolves to `builtin:coding`; an explicit missing/corrupt custom workflow fails closed instead of silently falling back.
@@ -50,6 +53,8 @@ Decision-only or investigation tasks can also declare `noCommitsExpected` / `**N
 | Design | `builtin:design` | UI-heavy work path that implements, persists a user-facing design preview task document, runs a gated design/UX review, then performs the standard review and merge. |
 | PR lifecycle | `builtin:pr-workflow` | Reusable PR lifecycle graph fragment (create PR → await review → respond → gate → merge); it is a fragment, not directly selectable as a task workflow. |
 | Lead generation | `builtin:lead-generation` | Selectable business workflow for sourcing, qualifying, enriching, and contacting leads with custom lead fields, stage columns, and reviewable enrichment/outreach task documents; requires the workflow graph executor for custom board columns. |
+
+Every selectable built-in workflow uses a capacity-released hold column (`todo` or a workflow-specific backlog) for queued work and a WIP execution column for active work, so the hold/release sweep performs the normal `todo`/backlog → in-progress dispatch across the catalog.
 
 ### Skill-backed workflow steps
 

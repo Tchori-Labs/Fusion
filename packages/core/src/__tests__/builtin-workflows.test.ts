@@ -18,11 +18,24 @@ import { DEFAULT_WORKFLOW_COLUMN_IDS, parseWorkflowIr, serializeWorkflowIr } fro
 import { createSharedTaskStoreTestHarness } from "./store-test-helpers.js";
 
 const EXECUTE_NODE_MAX_RETRIES = 2;
+const LINEAR_BUILTIN_IDS = [
+  "builtin:quick-fix",
+  "builtin:review-heavy",
+  "builtin:design",
+  "builtin:compound-engineering",
+] as const;
 
 function browserVerificationInnerConfig(ir: { nodes: Array<{ id: string; kind: string; config?: Record<string, unknown> }> }): Record<string, unknown> {
   const group = ir.nodes.find((node) => node.id === BROWSER_VERIFICATION_GROUP_ID);
   const template = group?.config?.template as { nodes?: Array<{ id: string; config?: Record<string, unknown> }> } | undefined;
   return template?.nodes?.find((node) => node.id === BROWSER_VERIFICATION_STEP_NODE_ID)?.config ?? {};
+}
+
+function columnTraitMatrix(ir: { columns: Array<{ id: string; traits: Array<{ trait: string; config?: unknown }> }> }): Array<{
+  id: string;
+  traits: Array<{ trait: string; config?: unknown }>;
+}> {
+  return ir.columns.map((column) => ({ id: column.id, traits: column.traits }));
 }
 
 describe("built-in workflows", () => {
@@ -140,6 +153,103 @@ describe("built-in workflows", () => {
     expect(coding!.updatedAt).toBe("2026-01-01T00:00:00.000Z");
     expect(coding!.ir).toBe(BUILTIN_CODING_WORKFLOW_IR);
     expect(serializeWorkflowIr(coding!.ir)).toBe(serializeWorkflowIr(BUILTIN_CODING_WORKFLOW_IR));
+  });
+
+  it("linear built-ins use the canonical trait-bearing default columns", () => {
+    expect(BUILTIN_CODING_WORKFLOW_IR.version).toBe("v2");
+    if (BUILTIN_CODING_WORKFLOW_IR.version !== "v2") throw new Error("expected coding v2");
+    const canonicalColumns = columnTraitMatrix(BUILTIN_CODING_WORKFLOW_IR);
+
+    for (const workflowId of LINEAR_BUILTIN_IDS) {
+      const workflow = getBuiltinWorkflow(workflowId);
+      expect(workflow, workflowId).toBeDefined();
+      const ir = parseWorkflowIr(workflow!.ir);
+      expect(ir.version, workflowId).toBe("v2");
+      if (ir.version !== "v2") throw new Error(`expected ${workflowId} v2`);
+
+      expect(columnTraitMatrix(ir), workflowId).toEqual(canonicalColumns);
+      const todo = ir.columns.find((column) => column.id === "todo");
+      expect(todo?.traits).toContainEqual({ trait: "hold", config: { release: "capacity" } });
+      expect(todo?.traits).toContainEqual({ trait: "reset-on-entry" });
+      expect(ir.columns.find((column) => column.id === "in-progress")?.traits.map((trait) => trait.trait)).toContain("wip");
+      expect(ir.columns.find((column) => column.id === "in-review")?.traits.map((trait) => trait.trait)).toContain("merge");
+    }
+
+    const quickFix = parseWorkflowIr(getBuiltinWorkflow("builtin:quick-fix")!.ir);
+    if (quickFix.version !== "v2") throw new Error("expected quick-fix v2");
+    expect(quickFix.nodes.find((node) => node.id === "execute")?.column).toBe("in-progress");
+    expect(quickFix.nodes.find((node) => node.id === "merge")?.column).toBe("in-review");
+  });
+
+  it("hand-authored built-in workflow columns stay on their authored trait sets", () => {
+    const expected = new Map([
+      [
+        "builtin:coding",
+        [
+          { id: "triage", traits: ["intake"] },
+          { id: "todo", traits: ["hold", "reset-on-entry"] },
+          { id: "in-progress", traits: ["wip", "abort-on-exit", "timing"] },
+          { id: "in-review", traits: ["merge-blocker", "human-review", "stall-detection", "merge"] },
+          { id: "done", traits: ["complete"] },
+          { id: "archived", traits: ["archived"] },
+        ],
+      ],
+      [
+        "builtin:marketing",
+        [
+          { id: "ideation", traits: ["intake"] },
+          { id: "backlog", traits: ["hold", "reset-on-entry"] },
+          { id: "drafting", traits: ["wip", "abort-on-exit", "timing"] },
+          { id: "editorial-review", traits: ["merge-blocker", "human-review", "stall-detection", "merge"] },
+          { id: "published", traits: ["complete"] },
+          { id: "archived", traits: ["archived"] },
+        ],
+      ],
+      [
+        "builtin:stepwise-coding",
+        [
+          { id: "triage", traits: ["intake"] },
+          { id: "todo", traits: ["hold", "reset-on-entry"] },
+          { id: "in-progress", traits: ["wip", "abort-on-exit", "timing"] },
+          { id: "in-review", traits: ["merge-blocker", "human-review", "stall-detection", "merge"] },
+          { id: "done", traits: ["complete"] },
+          { id: "archived", traits: ["archived"] },
+        ],
+      ],
+      [
+        "builtin:lead-generation",
+        [
+          { id: "triage", traits: ["intake"] },
+          { id: "sourcing", traits: ["timing"] },
+          { id: "qualification", traits: ["wip", "timing"] },
+          { id: "enrichment", traits: ["timing"] },
+          { id: "outreach", traits: ["human-review", "stall-detection"] },
+          { id: "converted", traits: ["complete"] },
+          { id: "archived", traits: ["archived"] },
+        ],
+      ],
+      [
+        "builtin:pr-workflow",
+        [
+          { id: "triage", traits: ["intake"] },
+          { id: "in-progress", traits: ["wip", "timing"] },
+          { id: "await-review", traits: ["merge-blocker", "stall-detection"] },
+          { id: "done", traits: ["complete"] },
+          { id: "archived", traits: ["archived"] },
+        ],
+      ],
+    ]);
+
+    for (const [workflowId, expectedColumns] of expected) {
+      const workflow = getBuiltinWorkflow(workflowId)!;
+      const ir = parseWorkflowIr(workflow.ir);
+      expect(ir.version, workflowId).toBe("v2");
+      if (ir.version !== "v2") throw new Error(`expected ${workflowId} v2`);
+      expect(
+        ir.columns.map((column) => ({ id: column.id, traits: column.traits.map((trait) => trait.trait) })),
+        workflowId,
+      ).toEqual(expectedColumns);
+    }
   });
 
   it("builtin:coding catalog IR exposes canonical columns, placements, and settings", () => {

@@ -63,6 +63,12 @@ function setTransitionPending(store: TaskStore, taskId: string, toColumn: string
 }
 
 const noReserveDeps: HoldReleaseDeps = { now: () => Date.now() };
+const LINEAR_BUILTIN_WORKFLOW_IDS = [
+  "builtin:compound-engineering",
+  "builtin:quick-fix",
+  "builtin:review-heavy",
+  "builtin:design",
+] as const;
 
 describe("hold-release sweep (U6)", () => {
   let rootDir = "";
@@ -95,6 +101,28 @@ describe("hold-release sweep (U6)", () => {
     setColumn(store, task.id, "todo");
     return task.id;
   }
+
+  it("releases default and linear built-in workflow todo cards into in-progress", async () => {
+    await store.updateSettings({ maxConcurrent: 10 } as Parameters<typeof store.updateSettings>[0]);
+    const defaultWorkflowTask = await seedTodoCard();
+    const selectedTasks: string[] = [];
+
+    // Pre-fix, linear() synthesized trait-less default columns, so isHeldTask()
+    // returned false here and these selected tasks were silently skipped forever.
+    for (const workflowId of LINEAR_BUILTIN_WORKFLOW_IDS) {
+      const task = await store.createTask({ description: `card ${workflowId}` });
+      setSelection(store, task.id, workflowId);
+      setColumn(store, task.id, "todo");
+      selectedTasks.push(task.id);
+    }
+
+    const result = await runHoldReleaseSweep(store, noReserveDeps);
+    expect(result.released).toEqual(expect.arrayContaining([defaultWorkflowTask, ...selectedTasks]));
+
+    for (const taskId of [defaultWorkflowTask, ...selectedTasks]) {
+      expect((await store.getTask(taskId))?.column).toBe("in-progress");
+    }
+  });
 
   it("ignores stale workflowColumns=false and still releases held default-workflow cards", async () => {
     await store.updateGlobalSettings({ experimentalFeatures: { workflowColumns: false } });
