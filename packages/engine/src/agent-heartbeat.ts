@@ -1902,12 +1902,33 @@ export class HeartbeatMonitor {
     return this.trackedAgents.get(agentId)?.lastSeen;
   }
 
-  private handleMessageToAgent(message: Message): void {
+  /**
+   * FNXC:PostgresBackend 2026-06-28-10:20:
+   * Wake-on-message delivery hook fired by MessageStore on an agent-directed send.
+   * Now async + PG-capable: it reads the recipient agent via the AgentStore's async
+   * `getAgent` (the previous sync `getCachedAgent`/`readAgent` threw in PG backend
+   * mode, leaving the agent un-woken even though the send succeeded). Self-catching:
+   * this is a fire-and-forget hook the send does not depend on, so any rejection is
+   * logged and swallowed here (MessageStore also awaits inside its own try/catch),
+   * guaranteeing a wake failure can neither fail the send nor surface as an
+   * unhandledRejection. Wake/skip semantics (response-mode gate, forced-wake rule,
+   * valid-state gate) are unchanged.
+   */
+  private async handleMessageToAgent(message: Message): Promise<void> {
+    try {
+      await this.deliverMessageToAgent(message);
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      heartbeatLog.warn(`Wake-on-message delivery failed for ${message.toId}: ${errorMessage}`);
+    }
+  }
+
+  private async deliverMessageToAgent(message: Message): Promise<void> {
     if (message.toType !== "agent") {
       return;
     }
 
-    const agent = this.configStore.getCachedAgent(message.toId);
+    const agent = await this.configStore.getAgent(message.toId);
     if (!agent) {
       return;
     }

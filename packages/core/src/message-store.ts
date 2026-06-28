@@ -56,8 +56,14 @@ interface MessageRow {
 
 /** Options for MessageStore constructor */
 export interface MessageStoreOptions {
-  /** Optional hook invoked when a message is addressed to an agent */
-  onMessageToAgent?: (message: Message) => void;
+  /**
+   * Optional hook invoked when a message is addressed to an agent.
+   * FNXC:PostgresBackend 2026-06-28-10:20: widened to allow an async hook so the
+   * agent wake-on-message delivery (agent-heartbeat.handleMessageToAgent) can read
+   * the AgentStore via its async PG-capable path. The hook is awaited inside a
+   * try/catch — a rejected wake hook is logged and degraded, never failing the send.
+   */
+  onMessageToAgent?: (message: Message) => void | Promise<void>;
 }
 
 // ── MessageStore Class ───────────────────────────────────────────────
@@ -72,7 +78,7 @@ export interface MessageStoreOptions {
  * PostgreSQL. When absent, the legacy sync SQLite path runs byte-identically.
  */
 export class MessageStore extends EventEmitter<MessageStoreEvents> {
-  private onMessageToAgent?: (message: Message) => void;
+  private onMessageToAgent?: (message: Message) => void | Promise<void>;
   private readonly asyncLayer: AsyncDataLayer | null;
 
   // Prepared statements for frequently-run queries (SQLite path only)
@@ -208,14 +214,15 @@ export class MessageStore extends EventEmitter<MessageStoreEvents> {
     this.emit("message:received", message);
 
     if (message.toType === "agent" && this.onMessageToAgent) {
-      // FNXC:PostgresBackend 2026-06-27-06:30:
-      // The agent-delivery hook (agent-heartbeat.handleMessageToAgent) reads the
-      // sync AgentStore, which throws in PG backend mode (AgentStore is not yet
-      // ported). The message is already persisted at this point, so a wake-hook
-      // failure must NOT fail the send — log and degrade (agent wake-on-message
-      // stays disabled in PG mode until AgentStore is ported) rather than 500.
+      // FNXC:PostgresBackend 2026-06-28-10:20:
+      // The agent-delivery hook (agent-heartbeat.handleMessageToAgent) is now async
+      // and PG-capable: it reads the AgentStore via its async getAgent path, so
+      // wake-on-message works in PG backend mode. The message is already persisted
+      // at this point, so a wake-hook failure (sync throw OR rejected promise) must
+      // NOT fail the send — await inside try/catch, then log and degrade rather
+      // than 500.
       try {
-        this.onMessageToAgent(message);
+        await this.onMessageToAgent(message);
       } catch (err) {
         messageStoreLog.warn(
           `MessageStore onMessageToAgent hook failed for id=${message.id} (send still succeeded): ${
@@ -586,7 +593,7 @@ export class MessageStore extends EventEmitter<MessageStoreEvents> {
   /**
    * Set or update the hook used when messages are sent to agents.
    */
-  setMessageToAgentHook(hook: (message: Message) => void): void {
+  setMessageToAgentHook(hook: (message: Message) => void | Promise<void>): void {
     this.onMessageToAgent = hook;
   }
 }

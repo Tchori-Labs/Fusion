@@ -2134,6 +2134,14 @@ export {
   ingestIncidentSignalAsync,
   getOpenIncidentByGroupingKeyAsync,
   getIncidentAsync,
+  // FNXC:Monitor 2026-06-28-10:10:
+  // Storm-guard async helpers exported so the dashboard monitor-trait can run
+  // the full create→link→release sequence in PG backend mode (no longer
+  // early-returns "absorbed" when store.backendMode).
+  countRecentAutoFixTasksAsync,
+  claimIncidentForFixTaskAsync,
+  attachFixTaskAsync,
+  releaseIncidentFixTaskClaimAsync,
 } from "./task-store/async-monitor.js";
 export type { Deployment as AsyncDeployment, Incident as AsyncIncident } from "./task-store/async-monitor.js";
 
