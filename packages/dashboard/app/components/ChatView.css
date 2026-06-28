@@ -487,6 +487,24 @@ The active-chat pane header must give the title the full available line to the L
   flex-shrink: 0;
 }
 
+/*
+FNXC:ChatContextWindow 2026-06-27-00:00:
+The Direct-chat context budget indicator is a secondary desktop/tablet header affordance. Keep it badge-like and shrinkable so the thread title and render toggle retain priority, and hide it at mobile widths where the session switcher owns the header.
+*/
+.chat-thread-header-context {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: calc(var(--space-xl) * 5);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-size-xs);
+  padding: calc(var(--space-xs) / 4) calc(var(--space-sm) - (var(--space-xs) / 2));
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text-muted);
+}
+
 .chat-mobile-session-menu {
   position: relative;
   min-width: 0;
@@ -2144,6 +2162,10 @@ Queued-message banners stack above the composer input with a capped scroll area,
 
   .chat-thread-header-render-toggle {
     flex-shrink: 0;
+  }
+
+  .chat-thread-header-context {
+    display: none;
   }
 
   .chat-sidebar-scope-btn {

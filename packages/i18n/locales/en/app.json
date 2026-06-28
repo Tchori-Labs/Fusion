@@ -1242,6 +1242,7 @@
     "conversationDeleted": "Conversation deleted",
     "conversationName": "Conversation name",
     "conversationRenamed": "Conversation renamed",
+    "contextWindowAria": "Estimated {{used}} of {{total}} context tokens",
     "copyFailed": "Copy failed",
     "copyResponse": "Copy response",
     "create": "Create",

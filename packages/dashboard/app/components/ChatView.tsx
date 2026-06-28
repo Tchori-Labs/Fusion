@@ -55,6 +55,7 @@ import { useNavigationHistoryContext } from "../hooks/useNavigationHistory";
 import { linkifyFilePaths, linkifyReactChildren } from "../utils/filePathLinkify";
 import { recordResumeEvent } from "../utils/resumeInstrumentation";
 import { parseQuestionToolCall } from "../utils/parseQuestionToolCall";
+import { estimateChatTokens, formatTokenCount } from "../utils/estimateChatTokens";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { ViewHeader } from "./ViewHeader";
@@ -1070,7 +1071,7 @@ export function ChatView({ projectId, addToast, floating = false, onPopOut, onMa
   const [createRoomOpen, setCreateRoomOpen] = useState(false);
   const { agentsMap: cachedAgentsMap } = useAgentsMapCache(projectId);
   const agentsMap = useMemo(() => (chatAgentsMap.size > 0 ? chatAgentsMap : cachedAgentsMap), [cachedAgentsMap, chatAgentsMap]);
-  const { defaultProvider, defaultModelId } = useModelsCache();
+  const { models, defaultProvider, defaultModelId } = useModelsCache();
   const defaultModel = useMemo<DefaultModelSelection>(() => ({ provider: defaultProvider, modelId: defaultModelId }), [defaultModelId, defaultProvider]);
   const { skills: discoveredSkills, loading: skillsLoading } = useDiscoveredSkillsCache(projectId);
   const [showSkillMenu, setShowSkillMenu] = useState(false);
@@ -2679,6 +2680,19 @@ export function ChatView({ projectId, addToast, floating = false, onPopOut, onMa
     activeSession?.agentId ? (agentsMap.get(activeSession.agentId) ?? null) : null,
     defaultModel,
   );
+  const activeContextWindow = useMemo(() => {
+    if (!activeResolvedModel?.provider || !activeResolvedModel.modelId) {
+      return null;
+    }
+    const matchedModel = models.find(
+      (model) => model.provider === activeResolvedModel.provider && model.id === activeResolvedModel.modelId,
+    );
+    return matchedModel?.contextWindow ? matchedModel.contextWindow : null;
+  }, [activeResolvedModel?.modelId, activeResolvedModel?.provider, models]);
+  const estimatedChatTokens = useMemo(
+    () => estimateChatTokens(messages, isStreaming ? streamingText : undefined),
+    [isStreaming, messages, streamingText],
+  );
   const activeModelTag = formatModelTag(activeResolvedModel?.provider, activeResolvedModel?.modelId);
   const activeModelProvider = activeResolvedModel?.provider ?? null;
   const hasThreadInView = Boolean(activeSession || isStreaming || messages.length > 0);
@@ -2710,6 +2724,15 @@ export function ChatView({ projectId, addToast, floating = false, onPopOut, onMa
     : activeSession?.title || agentsMap.get(activeSession?.agentId ?? "")?.name || activeSession?.agentId || "Chat";
 
   const showThreadHeaderModelTag = Boolean(activeModelTag && activeModelTag !== threadHeaderTitle);
+  const showThreadHeaderContextWindow = !isChatMobile && hasThreadInView && activeContextWindow !== null;
+  const threadHeaderContextUsed = formatTokenCount(estimatedChatTokens);
+  const threadHeaderContextTotal = activeContextWindow !== null ? formatTokenCount(activeContextWindow) : null;
+  const threadHeaderContextLabel = threadHeaderContextTotal
+    ? t("chat.contextWindowAria", "Estimated {{used}} of {{total}} context tokens", {
+      used: threadHeaderContextUsed,
+      total: threadHeaderContextTotal,
+    })
+    : null;
   const showMobileSessionSwitcher = isChatMobile && chatScope === "direct" && !!activeSession;
 
   const agentName =
@@ -4021,6 +4044,16 @@ export function ChatView({ projectId, addToast, floating = false, onPopOut, onMa
                   {activeModelProvider ? <ProviderIcon provider={activeModelProvider} size="md" /> : <Bot size={16} />}
                   <span className="chat-thread-header-title">{threadHeaderTitle}</span>
                   {showThreadHeaderModelTag && <span className="chat-model-tag">{activeModelTag}</span>}
+                  {showThreadHeaderContextWindow && threadHeaderContextTotal && threadHeaderContextLabel ? (
+                    <span
+                      className="chat-thread-header-context"
+                      data-testid="chat-thread-context-window"
+                      title={threadHeaderContextLabel}
+                      aria-label={threadHeaderContextLabel}
+                    >
+                      {threadHeaderContextUsed} / {threadHeaderContextTotal}
+                    </span>
+                  ) : null}
                 </>
               )}
             </div>
