@@ -34,6 +34,15 @@ The right dock OVERLAYS the page content (floats over the right edge) instead of
   box-shadow: var(--shadow-lg);
 }
 
+/*
+FNXC:RightDockPin 2026-06-27-00:00:
+Pinned mode is CSS-only: the project shell is already a flex row, so switching the dock from absolute overlay to relative in-flow reserves the dock width and shrinks `.project-content` without an App shell class. Keep position:relative (not static) so the absolute resize handle remains anchored to the dock, and remove the floating shadow so the pinned dock reads as a sibling pane with the existing tokenized divider. The mobile `.right-dock { display:none }` media guard still wins because this modifier does not override display.
+*/
+.right-dock--pinned {
+  position: relative;
+  box-shadow: none;
+}
+
 .right-dock--with-footer {
   padding-bottom: var(--executor-footer-height);
 }

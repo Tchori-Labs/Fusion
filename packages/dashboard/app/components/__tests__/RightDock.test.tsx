@@ -2,7 +2,13 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
-import { RightDock, RIGHT_DOCK_VIEW_STORAGE_KEY, RIGHT_DOCK_WIDTH_STORAGE_KEY } from "../RightDock";
+import {
+  RightDock,
+  RIGHT_DOCK_PINNED_STORAGE_KEY,
+  RIGHT_DOCK_VIEW_STORAGE_KEY,
+  RIGHT_DOCK_WIDTH_STORAGE_KEY,
+  type RightDockProps,
+} from "../RightDock";
 import { RightDockExpandModal } from "../RightDockExpandModal";
 import { useRightDockController, type RightDockControllerInput } from "../useRightDockController";
 import { DOCK_FILES_CURRENT_KEY } from "../DockFilesView";
@@ -22,6 +28,10 @@ const renderProps = {
 };
 
 const rightDockCss = readFileSync(resolve(__dirname, "../RightDock.css"), "utf8");
+
+function TestRightDock(props: Omit<RightDockProps, "pinned" | "onTogglePin"> & Partial<Pick<RightDockProps, "pinned" | "onTogglePin">>) {
+  return <RightDock pinned={false} onTogglePin={vi.fn()} {...props} />;
+}
 
 /*
 FNXC:Navigation 2026-06-22-16:00:
@@ -85,7 +95,7 @@ describe("RightDock", () => {
   });
 
   it("renders Files by default and restores the persisted inline view on remount", () => {
-    const { unmount } = render(<RightDock open={true} renderProps={renderProps} />);
+    const { unmount } = render(<TestRightDock open={true} renderProps={renderProps} />);
 
     expect(screen.getByTestId("right-dock-tab-files")).toHaveAttribute("aria-selected", "true");
     expect(screen.getByTestId("right-dock-files-view")).toBeInTheDocument();
@@ -99,7 +109,7 @@ describe("RightDock", () => {
     expect(window.localStorage.getItem(RIGHT_DOCK_VIEW_STORAGE_KEY)).toBe("git-manager");
     unmount();
 
-    render(<RightDock open={true} renderProps={renderProps} />);
+    render(<TestRightDock open={true} renderProps={renderProps} />);
     expect(screen.getByTestId("right-dock-tab-git-manager")).toHaveAttribute("aria-selected", "true");
   });
 
@@ -109,19 +119,19 @@ describe("RightDock", () => {
   */
   it("forces the Files two-pane layout when the dock is dragged wide, and stays stacked when narrow", () => {
     // Narrow default width (360px) -> stacked single-panel.
-    const { unmount } = render(<RightDock open={true} renderProps={renderProps} />);
+    const { unmount } = render(<TestRightDock open={true} renderProps={renderProps} />);
     expect(screen.getByTestId("right-dock-files-view")).toHaveAttribute("data-layout", "auto");
     unmount();
 
     // Wide persisted width (>= 640px) -> deterministic LEFT|RIGHT two-pane.
     window.localStorage.setItem(RIGHT_DOCK_WIDTH_STORAGE_KEY, "900");
-    render(<RightDock open={true} renderProps={renderProps} />);
+    render(<TestRightDock open={true} renderProps={renderProps} />);
     expect(screen.getByTestId("right-dock-files-view")).toHaveAttribute("data-layout", "two-pane");
   });
 
   it("falls back to Files when storage points at a removed right-dock view", () => {
     window.localStorage.setItem(RIGHT_DOCK_VIEW_STORAGE_KEY, "documents");
-    render(<RightDock open={true} renderProps={renderProps} />);
+    render(<TestRightDock open={true} renderProps={renderProps} />);
 
     expect(screen.getByTestId("right-dock-tab-files")).toHaveAttribute("aria-selected", "true");
     expect(screen.getByTestId("right-dock-files-view")).toBeInTheDocument();
@@ -129,19 +139,149 @@ describe("RightDock", () => {
   });
 
   it("exposes localized right-dock affordance labels without an in-dock collapse shell", () => {
-    render(<RightDock open={true} renderProps={renderProps} />);
+    render(<TestRightDock open={true} renderProps={renderProps} />);
 
     expect(screen.getByTestId("right-dock")).toHaveAttribute("aria-label", "Right dock");
     expect(screen.getByTestId("right-dock-resize-handle")).toHaveAttribute("aria-label", "Resize right dock");
     expect(screen.getByRole("tablist", { name: "Right dock views" })).toBeInTheDocument();
+    expect(screen.getByTestId("right-dock-pin")).toHaveAttribute("aria-label", "Pin sidebar (push content)");
+    expect(screen.getByTestId("right-dock-pin")).toHaveAttribute("title", "Pin sidebar (push content)");
+    expect(screen.getByTestId("right-dock-pin")).toHaveAttribute("aria-pressed", "false");
     expect(screen.getByTestId("right-dock-expand")).toHaveAttribute("aria-label", "Expand Files");
     expect(screen.getByTestId("right-dock-expand")).toHaveAttribute("title", "Expand Files");
     expect(screen.queryByTestId("right-dock-collapse-toggle")).toBeNull();
   });
 
+  it("renders the pin affordance for both states and delegates the toggle", () => {
+    const onTogglePin = vi.fn();
+    const { rerender } = render(<TestRightDock open={true} renderProps={renderProps} pinned={false} onTogglePin={onTogglePin} />);
+
+    expect(screen.getByTestId("right-dock-pin")).toHaveAttribute("aria-label", "Pin sidebar (push content)");
+    expect(screen.getByTestId("right-dock-pin")).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByTestId("right-dock")).not.toHaveClass("right-dock--pinned");
+
+    fireEvent.click(screen.getByTestId("right-dock-pin"));
+    expect(onTogglePin).toHaveBeenCalledTimes(1);
+
+    rerender(<TestRightDock open={true} renderProps={renderProps} pinned={true} onTogglePin={onTogglePin} />);
+    expect(screen.getByTestId("right-dock-pin")).toHaveAttribute("aria-label", "Unpin sidebar (overlay content)");
+    expect(screen.getByTestId("right-dock-pin")).toHaveAttribute("title", "Unpin sidebar (overlay content)");
+    expect(screen.getByTestId("right-dock-pin")).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByTestId("right-dock")).toHaveClass("right-dock--pinned");
+  });
+
+  it("persists and restores pinned state through the right-dock controller", () => {
+    const controllerInput = {
+      active: true,
+      projectId: "project-1",
+      addToast: vi.fn(),
+      settingsLoaded: true,
+      researchReadinessVersion: 0,
+      tasks: [],
+      workflowSteps: [],
+      subscribePluginEvents: () => () => {},
+      openDetailTask: vi.fn(),
+      openFileInBrowser: vi.fn(),
+      openSettings: vi.fn(),
+      onSendSelectionToTask: vi.fn(),
+      onCreateTaskFromInsight: vi.fn(),
+      onNavigateToMission: vi.fn(),
+      onTaskCreated: vi.fn(),
+      prAuthAvailable: false,
+      autoMerge: false,
+      visibilityOptions: {},
+      footerVisible: false,
+    } as unknown as RightDockControllerInput;
+
+    function Harness() {
+      const controller = useRightDockController(controllerInput);
+      return (
+        <>
+          <output data-testid="controller-pinned">{String(controller.pinned)}</output>
+          {controller.dock}
+          {controller.modal}
+        </>
+      );
+    }
+
+    const { unmount } = render(<Harness />);
+    expect(screen.getByTestId("controller-pinned")).toHaveTextContent("false");
+    expect(screen.getByTestId("right-dock")).not.toHaveClass("right-dock--pinned");
+    expect(screen.getByTestId("right-dock-pin")).toHaveAttribute("aria-pressed", "false");
+
+    fireEvent.click(screen.getByTestId("right-dock-pin"));
+    expect(window.localStorage.getItem(RIGHT_DOCK_PINNED_STORAGE_KEY)).toBe("true");
+    expect(screen.getByTestId("controller-pinned")).toHaveTextContent("true");
+    expect(screen.getByTestId("right-dock")).toHaveClass("right-dock--pinned");
+    expect(screen.getByTestId("right-dock-pin")).toHaveAttribute("aria-pressed", "true");
+
+    fireEvent.click(screen.getByTestId("right-dock-pin"));
+    expect(window.localStorage.getItem(RIGHT_DOCK_PINNED_STORAGE_KEY)).toBe("false");
+    expect(screen.getByTestId("right-dock")).not.toHaveClass("right-dock--pinned");
+    unmount();
+
+    window.localStorage.setItem(RIGHT_DOCK_PINNED_STORAGE_KEY, "true");
+    render(<Harness />);
+    expect(screen.getByTestId("controller-pinned")).toHaveTextContent("true");
+    expect(screen.getByTestId("right-dock")).toHaveClass("right-dock--pinned");
+  });
+
+  it("defaults missing, false, and invalid pinned storage to unpinned", () => {
+    const controllerInput = {
+      active: true,
+      projectId: "project-1",
+      addToast: vi.fn(),
+      settingsLoaded: true,
+      researchReadinessVersion: 0,
+      tasks: [],
+      workflowSteps: [],
+      subscribePluginEvents: () => () => {},
+      openDetailTask: vi.fn(),
+      openFileInBrowser: vi.fn(),
+      openSettings: vi.fn(),
+      onSendSelectionToTask: vi.fn(),
+      onCreateTaskFromInsight: vi.fn(),
+      onNavigateToMission: vi.fn(),
+      onTaskCreated: vi.fn(),
+      prAuthAvailable: false,
+      autoMerge: false,
+      visibilityOptions: {},
+      footerVisible: false,
+    } as unknown as RightDockControllerInput;
+
+    function Harness() {
+      const controller = useRightDockController(controllerInput);
+      return <>{controller.dock}</>;
+    }
+
+    const { unmount } = render(<Harness />);
+    expect(screen.getByTestId("right-dock")).not.toHaveClass("right-dock--pinned");
+    unmount();
+
+    window.localStorage.setItem(RIGHT_DOCK_PINNED_STORAGE_KEY, "false");
+    const falseMount = render(<Harness />);
+    expect(screen.getByTestId("right-dock")).not.toHaveClass("right-dock--pinned");
+    falseMount.unmount();
+
+    window.localStorage.setItem(RIGHT_DOCK_PINNED_STORAGE_KEY, "not-json");
+    render(<Harness />);
+    expect(screen.getByTestId("right-dock")).not.toHaveClass("right-dock--pinned");
+  });
+
+  it("keeps pinned layout as an explicit CSS switch from overlay to in-flow push", () => {
+    const baseRule = rightDockCss.match(/\.right-dock\s*\{([^}]*)\}/)?.[1] ?? "";
+    const pinnedRule = rightDockCss.match(/\.right-dock--pinned\s*\{([^}]*)\}/)?.[1] ?? "";
+
+    expect(baseRule).toContain("position: absolute;");
+    expect(pinnedRule).toContain("position: relative;");
+    expect(pinnedRule).toContain("box-shadow: none;");
+    expect(rightDockCss).toContain("@media (max-width: 768px)");
+    expect(rightDockCss).toContain(".right-dock {\n    display: none;");
+  });
+
   it("renders exactly the current right-dock tool entries and no removed content-view tabs", () => {
     render(
-      <RightDock
+      <TestRightDock
         open={true}
 
         renderProps={renderProps}
@@ -182,7 +322,7 @@ describe("RightDock", () => {
     FNXC:Navigation 2026-06-22-16:00:
     devserver is gated on experimentalFeatures.devServerView and todos on todosEnabled. With both unset (default renderProps), the dock renders only the five always-on inline tools.
     */
-    render(<RightDock open={true} renderProps={renderProps} />);
+    render(<TestRightDock open={true} renderProps={renderProps} />);
     expect(screen.getAllByRole("tab").map((tab) => tab.getAttribute("data-testid"))).toEqual([
       "right-dock-tab-files",
       "right-dock-tab-activity-log",
@@ -199,7 +339,7 @@ describe("RightDock", () => {
     FNXC:Navigation 2026-06-22-16:00:
     The right dock no longer hosts launcher-action tabs that fire Header handlers; every tab is an inline view. Clicking a non-Files tab selects it (aria-selected flips, Files deselects) and replaces the body, and the Files tab restores the inline Files view.
     */
-    render(<RightDock open={true} renderProps={renderProps} />);
+    render(<TestRightDock open={true} renderProps={renderProps} />);
 
     expect(screen.getByTestId("right-dock-tab-files")).toHaveAttribute("aria-selected", "true");
     expect(screen.getByTestId("right-dock-files-view")).toBeInTheDocument();
@@ -221,7 +361,7 @@ describe("RightDock", () => {
   The resize clamp + persisted-width read both funnel through RIGHT_DOCK_MAX_WIDTH, raised to 1280 so the dock drags MUCH wider. Drag far past the cap (startWidth 360 + 2000 px of leftward travel) and assert it clamps to the new 1280 max, then a keyboard step down lands one shift-step (48px) below the cap. This proves the new cap governs both the pointer drag and the keyboard path.
   */
   it("clamps then persists resize width while open", () => {
-    render(<RightDock open={true} renderProps={renderProps} />);
+    render(<TestRightDock open={true} renderProps={renderProps} />);
 
     const handle = screen.getByTestId("right-dock-resize-handle");
     fireEvent.pointerDown(handle, { pointerId: 1, clientX: 2000 });
@@ -235,7 +375,7 @@ describe("RightDock", () => {
 
   it("restores persisted width on mount", () => {
     window.localStorage.setItem(RIGHT_DOCK_WIDTH_STORAGE_KEY, "400");
-    render(<RightDock open={true} renderProps={renderProps} />);
+    render(<TestRightDock open={true} renderProps={renderProps} />);
 
     expect(screen.getByTestId("right-dock")).toHaveStyle({ width: "400px" });
     expect(screen.getByTestId("right-dock-resize-handle")).toHaveAttribute("aria-valuenow", "400");
@@ -243,7 +383,7 @@ describe("RightDock", () => {
 
   // FNXC:Navigation 2026-06-22-09:00: Show/hide is owned by the canonical Header right-sidebar toggle. The dock no longer renders an in-dock collapse toggle or a collapsed rail; when open=false it renders nothing so the main content reclaims the space.
   it("renders nothing when closed and renders the dock content when open", () => {
-    const { rerender } = render(<RightDock open={true} renderProps={renderProps} />);
+    const { rerender } = render(<TestRightDock open={true} renderProps={renderProps} />);
 
     // Show/hide invariant only — the exact tab set is owned by overflowViewRegistry, not asserted here.
     expect(screen.getByTestId("right-dock")).toBeInTheDocument();
@@ -252,13 +392,14 @@ describe("RightDock", () => {
     expect(screen.getAllByRole("tab").length).toBeGreaterThan(0);
     expect(screen.queryByTestId("right-dock-collapse-toggle")).toBeNull();
 
-    rerender(<RightDock open={false} renderProps={renderProps} />);
+    rerender(<TestRightDock open={false} renderProps={renderProps} />);
     expect(screen.queryByTestId("right-dock")).toBeNull();
     expect(screen.queryByTestId("right-dock-body")).toBeNull();
     expect(screen.queryByTestId("right-dock-resize-handle")).toBeNull();
+    expect(screen.queryByTestId("right-dock-pin")).toBeNull();
     expect(screen.queryAllByRole("tab")).toHaveLength(0);
 
-    rerender(<RightDock open={true} renderProps={renderProps} />);
+    rerender(<TestRightDock open={true} renderProps={renderProps} />);
     expect(screen.getByTestId("right-dock")).toBeInTheDocument();
     expect(screen.getByTestId("right-dock-body")).toBeInTheDocument();
   });
@@ -281,6 +422,7 @@ describe("RightDock", () => {
     expect(screen.getByTestId("right-dock-expand-modal")).toBeInTheDocument();
     expect(screen.getByTestId("right-dock-expand-modal")).toHaveAttribute("aria-label", "Files expanded");
     expect(screen.getByTestId("right-dock-expand-body")).toBeInTheDocument();
+    expect(screen.queryByTestId("right-dock-pin")).toBeNull();
     /*
     FNXC:RightDock 2026-06-22-17:40:
     The pop-out is a floating, non-blocking window: the overlay carries the non-blocking class (transparent + pointer-events:none in CSS so behind-clicks pass through), a drag handle (header) exists, and the panel is the floating variant. There is no overlay click-to-dismiss; the explicit close button is the only dismissal.
@@ -360,7 +502,7 @@ describe("RightDock", () => {
     Every tab is inline, so the expand button fires onExpand with whichever inline entry is selected (here git-manager after switching away from the default Files).
     */
     const onExpand = vi.fn();
-    render(<RightDock open={true} renderProps={renderProps} onExpand={onExpand} />);
+    render(<TestRightDock open={true} renderProps={renderProps} onExpand={onExpand} />);
     fireEvent.click(screen.getByTestId("right-dock-tab-git-manager"));
     fireEvent.click(screen.getByTestId("right-dock-expand"));
     expect(onExpand).toHaveBeenCalledWith("git-manager");

@@ -7,7 +7,7 @@ import { fetchTaskDetail } from "../api";
 import { getScopedItem } from "../utils/projectStorage";
 import { DOCK_FILES_CURRENT_KEY } from "./DockFilesView";
 import { TaskCard } from "./TaskCard";
-import { RightDock, persistRightDockOpen, readStoredRightDockOpen } from "./RightDock";
+import { RightDock, persistRightDockOpen, persistRightDockPinned, readStoredRightDockOpen, readStoredRightDockPinned } from "./RightDock";
 import { RightDockExpandModal } from "./RightDockExpandModal";
 import type { OverflowViewKey, OverflowViewRenderProps, OverflowViewVisibilityOptions } from "./overflowViewRegistry";
 
@@ -42,6 +42,8 @@ export interface RightDockControllerInput {
 export interface RightDockController {
   open: boolean;
   toggle: () => void;
+  pinned: boolean;
+  togglePin: () => void;
   dock: ReactNode;
   modal: ReactNode;
 }
@@ -55,6 +57,11 @@ The popped-out expand modal is INDEPENDENT of the dock's open state. `expandedVi
 */
 export function useRightDockController(input: RightDockControllerInput): RightDockController {
   const [open, setOpen] = useState(readStoredRightDockOpen);
+  /*
+  FNXC:RightDockPin 2026-06-27-00:00:
+  Pin state is owned next to open state so the Header toggle, dock render, and pop-out modal share one controller contract. The flag persists independently of open/expanded state: closing or popping out the dock must not erase the user's overlay-vs-push preference.
+  */
+  const [pinned, setPinned] = useState(readStoredRightDockPinned);
   const [expandedView, setExpandedView] = useState<OverflowViewKey | null>(null);
 
   const toggle = useCallback(() => {
@@ -62,6 +69,14 @@ export function useRightDockController(input: RightDockControllerInput): RightDo
       const next = !current;
       persistRightDockOpen(next);
       // FNXC:RightDock 2026-06-22-18:50: Do NOT clear expandedView on dock-hide; the floating pop-out is independent and survives the dock closing.
+      return next;
+    });
+  }, []);
+
+  const togglePin = useCallback(() => {
+    setPinned((current) => {
+      const next = !current;
+      persistRightDockPinned(next);
       return next;
     });
   }, []);
@@ -155,7 +170,9 @@ export function useRightDockController(input: RightDockControllerInput): RightDo
   return {
     open,
     toggle,
-    dock: input.active ? <RightDock open={open} renderProps={renderProps} visibilityOptions={input.visibilityOptions} footerVisible={input.footerVisible} onExpand={handleExpand} /> : null,
+    pinned,
+    togglePin,
+    dock: input.active ? <RightDock open={open} renderProps={renderProps} visibilityOptions={input.visibilityOptions} footerVisible={input.footerVisible} pinned={pinned} onTogglePin={togglePin} onExpand={handleExpand} /> : null,
     modal: input.active ? <RightDockExpandModal viewKey={expandedView} renderProps={renderProps} visibilityOptions={input.visibilityOptions} onClose={() => setExpandedView(null)} /> : null,
   };
 }

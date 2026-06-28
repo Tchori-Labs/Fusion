@@ -50,7 +50,7 @@ On mobile viewports (`<=768px`), the sidebar is not rendered even when the defau
 
 The **Right Dock Panel** experiment is enabled by default. To disable it, open **Settings → Experimental Features** and turn off **Right Dock Panel**.
 
-When enabled on desktop or tablet project screens, the right dock is a persistent far-right tools sidebar in the project content row. Use the in-dock collapse control to switch between the full tool panel and the compact far-right rail; the selected tool, expanded/collapsed state, width, and expanded modal size persist across reloads.
+When enabled on desktop or tablet project screens, the right dock is a persistent far-right tools sidebar in the project content row. By default it opens as an overlay so the main content does not reflow. Use the dock toolbar pin action to switch into push mode, where the dock becomes an in-flow pane that shrinks the main content beside it; unpinning returns to overlay mode. The selected tool, open/closed state, pinned push-mode state, width, and expanded modal size persist across reloads.
 
 The dock toolbar has built-in inline tool panels for **Activity**, **Activity Log**, **Git Manager**, **Files**, and project tool launchers such as **Import from GitHub** / **Import Tasks** workflow entry points and **Automation** actions when available. **Activity**, **Activity Log**, **Git Manager**, and **Files** render in embedded mode inside the dock instead of opening fixed popup overlays; **Files** opens by default and is the fallback when browser storage points at a removed dock key. Inline dock views have an expand button that opens the same view in a resizable modal for more room. The right-dock **Files** viewer and its expanded pop-out match the Files modal for browser-previewable file types: image, video/movie, audio, and PDF selections render as native browser previews, while editable text files keep the editor and save flow. Plugin overflow views may add additional right-dock tool tabs, except plugin destinations that explicitly belong in the left sidebar.
 
@@ -64,8 +64,10 @@ Use the desktop/tablet right dock this way:
    Expected outcome: the dock width changes within its min/max bounds and is saved for future reloads.
 4. Select the dock expand action.
    Expected outcome: the same inline tool opens in a resizable modal while the dock remains the source navigation surface.
-5. Use the dock's own collapse control.
-   Expected outcome: the far-right surface switches between full panel and compact rail without creating duplicate left-sidebar destinations; mobile viewports never render the right dock.
+5. Select the dock pin action.
+   Expected outcome: pinned mode pushes the main content narrower, unpinned mode overlays the page without reserving space, and the preference is saved for future reloads.
+6. Use the Header right-sidebar toggle.
+   Expected outcome: the far-right surface opens or closes without creating duplicate left-sidebar destinations; mobile viewports never render or reserve space for the right dock.
 
 Content views such as Artifacts, Research, Insights, Skills, Memory, Evals, Goals, Dev Server, **Workflows**, **Import Tasks**, and **Automations** live in the left sidebar (or compact mobile navigation) rather than the right dock. On desktop/tablet, GitHub import lives under **Import Tasks**; mobile keeps compact GitHub import entries in the More surfaces.
 

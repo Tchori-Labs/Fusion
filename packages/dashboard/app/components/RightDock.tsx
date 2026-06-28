@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { Maximize2 } from "lucide-react";
+import { Maximize2, Pin, PinOff } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
   findOverflowViewEntry,
@@ -21,6 +21,7 @@ export const RIGHT_DOCK_MAX_WIDTH = 1280;
 export const RIGHT_DOCK_WIDTH_STORAGE_KEY = "fusion:right-dock-width";
 export const RIGHT_DOCK_VIEW_STORAGE_KEY = "fusion:right-dock-view";
 export const RIGHT_DOCK_OPEN_STORAGE_KEY = "fusion:right-dock-open";
+export const RIGHT_DOCK_PINNED_STORAGE_KEY = "fusion:right-dock-pinned";
 
 function clampRightDockWidth(width: number): number {
   return Math.max(RIGHT_DOCK_MIN_WIDTH, Math.min(RIGHT_DOCK_MAX_WIDTH, width));
@@ -41,6 +42,23 @@ export function readStoredRightDockOpen(): boolean {
 export function persistRightDockOpen(open: boolean): void {
   try {
     window.localStorage.setItem(RIGHT_DOCK_OPEN_STORAGE_KEY, String(open));
+  } catch {
+    // Ignore storage errors.
+  }
+}
+
+/*
+FNXC:RightDockPin 2026-06-27-00:00:
+Right-dock push mode is a local, reversible UI preference. Default missing/invalid storage to unpinned so existing overlay behavior remains unchanged, and keep the same SSR-safe localStorage pattern used by the dock open flag.
+*/
+export function readStoredRightDockPinned(): boolean {
+  if (typeof window === "undefined") return false;
+  return window.localStorage.getItem(RIGHT_DOCK_PINNED_STORAGE_KEY) === "true";
+}
+
+export function persistRightDockPinned(pinned: boolean): void {
+  try {
+    window.localStorage.setItem(RIGHT_DOCK_PINNED_STORAGE_KEY, String(pinned));
   } catch {
     // Ignore storage errors.
   }
@@ -79,6 +97,8 @@ export interface RightDockProps {
   visibilityOptions?: OverflowViewVisibilityOptions;
   onExpand?: (key: OverflowViewKey) => void;
   footerVisible?: boolean;
+  pinned: boolean;
+  onTogglePin: () => void;
 }
 
 /*
@@ -100,6 +120,8 @@ export function RightDock({
   visibilityOptions = {},
   onExpand,
   footerVisible = false,
+  pinned,
+  onTogglePin,
 }: RightDockProps) {
   const { t } = useTranslation("app");
   const entries = useMemo(() => getVisibleOverflowViewEntries(visibilityOptions), [visibilityOptions]);
@@ -204,10 +226,14 @@ export function RightDock({
   const SelectedIcon = selectedEntry.icon;
   const dockWidth = `${width}px`;
   const expandSelectedViewLabel = t("rightDock.expandView", "Expand {{label}}", { label: selectedEntry.label });
+  const pinLabel = pinned
+    ? t("rightDock.unpin", "Unpin sidebar (overlay content)")
+    : t("rightDock.pin", "Pin sidebar (push content)");
+  const PinIcon = pinned ? PinOff : Pin;
 
   return (
     <aside
-      className={`right-dock${open ? "" : " right-dock--collapsed"}${footerVisible ? " right-dock--with-footer" : ""}`}
+      className={`right-dock${open ? "" : " right-dock--collapsed"}${footerVisible ? " right-dock--with-footer" : ""}${pinned ? " right-dock--pinned" : ""}`}
       style={dockWidth ? { width: dockWidth } : undefined}
       aria-label={t("rightDock.label", "Right dock")}
       data-testid="right-dock"
@@ -250,6 +276,21 @@ export function RightDock({
           })}
         </div>
         <div className="right-dock__actions">
+          {/*
+          FNXC:RightDockPin 2026-06-27-00:00:
+          The pin affordance belongs only to the in-dock toolbar, not the floating pop-out. It toggles overlay vs push layout while preserving open/close and expanded-modal independence, and aria-pressed mirrors the persisted push-mode state.
+          */}
+          <button
+            type="button"
+            className="btn-icon right-dock__pin"
+            aria-label={pinLabel}
+            title={pinLabel}
+            aria-pressed={pinned}
+            data-testid="right-dock-pin"
+            onClick={onTogglePin}
+          >
+            <PinIcon size={16} />
+          </button>
           {open && selectedEntry.render ? (
             <button
               type="button"
