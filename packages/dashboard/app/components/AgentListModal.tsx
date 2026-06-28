@@ -15,6 +15,7 @@ import type { AgentHealthStatus } from "../utils/agentHealth";
 import { useConfirm } from "../hooks/useConfirm";
 import { AgentAvatar } from "./AgentAvatar";
 import { AgentErrorIndicator } from "./AgentErrorDetailsModal";
+import { AgentTaskBadge } from "./AgentTaskBadge";
 
 interface AgentListModalProps {
   isOpen: boolean;
@@ -584,7 +585,7 @@ export function AgentListModal({ isOpen, onClose, addToast, projectId }: AgentLi
                       {agent.taskId && (
                         <div className="agent-task">
                           <span className="text-secondary">{t("agents.workingOn", "Working on:")}</span>
-                          <span className="badge">{agent.taskId}</span>
+                          <span className="badge"><AgentTaskBadge taskId={agent.taskId} taskColumn={agent.taskColumn} /></span>
                         </div>
                       )}
                       {agent.lastHeartbeatAt && (

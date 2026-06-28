@@ -248,8 +248,15 @@ describe("AgentListModal", () => {
       });
     });
 
-    it("displays task ID when agent is working on a task", async () => {
-      render(
+    it("displays task ID with column context when agent is working on a task", async () => {
+      mockFetchAgents.mockResolvedValue([
+        { ...mockAgents[0], id: "agent-triage", name: "Triage Agent", taskId: "FN-TRIAGE", taskColumn: "triage", state: "active" as AgentState },
+        { ...mockAgents[1], id: "agent-progress", name: "Progress Agent", taskId: "FN-PROGRESS", taskColumn: "in-progress", state: "running" as AgentState },
+        { ...mockAgents[2], id: "agent-bare", name: "Bare Agent", taskId: "FN-BARE", taskColumn: "unresolved" },
+        { ...mockAgents[3], id: "agent-none", name: "No Task Agent" },
+      ]);
+
+      const { container } = render(
         <AgentListModal
           isOpen={true}
           onClose={mockOnClose}
@@ -258,8 +265,11 @@ describe("AgentListModal", () => {
       );
 
       await waitFor(() => {
-        expect(screen.getByText("FN-001")).toBeTruthy();
+        expect(screen.getAllByText((_, el) => el?.textContent === "FN-TRIAGE · Planning").length).toBeGreaterThanOrEqual(1);
+        expect(screen.getAllByText((_, el) => el?.textContent === "FN-PROGRESS · In Progress").length).toBeGreaterThanOrEqual(1);
+        expect(screen.getAllByText((_, el) => el?.textContent === "FN-BARE · Unresolved task").length).toBeGreaterThanOrEqual(1);
       });
+      expect(container.querySelectorAll(".agent-task").length).toBe(3);
     });
 
     it("shows empty state when no agents exist", async () => {

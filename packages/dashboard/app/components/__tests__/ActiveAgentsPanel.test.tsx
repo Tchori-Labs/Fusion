@@ -300,25 +300,56 @@ describe("ActiveAgentsPanel", () => {
     expect(container.firstChild).toBeNull();
   });
 
-  it("displays agent name and task badge", async () => {
+  it("displays agent task badges with column context and unresolved fallback", async () => {
     mockUseLiveTranscript.mockReturnValue({
       entries: [],
       isConnected: false,
     });
 
-    const mockAgent: Agent = {
-      id: "agent-001",
-      name: "My Agent",
-      role: "executor",
-      state: "running",
-      taskId: "FN-042",
-      lastHeartbeatAt: new Date().toISOString(),
-    } as Agent;
+    const agents: Agent[] = [
+      {
+        id: "agent-001",
+        name: "Triage Agent",
+        role: "executor",
+        state: "running",
+        taskId: "FN-TRIAGE",
+        taskColumn: "triage",
+        lastHeartbeatAt: new Date().toISOString(),
+      } as Agent,
+      {
+        id: "agent-002",
+        name: "Progress Agent",
+        role: "executor",
+        state: "running",
+        taskId: "FN-PROGRESS",
+        taskColumn: "in-progress",
+        lastHeartbeatAt: new Date().toISOString(),
+      } as Agent,
+      {
+        id: "agent-003",
+        name: "Bare Agent",
+        role: "executor",
+        state: "running",
+        taskId: "FN-BARE",
+        taskColumn: "unresolved",
+        lastHeartbeatAt: new Date().toISOString(),
+      } as Agent,
+      {
+        id: "agent-004",
+        name: "No Task Agent",
+        role: "executor",
+        state: "active",
+        lastHeartbeatAt: new Date().toISOString(),
+      } as Agent,
+    ];
 
-    render(<ActiveAgentsPanel agents={[mockAgent]} />);
+    const { container } = render(<ActiveAgentsPanel agents={agents} />);
 
-    expect(screen.getByText("My Agent")).toBeInTheDocument();
-    expect(screen.getByText("FN-042")).toBeInTheDocument();
+    expect(screen.getByText("Triage Agent")).toBeInTheDocument();
+    expect(screen.getByText((_, el) => el?.textContent === "FN-TRIAGE · Planning")).toBeInTheDocument();
+    expect(screen.getByText((_, el) => el?.textContent === "FN-PROGRESS · In Progress")).toBeInTheDocument();
+    expect(screen.getByText((_, el) => el?.textContent === "FN-BARE · Unresolved task")).toBeInTheDocument();
+    expect(container.querySelectorAll(".live-agent-task")).toHaveLength(3);
   });
 
   it("calls onAgentSelect with agent ID when card is clicked", async () => {

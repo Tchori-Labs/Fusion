@@ -826,10 +826,29 @@ describe("AgentsView", () => {
       });
     });
 
-    it("displays agent task when working on one", async () => {
+    it("displays agent task with column context when enriched", async () => {
+      mockFetchAgents.mockResolvedValue([
+        { ...mockAgents[0], id: "agent-triage", name: "Triage Agent", taskId: "FN-TRIAGE", taskColumn: "triage", state: "active" as AgentState },
+        { ...mockAgents[1], id: "agent-progress", name: "Progress Agent", taskId: "FN-PROGRESS", taskColumn: "in-progress", state: "running" as AgentState },
+        { ...mockAgents[2], id: "agent-bare", name: "Bare Agent", taskId: "FN-BARE", taskColumn: "unresolved" },
+        { ...mockAgents[3], id: "agent-none", name: "No Task Agent" },
+      ]);
+      mockFetchAgentStats.mockResolvedValue({ total: 4, byState: { active: 1, running: 1 }, byRole: { executor: 2 } });
+
+      const { container } = render(<AgentsView addToast={mockAddToast} />);
+
+      await waitFor(() => {
+        expect(screen.getAllByText((_, el) => el?.textContent === "FN-TRIAGE · Planning").length).toBeGreaterThanOrEqual(1);
+        expect(screen.getAllByText((_, el) => el?.textContent === "FN-PROGRESS · In Progress").length).toBeGreaterThanOrEqual(1);
+        expect(screen.getAllByText((_, el) => el?.textContent === "FN-BARE · Unresolved task").length).toBeGreaterThanOrEqual(1);
+      });
+      expect(container.querySelectorAll(".agent-task").length).toBeGreaterThanOrEqual(3);
+    });
+
+    it("displays unresolved context when task column is missing", async () => {
       render(<AgentsView addToast={mockAddToast} />);
       await waitFor(() => {
-        expect(screen.getAllByText("FN-001").length).toBeGreaterThanOrEqual(1);
+        expect(screen.getAllByText((_, el) => el?.textContent === "FN-001 · Unresolved task").length).toBeGreaterThanOrEqual(1);
       });
     });
 

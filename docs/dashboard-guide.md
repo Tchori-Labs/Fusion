@@ -711,6 +711,8 @@ Features:
 - Switch between **List**, **Board**, and **Org chart** layouts
 - Filter by role/state, include/exclude system agents, and inspect health/status
 - Agent list cards show the configured **Model** or plugin **Runtime** for each agent, falling back to **Auto** when no override is set
+<!-- FNXC:AgentTaskStateDrift 2026-06-27-16:46: Agent task badges include the linked task column so parked `triage`/`todo` ownership from the FN-7138 invariant is not misread as execution drift. -->
+- Agent list, live-agent, and detail task badges show the linked task ID with its current column when the task is non-terminal (for example `FN-6902 · Triage` or `FN-6902 · In Progress`). Terminal linked tasks are omitted, and unresolved column lookups render an explicit `Unresolved task` suffix so missing or deleted task links are not mistaken for healthy parked work.
 - First-run setup asks whether to create an optional project agent after project registration. The default template is **CEO**; users can choose another preset, use the AI interview when `experimentalFeatures.agentOnboarding` is enabled, or skip it. Fusion can still build tasks without an agent by starting temporary agents to plan, code, review, and merge task work.
 - Start, pause, stop, and trigger agent runs from the view and from detail panels
 - In **Agent detail**, use the kebab **Bulk agent actions** button in the header utility cluster (next to **Refresh** and **Close**) to run project-wide lifecycle transitions for non-ephemeral agents in the current project — **Pause All Agents** targets agents in the `active` or `running` state, while **Resume All Agents** targets agents in the `paused` state only

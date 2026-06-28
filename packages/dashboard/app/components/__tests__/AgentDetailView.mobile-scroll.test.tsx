@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { loadAllAppCss, loadAllAppCssBaseOnly } from "../../test/cssFixture";
-import { setupAgentDetailMocks } from "./AgentDetailView.test-helpers";
+import { createMockAgent, mockFetchAgent, setupAgentDetailMocks } from "./AgentDetailView.test-helpers";
 import { AgentDetailView } from "../AgentDetailView";
 
 function installAgentDetailMatchMedia(matchesMobile: boolean) {
@@ -49,6 +49,18 @@ describe("AgentDetailView mobile scroll regression (FN-4231)", () => {
     expect(window.getComputedStyle(contentEl).overflowY).toBe("auto");
     expect(window.getComputedStyle(tabsEl).flexShrink).toBe("0");
     expect(window.getComputedStyle(footerEl).flexShrink).toBe("0");
+  });
+
+  it("shows mobile task column context without empty task shells (FN-7139)", async () => {
+    mockFetchAgent.mockResolvedValueOnce(createMockAgent({ taskId: "FN-MOBILE", taskColumn: "in-progress" }));
+
+    const { container } = render(<AgentDetailView agentId="agent-001" onClose={vi.fn()} addToast={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(screen.getAllByText((_, el) => el?.textContent === "FN-MOBILE · In Progress").length).toBeGreaterThanOrEqual(2);
+    });
+    expect(container.querySelector(".agent-detail-content")).toBeTruthy();
+    expect(container.querySelector(".task-badge")?.textContent).toContain("FN-MOBILE · In Progress");
   });
 
   it("tabs accept horizontal touch panning and stay non-shrinking on mobile (FN-6450, FN-6865)", async () => {

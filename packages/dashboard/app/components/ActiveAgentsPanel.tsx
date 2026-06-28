@@ -7,6 +7,7 @@ import { fetchTaskDetail } from "../api";
 import "./ActiveAgentsPanel.css";
 import { useLiveTranscript } from "../hooks/useLiveTranscript";
 import { resolveHeartbeatIntervalMs } from "../utils/heartbeatIntervals";
+import { AgentTaskBadge } from "./AgentTaskBadge";
 
 interface LiveAgentCardProps {
   agent: Agent;
@@ -113,7 +114,7 @@ function LiveAgentCard({ agent, projectId, onSelect, onOpenTaskLogs }: LiveAgent
           <span>{agent.name}</span>
         </div>
         {agent.taskId && (
-          <span className="live-agent-task badge">{agent.taskId}</span>
+          <span className="live-agent-task badge"><AgentTaskBadge taskId={agent.taskId} taskColumn={agent.taskColumn} /></span>
         )}
       </div>
       <div className="live-agent-card-transcript">

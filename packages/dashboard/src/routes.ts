@@ -3198,6 +3198,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
    * as "working on" in agent UI surfaces to avoid stale activity indicators.
    */
   const TERMINAL_TASK_STATUSES = new Set(["done", "archived"]);
+  const UNRESOLVED_AGENT_TASK_COLUMN = "unresolved";
 
   /**
    * Check if a task status is terminal (done or archived).
@@ -3235,10 +3236,18 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
       const taskStatus = taskStatusMap.get(agent.taskId);
       if (isTerminalTaskStatus(taskStatus)) {
         // Omit taskId for terminal tasks — use spread to create shallow copy without taskId
-        const { taskId: _omitted, ...sanitized } = agent;
+        const { taskId: _omitted, taskColumn: _taskColumnOmitted, ...sanitized } = agent;
         return sanitized as import("@fusion/core").Agent;
       }
-      return agent;
+
+      /*
+       * FNXC:AgentTaskStateDrift 2026-06-27-16:20:
+       * Dashboard agent surfaces show the linked task column so coordinators can tell legitimate triage/queued or active linkage apart from execution drift, matching the FN-7138 text-surface invariant.
+       *
+       * FNXC:AgentTaskStateDrift 2026-06-27-17:08:
+       * Missing/deleted linked tasks and lookup failures must be explicit too; otherwise a stale task link is indistinguishable from an un-enriched dashboard response.
+       */
+      return { ...agent, taskColumn: taskStatus ?? UNRESOLVED_AGENT_TASK_COLUMN };
     });
   }
 

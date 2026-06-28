@@ -6534,6 +6534,11 @@ export interface Agent {
   lastError?: string;
   /** Number of currently pending approvals requested by this agent. */
   pendingApprovalCount?: number;
+  /**
+   * FNXC:AgentTaskStateDrift 2026-06-27-16:20:
+   * Dashboard/API responses need a transient linked-task column so coordinators can distinguish legitimate parked/active agent linkages from execution drift; unresolved lookups use the response-only "unresolved" sentinel. This is resolved per request and must not be persisted by AgentStore.
+   */
+  taskColumn?: string;
   /** Path to a markdown file containing custom instructions (resolved relative to project root).
    *  Must end in `.md`, no `..` traversal. Max 500 chars. */
   instructionsPath?: string;

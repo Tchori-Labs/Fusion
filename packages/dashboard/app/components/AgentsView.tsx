@@ -37,6 +37,7 @@ import {
 } from "./agentsOrgChartLayout";
 import { AgentAvatar } from "./AgentAvatar";
 import { AgentErrorIndicator } from "./AgentErrorDetailsModal";
+import { AgentTaskBadge } from "./AgentTaskBadge";
 
 export interface AgentsViewProps {
   addToast: (message: string, type?: "success" | "error") => void;
@@ -1886,7 +1887,7 @@ export function AgentsView({ addToast, projectId, onOpenTaskLogs, agentOnboardin
                     {agent.taskId && (
                       <div className="agent-task">
                         <span className="text-secondary">{t("agents.workingOn", "Working on:")}</span>
-                        <span className="badge">{agent.taskId}</span>
+                        <span className="badge"><AgentTaskBadge taskId={agent.taskId} taskColumn={agent.taskColumn} /></span>
                       </div>
                     )}
                     <div className="agent-heartbeat-control">

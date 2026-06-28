@@ -270,6 +270,71 @@ it("uses global design tokens instead of component-local aliases", async () => {
   expect(stylesContent).toMatch(/--card-hover:/);
 });
 
+it("displays linked task column context in header and current work", async () => {
+  mockFetchAgent.mockResolvedValueOnce(createMockAgent({ taskId: "FN-TRIAGE", taskColumn: "triage" }));
+
+  render(
+    <AgentDetailView
+      agentId="agent-001"
+      onClose={vi.fn()}
+      addToast={vi.fn()}
+    />
+  );
+
+  await waitFor(() => {
+    expect(screen.getAllByText((_, el) => el?.textContent === "FN-TRIAGE · Planning").length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+it("displays in-progress linked task column context", async () => {
+  mockFetchAgent.mockResolvedValueOnce(createMockAgent({ taskId: "FN-PROGRESS", taskColumn: "in-progress" }));
+
+  render(
+    <AgentDetailView
+      agentId="agent-001"
+      onClose={vi.fn()}
+      addToast={vi.fn()}
+    />
+  );
+
+  await waitFor(() => {
+    expect(screen.getAllByText((_, el) => el?.textContent === "FN-PROGRESS · In Progress").length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+it("displays unresolved linked task context when column enrichment is missing", async () => {
+  mockFetchAgent.mockResolvedValueOnce(createMockAgent({ taskId: "FN-BARE", taskColumn: undefined }));
+
+  render(
+    <AgentDetailView
+      agentId="agent-001"
+      onClose={vi.fn()}
+      addToast={vi.fn()}
+    />
+  );
+
+  await waitFor(() => {
+    expect(screen.getAllByText((_, el) => el?.textContent === "FN-BARE · Unresolved task").length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+it("does not render task badge shells without a linked task", async () => {
+  mockFetchAgent.mockResolvedValueOnce(createMockAgent({ taskId: undefined, taskColumn: undefined }));
+
+  const { container } = render(
+    <AgentDetailView
+      agentId="agent-001"
+      onClose={vi.fn()}
+      addToast={vi.fn()}
+    />
+  );
+
+  await waitFor(() => {
+    expect(screen.getByText("No active assignment")).toBeInTheDocument();
+  });
+  expect(container.querySelector(".task-badge")).toBeNull();
+});
+
 it("displays agent name in header after loading", async () => {
   render(
     <AgentDetailView

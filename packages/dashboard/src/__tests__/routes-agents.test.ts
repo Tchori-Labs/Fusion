@@ -2035,7 +2035,7 @@ describe("POST /api/ai/draft-goal-description", () => {
     expect(res.body).toEqual({
       description: "Grow the ecosystem with clear extension support and measurable adoption.",
     });
-    expect(draftSpy).toHaveBeenCalledWith("Grow plugin ecosystem", "/test/project", undefined);
+    expect(draftSpy).toHaveBeenCalledWith("Grow plugin ecosystem", "/test/project", undefined, store);
   });
 
   it("returns 400 when title is missing or empty", async () => {
@@ -2062,6 +2062,7 @@ describe("POST /api/ai/draft-goal-description", () => {
 
   it("returns 429 when draft requests are rate limited", async () => {
     const app = buildApp();
+    vi.spyOn(aiRefineModule, "draftGoalDescription").mockResolvedValue("Drafted goal description.");
 
     for (let i = 0; i < 10; i++) {
       const res = await REQUEST(
@@ -2927,6 +2928,7 @@ describe("Agent stale task-link sanitization", () => {
     const testAgent = agents.find((a: { id: string }) => a.id === agentId);
     expect(testAgent).toBeDefined();
     expect(testAgent).not.toHaveProperty("taskId");
+    expect(testAgent).not.toHaveProperty("taskColumn");
   });
 
   it("GET /api/agents omits taskId when linked task is archived", async () => {
@@ -2953,6 +2955,7 @@ describe("Agent stale task-link sanitization", () => {
     const testAgent = agents.find((a: { id: string }) => a.id === agentId);
     expect(testAgent).toBeDefined();
     expect(testAgent).not.toHaveProperty("taskId");
+    expect(testAgent).not.toHaveProperty("taskColumn");
   });
 
   it("GET /api/agents preserves taskId for non-terminal linked tasks", async () => {
@@ -2979,6 +2982,33 @@ describe("Agent stale task-link sanitization", () => {
     const testAgent = agents.find((a: { id: string }) => a.id === agentId);
     expect(testAgent).toBeDefined();
     expect(testAgent.taskId).toBe(activeTaskId);
+    expect(testAgent.taskColumn).toBe("in-progress");
+  });
+
+  it("GET /api/agents returns taskColumn for parked triage linked tasks", async () => {
+    const triageTaskId = "FN-TRIAGE";
+    const store = createMockStore({
+      getFusionDir: vi.fn().mockReturnValue(fusionDir),
+      getTaskColumns: vi.fn().mockResolvedValue(new Map([[triageTaskId, "triage"]])),
+    } as any);
+
+    const app = express();
+    app.use(express.json());
+    app.use("/api", createApiRoutes(store));
+
+    const { AgentStore } = await import("@fusion/core");
+    const agentStore = new AgentStore({ rootDir: fusionDir });
+    await agentStore.init();
+    await agentStore.assignTask(agentId, triageTaskId);
+
+    const res = await GET(app, "/api/agents");
+
+    expect(res.status).toBe(200);
+    const agents = Array.isArray(res.body) ? res.body : [res.body];
+    const testAgent = agents.find((a: { id: string }) => a.id === agentId);
+    expect(testAgent).toBeDefined();
+    expect(testAgent.taskId).toBe(triageTaskId);
+    expect(testAgent.taskColumn).toBe("triage");
   });
 
   it("GET /api/agents/:id omits taskId when linked task is done", async () => {
@@ -3004,6 +3034,7 @@ describe("Agent stale task-link sanitization", () => {
     expect(res.body).toBeDefined();
     expect(res.body.id).toBe(agentId);
     expect(res.body).not.toHaveProperty("taskId");
+    expect(res.body).not.toHaveProperty("taskColumn");
   });
 
   it("GET /api/agents/:id omits taskId when linked task is archived", async () => {
@@ -3029,6 +3060,7 @@ describe("Agent stale task-link sanitization", () => {
     expect(res.body).toBeDefined();
     expect(res.body.id).toBe(agentId);
     expect(res.body).not.toHaveProperty("taskId");
+    expect(res.body).not.toHaveProperty("taskColumn");
   });
 
   it("GET /api/agents/:id preserves taskId for in-review linked tasks", async () => {
@@ -3054,6 +3086,32 @@ describe("Agent stale task-link sanitization", () => {
     expect(res.body).toBeDefined();
     expect(res.body.id).toBe(agentId);
     expect(res.body.taskId).toBe(inReviewTaskId);
+    expect(res.body.taskColumn).toBe("in-review");
+  });
+
+  it("GET /api/agents/:id returns taskColumn for in-progress linked tasks", async () => {
+    const inProgressTaskId = "FN-IN-PROGRESS";
+    const store = createMockStore({
+      getFusionDir: vi.fn().mockReturnValue(fusionDir),
+      getTaskColumns: vi.fn().mockResolvedValue(new Map([[inProgressTaskId, "in-progress"]])),
+    } as any);
+
+    const app = express();
+    app.use(express.json());
+    app.use("/api", createApiRoutes(store));
+
+    const { AgentStore } = await import("@fusion/core");
+    const agentStore = new AgentStore({ rootDir: fusionDir });
+    await agentStore.init();
+    await agentStore.assignTask(agentId, inProgressTaskId);
+
+    const res = await GET(app, `/api/agents/${agentId}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toBeDefined();
+    expect(res.body.id).toBe(agentId);
+    expect(res.body.taskId).toBe(inProgressTaskId);
+    expect(res.body.taskColumn).toBe("in-progress");
   });
 
   it("GET /api/agents/stats excludes terminal task links from assignedTaskCount", async () => {
@@ -3195,7 +3253,33 @@ describe("Agent stale task-link sanitization", () => {
     expect(res.body.todoTaskCount).toBe(2);
   });
 
-  it("GET /api/agents handles task lookup failure gracefully", async () => {
+  it("GET /api/agents marks missing linked tasks as unresolved", async () => {
+    const taskId = "FN-MISSING";
+    const store = createMockStore({
+      getFusionDir: vi.fn().mockReturnValue(fusionDir),
+      getTaskColumns: vi.fn().mockResolvedValue(new Map()),
+    } as any);
+
+    const app = express();
+    app.use(express.json());
+    app.use("/api", createApiRoutes(store));
+
+    const { AgentStore } = await import("@fusion/core");
+    const agentStore = new AgentStore({ rootDir: fusionDir });
+    await agentStore.init();
+    await agentStore.assignTask(agentId, taskId);
+
+    const res = await GET(app, "/api/agents");
+
+    expect(res.status).toBe(200);
+    const agents = Array.isArray(res.body) ? res.body : [res.body];
+    const testAgent = agents.find((a: { id: string }) => a.id === agentId);
+    expect(testAgent).toBeDefined();
+    expect(testAgent.taskId).toBe(taskId);
+    expect(testAgent.taskColumn).toBe("unresolved");
+  });
+
+  it("GET /api/agents marks linked task lookup failures as unresolved", async () => {
     const taskId = "FN-LOOKUP-FAIL";
     const store = createMockStore({
       getFusionDir: vi.fn().mockReturnValue(fusionDir),
@@ -3212,15 +3296,15 @@ describe("Agent stale task-link sanitization", () => {
     await agentStore.init();
     await agentStore.assignTask(agentId, taskId);
 
-    // Should not throw, taskId should be preserved on lookup failure
+    // Should not throw; unresolved lookup state should be explicit on the response.
     const res = await GET(app, "/api/agents");
 
     expect(res.status).toBe(200);
     const agents = Array.isArray(res.body) ? res.body : [res.body];
     const testAgent = agents.find((a: { id: string }) => a.id === agentId);
     expect(testAgent).toBeDefined();
-    // On lookup failure, taskId should be preserved (treated as non-terminal)
     expect(testAgent.taskId).toBe(taskId);
+    expect(testAgent.taskColumn).toBe("unresolved");
   });
 });
 

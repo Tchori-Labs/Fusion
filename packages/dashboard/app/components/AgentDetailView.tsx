@@ -31,6 +31,7 @@ import { useConfirm } from "../hooks/useConfirm";
 import { useModalResizePersist } from "../hooks/useModalResizePersist";
 import { AgentAvatar } from "./AgentAvatar";
 import { AgentErrorIndicator } from "./AgentErrorDetailsModal";
+import { AgentTaskBadge } from "./AgentTaskBadge";
 import { ExperimentalAgentOnboardingModal } from "./ExperimentalAgentOnboardingModal";
 import { AgentPermissionPolicyEditor } from "./AgentPermissionPolicyEditor";
 import { useFavorites } from "../hooks/useFavorites";
@@ -1028,7 +1029,7 @@ export function AgentDetailView({ agentId, projectId, onClose, addToast, onChild
                 <span className="divider">|</span>
                 <span className="text-muted">{t("agents.workingOn", "Working on:")}</span>
                 <a href={`/tasks/${agent.taskId}`} className="link">
-                  {agent.taskId}
+                  <AgentTaskBadge taskId={agent.taskId} taskColumn={agent.taskColumn} />
                   <ExternalLink size={12} />
                 </a>
               </>
@@ -1301,7 +1302,7 @@ function DashboardTab({
         <h3>{t("agents.currentWork", "Current Work")}</h3>
         {agent.taskId ? (
           <div className="current-task">
-            <a href={`/tasks/${agent.taskId}`} className="task-badge">{agent.taskId}</a>
+            <a href={`/tasks/${agent.taskId}`} className="task-badge"><AgentTaskBadge taskId={agent.taskId} taskColumn={agent.taskColumn} /></a>
             <a href={`/tasks/${agent.taskId}`} className="btn btn-sm">{t("agents.viewTask", "View Task")} <ExternalLink size={14} /></a>
           </div>
         ) : (
