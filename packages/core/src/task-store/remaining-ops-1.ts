@@ -34,6 +34,7 @@ import {generateTaskLineageId} from "../task-lineage.js";
 import {sanitizeFileScopeInPromptContent} from "../task-store/file-scope.js";
 import {type TaskRow} from "../task-store/persistence.js";
 import {__setTaskActivityLogLimitsForTesting} from "../task-store/comments.js";
+import {nextWorkflowDefinitionIdAsyncImpl} from "../task-store/remaining-ops-8.js";
 import {upsertTaskRowInTransaction} from "../task-store/async-persistence.js";
 import {readTaskRowInTransaction} from "../task-store/async-persistence.js";
 import {recordActivityLogEntry as recordActivityLogEntryAsync} from "../task-store/async-audit.js";
@@ -797,7 +798,14 @@ export async function createWorkflowDefinitionImpl(store: TaskStore, input: Work
       store.assertWorkflowIrTraitsValid(ir);
       const layout = input.layout ?? {};
       const now = new Date().toISOString();
-      const id = store.nextWorkflowDefinitionId();
+      // FNXC:SqliteFinalRemoval 2026-06-28:
+      // Backend mode (PG) allocates the WF-id from project.config via the async
+      // counter; the sync store.nextWorkflowDefinitionId() reads a SQLite __meta
+      // row that does not exist in PG. The id is computed up front so the
+      // definition object is identical across both branches.
+      const id = store.backendMode
+        ? await nextWorkflowDefinitionIdAsyncImpl(store)
+        : store.nextWorkflowDefinitionId();
       const definition: WorkflowDefinition = {
         id,
         name,
@@ -810,6 +818,26 @@ export async function createWorkflowDefinitionImpl(store: TaskStore, input: Work
         createdAt: now,
         updatedAt: now,
       };
+
+      if (store.backendMode) {
+        // FNXC:SqliteFinalRemoval 2026-06-28:
+        // PG INSERT via Drizzle. ir/layout are jsonb columns, so the OBJECT is
+        // passed directly (no serializeWorkflowIr/JSON.stringify — that is the
+        // SQLite TEXT path). Mirrors updateWorkflowDefinitionImpl's backend
+        // branch; bumpLastModified is skipped in backend mode.
+        await store.asyncLayer!.db.insert(schema.project.workflows).values({
+          id: definition.id,
+          name: definition.name,
+          description: definition.description,
+          ir: (flagOnForCreate ? definition.ir : downgradeIrToV1IfPure(definition.ir)) as unknown as object,
+          layout: definition.layout as unknown as object,
+          kind: definition.kind,
+          createdAt: definition.createdAt,
+          updatedAt: definition.updatedAt,
+        });
+        store.workflowDefinitionsCache = null;
+        return definition;
+      }
 
       store.db
         .prepare(

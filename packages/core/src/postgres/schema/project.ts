@@ -267,6 +267,11 @@ export const config = projectSchema.table("config", {
   id: integer("id").primaryKey(),
   nextId: integer("next_id").default(1),
   nextWorkflowStepId: integer("next_workflow_step_id").default(1),
+  // FNXC:SqliteFinalRemoval 2026-06-28:
+  // WF-id counter for createWorkflowDefinition. SQLite stored this in a __meta
+  // row (key='nextWorkflowDefinitionId'); PG has no __meta table so the counter
+  // lives here alongside next_workflow_step_id. Monotonic, never reused.
+  nextWorkflowDefinitionId: integer("next_workflow_definition_id").default(1),
   settings: jsonb("settings").default({}),
   workflowSteps: jsonb("workflow_steps").default([]),
   updatedAt: text("updated_at"),

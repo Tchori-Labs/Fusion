@@ -35,6 +35,8 @@ import type { AsyncDataLayer } from "../postgres/data-layer.js";
 export interface ProjectConfigRow {
   nextId: number | null;
   nextWorkflowStepId: number | null;
+  // FNXC:SqliteFinalRemoval 2026-06-28: WF-id counter (was a SQLite __meta row).
+  nextWorkflowDefinitionId: number | null;
   settings: Record<string, unknown> | null;
 }
 
@@ -55,17 +57,19 @@ export async function readProjectConfig(
     .select({
       nextId: schema.project.config.nextId,
       nextWorkflowStepId: schema.project.config.nextWorkflowStepId,
+      nextWorkflowDefinitionId: schema.project.config.nextWorkflowDefinitionId,
       settings: schema.project.config.settings,
     })
     .from(schema.project.config)
     .where(eq(schema.project.config.id, CONFIG_ROW_ID));
   const row = rows[0];
   if (!row) {
-    return { nextId: 1, nextWorkflowStepId: 1, settings: null };
+    return { nextId: 1, nextWorkflowStepId: 1, nextWorkflowDefinitionId: 1, settings: null };
   }
   return {
     nextId: row.nextId ?? 1,
     nextWorkflowStepId: row.nextWorkflowStepId ?? 1,
+    nextWorkflowDefinitionId: row.nextWorkflowDefinitionId ?? 1,
     settings: (row.settings as Record<string, unknown> | null) ?? null,
   };
 }
@@ -105,15 +109,18 @@ export async function readProjectSettings(
 export async function writeProjectConfig(
   layer: AsyncDataLayer,
   settings: Record<string, unknown>,
-  options?: { nextWorkflowStepId?: number },
+  options?: { nextWorkflowStepId?: number; nextWorkflowDefinitionId?: number },
 ): Promise<void> {
   const nowIso = new Date().toISOString();
 
-  // Preserve the prior nextWorkflowStepId if not supplied.
+  // Preserve the prior counters when not supplied so an unrelated write does not
+  // reset the workflow-step or workflow-definition (WF-id) allocator.
   let nextWorkflowStepId = options?.nextWorkflowStepId;
-  if (nextWorkflowStepId === undefined) {
+  let nextWorkflowDefinitionId = options?.nextWorkflowDefinitionId;
+  if (nextWorkflowStepId === undefined || nextWorkflowDefinitionId === undefined) {
     const existing = await readProjectConfig(layer);
-    nextWorkflowStepId = existing.nextWorkflowStepId ?? 1;
+    if (nextWorkflowStepId === undefined) nextWorkflowStepId = existing.nextWorkflowStepId ?? 1;
+    if (nextWorkflowDefinitionId === undefined) nextWorkflowDefinitionId = existing.nextWorkflowDefinitionId ?? 1;
   }
 
   await layer.db
@@ -122,6 +129,7 @@ export async function writeProjectConfig(
       id: CONFIG_ROW_ID,
       nextId: sql`COALESCE((SELECT next_id FROM ${schema.project.config} WHERE id = ${CONFIG_ROW_ID} LIMIT 1), 1)`,
       nextWorkflowStepId,
+      nextWorkflowDefinitionId,
       settings,
       workflowSteps: [],
       updatedAt: nowIso,
@@ -130,6 +138,7 @@ export async function writeProjectConfig(
       target: schema.project.config.id,
       set: {
         nextWorkflowStepId,
+        nextWorkflowDefinitionId,
         settings,
         workflowSteps: [],
         updatedAt: nowIso,

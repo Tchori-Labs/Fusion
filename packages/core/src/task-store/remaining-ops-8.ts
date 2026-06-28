@@ -24,6 +24,7 @@ import { SecretsStore } from "../secrets-store.js";
 import { type ActivityLogSnapshot, type TaskMetadataSnapshot, toTaskMetadataRecord, validateSnapshotEnvelope } from "../shared-mesh-state.js";
 import { createAsyncDistributedTaskIdAllocator } from "./async-allocator.js";
 import { getWorkflowRow, listWorkflowRows } from "../async-workflow-store.js";
+import { readProjectConfig, writeProjectConfig } from "./async-settings.js";
 import { compactTaskActivityLog } from "./comments.js";
 import { type TaskRow } from "./persistence.js";
 import { ActivityLogRow } from "./row-types.js";
@@ -158,6 +159,27 @@ export function resolvePluginWorkflowStepImpl(store: TaskStore, id: string): imp
       createdAt: now,
       updatedAt: now,
     };
+}
+
+/**
+ * FNXC:SqliteFinalRemoval 2026-06-28:
+ * Backend-mode (PG) sibling of nextWorkflowDefinitionIdImpl. SQLite stored the
+ * WF-id counter in a __meta row read+incremented inside a transactionImmediate;
+ * PG has no __meta table so the counter lives in project.config
+ * (next_workflow_definition_id). The read+increment is serialized by the
+ * caller's withConfigLock (mirrors createWorkflowStepImpl's WS-id counter port),
+ * preserving the WF-### format and the never-reuse-across-deletes intent. The
+ * existing settings are passed back through writeProjectConfig so bumping the
+ * counter never clobbers the project settings object.
+ */
+export async function nextWorkflowDefinitionIdAsyncImpl(store: TaskStore): Promise<string> {
+  const layer = store.asyncLayer!;
+  const configRow = await readProjectConfig(layer);
+  const next = configRow.nextWorkflowDefinitionId ?? 1;
+  await writeProjectConfig(layer, configRow.settings ?? {}, {
+    nextWorkflowDefinitionId: next + 1,
+  });
+  return `WF-${String(next).padStart(3, "0")}`;
 }
 
 export function nextWorkflowDefinitionIdImpl(store: TaskStore): string {

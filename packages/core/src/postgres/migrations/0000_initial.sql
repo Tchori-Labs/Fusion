@@ -177,6 +177,9 @@ CREATE TABLE IF NOT EXISTS project.config (
   id integer PRIMARY KEY,
   next_id integer DEFAULT 1,
   next_workflow_step_id integer DEFAULT 1,
+  -- FNXC:SqliteFinalRemoval 2026-06-28: WF-id counter for createWorkflowDefinition
+  -- (SQLite used a __meta row; PG has no __meta table).
+  next_workflow_definition_id integer DEFAULT 1,
   settings jsonb DEFAULT '{}',
   workflow_steps jsonb DEFAULT '[]',
   updated_at text,
