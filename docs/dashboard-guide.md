@@ -135,8 +135,9 @@ Features:
 - Task card header meta badges group priority, fast mode, agent-created provenance, and elapsed/created-time chips into one wrapping row; agent labels prefer `sourceMetadata.agentName` over raw agent IDs
 - Column ordering semantics: `todo` mirrors scheduler pickup order (priority descending, then oldest `createdAt`, then task ID); `triage`, `in-progress`, `in-review`, and `archived` remain priority-first with task-ID tie-breaks; `done` is ordered by most recent completion first (`columnMovedAt`, then `updatedAt`, then `createdAt` fallback)
 - On mobile, both default and workflow-mode boards fill the project viewport while the column strip remains the internal horizontal scroller with contained edge overscroll.
+<!-- FNXC:WorkflowSelection 2026-06-29-13:34: Board, List, Header, and Graph workflow selectors now share a durable per-project selection so operators return to the same lane after remounts, task refreshes, or respecification flows; stale saved workflow ids must fall back to a valid default/first workflow instead of hiding all tasks. -->
 - Board and List workflow switchers use a themed dropdown instead of a native select. The closed trigger shows the workflow name and chevron only; compact Todo / In Progress / Done counts derived from workflow column flags (excluding archived columns) refresh each time the dropdown opens and appear while the dropdown is expanded, including on each workflow option. Built-in lanes with synthesized trait-less lifecycle columns fall back to canonical column ids (`todo`, `in-progress`, `done`, and `archived`) for those counts. Each option row also exposes an inline edit action, and a persistent **New workflow** footer stays visible below the scrollable option list. The open listbox grows from the longest workflow name plus its count/edit decorations while remaining viewport-bounded; the closed trigger stays narrow and ellipsized. Those inline count badges intentionally use the same board column color tokens as cards: `--todo`, `--in-progress`, and `--done`.
-- When workflow columns are enabled, Board and List hydrate the last successful workflow-lane payload from a per-project session cache; cold loads show a neutral skeleton until settings and workflow metadata are known, avoiding a legacy single-lane flash.
+- When workflow columns are enabled, Board and List hydrate the last successful workflow-lane payload from a per-project session cache; cold loads show a neutral skeleton until settings and workflow metadata are known, avoiding a legacy single-lane flash. The selected workflow is remembered per project in durable browser storage and restored when returning to Board/List after task refreshes, route changes, or respecification flows; if that saved workflow is later deleted, Fusion falls back to a valid default/first workflow so tasks remain visible.
 
 ![Board view](./screenshots/dashboard-overview.png)
 
@@ -190,7 +191,7 @@ Navigation:
 Behavior:
 - Shows only tasks in `triage`, `todo`, `in-progress`, and `in-review`
 - Excludes `done` and `archived`
-- On desktop/tablet, the header workflow dropdown mirrors Board/List selection behavior and filters graph nodes to tasks assigned to the selected workflow; **All workflows** restores the full active-task graph.
+- On desktop/tablet, the header workflow dropdown mirrors Board/List selection behavior, restores the same per-project saved workflow when available, and filters graph nodes to tasks assigned to the selected workflow; **All workflows** restores the full active-task graph.
 - Uses Sugiyama-style layered auto-layout to place nodes by dependency depth
 - Renders directed bezier dependency edges (dependent → dependency) with arrowheads
 - Supports cursor-centered wheel zoom, pinch zoom, keyboard shortcuts (`Ctrl/Cmd+=`, `Ctrl/Cmd+-`, `Ctrl/Cmd+0`, `Ctrl/Cmd+Shift+F`, `Escape`), and fit/reset controls via the floating toolbar with live zoom percentage

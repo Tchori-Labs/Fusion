@@ -3,6 +3,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { Board } from "../Board";
 import { COLUMNS } from "@fusion/core";
+import { BOARD_WORKFLOW_SELECTION_STORAGE_KEY } from "../../utils/boardWorkflowSelection";
+import { scopedKey } from "../../utils/projectStorage";
 
 import type { Task } from "@fusion/core";
 
@@ -960,6 +962,49 @@ describe("Board", () => {
         expect(screen.getByTestId(`column-${col}`)).toBeDefined();
       }
       expect(screen.queryByTestId(/^lane-/)).toBeNull();
+    });
+
+    it("hydrates remounted board workflow selection from durable project storage", async () => {
+      const projectId = "project-board-persist";
+      enableFlag({}, [DEFAULT_WORKFLOW, CUSTOM_WORKFLOW]);
+      const { unmount } = renderBoard({ projectId });
+
+      await selectWorkflow(CUSTOM_WORKFLOW.id);
+      await waitFor(() => expect(screen.getByTestId("workflow-switcher")).toHaveTextContent(CUSTOM_WORKFLOW.name));
+      expect(window.localStorage.getItem(scopedKey(BOARD_WORKFLOW_SELECTION_STORAGE_KEY, projectId))).toBe(CUSTOM_WORKFLOW.id);
+
+      unmount();
+      enableFlag({}, [DEFAULT_WORKFLOW, CUSTOM_WORKFLOW]);
+      renderBoard({ projectId });
+
+      await waitFor(() => expect(screen.getByTestId("workflow-switcher")).toHaveTextContent(CUSTOM_WORKFLOW.name));
+    });
+
+    it("keeps a custom board workflow selected after task refresh and workflow payload revalidation", async () => {
+      fetchBoardWorkflowsMock.mockResolvedValue({
+        flagEnabled: true,
+        defaultWorkflowId: "builtin:coding",
+        workflows: [DEFAULT_WORKFLOW, CUSTOM_WORKFLOW],
+        taskWorkflowIds: { "FN-1": "wf-custom" },
+      });
+      const { rerender } = renderBoard({
+        projectId: "project-board-refresh",
+        tasks: [mkTask({ id: "FN-1", column: "intake", title: "Custom task" })],
+      });
+
+      await selectWorkflow(CUSTOM_WORKFLOW.id);
+      await waitFor(() => expect(screen.getByTestId("workflow-switcher")).toHaveTextContent(CUSTOM_WORKFLOW.name));
+
+      rerender(<Board {...createBoardProps({
+        projectId: "project-board-refresh",
+        tasks: [mkTask({ id: "FN-1", column: "done", title: "Custom task after respec" })],
+      })} />);
+      await act(async () => {
+        sseHandlers["workflow:updated"]?.();
+      });
+
+      await waitFor(() => expect(screen.getByTestId("workflow-switcher")).toHaveTextContent(CUSTOM_WORKFLOW.name));
+      expect(screen.getByTestId("column-done")).toHaveAttribute("data-tasks", expect.stringContaining("FN-1"));
     });
 
     it("tasks with no selection render in the default selected workflow", async () => {
