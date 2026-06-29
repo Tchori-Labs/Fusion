@@ -558,16 +558,17 @@ export class WorkflowGraphExecutor {
            * still reaches the same downstream node.
            */
           /*
-           * FNXC:WorkflowOptionalSteps 2026-06-29-02:45:
-           * Optional-group execution is driven only by the task's materialized
-           * `enabledWorkflowSteps` list. Workflow `defaultOn` seeds that list at
-           * task creation/selection time; using it here as a fallback resurrects
-           * unchecked Quick Add steps and makes legacy/in-memory tasks run review
-           * gates that were never explicitly selected.
+           * FNXC:WorkflowOptionalSteps 2026-06-29-03:43:
+           * Distinguish an explicit empty toggle list from a missing one. Quick Add
+           * and task forms persist `[]` when an operator unchecks Plan/Code Review,
+           * so that must keep bypassing the group. Imported/legacy/resumed tasks may
+           * have no `enabledWorkflowSteps` field at all; for those, honor the
+           * workflow-authored `defaultOn` so default Coding still runs Plan Review
+           * before execution and Code Review before merge.
            */
           const enabled = Array.isArray(task.enabledWorkflowSteps)
             ? task.enabledWorkflowSteps.includes(node.id)
-            : false;
+            : node.config?.defaultOn === true;
           if (!enabled) {
             // FNXC:WorkflowOptionalGroup 2026-06-21-16:30: record the group's own
             // outcome on bypass too (mirrors the enabled path + every other node
@@ -608,6 +609,15 @@ export class WorkflowGraphExecutor {
               (result) => result.workflowStepId === PLAN_REVIEW_GROUP_ID && result.status === "passed",
             )
           ) {
+            context[`node:${node.id}:outcome`] = "success";
+            this.deps.logTaskEntry?.("[pre-merge] Workflow step already passed: Plan Review");
+            return await traverseChildren(node, { outcome: "success", value: "already-passed" });
+          }
+          const repairedPlanReview = node.id === PLAN_REVIEW_GROUP_ID
+            ? recoverPassedPlanReviewFromLatestLog(task)
+            : undefined;
+          if (repairedPlanReview) {
+            await this.recordOptionalGroupStepResult(task.id, repairedPlanReview);
             context[`node:${node.id}:outcome`] = "success";
             this.deps.logTaskEntry?.("[pre-merge] Workflow step already passed: Plan Review");
             return await traverseChildren(node, { outcome: "success", value: "already-passed" });
@@ -1135,4 +1145,34 @@ export class WorkflowGraphExecutor {
     }
     return result;
   }
+}
+
+function recoverPassedPlanReviewFromLatestLog(task: TaskDetail): WorkflowStepResult | undefined {
+  /*
+   * FNXC:WorkflowLifecycle 2026-06-29-03:55:
+   * FN-7228 exposed persisted tasks where Plan Review completed successfully but
+   * later cleanup erased `workflowStepResults`, leaving the dashboard with an
+   * enabled Plan Review step and no status. Trust only the latest Plan Review
+   * terminal log: completed repairs the missing projection; failed still blocks
+   * and reruns/replans through the normal path.
+   */
+  let latest: { status: "passed" | "failed"; timestamp?: string; outcome?: string } | undefined;
+  for (const entry of task.log ?? []) {
+    if (entry.action === "[pre-merge] Workflow step completed: Plan Review") {
+      latest = { status: "passed", timestamp: entry.timestamp, outcome: entry.outcome };
+    } else if (entry.action === "[pre-merge] Workflow step failed: Plan Review") {
+      latest = { status: "failed", timestamp: entry.timestamp, outcome: entry.outcome };
+    }
+  }
+  if (latest?.status !== "passed") return undefined;
+  return {
+    workflowStepId: PLAN_REVIEW_GROUP_ID,
+    workflowStepName: "Plan Review",
+    phase: "pre-merge",
+    status: "passed",
+    verdict: "APPROVE",
+    ...(latest.outcome ? { notes: latest.outcome } : {}),
+    startedAt: latest.timestamp,
+    completedAt: latest.timestamp,
+  };
 }

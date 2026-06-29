@@ -165,7 +165,7 @@ describe("WorkflowGraphExecutor optional-group", () => {
     expect(disabledResult.outcome).toBe("success");
   });
 
-  it("treats defaultOn as a creation-time seed, not an execution-time fallback", async () => {
+  it("uses defaultOn only when enabledWorkflowSteps is missing, while explicit empty disables", async () => {
     const ir = optionalGroupIr();
     const group = ir.nodes.find((node) => node.id === "group");
     if (group?.config) group.config.defaultOn = true;
@@ -182,8 +182,8 @@ describe("WorkflowGraphExecutor optional-group", () => {
     const unsetResult = await executor.run(taskWith(undefined), settingsOn(), ir);
     const explicitEmptyResult = await executor.run(taskWith([]), settingsOn(), ir);
 
-    expect(calls.filter((id) => id === "optstep")).toHaveLength(0);
-    expect(unsetResult.visitedNodeIds).not.toContain("group::optstep");
+    expect(calls.filter((id) => id === "optstep")).toHaveLength(1);
+    expect(unsetResult.visitedNodeIds).toContain("group::optstep");
     expect(explicitEmptyResult.visitedNodeIds).not.toContain("group::optstep");
   });
 
@@ -575,6 +575,75 @@ describe("WorkflowGraphExecutor optional-group", () => {
     expect(result.outcome).toBe("success");
     expect(calls).toEqual(["execute"]);
     expect(requestFix).not.toHaveBeenCalled();
+    expect(logs).toContain("[pre-merge] Workflow step already passed: Plan Review");
+  });
+
+  it("repairs missing Plan Review result from the latest completed log before execution", async () => {
+    const records: Array<{ workflowStepId: string; status: string; notes?: string }> = [];
+    const calls: string[] = [];
+    const logs: string[] = [];
+    const ir: WorkflowIr = {
+      version: "v2",
+      name: "plan-review-log-repair",
+      columns: [{ id: "work", name: "Work", traits: [] }],
+      nodes: [
+        { id: "start", kind: "start" },
+        {
+          id: "plan-review",
+          kind: "optional-group",
+          config: {
+            name: "Plan Review",
+            defaultOn: true,
+            template: {
+              nodes: [{ id: "plan-review-step", kind: "prompt", config: { prompt: "review plan" } }],
+              edges: [],
+            },
+          },
+        },
+        { id: "execute", kind: "prompt", config: { prompt: "execute" } },
+        { id: "end", kind: "end" },
+      ],
+      edges: [
+        { from: "start", to: "plan-review" },
+        { from: "plan-review", to: "execute", condition: "success" },
+        { from: "execute", to: "end" },
+      ],
+    };
+    const executor = new WorkflowGraphExecutor({
+      handlers: {
+        prompt: async (node) => {
+          calls.push(node.id);
+          return { outcome: "success" };
+        },
+      },
+      logTaskEntry: (summary) => { logs.push(summary); },
+      recordWorkflowStepResult: async (_taskId, result) => { records.push(result); },
+    });
+
+    const result = await executor.run({
+      ...taskWith(["plan-review"]),
+      id: "FN-7228",
+      workflowStepResults: [],
+      log: [
+        { timestamp: "2026-06-29T10:31:20.000Z", action: "[pre-merge] Workflow step failed: Plan Review" },
+        {
+          timestamp: "2026-06-29T10:34:21.000Z",
+          action: "[pre-merge] Workflow step completed: Plan Review",
+          outcome: "approved after replan",
+        },
+      ],
+    } as TaskDetail, settingsOn(), ir);
+
+    expect(result.outcome).toBe("success");
+    expect(calls).toEqual(["execute"]);
+    expect(records).toEqual([
+      expect.objectContaining({
+        workflowStepId: "plan-review",
+        workflowStepName: "Plan Review",
+        status: "passed",
+        notes: "approved after replan",
+      }),
+    ]);
     expect(logs).toContain("[pre-merge] Workflow step already passed: Plan Review");
   });
 

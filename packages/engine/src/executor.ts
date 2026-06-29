@@ -3130,11 +3130,12 @@ export class TaskExecutor {
     logMessage: string,
     options?: { preserveVerificationFailureCount?: boolean },
   ): Promise<Task> {
+    const preservedWorkflowStepResults = preservePreExecutionWorkflowStepResults(task.workflowStepResults);
     await this.store.updateTask(task.id, {
       mergeDetails: null,
       mergeRetries: 0,
       verificationFailureCount: options?.preserveVerificationFailureCount ? task.verificationFailureCount ?? 0 : 0,
-      workflowStepResults: [],
+      workflowStepResults: preservedWorkflowStepResults,
     });
 
     const refreshedTask = await this.store.getTask(task.id);
@@ -16704,6 +16705,18 @@ export interface PseudoPauseResult {
 
 function hasNonTerminalWorkflowSteps(task: Pick<TaskDetail, "steps">): boolean {
   return task.steps.length > 0 && task.steps.some((step) => step.status !== "done" && step.status !== "skipped");
+}
+
+function preservePreExecutionWorkflowStepResults(results: Task["workflowStepResults"]): CoreWorkflowStepResult[] {
+  /*
+   * FNXC:WorkflowLifecycle 2026-06-29-03:50:
+   * Reverification cleanup must clear post-implementation verification residue
+   * without erasing pre-execution Plan Review evidence. FN-7228 passed Plan
+   * Review, then stale merge-state cleanup reset `workflowStepResults` to `[]`;
+   * the dashboard showed Plan Review with no status while execution continued and
+   * the graph no longer had durable proof to skip duplicate plan review.
+   */
+  return (results ?? []).filter((result) => result.workflowStepId === "plan-review");
 }
 
 /**

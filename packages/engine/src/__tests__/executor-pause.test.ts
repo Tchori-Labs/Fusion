@@ -1625,6 +1625,62 @@ describe("FN-2883 fast-path guards", () => {
     );
   });
 
+  it("stale merge cleanup preserves passed plan review status while clearing post-execution gates", async () => {
+    const store = createMockStore();
+    const executor = new TaskExecutor(store, "/tmp/test");
+    const task = {
+      id: "FN-7228",
+      title: "stale merge",
+      description: "desc",
+      column: "in-progress" as const,
+      dependencies: [],
+      steps: [{ name: "Step 0", status: "in-progress" }],
+      currentStep: 0,
+      log: [],
+      mergeDetails: { strategy: "manual" },
+      workflowStepResults: [
+        {
+          workflowStepId: "plan-review",
+          workflowStepName: "Plan Review",
+          phase: "pre-merge",
+          status: "passed",
+        },
+        {
+          workflowStepId: "code-review",
+          workflowStepName: "Code Review",
+          phase: "pre-merge",
+          status: "passed",
+        },
+      ],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    store.getTask.mockResolvedValue({ ...task, mergeDetails: null });
+
+    await (executor as any).cleanupMergeStateForReverification(task, "cleanup stale merge state");
+
+    expect(store.updateTask).toHaveBeenCalledWith(
+      "FN-7228",
+      expect.objectContaining({
+        workflowStepResults: [
+          expect.objectContaining({
+            workflowStepId: "plan-review",
+            workflowStepName: "Plan Review",
+            status: "passed",
+          }),
+        ],
+      }),
+    );
+    expect(store.updateTask).not.toHaveBeenCalledWith(
+      "FN-7228",
+      expect.objectContaining({
+        workflowStepResults: expect.arrayContaining([
+          expect.objectContaining({ workflowStepId: "code-review" }),
+        ]),
+      }),
+    );
+  });
+
   it("resumeOrphaned does not fast-path completed tasks that still have mergeDetails", async () => {
     const store = createMockStore();
     const executor = new TaskExecutor(store, "/tmp/test");
