@@ -4,10 +4,14 @@ vi.mock("../pi.js", () => ({
   createFnAgent: vi.fn(),
   describeModel: vi.fn().mockReturnValue("mock-provider/mock-model"),
   promptWithFallback: vi.fn(async (session, prompt, options) => {
-    if (options === undefined) {
-      await session.prompt(prompt);
-    } else {
-      await session.prompt(prompt, options);
+    if (typeof session.prompt === "function") {
+      if (options === undefined) {
+        await session.prompt(prompt);
+      } else {
+        await session.prompt(prompt, options);
+      }
+    } else if (typeof session.promptWithFallback === "function") {
+      await session.promptWithFallback(prompt, options);
     }
   }),
 }));
@@ -41,10 +45,14 @@ function createMockSession(reviewText: string) {
 beforeEach(() => {
   vi.clearAllMocks();
   mockedPromptWithFallback.mockImplementation(async (session, prompt, options) => {
-    if (options == null) {
-      await session.prompt(prompt);
-    } else {
-      await session.prompt(prompt, options);
+    if (typeof session.prompt === "function") {
+      if (options == null) {
+        await session.prompt(prompt);
+      } else {
+        await session.prompt(prompt, options);
+      }
+    } else if (typeof session.promptWithFallback === "function") {
+      await session.promptWithFallback(prompt, options);
     }
   });
 });
@@ -89,6 +97,112 @@ describe("reviewStep — model settings threading", () => {
     const opts = mockedCreateFnAgent.mock.calls[0][0];
     expect(opts.defaultProvider).toBeUndefined();
     expect(opts.defaultModelId).toBeUndefined();
+  });
+
+  it("uses task reviewer overrides before conflicting validator and default settings", async () => {
+    mockedCreateFnAgent.mockResolvedValue(
+      createMockSession("### Verdict: APPROVE\n### Summary\nReviewer override honored."),
+    );
+
+    await reviewStep(
+      "/tmp/worktree", "FN-100", 1, "Test Step", "code", "# prompt",
+      "abc123",
+      {
+        taskValidatorProvider: "task-reviewer-provider",
+        taskValidatorModelId: "task-reviewer-model",
+        projectValidatorProvider: "project-reviewer-provider",
+        projectValidatorModelId: "project-reviewer-model",
+        globalValidatorProvider: "global-reviewer-provider",
+        globalValidatorModelId: "global-reviewer-model",
+        projectDefaultOverrideProvider: "project-default-provider",
+        projectDefaultOverrideModelId: "project-default-model",
+        defaultProvider: "global-default-provider",
+        defaultModelId: "global-default-model",
+      },
+    );
+
+    const opts = mockedCreateFnAgent.mock.calls[0][0];
+    expect(opts.defaultProvider).toBe("task-reviewer-provider");
+    expect(opts.defaultModelId).toBe("task-reviewer-model");
+  });
+
+  it("falls through reviewer settings without mixing partial pairs", async () => {
+    mockedCreateFnAgent.mockResolvedValue(
+      createMockSession("### Verdict: APPROVE\n### Summary\nReviewer fallback honored."),
+    );
+
+    await reviewStep(
+      "/tmp/worktree", "FN-100", 1, "Test Step", "plan", "# prompt",
+      undefined,
+      {
+        taskValidatorProvider: "task-provider-only",
+        projectValidatorProvider: "project-provider-only",
+        globalValidatorModelId: "global-model-only",
+        projectDefaultOverrideProvider: "project-default-provider",
+        projectDefaultOverrideModelId: "project-default-model",
+        defaultProvider: "global-default-provider",
+        defaultModelId: "global-default-model",
+      },
+    );
+
+    const opts = mockedCreateFnAgent.mock.calls[0][0];
+    expect(opts.defaultProvider).toBe("project-default-provider");
+    expect(opts.defaultModelId).toBe("project-default-model");
+  });
+
+  it("forces reviewer sessions to mock/scripted in test mode", async () => {
+    mockedCreateFnAgent.mockResolvedValue(
+      createMockSession("### Verdict: APPROVE\n### Summary\nTest mode honored."),
+    );
+
+    const result = await reviewStep(
+      "/tmp/worktree", "FN-100", 1, "Test Step", "plan", "# prompt",
+      undefined,
+      {
+        taskValidatorProvider: "task-reviewer-provider",
+        taskValidatorModelId: "task-reviewer-model",
+        projectValidatorProvider: "project-reviewer-provider",
+        projectValidatorModelId: "project-reviewer-model",
+        defaultProvider: "anthropic",
+        defaultModelId: "claude-sonnet-4-5",
+        settings: { testMode: true } as any,
+      },
+    );
+
+    expect(mockedCreateFnAgent).not.toHaveBeenCalled();
+    expect(result.verdict).toBe("APPROVE");
+  });
+
+  it("uses live store settings for reviewer test-mode forcing when settings snapshot is omitted", async () => {
+    mockedCreateFnAgent.mockResolvedValue(
+      createMockSession("### Verdict: APPROVE\n### Summary\nShould not spawn pi."),
+    );
+    const store = {
+      getSettings: vi.fn().mockResolvedValue({
+        testMode: true,
+        defaultProvider: "anthropic",
+        defaultModelId: "claude-sonnet-4-5",
+        validatorProvider: "project-reviewer-provider",
+        validatorModelId: "project-reviewer-model",
+      }),
+      logEntry: vi.fn().mockResolvedValue(undefined),
+      appendAgentLog: vi.fn().mockResolvedValue(undefined),
+    };
+
+    const result = await reviewStep(
+      "/tmp/worktree", "FN-100", 1, "Test Step", "code", "# prompt",
+      "abc123",
+      {
+        store: store as any,
+        taskId: "FN-100",
+        taskValidatorProvider: "task-reviewer-provider",
+        taskValidatorModelId: "task-reviewer-model",
+      },
+    );
+
+    expect(store.getSettings).toHaveBeenCalled();
+    expect(mockedCreateFnAgent).not.toHaveBeenCalled();
+    expect(result.verdict).toBe("APPROVE");
   });
 
   it("extracts APPROVE verdict correctly", async () => {

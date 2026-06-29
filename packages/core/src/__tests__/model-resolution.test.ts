@@ -269,6 +269,123 @@ describe("model-resolution", () => {
     ).toEqual({ provider: "google", modelId: "gemini-2.5-pro" });
   });
 
+  it("resolves task validator models through the full reviewer hierarchy", () => {
+    const task = {
+      validatorModelProvider: "task-reviewer-provider",
+      validatorModelId: "task-reviewer-model",
+    };
+    const settings = {
+      validatorProvider: "project-reviewer-provider",
+      validatorModelId: "project-reviewer-model",
+      validatorGlobalProvider: "global-reviewer-provider",
+      validatorGlobalModelId: "global-reviewer-model",
+      defaultProviderOverride: "project-default-provider",
+      defaultModelIdOverride: "project-default-model",
+      defaultProvider: "global-default-provider",
+      defaultModelId: "global-default-model",
+    };
+
+    expect(resolveTaskValidatorModel(task, settings)).toEqual({
+      provider: "task-reviewer-provider",
+      modelId: "task-reviewer-model",
+    });
+    expect(resolveTaskValidatorModel({}, settings)).toEqual({
+      provider: "project-reviewer-provider",
+      modelId: "project-reviewer-model",
+    });
+    expect(resolveTaskValidatorModel({}, {
+      ...settings,
+      validatorProvider: undefined,
+      validatorModelId: undefined,
+    })).toEqual({
+      provider: "global-reviewer-provider",
+      modelId: "global-reviewer-model",
+    });
+    expect(resolveTaskValidatorModel({}, {
+      ...settings,
+      validatorProvider: undefined,
+      validatorModelId: undefined,
+      validatorGlobalProvider: undefined,
+      validatorGlobalModelId: undefined,
+    })).toEqual({
+      provider: "project-default-provider",
+      modelId: "project-default-model",
+    });
+    expect(resolveTaskValidatorModel({}, {
+      defaultProvider: "global-default-provider",
+      defaultModelId: "global-default-model",
+    })).toEqual({
+      provider: "global-default-provider",
+      modelId: "global-default-model",
+    });
+  });
+
+  it("does not mix partial reviewer pairs across task, lane, and default tiers", () => {
+    expect(resolveTaskValidatorModel(
+      { validatorModelProvider: "task-provider-only" },
+      {
+        validatorProvider: "project-reviewer-provider",
+        validatorModelId: "project-reviewer-model",
+      },
+    )).toEqual({ provider: "project-reviewer-provider", modelId: "project-reviewer-model" });
+
+    expect(resolveTaskValidatorModel(
+      { validatorModelId: "task-model-only" },
+      {
+        validatorProvider: "project-provider-only",
+        validatorGlobalProvider: "global-reviewer-provider",
+        validatorGlobalModelId: "global-reviewer-model",
+      },
+    )).toEqual({ provider: "global-reviewer-provider", modelId: "global-reviewer-model" });
+
+    expect(resolveTaskValidatorModel(
+      {},
+      {
+        validatorProvider: "project-reviewer-provider",
+        validatorGlobalModelId: "global-model-only",
+        defaultProviderOverride: "project-default-provider",
+        defaultModelIdOverride: "project-default-model",
+        defaultProvider: "global-default-provider",
+        defaultModelId: "global-default-model",
+      },
+    )).toEqual({ provider: "project-default-provider", modelId: "project-default-model" });
+
+    expect(resolveTaskValidatorModel(
+      {},
+      {
+        defaultProviderOverride: "project-default-provider",
+        defaultProvider: "global-default-provider",
+        defaultModelId: "global-default-model",
+      },
+    )).toEqual({ provider: "global-default-provider", modelId: "global-default-model" });
+  });
+
+  it("forces task reviewer overrides to mock/scripted in test mode and mock default mode", () => {
+    const task = {
+      validatorModelProvider: "task-reviewer-provider",
+      validatorModelId: "task-reviewer-model",
+    };
+    const populatedSettings = {
+      validatorProvider: "project-reviewer-provider",
+      validatorModelId: "project-reviewer-model",
+      validatorGlobalProvider: "global-reviewer-provider",
+      validatorGlobalModelId: "global-reviewer-model",
+      defaultProviderOverride: "project-default-provider",
+      defaultModelIdOverride: "project-default-model",
+      defaultProvider: "global-default-provider",
+      defaultModelId: "global-default-model",
+    };
+
+    expect(resolveTaskValidatorModel(task, {
+      ...populatedSettings,
+      testMode: true,
+    })).toEqual(TEST_MODE_RESOLVED);
+    expect(resolveTaskValidatorModel(task, {
+      ...populatedSettings,
+      defaultProvider: "mock",
+    })).toEqual(TEST_MODE_RESOLVED);
+  });
+
   it("forces every lane to mock when testMode is true", () => {
     const settings = {
       testMode: true,

@@ -2085,6 +2085,9 @@ export class TriageProcessor {
               // Execution defaults as final fallback
               defaultProvider: currentSettings.defaultProvider,
               defaultModelId: currentSettings.defaultModelId,
+              // FNXC:ModelResolution 2026-06-28-17:10: Spec review is a reviewer/validator lane, so triage must forward the task reviewer override to reviewStep instead of letting project/global settings mask a per-task validator model.
+              taskValidatorProvider: currentDetail.validatorModelProvider,
+              taskValidatorModelId: currentDetail.validatorModelId,
               // Project-level validator override
               projectValidatorProvider: currentSettings.validatorProvider,
               projectValidatorModelId: currentSettings.validatorModelId,

@@ -1022,7 +1022,15 @@ describe("fast-mode triage", () => {
       mockReviewStep.mockResolvedValue({ verdict: "APPROVE", review: "ok", summary: "ok" });
 
       const store = createMockStore({
-        getTask: vi.fn().mockResolvedValue({ ...mockTaskDetail, id: taskId, comments: [] }),
+        getTask: vi.fn().mockResolvedValue({
+          ...mockTaskDetail,
+          id: taskId,
+          comments: [],
+          modelProvider: "task-executor-provider",
+          modelId: "task-executor-model",
+          validatorModelProvider: "task-reviewer-provider",
+          validatorModelId: "task-reviewer-model",
+        }),
         getSettings: vi.fn().mockResolvedValue({
           maxConcurrent: 2,
           maxWorktrees: 4,
@@ -1055,12 +1063,16 @@ describe("fast-mode triage", () => {
 
       const reviewOptions = mockReviewStep.mock.calls[0]?.[7];
       expect(reviewOptions).toMatchObject({
+        taskValidatorProvider: "task-reviewer-provider",
+        taskValidatorModelId: "task-reviewer-model",
         projectDefaultOverrideProvider: "openai-codex",
         projectDefaultOverrideModelId: "gpt-5.5",
         fallbackProvider: "openai-codex",
         fallbackModelId: "gpt-5.5",
         agentPrompts: { roleAssignments: { reviewer: "custom-reviewer" } },
       });
+      expect(reviewOptions.taskValidatorProvider).not.toBe("task-executor-provider");
+      expect(reviewOptions.taskValidatorModelId).not.toBe("task-executor-model");
       expect(reviewOptions.settings).toMatchObject({
         memoryEnabled: false,
         agentPrompts: { roleAssignments: { reviewer: "custom-reviewer" } },

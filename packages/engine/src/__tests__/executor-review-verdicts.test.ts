@@ -252,12 +252,18 @@ describe("TaskExecutor enginePaused soft pause (no agent termination)", () => {
  * Helper: executes a task and captures the custom tools passed to createFnAgent.
  * Returns a map of tool name → tool execute function for direct testing.
  */
-async function captureTools(settingsOverride?: Record<string, unknown>): Promise<Record<string, (id: string, params: any) => Promise<any>>> {
-  const { tools } = await captureToolsWithStore(settingsOverride);
+async function captureTools(
+  settingsOverride?: Record<string, unknown>,
+  taskOverride?: Record<string, unknown>,
+): Promise<Record<string, (id: string, params: any) => Promise<any>>> {
+  const { tools } = await captureToolsWithStore(settingsOverride, taskOverride);
   return tools;
 }
 
-async function captureToolsWithStore(settingsOverride?: Record<string, unknown>): Promise<{
+async function captureToolsWithStore(
+  settingsOverride?: Record<string, unknown>,
+  taskOverride?: Record<string, unknown>,
+): Promise<{
   tools: Record<string, (id: string, params: any) => Promise<any>>;
   store: ReturnType<typeof createMockStore>;
 }> {
@@ -285,6 +291,7 @@ async function captureToolsWithStore(settingsOverride?: Record<string, unknown>)
     log: [],
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
+    ...taskOverride,
   }));
   store.updateStep.mockImplementation(async (_taskId: string, stepIndex: number, status: string) => {
     const current = stepStates[stepIndex];
@@ -337,6 +344,46 @@ describe("Code review verdict tracking", () => {
   beforeEach(() => {
     resetExecutorMocks();
     mockedExistsSync.mockReturnValue(true);
+  });
+
+  it("passes task reviewer overrides to fn_review_step instead of executor overrides", async () => {
+    mockedReviewStep.mockResolvedValue({
+      verdict: "APPROVE",
+      review: "Looks good",
+      summary: "Approved",
+    });
+
+    const tools = await captureTools(
+      {
+        defaultProvider: "global-default-provider",
+        defaultModelId: "global-default-model",
+        validatorProvider: "project-reviewer-provider",
+        validatorModelId: "project-reviewer-model",
+      },
+      {
+        modelProvider: "task-executor-provider",
+        modelId: "task-executor-model",
+        validatorModelProvider: "task-reviewer-provider",
+        validatorModelId: "task-reviewer-model",
+      },
+    );
+
+    await tools.fn_review_step("call-reviewer-model", {
+      step: 1,
+      type: "code",
+      step_name: "Implement",
+      baseline: "abc123",
+    });
+
+    const reviewOptions = mockedReviewStep.mock.calls[0]?.[7];
+    expect(reviewOptions).toMatchObject({
+      taskValidatorProvider: "task-reviewer-provider",
+      taskValidatorModelId: "task-reviewer-model",
+      projectValidatorProvider: "project-reviewer-provider",
+      projectValidatorModelId: "project-reviewer-model",
+    });
+    expect(reviewOptions.taskValidatorProvider).not.toBe("task-executor-provider");
+    expect(reviewOptions.taskValidatorModelId).not.toBe("task-executor-model");
   });
 
   it("code review REVISE sets tracking state", async () => {

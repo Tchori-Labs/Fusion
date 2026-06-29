@@ -21,7 +21,7 @@ import { recordRetry } from "./retry-burned-logger.js";
 import { mergeEffectiveSettings } from "./effective-settings.js";
 import { describeModel, promptWithFallback } from "./pi.js";
 import { isContextLimitError } from "./context-limit-detector.js";
-import { createResolvedAgentSession, extractRuntimeHint } from "./agent-session-helpers.js";
+import { createResolvedAgentSession, extractRuntimeHint, resolveValidatorSessionModel } from "./agent-session-helpers.js";
 import { buildSessionSkillContext } from "./session-skill-context.js";
 import { AgentLogger } from "./agent-logger.js";
 import { reviewerLog } from "./logger.js";
@@ -168,6 +168,7 @@ export async function reviewStep(
     taskId, stepNumber, stepName, reviewType, promptContent, cwd, baseline, options.userComments,
   );
 
+  const effectiveSettings = liveSettings ?? options.settings;
   const agentLogger = options.store && options.taskId
     ? new AgentLogger({
         store: options.store,
@@ -176,30 +177,37 @@ export async function reviewStep(
         onAgentText: options.onText
           ? (_id, delta) => options.onText!(delta)
           : undefined,
-        persistAgentToolOutput: liveSettings?.persistAgentToolOutput,
+        persistAgentToolOutput: effectiveSettings?.persistAgentToolOutput,
         // Reviewer sessions are task-scoped ephemeral workers.
-        persistAgentThinkingLog: resolvePersistAgentThinkingLog(liveSettings, { ephemeral: true }),
+        persistAgentThinkingLog: resolvePersistAgentThinkingLog(effectiveSettings, { ephemeral: true }),
       })
     : null;
 
-  const validatorProvider = options.taskValidatorProvider && options.taskValidatorModelId
-    ? options.taskValidatorProvider
-    : (options.projectValidatorProvider && options.projectValidatorModelId
-        ? options.projectValidatorProvider
-        : (options.globalValidatorProvider && options.globalValidatorModelId
-            ? options.globalValidatorProvider
-            : (options.projectDefaultOverrideProvider && options.projectDefaultOverrideModelId
-                ? options.projectDefaultOverrideProvider
-                : options.defaultProvider)));
-  const validatorModelId = options.taskValidatorProvider && options.taskValidatorModelId
-    ? options.taskValidatorModelId
-    : (options.projectValidatorProvider && options.projectValidatorModelId
-        ? options.projectValidatorModelId
-        : (options.globalValidatorProvider && options.globalValidatorModelId
-            ? options.globalValidatorModelId
-            : (options.projectDefaultOverrideProvider && options.projectDefaultOverrideModelId
-                ? options.projectDefaultOverrideModelId
-                : options.defaultModelId)));
+  /*
+  FNXC:ModelResolution 2026-06-28-17:00:
+  Reviewer, spec-review, and workflow review-step sessions are validator-lane sessions. Resolve their primary model through the shared session helper so task reviewer overrides, project/global validator lanes, project/global defaults, and test-mode mock forcing stay identical to core model resolution instead of drifting in a reviewer-local precedence chain.
+
+  FNXC:ModelResolution 2026-06-28-17:48:
+  Re-read store settings are the authoritative reviewer snapshot because optional review steps may omit `options.settings` or hold stale settings while test mode/default-provider mock has changed. Explicit per-call overrides still win, but every unspecified tier must come from the same live settings object passed into session creation.
+  */
+  const reviewerModelSettings: Partial<Settings> = {
+    ...(effectiveSettings ?? {}),
+    defaultProvider: options.defaultProvider ?? effectiveSettings?.defaultProvider,
+    defaultModelId: options.defaultModelId ?? effectiveSettings?.defaultModelId,
+    validatorProvider: options.projectValidatorProvider ?? effectiveSettings?.validatorProvider,
+    validatorModelId: options.projectValidatorModelId ?? effectiveSettings?.validatorModelId,
+    validatorGlobalProvider: options.globalValidatorProvider ?? effectiveSettings?.validatorGlobalProvider,
+    validatorGlobalModelId: options.globalValidatorModelId ?? effectiveSettings?.validatorGlobalModelId,
+    defaultProviderOverride: options.projectDefaultOverrideProvider ?? effectiveSettings?.defaultProviderOverride,
+    defaultModelIdOverride: options.projectDefaultOverrideModelId ?? effectiveSettings?.defaultModelIdOverride,
+  };
+  const reviewerModel = resolveValidatorSessionModel(
+    options.taskValidatorProvider,
+    options.taskValidatorModelId,
+    reviewerModelSettings,
+  );
+  const validatorProvider = reviewerModel.provider;
+  const validatorModelId = reviewerModel.modelId;
 
   const validatorFallbackProvider = options.projectValidatorFallbackProvider && options.projectValidatorFallbackModelId
     ? options.projectValidatorFallbackProvider
@@ -214,7 +222,7 @@ export async function reviewStep(
       const agents = await options.agentStore.listAgents({ role: "reviewer" });
       for (const agent of agents) {
         if (agent.instructionsText || agent.instructionsPath) {
-          const memoryMode = resolveAgentMemoryInclusionMode({ agent, globalSettings: options.settings }).mode;
+          const memoryMode = resolveAgentMemoryInclusionMode({ agent, globalSettings: effectiveSettings }).mode;
           reviewerInstructions = await resolveAgentInstructions(agent, options.rootDir, undefined, memoryMode);
           break;
         }
@@ -232,8 +240,8 @@ export async function reviewStep(
   // FN-6235: built-in reviewer policy is sourced from the resolved workflow IR review node;
   // explicit reviewer role overrides still win, and the built-in default keeps this fail-soft.
   const reviewerBasePrompt = userReviewerPrompt || workflowReviewerPrompt || resolveAgentPrompt("reviewer");
-  const memorySection = options.rootDir && options.settings?.memoryEnabled !== false
-    ? buildReviewerMemoryInstructions(options.rootDir, options.settings)
+  const memorySection = options.rootDir && effectiveSettings?.memoryEnabled !== false
+    ? buildReviewerMemoryInstructions(options.rootDir, effectiveSettings)
     : "";
 
   const reviewerPluginContributions = buildPluginPromptSection(
@@ -276,16 +284,16 @@ export async function reviewStep(
     && typeof (agentStore as { getAgent?: unknown }).getAgent === "function"
       ? await agentStore.getAgent(assignedAgentId).catch(() => null)
       : null;
-  const memoryTools = options.rootDir && options.settings?.memoryEnabled !== false
+  const memoryTools = options.rootDir && effectiveSettings?.memoryEnabled !== false
     ? [
-        createMemorySearchTool(options.rootDir, options.settings, memoryAgent ? {
+        createMemorySearchTool(options.rootDir, effectiveSettings, memoryAgent ? {
           agentMemory: {
             agentId: memoryAgent.id,
             agentName: memoryAgent.name,
             memory: memoryAgent.memory,
           },
         } : undefined),
-        createMemoryGetTool(options.rootDir, options.settings, memoryAgent ? {
+        createMemoryGetTool(options.rootDir, effectiveSettings, memoryAgent ? {
           agentMemory: {
             agentId: memoryAgent.id,
             agentName: memoryAgent.name,
@@ -331,6 +339,17 @@ export async function reviewStep(
   const createReviewerSession = async (
     overrides?: { forceProvider?: string; forceModelId?: string },
   ): Promise<import("@earendil-works/pi-coding-agent").AgentSession> => {
+    let streamReviewTextFromOnText = false;
+    const handleReviewerText = (delta: string) => {
+      if (streamReviewTextFromOnText) {
+        reviewText += delta;
+      }
+      if (agentLogger) {
+        agentLogger.onText(delta);
+      } else {
+        options.onText?.(delta);
+      }
+    };
     const runAuditor = options.store
       ? createRunAuditor(options.store, {
         runId: generateSyntheticRunId("reviewer", options.taskId ?? "review"),
@@ -349,7 +368,7 @@ export async function reviewStep(
       systemPromptLayers: layers,
       tools: "readonly",
       customTools: [createWebFetchTool(), ...(memoryTools ?? [])],
-      onText: agentLogger ? agentLogger.onText : (delta) => options.onText?.(delta),
+      onText: handleReviewerText,
       onThinking: agentLogger?.onThinking,
       onToolStart: agentLogger?.onToolStart,
       onToolEnd: agentLogger?.onToolEnd,
@@ -359,7 +378,7 @@ export async function reviewStep(
       fallbackModelId: validatorFallbackModelId,
       defaultThinkingLevel: options.defaultThinkingLevel,
       runAuditor,
-      settings: options.settings,
+      settings: effectiveSettings,
       ...(skillContext?.skillSelectionContext ? { skillSelection: skillContext.skillSelectionContext } : {}),
       taskId: options.taskId,
       taskTitle: options.taskTitle,
@@ -397,11 +416,15 @@ export async function reviewStep(
 
     activeSessions.add(session);
     options.onSessionCreated?.(session);
-    session.subscribe((event) => {
-      if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
-        reviewText += event.assistantMessageEvent.delta;
-      }
-    });
+    if (typeof session.subscribe === "function") {
+      session.subscribe((event) => {
+        if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
+          reviewText += event.assistantMessageEvent.delta;
+        }
+      });
+    } else {
+      streamReviewTextFromOnText = true;
+    }
 
     return session;
   };
