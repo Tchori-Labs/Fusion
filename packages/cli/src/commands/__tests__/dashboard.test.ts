@@ -285,7 +285,8 @@ const {
   mockExecSync: vi.fn(() => ""),
   mockExecFileSync: vi.fn((file: string, args: readonly string[] = [], options?: { cwd?: string }) => {
     if (file === "git" && args.join(" ") === "remote get-url origin") {
-      if (options?.cwd !== "/repo" && options?.cwd !== process.cwd()) {
+      const effectiveCwd = options?.cwd ?? process.cwd();
+      if (effectiveCwd !== "/repo" && effectiveCwd !== process.cwd()) {
         throw new Error(`unexpected repository cwd: ${options?.cwd ?? "<unset>"}`);
       }
       return "https://github.com/owner/repo.git\n";
@@ -927,7 +928,8 @@ beforeEach(() => {
   mockExecFileSync.mockReset();
   mockExecFileSync.mockImplementation((file: string, args: readonly string[] = [], options?: { cwd?: string }) => {
     if (file === "git" && args.join(" ") === "remote get-url origin") {
-      if (options?.cwd !== "/repo" && options?.cwd !== process.cwd()) {
+      const effectiveCwd = options?.cwd ?? process.cwd();
+      if (effectiveCwd !== "/repo" && effectiveCwd !== process.cwd()) {
         throw new Error(`unexpected repository cwd: ${options?.cwd ?? "<unset>"}`);
       }
       return "https://github.com/owner/repo.git\n";
