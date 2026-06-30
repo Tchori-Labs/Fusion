@@ -385,6 +385,7 @@ describe("SessionTerminal (mobile)", () => {
 // ── Keyboard-open (fixed-footer) + pinch-zoom guard ──────────────────────────
 describe("SessionTerminal (mobile) — keyboard-open behavior", () => {
   let savedVisualViewport: typeof window.visualViewport;
+  let savedDocumentElementClientHeight: number;
 
   function installVisualViewport({
     innerHeight,
@@ -438,12 +439,17 @@ describe("SessionTerminal (mobile) — keyboard-open behavior", () => {
     installMatchMedia(true);
     _resetInitialViewportHeight();
     savedVisualViewport = window.visualViewport;
+    savedDocumentElementClientHeight = document.documentElement.clientHeight;
   });
 
   afterEach(() => {
     Object.defineProperty(window, "visualViewport", {
       value: savedVisualViewport,
       writable: true,
+      configurable: true,
+    });
+    Object.defineProperty(document.documentElement, "clientHeight", {
+      value: savedDocumentElementClientHeight,
       configurable: true,
     });
     _resetInitialViewportHeight();
@@ -467,6 +473,30 @@ describe("SessionTerminal (mobile) — keyboard-open behavior", () => {
     });
 
     input.remove();
+  });
+
+  it("keeps initial folded keyboard-open metrics without waiting for unfold", async () => {
+    installVisualViewport({ innerHeight: 300, vvHeight: 300 });
+    Object.defineProperty(document.documentElement, "clientHeight", {
+      value: 667,
+      configurable: true,
+    });
+    const input = document.createElement("textarea");
+    document.body.appendChild(input);
+    input.focus();
+
+    try {
+      await renderMobile();
+
+      await waitFor(() => {
+        const bar = screen.getByTestId("cli-terminal-mobile-bar");
+        expect(bar.className).toContain("cli-session-terminal__mobile-bar--keyboard-open");
+        expect(bar.style.bottom).toBe("367px");
+      });
+      expectMeasurementSafeFontStack(mockTerm.options.fontFamily as string);
+    } finally {
+      input.remove();
+    }
   });
 
   it("re-baselines folded iOS viewport before lifting the mobile input bar", async () => {

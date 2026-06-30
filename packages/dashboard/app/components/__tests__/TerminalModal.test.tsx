@@ -4617,18 +4617,26 @@ describe("TerminalModal — FN-872 real-device keyboard overlap refinement", () 
   let savedInnerWidth: typeof window.innerWidth;
   let savedInnerHeight: typeof window.innerHeight;
   let savedOntouchstart: typeof window.ontouchstart;
+  let savedDocumentElementClientHeight: number;
 
   beforeEach(() => {
     vi.clearAllMocks();
     _resetInitialViewportHeight();
     mockUseTerminal.mockReturnValue(createMockTerminalState());
     mockUseTerminalSessions.mockReturnValue(defaultSessionState);
+    mockUseWorkspaces.mockReturnValue({
+      projectName: "kb",
+      workspaces: [],
+      loading: false,
+      error: null,
+    });
 
     // Stash originals
     savedVisualViewport = window.visualViewport;
     savedInnerWidth = window.innerWidth;
     savedInnerHeight = window.innerHeight;
     savedOntouchstart = window.ontouchstart;
+    savedDocumentElementClientHeight = document.documentElement.clientHeight;
   });
 
   afterEach(() => {
@@ -4651,6 +4659,10 @@ describe("TerminalModal — FN-872 real-device keyboard overlap refinement", () 
     Object.defineProperty(window, "ontouchstart", {
       value: savedOntouchstart,
       writable: true,
+      configurable: true,
+    });
+    Object.defineProperty(document.documentElement, "clientHeight", {
+      value: savedDocumentElementClientHeight,
       configurable: true,
     });
     vi.restoreAllMocks();
@@ -4749,6 +4761,71 @@ describe("TerminalModal — FN-872 real-device keyboard overlap refinement", () 
 
     return { listeners, mockVV, initialHeight };
   }
+
+  it("keeps initial folded keyboard-open terminal metrics before any unfold repair", async () => {
+    const { listeners } = simulateIOSSafari(true, 300);
+    const onDataListeners: Array<(data: string) => void> = [];
+    const resizeForFoldedKeyboard = vi.fn();
+    Object.defineProperty(document.documentElement, "clientHeight", {
+      value: 667,
+      configurable: true,
+    });
+    const helperTextarea = document.createElement("textarea");
+    document.body.appendChild(helperTextarea);
+    helperTextarea.focus();
+
+    mockUseTerminal.mockReturnValue(createMockTerminalState({
+      connectionStatus: "connected",
+      resize: resizeForFoldedKeyboard,
+      onData: vi.fn((cb: (data: string) => void) => {
+        onDataListeners.push(cb);
+        return vi.fn();
+      }),
+      onScrollback: vi.fn((cb: (data: string) => void) => {
+        onDataListeners.push(cb);
+        return vi.fn();
+      }),
+    }));
+
+    try {
+      render(<TerminalModal isOpen={true} onClose={mockOnClose} />);
+
+      act(() => {
+        for (const cb of listeners.resize) cb();
+      });
+
+      await waitFor(() => {
+        const modal = screen.getByTestId("terminal-modal");
+        expect(modal.style.getPropertyValue("--keyboard-overlap")).toBe("367px");
+        expect(modal.style.getPropertyValue("--vv-height")).toBe("300px");
+      });
+      await waitFor(() => expect(onDataListeners.length).toBeGreaterThan(0));
+      act(() => {
+        for (const cb of onDataListeners) {
+          cb("❯ pnpm build\r\n✔ built packages/dashboard  main\r\n");
+        }
+      });
+      await waitFor(() => expect(mockTerminalInstance.write).toHaveBeenCalledWith(expect.stringContaining("pnpm build")));
+      await waitFor(() => expect(resizeForFoldedKeyboard).toHaveBeenCalledWith(80, 24));
+
+      resizeForFoldedKeyboard.mockClear();
+      act(() => {
+        for (const cb of listeners.resize) cb();
+        for (const cb of listeners.resize) cb();
+        window.dispatchEvent(new Event("orientationchange"));
+        window.dispatchEvent(new Event("orientationchange"));
+      });
+
+      await waitFor(() => {
+        const modal = screen.getByTestId("terminal-modal");
+        expect(modal.style.getPropertyValue("--keyboard-overlap")).toBe("367px");
+        expect(modal.style.getPropertyValue("--vv-height")).toBe("300px");
+        expect(resizeForFoldedKeyboard).toHaveBeenCalledWith(80, 24);
+      });
+    } finally {
+      helperTextarea.remove();
+    }
+  });
 
   it("detects keyboard on iOS Safari where innerHeight shrinks with visualViewport", async () => {
     // On iOS Safari, both window.innerHeight and visualViewport.height shrink.
@@ -4875,6 +4952,56 @@ describe("TerminalModal — FN-872 real-device keyboard overlap refinement", () 
       const modal = screen.getByTestId("terminal-modal");
       expect(modal.style.getPropertyValue("--keyboard-overlap")).toBe("367px");
       expect(modal.style.getPropertyValue("--vv-height")).toBe("300px");
+    });
+  });
+
+  it("re-baselines keyboard-closed folded landscape samples below 480px", async () => {
+    const { listeners, mockVV } = simulateIOSSafari(false, 844);
+    Object.defineProperty(mockVV, "width", { value: 700, writable: true, configurable: true });
+    Object.defineProperty(window, "innerWidth", { value: 700, writable: true, configurable: true });
+    Object.defineProperty(document.documentElement, "clientHeight", {
+      value: 844,
+      configurable: true,
+    });
+
+    render(<TerminalModal isOpen={true} onClose={mockOnClose} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("terminal-modal").style.getPropertyValue("--keyboard-overlap")).toBe("");
+    });
+
+    Object.defineProperty(window, "innerWidth", { value: 375, writable: true, configurable: true });
+    Object.defineProperty(window, "innerHeight", { value: 375, writable: true, configurable: true });
+    Object.defineProperty(document.documentElement, "clientHeight", {
+      value: 375,
+      configurable: true,
+    });
+    Object.defineProperty(mockVV, "width", { value: 375, writable: true, configurable: true });
+    Object.defineProperty(mockVV, "height", { value: 375, writable: true, configurable: true });
+
+    act(() => {
+      for (const cb of listeners.resize) cb();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("terminal-modal").style.getPropertyValue("--keyboard-overlap")).toBe("");
+    });
+
+    Object.defineProperty(window, "innerHeight", { value: 250, writable: true, configurable: true });
+    Object.defineProperty(document.documentElement, "clientHeight", {
+      value: 250,
+      configurable: true,
+    });
+    Object.defineProperty(mockVV, "height", { value: 250, writable: true, configurable: true });
+
+    act(() => {
+      for (const cb of listeners.resize) cb();
+    });
+
+    await waitFor(() => {
+      const modal = screen.getByTestId("terminal-modal");
+      expect(modal.style.getPropertyValue("--keyboard-overlap")).toBe("125px");
+      expect(modal.style.getPropertyValue("--vv-height")).toBe("250px");
     });
   });
 

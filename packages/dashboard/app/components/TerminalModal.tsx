@@ -189,8 +189,6 @@ const TERMINAL_KEY_LABELS = {
   pxUnit: "px",
 } as const;
 
-const SETTLED_FOLDED_VIEWPORT_MIN_HEIGHT_PX = 480;
-
 export function ctrlChar(key: string): string {
   if (!key) {
     return "";
@@ -344,8 +342,9 @@ function getKeyboardOverlap(): number {
   if (typeof window === "undefined" || !window.visualViewport) return 0;
   const vv = window.visualViewport;
   const viewportWidth = vv.width > 0 ? vv.width : window.innerWidth;
-  const viewportHeight = Math.max(window.innerHeight, vv.height);
-  const chromeOverlap = Math.max(0, window.innerHeight - vv.offsetTop - vv.height);
+  const layoutViewportHeight = Math.max(window.innerHeight, document.documentElement?.clientHeight || 0);
+  const viewportHeight = Math.max(layoutViewportHeight, vv.height);
+  const chromeOverlap = Math.max(0, layoutViewportHeight - vv.offsetTop - vv.height);
   if (chromeOverlap > 0) return chromeOverlap;
 
   /*
@@ -354,8 +353,14 @@ function getKeyboardOverlap(): number {
 
   FNXC:Terminal 2026-06-30-09:38:
   A later folded-posture width sample can arrive while xterm's helper textarea is focused and the soft keyboard is already open. Never re-baseline from that focused keyboard-open sample, because it makes the keyboard height look like the closed viewport and clears --keyboard-overlap/--vv-height before the final fit.
+
+  FNXC:Terminal 2026-06-30-10:36:
+  The reported recurrence starts with the folded phone already focused and keyboard-open, so there is no prior closed visualViewport sample to seed the iOS fallback baseline. Prefer the current layout viewport height before falling back to visualViewport height; this preserves --keyboard-overlap/--vv-height and the post-layout xterm fit before any later unfold can repair stale geometry.
+
+  FNXC:Terminal 2026-06-30-11:42:
+  Touch-primary short landscape and folded closed postures can be <=480px tall. A keyboard-closed width/posture sample must replace an unfolded baseline even at that height, while focused keyboard-open samples remain excluded so xterm does not clear overlap before the first correct folded fit.
   */
-  if (!isKeyboardFocusableElement(document.activeElement) && hasSettledViewportPostureChange(viewportWidth, viewportHeight)) {
+  if (!isKeyboardFocusableElement(document.activeElement) && hasSettledViewportPostureChange(viewportWidth)) {
     setInitialViewportBaseline(viewportHeight, viewportWidth);
   }
 
@@ -383,12 +388,11 @@ function setInitialViewportBaseline(height: number, width: number): void {
   _initialViewportWidth = width;
 }
 
-function hasSettledViewportPostureChange(width: number, height: number): boolean {
+function hasSettledViewportPostureChange(width: number): boolean {
   return (
     _initialViewportHeight !== null &&
     _initialViewportWidth !== null &&
-    Math.abs(width - _initialViewportWidth) >= 1 &&
-    height >= SETTLED_FOLDED_VIEWPORT_MIN_HEIGHT_PX
+    Math.abs(width - _initialViewportWidth) >= 1
   );
 }
 
