@@ -522,10 +522,12 @@ Use Git Manager:
 4. Select **Status**, **Changes**, **Commits**, **Branches**, **Worktrees**, **Stashes**, **Recovery**, or **Remotes**.
    Expected outcome: the corresponding section panel replaces the previous section while preserving the same Git Manager session.
 
+<!-- FNXC:GitManagerDocs 2026-06-29-00:00: The Commits panel may read history from Git-listed worktrees, but mutating Git actions must remain scoped to the current repository/section target so history inspection does not imply cross-worktree writes.
+FNXC:GitManagerDocs 2026-06-30-03:15: The worktree history target is a security-bounded read surface: only Git-reported worktrees from the current repository target are valid, and arbitrary absolute filesystem paths must stay rejected by the API. -->
 Features:
 
 - Branch/worktree visibility
-- Commit and diff browsing
+- Commit and diff browsing, including a read-only **History target** selector for Git-reported worktrees in the Commits panel and **View commits** shortcuts from populated Worktrees rows. Changing this target affects only the Commits list and diff viewer, and the API accepts only worktrees already reported by `git worktree list` for the current repository target.
 - Push/pull/fetch actions
 - Pull with rebase option (split-button chooses between `git pull` and `git pull --rebase`)
 - One-click **Sync** action in Remotes (`git pull --rebase` followed by push; it stops and surfaces an error instead of pushing when the pull conflicts or fails)
@@ -533,6 +535,8 @@ Features:
 - Stash inspection (view stat + patch) before apply/pop/drop actions
 - **Recovery** tab for orphaned merger-autostashes; orphan counts appear on Git Manager entry points
 - Remotes tab keeps "Recent commits on {remote}" in sync immediately after successful push/pull actions
+
+Mutating actions such as staging, committing, checkout, stash, pull, push, fetch, sync, and remote edits still operate on the current repository or the active section's existing target. Use the Commits **History target** selector only for read-only history/diff inspection of another known worktree.
 
 ![Git Manager](./screenshots/git-manager.png)
 
