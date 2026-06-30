@@ -469,6 +469,45 @@ describe("SessionTerminal (mobile) — keyboard-open behavior", () => {
     input.remove();
   });
 
+  it("re-baselines folded iOS viewport before lifting the mobile input bar", async () => {
+    const { listeners, mockVV } = installVisualViewport({ innerHeight: 844, vvHeight: 844 });
+    Object.defineProperty(window, "innerWidth", { value: 700, writable: true, configurable: true });
+    Object.defineProperty(mockVV, "width", { value: 700, writable: true, configurable: true });
+
+    render(<SessionTerminal sessionId="s1" />);
+    await waitFor(() => expect(FakeWS.instances.length).toBe(1));
+
+    // Fold/narrow the device while the keyboard is still closed; this must
+    // replace the prior unfolded baseline before a focused input opens.
+    Object.defineProperty(window, "innerWidth", { value: 375, writable: true, configurable: true });
+    Object.defineProperty(window, "innerHeight", { value: 667, writable: true, configurable: true });
+    Object.defineProperty(mockVV, "width", { value: 375, writable: true, configurable: true });
+    Object.defineProperty(mockVV, "height", { value: 667, writable: true, configurable: true });
+
+    act(() => {
+      for (const cb of listeners.resize) cb();
+    });
+
+    const input = document.createElement("textarea");
+    document.body.appendChild(input);
+    input.focus();
+
+    Object.defineProperty(window, "innerHeight", { value: 300, writable: true, configurable: true });
+    Object.defineProperty(mockVV, "height", { value: 300, writable: true, configurable: true });
+
+    act(() => {
+      for (const cb of listeners.resize) cb();
+    });
+
+    await waitFor(() => {
+      const bar = screen.getByTestId("cli-terminal-mobile-bar");
+      expect(bar.className).toContain("cli-session-terminal__mobile-bar--keyboard-open");
+      expect(bar.style.bottom).toBe("367px");
+    });
+
+    input.remove();
+  });
+
   it("pinch-zoom (vv.scale > 1) is NOT treated as keyboard-open", async () => {
     installVisualViewport({ innerHeight: 800, vvHeight: 600, scale: 2 });
     const input = document.createElement("textarea");

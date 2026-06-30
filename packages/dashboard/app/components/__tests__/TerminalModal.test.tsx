@@ -4774,6 +4774,85 @@ describe("TerminalModal — FN-872 real-device keyboard overlap refinement", () 
     });
   });
 
+  it("re-baselines iOS keyboard overlap after folded posture settles before input", async () => {
+    const { listeners, mockVV } = simulateIOSSafari(false, 844);
+    Object.defineProperty(mockVV, "width", { value: 700, writable: true, configurable: true });
+    Object.defineProperty(window, "innerWidth", { value: 700, writable: true, configurable: true });
+
+    render(<TerminalModal isOpen={true} onClose={mockOnClose} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("terminal-modal").style.getPropertyValue("--keyboard-overlap")).toBe("");
+    });
+
+    // Device is folded/narrow while the keyboard is still closed; this settled
+    // viewport must replace the previous unfolded baseline before input opens.
+    Object.defineProperty(window, "innerWidth", { value: 375, writable: true, configurable: true });
+    Object.defineProperty(window, "innerHeight", { value: 667, writable: true, configurable: true });
+    Object.defineProperty(mockVV, "width", { value: 375, writable: true, configurable: true });
+    Object.defineProperty(mockVV, "height", { value: 667, writable: true, configurable: true });
+
+    act(() => {
+      for (const cb of listeners.resize) cb();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("terminal-modal").style.getPropertyValue("--keyboard-overlap")).toBe("");
+    });
+
+    Object.defineProperty(window, "innerHeight", { value: 300, writable: true, configurable: true });
+    Object.defineProperty(mockVV, "height", { value: 300, writable: true, configurable: true });
+
+    act(() => {
+      for (const cb of listeners.resize) cb();
+    });
+
+    await waitFor(() => {
+      const modal = screen.getByTestId("terminal-modal");
+      expect(modal.style.getPropertyValue("--keyboard-overlap")).toBe("367px");
+      expect(modal.style.getPropertyValue("--vv-height")).toBe("300px");
+    });
+  });
+
+  it("does not re-baseline folded viewport width changes from focused keyboard-open samples", async () => {
+    const { listeners, mockVV } = simulateIOSSafari(false, 844);
+    Object.defineProperty(mockVV, "width", { value: 700, writable: true, configurable: true });
+    Object.defineProperty(window, "innerWidth", { value: 700, writable: true, configurable: true });
+
+    render(<TerminalModal isOpen={true} onClose={mockOnClose} />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("terminal-modal").style.getPropertyValue("--keyboard-overlap")).toBe("");
+    });
+
+    const helperTextarea = document.createElement("textarea");
+    document.body.appendChild(helperTextarea);
+    helperTextarea.focus();
+
+    try {
+      // Fold/orientation can deliver the first narrow width sample while the
+      // soft keyboard is already open. With iOS-style innerHeight==vv.height,
+      // re-baselining from this focused sample would make gap=0 and clear the
+      // terminal keyboard CSS vars that drive the final xterm fit.
+      Object.defineProperty(window, "innerWidth", { value: 375, writable: true, configurable: true });
+      Object.defineProperty(window, "innerHeight", { value: 520, writable: true, configurable: true });
+      Object.defineProperty(mockVV, "width", { value: 375, writable: true, configurable: true });
+      Object.defineProperty(mockVV, "height", { value: 520, writable: true, configurable: true });
+
+      act(() => {
+        for (const cb of listeners.resize) cb();
+      });
+
+      await waitFor(() => {
+        const modal = screen.getByTestId("terminal-modal");
+        expect(modal.style.getPropertyValue("--keyboard-overlap")).toBe("324px");
+        expect(modal.style.getPropertyValue("--vv-height")).toBe("520px");
+      });
+    } finally {
+      helperTextarea.remove();
+    }
+  });
+
   it("does not set --vv-height when no keyboard overlap", async () => {
     const { listeners } = simulateChromeAndroid(0);
 

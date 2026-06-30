@@ -182,6 +182,8 @@ const TERMINAL_KEY_LABELS = {
   pxUnit: "px",
 } as const;
 
+const SETTLED_FOLDED_VIEWPORT_MIN_HEIGHT_PX = 480;
+
 export function ctrlChar(key: string): string {
   if (!key) {
     return "";
@@ -310,6 +312,16 @@ function isMacPlatform(): boolean {
   return /mac/i.test(platform) || /mac/i.test(userAgent);
 }
 
+function isKeyboardFocusableElement(el: Element | null): boolean {
+  if (!el) return false;
+  if (el instanceof HTMLTextAreaElement) return true;
+  if (el instanceof HTMLInputElement) {
+    const nonTextTypes = new Set(["checkbox", "radio", "button", "submit", "reset", "file", "range", "color", "hidden"]);
+    return !nonTextTypes.has(el.type);
+  }
+  return el instanceof HTMLElement && el.isContentEditable;
+}
+
 /**
  * Compute how many CSS pixels the virtual keyboard covers from the bottom
  * of the layout viewport. Returns 0 on desktop or when visualViewport is
@@ -324,35 +336,70 @@ function isMacPlatform(): boolean {
 function getKeyboardOverlap(): number {
   if (typeof window === "undefined" || !window.visualViewport) return 0;
   const vv = window.visualViewport;
+  const viewportWidth = vv.width > 0 ? vv.width : window.innerWidth;
+  const viewportHeight = Math.max(window.innerHeight, vv.height);
   const chromeOverlap = Math.max(0, window.innerHeight - vv.offsetTop - vv.height);
   if (chromeOverlap > 0) return chromeOverlap;
+
+  /*
+  FNXC:Terminal 2026-06-30-08:48:
+  Folded phones can report an unfolded iOS fallback baseline first, then settle to a narrower closed-posture viewport before the keyboard opens. If that closed sample does not replace the old baseline, the terminal overestimates --keyboard-overlap, fits against a too-short/wrong-width box, and commands like `pnpm build` wrap into spaced glyphs. Re-baseline on settled width/posture changes before computing the iOS gap; do not touch xterm's symbols-free font stack.
+
+  FNXC:Terminal 2026-06-30-09:38:
+  A later folded-posture width sample can arrive while xterm's helper textarea is focused and the soft keyboard is already open. Never re-baseline from that focused keyboard-open sample, because it makes the keyboard height look like the closed viewport and clears --keyboard-overlap/--vv-height before the final fit.
+  */
+  if (!isKeyboardFocusableElement(document.activeElement) && hasSettledViewportPostureChange(viewportWidth, viewportHeight)) {
+    setInitialViewportBaseline(viewportHeight, viewportWidth);
+  }
+
   // On iOS Safari, window.innerHeight shrinks to match visualViewport.
   // Detect keyboard by checking if visual viewport is shorter than initial
   // height by more than 80px (with a 30px noise filter).
-  const initialHeight = getInitialViewportHeight();
+  const initialHeight = getInitialViewportHeight(viewportWidth, viewportHeight);
   const gap = initialHeight - vv.offsetTop - vv.height;
   // Minimum 30px gap required to filter noise (address bar, toolbar changes).
   // Threshold of 80px: only consider keyboard present when gap exceeds this.
-  return gap >= 30 && gap > 80 ? gap : 0;
+  if (gap >= 30 && gap > 80) {
+    return gap;
+  }
+
+  setInitialViewportBaseline(viewportHeight, viewportWidth);
+  return 0;
 }
 
 /** Cached initial viewport height before any keyboard opened. */
 let _initialViewportHeight: number | null = null;
+let _initialViewportWidth: number | null = null;
+
+function setInitialViewportBaseline(height: number, width: number): void {
+  _initialViewportHeight = height;
+  _initialViewportWidth = width;
+}
+
+function hasSettledViewportPostureChange(width: number, height: number): boolean {
+  return (
+    _initialViewportHeight !== null &&
+    _initialViewportWidth !== null &&
+    Math.abs(width - _initialViewportWidth) >= 1 &&
+    height >= SETTLED_FOLDED_VIEWPORT_MIN_HEIGHT_PX
+  );
+}
 
 /**
  * Returns the viewport height at page load (before any keyboard opens).
  * Cached after first read.
  */
-function getInitialViewportHeight(): number {
+function getInitialViewportHeight(width: number, height: number): number {
   if (_initialViewportHeight === null) {
-    _initialViewportHeight = window.innerHeight;
+    setInitialViewportBaseline(height, width);
   }
-  return _initialViewportHeight;
+  return _initialViewportHeight ?? height;
 }
 
 /** Reset the cached initial viewport height. Exported for tests only. */
 export function _resetInitialViewportHeight(): void {
   _initialViewportHeight = null;
+  _initialViewportWidth = null;
 }
 
 interface TerminalModalProps {
