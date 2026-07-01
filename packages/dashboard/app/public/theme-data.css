@@ -1431,6 +1431,9 @@ FN-6758 makes the default shadcn highlight/accent orange for focus rings, active
 /*
 FNXC:DashboardTheming 2026-06-30-00:00:
 Shadcn Ember combines shadcn/ui zinc structure with Ember's warm orange/graphite CTA, status, accent, and info colors. It is the default for unset installs while explicit legacy theme ids stay valid.
+
+FNXC:DashboardTheming 2026-06-30-21:41:
+Shadcn Ember must keep shadcn structure but match every Ember-owned color token byte-for-byte against Ember in dark and light mode so the default theme cannot drift from Ember's palette.
 */
 [data-color-theme="shadcn-ember"] {
   --bg: #09090b;
@@ -1505,7 +1508,7 @@ Shadcn Ember combines shadcn/ui zinc structure with Ember's warm orange/graphite
   --logo-accent: #e8773a;
   --color-info: #e8773a;
   --accent: #e8773a;
-  --accent-text: #ffffff;
+  --accent-text: #fff;
 }
 
 [data-color-theme="shadcn-ember"][data-theme="light"] {
@@ -1552,7 +1555,7 @@ Shadcn Ember combines shadcn/ui zinc structure with Ember's warm orange/graphite
   --logo-accent: #d4622a;
   --color-info: #c05820;
   --accent: #d4622a;
-  --accent-text: #ffffff;
+  --accent-text: #fff;
 }
 
 
