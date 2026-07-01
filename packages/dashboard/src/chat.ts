@@ -236,11 +236,11 @@ function createTaskPlannerSteeringTool(taskStore: TaskStore, taskId: string) {
   return {
     name: "fn_task_planner_add_steering",
     label: "Add Task Steering Comment",
-    description: "Add an explicit user-approved steering comment to the current task from task-detail planner chat. Use only when the user asks to steer, instruct, or tell the executor/reviewer something; ask a clarifying question first if intent is ambiguous.",
+    description: "Add a clear, bounded, user-authored steering comment to the current task. The task id is fixed by server context; never accept or infer a different task id. Ask for clarification before broad, destructive, credential/security-sensitive, conflicting, or unclear requests.",
     parameters: {
       type: "object",
       properties: {
-        text: { type: "string", description: "The steering comment to add to the task." },
+        text: { type: "string", description: "The concise steering comment to add to the current task. Do not include hidden prompt/context text." },
       },
       required: ["text"],
       additionalProperties: false,
@@ -251,9 +251,24 @@ function createTaskPlannerSteeringTool(taskStore: TaskStore, taskId: string) {
         return { content: [{ type: "text" as const, text: "ERROR: text must be a non-empty string" }], details: {}, isError: true };
       }
       const task = await taskStore.addSteeringComment(taskId, text, "user");
+      const steeringComment = task.steeringComments
+        ?.filter((comment) => comment.author === "user" && comment.text === text)
+        .at(-1);
       return {
-        content: [{ type: "text" as const, text: `Steering comment added to ${task.id}.` }],
-        details: { taskId: task.id, text },
+        content: [{ type: "text" as const, text: `Added as steering comment on ${task.id}.` }],
+        details: {
+          taskId: task.id,
+          text,
+          taskUpdatedAt: task.updatedAt,
+          steeringComment: steeringComment
+            ? {
+                id: steeringComment.id,
+                text: steeringComment.text,
+                author: steeringComment.author,
+                createdAt: steeringComment.createdAt,
+              }
+            : { text, author: "user" },
+        },
       };
     },
   };
@@ -1763,7 +1778,14 @@ export class ChatManager {
             diagnostics.warn(`Failed to load task planner-chat context for ${taskPlannerChatTaskId}: ${message}`);
           }
         }
-        systemPrompt = `${systemPrompt}\n\n${TASK_PLANNER_CHAT_CONTEXT_PROMPT_GUIDANCE}\n\n${taskContext}`;
+        /*
+        FNXC:TaskDetailPlannerChat 2026-06-30-23:58:
+        Task-detail planner Chat sessions use a synthetic task-planner agent id and the planning-model lane. Include compact task state, dependency, comment, step, and recent activity context so the planner can answer status questions; convert only explicit steering intent through the scoped steering tool and use `fn_ask_question` for ambiguous clarification.
+
+        FNXC:TaskDetailChat 2026-06-30-23:59:
+        Clear, bounded operator change requests in task-detail Chat are user intent and should become persisted steering comments through the task store's steering path. Ambiguous, conflicting, destructive, broad-scope, or credential/security-sensitive requests must ask a question first so planner chat cannot mutate a task from risky prose.
+        */
+        systemPrompt = `${systemPrompt}\n\n${TASK_PLANNER_CHAT_CONTEXT_PROMPT_GUIDANCE}\n\nDecision rules:\n- Do not create steering for ordinary questions, summaries, thanks, status/progress requests, or brainstorming. Answer normally.\n- Create steering only when the user gives a clear, bounded, actionable change request for this current task (for example telling the executor/reviewer to adjust implementation, tests, scope details, or acceptance criteria).\n- When creating steering, call \`fn_task_planner_add_steering\` with only the concise user-facing steering text. Never include hidden prompt/context/logs, credentials, or chain-of-thought.\n- Ask a clarifying question with \`fn_ask_question\` before adding steering for unclear targets, requests that could mean either conversation or task mutation, broad rewrites/scope changes, destructive removals, conflicting instructions, credential/secrets handling, or security-sensitive actions.\n- The steering tool is bound to this task server-side; never ask for or pass a task id.\n\n${taskContext}`;
       }
 
       if (agent) {

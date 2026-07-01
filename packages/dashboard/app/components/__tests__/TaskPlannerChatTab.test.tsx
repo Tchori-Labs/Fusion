@@ -4,11 +4,12 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { TaskPlannerChatTab } from "../TaskPlannerChatTab";
 
-const { mockEnsureTaskPlannerChatSession, mockFetchChatMessages, mockStreamChatResponse, mockTranslations, mockT } = vi.hoisted(() => {
+const { mockEnsureTaskPlannerChatSession, mockFetchChatMessages, mockFetchTaskDetail, mockStreamChatResponse, mockTranslations, mockT } = vi.hoisted(() => {
   const translations = new Map<string, string>();
   return {
     mockEnsureTaskPlannerChatSession: vi.fn(),
     mockFetchChatMessages: vi.fn(),
+    mockFetchTaskDetail: vi.fn(),
     mockStreamChatResponse: vi.fn(),
     mockTranslations: translations,
     mockT: (key: string, fallback: string) => translations.get(key) ?? fallback,
@@ -27,6 +28,7 @@ vi.mock("../../api", async (importOriginal) => {
     ...actual,
     ensureTaskPlannerChatSession: mockEnsureTaskPlannerChatSession,
     fetchChatMessages: mockFetchChatMessages,
+    fetchTaskDetail: mockFetchTaskDetail,
     streamChatResponse: mockStreamChatResponse,
   };
 });
@@ -83,6 +85,7 @@ describe("TaskPlannerChatTab", () => {
       },
     });
     mockFetchChatMessages.mockResolvedValue({ messages: [] });
+    mockFetchTaskDetail.mockResolvedValue(makeTask("FN-7310"));
     mockStreamChatResponse.mockReturnValue({ close: vi.fn(), isConnected: () => true });
   });
 
@@ -422,6 +425,73 @@ describe("TaskPlannerChatTab", () => {
       undefined,
       { taskId: "FN-7310" },
     );
+  });
+
+  it("renders steering-tool confirmation and refreshes task detail after persistence", async () => {
+    const user = userEvent.setup();
+    const updatedTask = { ...makeTask("FN-7310"), steeringComments: [{ id: "steer-1", text: "Keep Activity and Chat separate", author: "user" }] } as any;
+    const onTaskUpdated = vi.fn();
+    mockFetchTaskDetail.mockResolvedValue(updatedTask);
+    mockStreamChatResponse.mockImplementation((_sessionId, _content, handlers) => {
+      setTimeout(() => {
+        handlers.onToolStart({ toolName: "fn_task_planner_add_steering", args: { text: "Keep Activity and Chat separate" } });
+        handlers.onToolEnd({
+          toolName: "fn_task_planner_add_steering",
+          isError: false,
+          result: { details: { taskId: "FN-7310", text: "Keep Activity and Chat separate", steeringComment: { id: "steer-1", text: "Keep Activity and Chat separate", author: "user" } } },
+        });
+        handlers.onDone({
+          messageId: "assistant-steering",
+          message: {
+            id: "assistant-steering",
+            sessionId: "chat-planner",
+            role: "assistant",
+            content: "I added that as steering.",
+            thinkingOutput: null,
+            metadata: {
+              toolCalls: [{
+                toolName: "fn_task_planner_add_steering",
+                args: { text: "Keep Activity and Chat separate" },
+                isError: false,
+                result: { details: { taskId: "FN-7310", text: "Keep Activity and Chat separate", steeringComment: { id: "steer-1", text: "Keep Activity and Chat separate", author: "user" } } },
+              }],
+            },
+            createdAt: "2026-06-30T00:03:00.000Z",
+          },
+        });
+      }, 0);
+      return { close: vi.fn(), isConnected: () => true };
+    });
+    renderPlannerChat({ projectId: "project-1", onTaskUpdated });
+    await screen.findByTestId("task-planner-chat-empty");
+
+    await user.type(screen.getByLabelText("Message planner chat"), "Tell the executor to keep Activity and Chat separate");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+
+    expect(await screen.findByTestId("task-planner-chat-steering-confirmation")).toHaveTextContent("Added as steering comment");
+    expect(screen.getByTestId("task-planner-chat-steering-confirmation")).toHaveTextContent("Keep Activity and Chat separate");
+    await waitFor(() => expect(mockFetchTaskDetail).toHaveBeenCalledWith("FN-7310", "project-1"));
+    expect(onTaskUpdated).toHaveBeenCalledWith(updatedTask);
+  });
+
+  it("renders clarification questions without refreshing task steering", async () => {
+    mockFetchChatMessages.mockResolvedValue({
+      messages: [{
+        id: "assistant-question",
+        sessionId: "chat-planner",
+        role: "assistant",
+        content: "Do you want this recorded as steering?",
+        thinkingOutput: null,
+        metadata: { toolCalls: [{ toolName: "fn_ask_question", args: { question: "Record this as steering?", options: ["Yes", "No"] }, isError: false }] },
+        createdAt: "2026-06-30T00:02:00.000Z",
+      }],
+    });
+
+    renderPlannerChat({ projectId: "project-1", onTaskUpdated: vi.fn() });
+
+    expect(await screen.findByTestId("chat-question-response")).toBeInTheDocument();
+    expect(screen.queryByTestId("task-planner-chat-steering-confirmation")).not.toBeInTheDocument();
+    expect(mockFetchTaskDetail).not.toHaveBeenCalled();
   });
 
   it("shows API errors and re-enables the composer", async () => {

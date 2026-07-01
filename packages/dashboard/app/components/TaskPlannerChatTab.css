@@ -152,6 +152,34 @@
   margin-bottom: 0;
 }
 
+.task-planner-chat-steering-confirmation {
+  margin-top: var(--space-sm);
+  border: var(--btn-border-width) solid var(--color-success);
+  border-radius: var(--radius-md);
+  padding: var(--space-sm);
+  color: var(--text);
+  background: var(--surface);
+}
+
+.task-planner-chat-steering-confirmation--pending {
+  border-color: var(--color-warning);
+}
+
+.task-planner-chat-steering-confirmation--error {
+  border-color: var(--color-error);
+  color: var(--color-error);
+}
+
+.task-planner-chat-steering-confirmation strong,
+.task-planner-chat-steering-confirmation p {
+  margin: 0;
+}
+
+.task-planner-chat-steering-confirmation p {
+  margin-top: var(--space-xs);
+  color: var(--text-muted);
+}
+
 .task-planner-chat-composer {
   display: flex;
   align-items: flex-end;
