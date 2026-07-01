@@ -16,7 +16,7 @@ execution: code
 | Field | Value |
 |---|---|
 | Objective | Refactor workflow lifecycle logic out of monolithic triage, executor, and reviewer files into well-defined workflow node runner modules/classes that call runtime primitives through explicit dependencies. |
-| Authority | User request in this session: assess and plan whether workflow logic can be moved from monolithic triage/executor/reviewer files into well-defined node classes. Existing product direction says workflow policy belongs in workflow nodes and runtime primitives while engine substrate keeps hard safety invariants. |
+| Authority | Architecture decision: decouple workflow node behavior from monolithic triage/executor/reviewer files into workflow-owned node runners and runtime primitive/service boundaries while engine substrate keeps hard safety invariants. |
 | Execution profile | Deep architecture refactor across `@fusion/engine` workflow dispatch, runtime primitive adapters, custom node execution, reviewer invocation, triage planning review, and focused parity tests. |
 | Stop conditions | Do not change workflow behavior while extracting boundaries. Do not weaken worktree, file-scope, merge-proof, pause/abort, semaphore, active-session, or self-healing invariants. Do not add arbitrary workflow-definition code execution. |
 | Tail ownership | Ship in small slices with characterization tests first. Add a changeset only when behavior of published `@runfusion/fusion` changes; pure internal refactor slices do not need one. |

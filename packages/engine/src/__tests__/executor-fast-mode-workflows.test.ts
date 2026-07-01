@@ -202,6 +202,98 @@ describe("fast mode workflow/runtime invariants", () => {
     expect(seams.merge).toHaveBeenCalledTimes(1);
   });
 
+  it("raw fast mode skips skill executor nodes when primitives are unavailable", async () => {
+    const runCustomNode = vi.fn(async () => ({ outcome: "success", value: "ran-skill" }));
+    const runner = new WorkflowGraphTaskRunner({
+      store: {
+        getTaskWorkflowSelection: () => ({ workflowId: "WF-fast-skill", stepIds: [] }),
+        getWorkflowDefinition: vi.fn(async () => ({
+          id: "WF-fast-skill",
+          name: "Fast skill",
+          description: "custom skill workflow",
+          kind: "workflow",
+          layout: {},
+          createdAt: now,
+          updatedAt: now,
+          ir: {
+            version: "v1",
+            name: "Fast skill",
+            nodes: [
+              { id: "start", kind: "start" },
+              { id: "skill-review", kind: "prompt", config: { executor: "skill", skillName: "compound-engineering:ce-code-review" } },
+              { id: "end", kind: "end" },
+            ],
+            edges: [
+              { from: "start", to: "skill-review" },
+              { from: "skill-review", to: "end", condition: "success" },
+            ],
+          },
+        })),
+      },
+      seams: {
+        planning: vi.fn(async () => ({ outcome: "success", value: "planned" })),
+        execute: vi.fn(async () => ({ outcome: "success", value: "implemented" })),
+        review: vi.fn(async () => ({ outcome: "success", value: "approved" })),
+        merge: vi.fn(async () => ({ outcome: "success", value: "merged" })),
+        schedule: vi.fn(async () => ({ outcome: "success", value: "scheduled" })),
+      },
+      runCustomNode,
+    });
+
+    const result = await runner.run(task({ executionMode: "fast" }), { experimentalFeatures: { workflowGraphExecutor: true } });
+
+    expect(result.disposition).toBe("completed");
+    expect(result.visitedNodeIds).toEqual(["start", "skill-review"]);
+    expect(runCustomNode).not.toHaveBeenCalled();
+  });
+
+  it("raw fast mode still invokes non-executable review seam nodes", async () => {
+    const review = vi.fn(async () => ({ outcome: "success" as const, value: "approved" }));
+    const runCustomNode = vi.fn(async () => ({ outcome: "failure" as const, value: "unexpected-custom-node" }));
+    const runner = new WorkflowGraphTaskRunner({
+      store: {
+        getTaskWorkflowSelection: () => ({ workflowId: "WF-fast-review-seam", stepIds: [] }),
+        getWorkflowDefinition: vi.fn(async () => ({
+          id: "WF-fast-review-seam",
+          name: "Fast review seam",
+          description: "custom review seam workflow",
+          kind: "workflow",
+          layout: {},
+          createdAt: now,
+          updatedAt: now,
+          ir: {
+            version: "v1",
+            name: "Fast review seam",
+            nodes: [
+              { id: "start", kind: "start" },
+              { id: "review", kind: "prompt", config: { seam: "review" } },
+              { id: "end", kind: "end" },
+            ],
+            edges: [
+              { from: "start", to: "review" },
+              { from: "review", to: "end", condition: "success" },
+            ],
+          },
+        })),
+      },
+      seams: {
+        planning: vi.fn(async () => ({ outcome: "success", value: "planned" })),
+        execute: vi.fn(async () => ({ outcome: "success", value: "implemented" })),
+        review,
+        merge: vi.fn(async () => ({ outcome: "success", value: "merged" })),
+        schedule: vi.fn(async () => ({ outcome: "success", value: "scheduled" })),
+      },
+      runCustomNode,
+    });
+
+    const result = await runner.run(task({ executionMode: "fast" }), { experimentalFeatures: { workflowGraphExecutor: true } });
+
+    expect(result.disposition).toBe("completed");
+    expect(result.visitedNodeIds).toEqual(["start", "review"]);
+    expect(review).toHaveBeenCalledTimes(1);
+    expect(runCustomNode).not.toHaveBeenCalled();
+  });
+
   it("fast builtin:coding executes explicitly selected optional-group template nodes", async () => {
     const calls: string[] = [];
     const prompt = "# Task\n\n## Steps\n\n### Step 1: Do the work\n- [ ] edit files";

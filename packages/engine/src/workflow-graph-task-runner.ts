@@ -257,11 +257,14 @@ export class WorkflowGraphTaskRunner {
 
         FNXC:WorkflowFastMode 2026-07-01-00:00:
         Explicitly selected optional-group bodies carry workflow:optionalGroupActive and must still execute in fast mode because selecting the optional workflow step is operator intent, not default built-in review behavior.
+
+        FNXC:WorkflowFastMode 2026-07-01-00:00:
+        Skill executor nodes use `config.skillName`, not `config.skill`; include that field in executable-node detection so raw fast-mode compatibility skips skill prompts the same way it skips prompt/script nodes.
         */
         const hasExecutableConfig =
           typeof node.config?.prompt === "string" ||
           typeof node.config?.scriptName === "string" ||
-          typeof node.config?.skill === "string";
+          typeof node.config?.skillName === "string";
         const isExplicitOptionalGroupNode = typeof c[WORKFLOW_OPTIONAL_GROUP_CONTEXT_KEY] === "string";
         if (hasExecutableConfig && !isExplicitOptionalGroupNode) {
           return Promise.resolve({ outcome: "success", value: "fast-mode-skipped" });
@@ -295,10 +298,13 @@ export class WorkflowGraphTaskRunner {
               /*
               FNXC:WorkflowFastMode 2026-07-01-00:00:
               Raw legacy-seam graph runs do not have TaskExecutor's parse-steps dependencies. For fast-mode compatibility, parse the task prompt from memory and project the parsed steps back onto the runner task so the stepwise built-in can reach the seam-backed lifecycle suffix without a store-backed projection.
+
+              FNXC:WorkflowFastMode 2026-07-01-00:00:
+              Parse-step projection must write through the task object supplied by the graph node context, not a closed-over outer run argument. Raw fallback callers usually pass the same object today, but the dependency contract belongs to ParseStepsNodeRunner's write target.
               */
               readArtifact: async (_task, key) => (key === "PROMPT.md" ? task.prompt : undefined),
-              writeSteps: async (_task, steps: TaskStep[]) => {
-                task.steps = steps;
+              writeSteps: async (target, steps: TaskStep[]) => {
+                target.steps = steps;
               },
             }
           : undefined;

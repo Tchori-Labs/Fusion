@@ -7,6 +7,7 @@ import {
   handlerBackedRunner,
   type WorkflowNodeRunner,
 } from "../workflow-node-runner.js";
+import { createMergeAttemptHandler } from "../workflow-node-runners/merge-runner.js";
 
 const task = { id: "FN-7300" } as TaskDetail;
 
@@ -101,5 +102,24 @@ describe("WorkflowNodeRunnerRegistry", () => {
     expect(result.outcome).toBe("success");
     expect(result.context["node:script:value"]).toBe("handler-backed");
     expect(handler).toHaveBeenCalledWith(scriptNode, expect.objectContaining({ task }));
+  });
+
+  it("delegates merge-attempt to the legacy merge seam when primitives are unwired", async () => {
+    const merge = vi.fn(async () => ({ outcome: "success" as const, value: "legacy-merged" }));
+    const handler = createMergeAttemptHandler({
+      seams: { merge },
+      buildPrimitiveContext: vi.fn(),
+    });
+    const node: WorkflowIrNode = { id: "merge-attempt", kind: "merge-attempt" };
+    const context = { branch: "main" };
+
+    const result = await handler(node, {
+      task,
+      settings: settingsOn(),
+      context,
+    });
+
+    expect(result).toEqual({ outcome: "success", value: "legacy-merged" });
+    expect(merge).toHaveBeenCalledWith(task, context);
   });
 });
