@@ -8439,7 +8439,6 @@
     "gateBlocks": "关卡（阻断）",
     "gateMode": "关卡模式",
     "insertTemplate": "插入模板 {{name}}",
-    "interpreterOnly": "此工作流包含分支，将在图解释器上运行——无法编译为线性步骤引擎，但仍会正常执行。",
     "joinAll": "所有分支",
     "joinAny": "任意分支",
     "joinMode": "合并模式",

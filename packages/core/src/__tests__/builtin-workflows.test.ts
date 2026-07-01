@@ -16,7 +16,6 @@ import { PLAN_REVIEW_GROUP_ID, PLAN_REVIEW_STEP_NODE_ID } from "../builtin-plan-
 import { builtinPromptConfig, BUILTIN_SEAM_PROMPTS } from "../builtin-workflow-prompts.js";
 import { BUILTIN_WORKFLOW_SETTINGS } from "../builtin-workflow-settings.js";
 import { resolveColumnFlags } from "../trait-registry.js";
-import { compileWorkflowToSteps } from "../workflow-compiler.js";
 import { DEFAULT_WORKFLOW_COLUMN_IDS, parseWorkflowIr, serializeWorkflowIr } from "../workflow-ir.js";
 import { createSharedTaskStoreTestHarness } from "./store-test-helpers.js";
 import { BUILTIN_STEPWISE_FINAL_REVIEW_CODING_WORKFLOW_IR } from "../builtin-stepwise-final-review-coding-workflow-ir.js";
@@ -49,28 +48,14 @@ function columnTraitMatrix(ir: { columns: Array<{ id: string; traits: Array<{ tr
 }
 
 describe("built-in workflows", () => {
-  // Non-compiler built-ins model graph-only node kinds or reusable fragments the
-  // linear compiler cannot lower to a step list. They still must parse as valid IR.
-  const NON_COMPILABLE_BUILTIN_IDS = new Set([
-    "builtin:coding",
-    "builtin:legacy-coding",
-    "builtin:quick-fix",
-    "builtin:review-heavy",
-    "builtin:design",
-    "builtin:marketing",
-    "builtin:compound-engineering",
-    "builtin:stepwise-coding",
-    "builtin:pr-workflow",
-  ]);
-
-  it("every built-in has a valid IR; linear built-ins compile without error", () => {
+  // FNXC:WorkflowStepCRUD 2026-07-01-00:00: the linear WorkflowStep compiler was
+  // removed; the graph interpreter runs every built-in (including branching ones)
+  // directly. `parseWorkflowIr` is now the sole validity gate for all built-ins.
+  it("every built-in has a valid IR", () => {
     expect(BUILTIN_WORKFLOWS.length).toBeGreaterThanOrEqual(4);
     for (const wf of BUILTIN_WORKFLOWS) {
       expect(isBuiltinWorkflowId(wf.id)).toBe(true);
       expect(() => parseWorkflowIr(wf.ir)).not.toThrow();
-      if (!NON_COMPILABLE_BUILTIN_IDS.has(wf.id)) {
-        expect(() => compileWorkflowToSteps(wf.ir)).not.toThrow();
-      }
     }
   });
 

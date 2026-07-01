@@ -8439,7 +8439,6 @@
     "gateBlocks": "關卡（阻擋）",
     "gateMode": "關卡模式",
     "insertTemplate": "插入範本 {{name}}",
-    "interpreterOnly": "這個工作流程有分支，因此會在圖形解譯器上執行 — 它無法編譯成線性步驟引擎，但仍可執行。",
     "joinAll": "所有分支",
     "joinAny": "任一分支",
     "joinMode": "合併模式",

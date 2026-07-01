@@ -1,10 +1,8 @@
 import type { Settings, TaskDetail, TaskStep, WorkflowDefinition, WorkflowIr, WorkflowStepResult } from "@fusion/core";
 import {
-  compileWorkflowToSteps,
   getBuiltinWorkflow,
   isBuiltinWorkflowId,
   parseWorkflowIr,
-  WorkflowCompileError,
 } from "@fusion/core";
 
 import {
@@ -45,10 +43,6 @@ import type { WorkflowPrimitiveContext, WorkflowRuntimePrimitives } from "./runt
  *                  the caller must run the legacy pipeline instead.
  */
 export type WorkflowGraphRunDisposition = "completed" | "failed" | "fell-back";
-
-function isInterpreterDeferredCompileError(error: unknown): boolean {
-  return error instanceof WorkflowCompileError && error.message.includes("require the workflow interpreter (deferred)");
-}
 
 export interface WorkflowGraphTaskRunResult {
   disposition: WorkflowGraphRunDisposition;
@@ -211,13 +205,11 @@ export class WorkflowGraphTaskRunner {
       /*
       FNXC:WorkflowExecution 2026-06-27-07:40:
       FN-7113 requires the interpreter to re-validate the resolved built-in/custom/plugin workflow IR before any seam, primitive, or custom-node side effects. Invalid persisted or plugin-authored graphs fail closed with an author-facing invalid-ir reason instead of partially running or falling back into the wrong legacy workflow.
+
+      FNXC:WorkflowExecution 2026-07-01-00:00:
+      The linear WorkflowStep compiler was removed; the graph interpreter is the sole executor. `parseWorkflowIr` (which validates branching graphs via validateV2) is now the only IR validity gate here — there is no separate linear-compile pre-check to satisfy.
       */
       validatedIr = parseWorkflowIr(definition.ir);
-      try {
-        compileWorkflowToSteps(validatedIr);
-      } catch (err) {
-        if (!isInterpreterDeferredCompileError(err)) throw err;
-      }
     } catch (err) {
       return this.failBeforeSideEffects(task.id, `invalid-ir: ${err instanceof Error ? err.message : String(err)}`);
     }

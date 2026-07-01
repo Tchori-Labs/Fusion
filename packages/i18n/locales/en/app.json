@@ -8449,7 +8449,6 @@
     "gateBlocks": "Gate (blocks)",
     "gateMode": "Gate mode",
     "insertTemplate": "Insert template {{name}}",
-    "interpreterOnly": "This workflow branches, so it runs on the graph interpreter — it can't compile to the linear step engine, but it will still run.",
     "joinAll": "All branches",
     "joinAny": "Any branch",
     "joinMode": "Join mode",

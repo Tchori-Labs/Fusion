@@ -8439,7 +8439,6 @@
     "gateBlocks": "Compuerta (bloquea)",
     "gateMode": "Modo de compuerta",
     "insertTemplate": "Insertar plantilla {{name}}",
-    "interpreterOnly": "Este flujo de trabajo tiene ramas, por lo que se ejecuta en el intérprete de grafo — no puede compilarse al motor de pasos lineal, pero igualmente se ejecutará.",
     "joinAll": "Todas las ramas",
     "joinAny": "Cualquier rama",
     "joinMode": "Modo de unión",

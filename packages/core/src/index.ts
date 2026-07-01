@@ -384,11 +384,6 @@ export {
   normalizeWorkflowIcon,
 } from "./workflow-definition-types.js";
 export {
-  compileWorkflowToSteps,
-  validateLinearity,
-  WorkflowCompileError,
-} from "./workflow-compiler.js";
-export {
   stepsToWorkflowIr,
   stepToFragmentIr,
   layoutForIr,

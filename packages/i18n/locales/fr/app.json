@@ -8439,7 +8439,6 @@
     "gateBlocks": "Barrière (bloque)",
     "gateMode": "Mode de barrière",
     "insertTemplate": "Insérer le modèle {{name}}",
-    "interpreterOnly": "Ce workflow comporte des branches, il s'exécute donc sur l'interpréteur de graphe — il ne peut pas être compilé vers le moteur d'étapes linéaire, mais il s'exécutera quand même.",
     "joinAll": "Toutes les branches",
     "joinAny": "N’importe quelle branche",
     "joinMode": "Mode de jointure",

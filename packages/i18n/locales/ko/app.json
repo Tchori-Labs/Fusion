@@ -8439,7 +8439,6 @@
     "gateBlocks": "게이트(차단)",
     "gateMode": "게이트 모드",
     "insertTemplate": "{{name}} 템플릿 삽입",
-    "interpreterOnly": "이 워크플로는 분기되므로 그래프 인터프리터에서 실행됩니다 — 선형 단계 엔진으로 컴파일할 수는 없지만 그래도 실행됩니다.",
     "joinAll": "모든 분기",
     "joinAny": "임의 분기",
     "joinMode": "조인 모드",

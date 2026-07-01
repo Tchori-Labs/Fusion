@@ -98,8 +98,9 @@ function linearIr(overrides?: { nodeConfig?: Record<string, unknown> }): Workflo
   } as WorkflowIr;
 }
 
-/** A branching IR: one node with two `success` edges → triggers the compiler's
- *  deferred-interpreter suffix (interpreterOnly). */
+/** A branching IR: one node with two `success` edges. The linear compiler was
+ *  removed — the graph interpreter runs branching graphs directly, so this is an
+ *  accepted design result. */
 function branchingIr(): WorkflowIr {
   return {
     version: "v1",
@@ -193,13 +194,13 @@ describe("POST /api/workflows/design (U7/R11/KTD-6)", () => {
     return (await store.listWorkflowDefinitions()).filter((w) => !isBuiltinWorkflowId(w.id)).length;
   }
 
-  it("valid linear IR → 200 {ir, interpreterOnly:false} with layout", async () => {
+  it("valid IR → 200 {ir} with layout", async () => {
     const { factory, captured } = makeFakeAgent(JSON.stringify(linearIr()));
     __setCreateFnAgentForDesign(factory);
 
     const res = await postJson("/api/workflows/design", { prompt: "a coding flow" });
     expect(res.status).toBe(200);
-    expect(res.body.interpreterOnly).toBe(false);
+    expect(res.body.interpreterOnly).toBeUndefined();
     expect(res.body.ir.nodes).toHaveLength(3);
     expect(res.body.layout).toBeTruthy();
     expect(Object.keys(res.body.layout).length).toBeGreaterThan(0);
@@ -232,7 +233,6 @@ describe("POST /api/workflows/design (U7/R11/KTD-6)", () => {
 
     const res = await postJson("/api/workflows/design", { prompt: "a coding flow" });
     expect(res.status).toBe(200);
-    expect(res.body.interpreterOnly).toBe(false);
     expect(res.body.ir.nodes).toHaveLength(3);
     expect(captured.userPrompt).toContain("Design a workflow");
   });
@@ -245,16 +245,15 @@ describe("POST /api/workflows/design (U7/R11/KTD-6)", () => {
     const res = await postJson("/api/workflows/design", { prompt: "make a flow" });
     expect(res.status).toBe(200);
     expect(res.body.ir.nodes).toHaveLength(3);
-    expect(res.body.interpreterOnly).toBe(false);
   });
 
-  it("branching IR → 200 {interpreterOnly:true}", async () => {
+  it("branching IR → 200 (accepted; runs on the graph interpreter)", async () => {
     const { factory } = makeFakeAgent(JSON.stringify(branchingIr()));
     __setCreateFnAgentForDesign(factory);
 
     const res = await postJson("/api/workflows/design", { prompt: "branch it" });
     expect(res.status).toBe(200);
-    expect(res.body.interpreterOnly).toBe(true);
+    expect(res.body.interpreterOnly).toBeUndefined();
     expect(res.body.ir.nodes).toHaveLength(5);
   });
 

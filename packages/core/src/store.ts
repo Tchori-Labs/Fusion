@@ -115,7 +115,6 @@ import type {
   WorkflowNodeLayout,
 } from "./workflow-definition-types.js";
 import { normalizeWorkflowIcon } from "./workflow-definition-types.js";
-import { compileWorkflowToSteps, isInterpreterDeferredWorkflowCompileError } from "./workflow-compiler.js";
 import { analyzeWorkflowLifecycle } from "./workflow-lifecycle-validation.js";
 import { resolveDefaultOnOptionalGroupIds } from "./workflow-optional-steps.js";
 import {
@@ -16095,16 +16094,16 @@ ${stepsSection}`;
     this.db.prepare("DELETE FROM task_workflow_selection WHERE taskId = ?").run(taskId);
   }
 
-  /** Validate a workflow's IR by compiling it; throws on genuinely invalid graphs.
-   *  Interpreter-deferred built-ins (optional-group bearing) are valid and tolerated.
-   *  No `workflow_steps` rows are written (U7c). */
-  private validateWorkflowCompilable(workflowId: string, def: { ir: WorkflowIr }): void {
-    try {
-      compileWorkflowToSteps(def.ir);
-    } catch (err) {
-      if (isBuiltinWorkflowId(workflowId) && isInterpreterDeferredWorkflowCompileError(err)) return;
-      throw err;
-    }
+  /**
+   * FNXC:WorkflowSelection 2026-07-01-00:00:
+   * Validate a workflow's IR up front; throws (WorkflowIrError) on genuinely
+   * invalid graphs. The linear WorkflowStep compiler was removed — the graph
+   * interpreter is the sole executor, so `parseWorkflowIr`/`validateV2` (which
+   * accepts branching graphs) is the validity gate. Branching is no longer a
+   * rejected shape, so no built-in tolerance is needed.
+   */
+  private validateWorkflowCompilable(_workflowId: string, def: { ir: WorkflowIr }): void {
+    parseWorkflowIr(def.ir);
   }
 
   /** Resolve the project-default workflow into the selection seed (workflow id +

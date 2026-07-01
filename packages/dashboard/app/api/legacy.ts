@@ -16,7 +16,6 @@ import type {
   ActivityLogEntry,
   ActivityEventType,
   WorkflowStep,
-  WorkflowStepInput,
   WorkflowStepResult,
   PluginInstallation,
   PluginSetupCheckResult,
@@ -5487,13 +5486,6 @@ export function updateWorkflowPromptOverrides(
   );
 }
 
-/** Preview the compiled steps for a workflow. Rejects (422) for non-linear graphs. */
-export function compileWorkflow(id: string, projectId?: string): Promise<{ steps: WorkflowStepInput[] }> {
-  return api<{ steps: WorkflowStepInput[] }>(withProjectId(`/workflows/${encodeURIComponent(id)}/compile`, projectId), {
-    method: "POST",
-  });
-}
-
 /** A workflow export envelope (U5/R9/KTD-5). `schemaVersion` is the SERVER's
  *  schema version at export time — the import route version-gates against it
  *  (the app build aliases @fusion/core to types-only, so the value can only come
@@ -5561,13 +5553,12 @@ export function importWorkflow(
 // MigrateLegacyStepsResult along with the legacy workflow_steps table and its route.
 
 /** Result of POST /api/workflows/design (U10/R11). The server validates the
- *  AI-produced IR (parseWorkflowIr), triages compilability (`interpreterOnly`),
- *  and strips trust-escalating flags (`strippedApprovalFlags`). Persists nothing
- *  — the client decides what to do with the returned graph. */
+ *  AI-produced IR (parseWorkflowIr) and strips trust-escalating flags
+ *  (`strippedApprovalFlags`). Persists nothing — the client decides what to do
+ *  with the returned graph. */
 export interface DesignWorkflowResult {
   ir: import("@fusion/core").WorkflowIr;
   layout: import("@fusion/core").WorkflowDefinition["layout"];
-  interpreterOnly: boolean;
   strippedApprovalFlags: boolean;
 }
 

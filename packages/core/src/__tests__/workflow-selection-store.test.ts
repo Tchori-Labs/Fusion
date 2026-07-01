@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 
-import { WorkflowCompileError } from "../workflow-compiler.js";
 import type { WorkflowIr } from "../workflow-ir-types.js";
 import { createTaskStoreTestHarness } from "./store-test-helpers.js";
 
@@ -191,12 +190,17 @@ describe("TaskStore workflow selection (U3)", () => {
     expect(store.getTaskWorkflowSelection(task.id)).toBeUndefined();
   });
 
-  it("rejects selecting a non-linear workflow without writing partial state", async () => {
+  // FNXC:WorkflowSelection 2026-07-01-00:00: the linear WorkflowStep compiler was
+  // removed; the graph interpreter runs branching graphs directly. A branching
+  // workflow is now a valid, selectable workflow (previously rejected as
+  // non-linear). `parseWorkflowIr` is the sole validity gate.
+  it("selects a branching workflow (runs on the graph interpreter)", async () => {
     const wf = await store.createWorkflowDefinition({ name: "Branchy", ir: branchingIr() });
     const task = await store.createTask({ description: "T", enabledWorkflowSteps: [] });
 
-    await expect(store.selectTaskWorkflow(task.id, wf.id)).rejects.toBeInstanceOf(WorkflowCompileError);
-    expect(store.getTaskWorkflowSelection(task.id)).toBeUndefined();
+    await expect(store.selectTaskWorkflow(task.id, wf.id)).resolves.toBeDefined();
+    expect(store.getTaskWorkflowSelection(task.id)?.workflowId).toBe(wf.id);
+    // branchingIr has no optional-group nodes, so the selection seeds an empty set.
     const detail = await store.getTask(task.id);
     expect(detail.enabledWorkflowSteps ?? []).toHaveLength(0);
   });
@@ -458,18 +462,24 @@ describe("TaskStore workflow selection (U3)", () => {
       expect(detail.column).toBe("todo");
     });
 
+    // FNXC:WorkflowSelection 2026-07-01-00:00: branching workflows are now valid
+    // (the linear compiler was removed), so the "cannot materialize" path is
+    // exercised by a source selection pointing at a FRAGMENT — fragments are not
+    // selectable, so materialization throws a non-"not found" error that
+    // refineTask rethrows (a stale "not found" would instead fall back to the
+    // default). refineTask must still fail BEFORE creating the refinement row.
     it("fails before creating a refinement when the explicit source workflow cannot materialize", async () => {
-      const invalidWorkflow = await store.createWorkflowDefinition({ name: "Branchy", ir: branchingIr() });
+      const fragment = await store.createWorkflowDefinition({ name: "Frag", kind: "fragment", ir: fragmentIr() });
       const source = await store.createTask({ description: "source", enabledWorkflowSteps: [] });
       store.getDatabase().prepare(
         `INSERT INTO task_workflow_selection (taskId, workflowId, stepIds, updatedAt)
          VALUES (?, ?, ?, ?)
          ON CONFLICT(taskId) DO UPDATE SET workflowId = excluded.workflowId, stepIds = excluded.stepIds, updatedAt = excluded.updatedAt`,
-      ).run(source.id, invalidWorkflow.id, JSON.stringify([]), new Date().toISOString());
+      ).run(source.id, fragment.id, JSON.stringify([]), new Date().toISOString());
       await moveToDone(source.id);
       const before = (await store.listTasks({ includeArchived: true })).length;
 
-      await expect(store.refineTask(source.id, "follow up")).rejects.toBeInstanceOf(WorkflowCompileError);
+      await expect(store.refineTask(source.id, "follow up")).rejects.toThrow(/fragment/i);
 
       expect((await store.listTasks({ includeArchived: true })).length).toBe(before);
     });
