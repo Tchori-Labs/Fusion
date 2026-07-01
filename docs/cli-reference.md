@@ -270,6 +270,11 @@ Remote actions support:
 
 > ⚠️ Remote URL/QR payloads include tokenized query data. Treat them like credentials and avoid sharing them in screenshots/chat/logs. Prefer short-lived links for ad-hoc phone login.
 
+Settings pane navigation and editing:
+- `Tab` switches focus between the settings list and the detail/edit pane.
+- In the settings list, `↑`/`↓` or `k`/`j` moves the selected setting.
+- In the detail/edit pane, `←`/`→` or `h`/`l` cycles enum values such as **Remote Provider**; `Space` toggles booleans; `+`/`-` adjusts numbers.
+
 Remote action keys in Settings detail pane:
 - `C` activate selected provider
 - `V` start tunnel
