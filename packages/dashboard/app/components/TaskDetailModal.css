@@ -140,6 +140,14 @@ Task detail workflow badges share the board badge's slight token-based icon-to-l
   padding-block: var(--space-md);
 }
 
+/*
+FNXC:TaskDetailPlannerChat 2026-06-30-23:58:
+Planner Chat expand/collapse may reallocate height or hide mobile chrome, but it must not change the chat surface spacing. Keep body padding on the collapsed base selector and let expanded selectors own only flex/height behavior.
+*/
+.detail-body--planner-chat {
+  padding: var(--space-md);
+}
+
 .detail-title {
   font-size: 18px;
   font-weight: 600;
@@ -884,7 +892,6 @@ Expanded Planner Chat must still expose task Priority, Execution Mode, and the t
 .task-detail-content--planner-chat-expanded .detail-body--planner-chat {
   flex: 1;
   min-height: 0;
-  padding: var(--space-md);
 }
 
 .task-detail-content--planner-chat-expanded .detail-section--planner-chat {
@@ -1196,7 +1203,7 @@ FN-6500 fixes a tablet regression from FN-5599: the task-detail overlay offset a
     margin-bottom: var(--space-sm);
   }
 
-  .task-detail-content--planner-chat-expanded .detail-body--planner-chat {
+  .detail-body--planner-chat {
     padding: var(--space-sm);
   }
 }
