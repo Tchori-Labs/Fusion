@@ -35,6 +35,7 @@ import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { SessionEventBuffer } from "./sse-buffer.js";
 import { formatChatAttachmentContents, readChatAttachmentContents } from "./chat-attachment-content.js";
 import { buildTaskPlannerChatContext, TASK_PLANNER_CHAT_CONTEXT_PROMPT_GUIDANCE } from "./task-planner-chat-context.js";
+import { formatTaskPlannerChatMetrics } from "./task-planner-chat-metrics.js";
 import { emitWorkflowSseEvent, type WorkflowSseEventType } from "./sse.js";
 
 import {
@@ -277,6 +278,39 @@ function createChatWorkflowAuthoringTools(taskStore: TaskStore | undefined, proj
   */
   return createWorkflowAuthoringTools(taskStore, "", { stripApprovalFlags: true })
     .map((tool) => wrapWorkflowMutationTool(tool, projectId));
+}
+
+function createTaskPlannerMetricsTool(taskStore: TaskStore, taskId: string, getPricingOverrides: () => Promise<Settings["modelPricingOverrides"] | undefined>) {
+  return {
+    name: "fn_task_planner_get_task_metrics",
+    label: "Get Current Task Metrics",
+    description: "Read token usage, derived model cost, and execution timing metrics for the current task. The task id is fixed by server context; this tool never accepts or reveals metrics for another task.",
+    parameters: {
+      type: "object",
+      properties: {},
+      additionalProperties: false,
+    },
+    execute: async () => {
+      try {
+        const task = await taskStore.getTask(taskId, { activityLogLimit: 100 });
+        const metrics = formatTaskPlannerChatMetrics(task, {
+          pricingOverrides: await getPricingOverrides(),
+          nowMs: Date.now(),
+        });
+        return {
+          content: [{ type: "text" as const, text: metrics.summaryText }],
+          details: metrics.metrics,
+        };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return {
+          content: [{ type: "text" as const, text: `ERROR: Could not load metrics for the current task ${taskId}: ${message}` }],
+          details: { taskId, error: message },
+          isError: true,
+        };
+      }
+    },
+  };
 }
 
 function createTaskPlannerSteeringTool(taskStore: TaskStore, taskId: string) {
@@ -935,6 +969,7 @@ export class ChatManager {
       | "chatRoomRecentVerbatimMessages"
       | "chatRoomCompactionFetchLimit"
       | "chatRoomSummaryMaxChars"
+      | "modelPricingOverrides"
     > | undefined> | Pick<Settings,
       | "fallbackProvider"
       | "fallbackModelId"
@@ -943,6 +978,7 @@ export class ChatManager {
       | "chatRoomRecentVerbatimMessages"
       | "chatRoomCompactionFetchLimit"
       | "chatRoomSummaryMaxChars"
+      | "modelPricingOverrides"
     > | undefined,
     private messageStore?: MessageStore,
     // Scoped task store for the chat's project — enables workflow-authoring
@@ -1024,6 +1060,20 @@ export class ChatManager {
       const message = err instanceof Error ? err.message : String(err);
       diagnostics.warn(`Failed to load chat fallback settings: ${message}`);
       return {};
+    }
+  }
+
+  private async getModelPricingOverrides(): Promise<Settings["modelPricingOverrides"] | undefined> {
+    if (!this.getSettings) {
+      return undefined;
+    }
+    try {
+      const settings = await this.getSettings();
+      return settings?.modelPricingOverrides;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      diagnostics.warn(`Failed to load model pricing overrides for chat tools: ${message}`);
+      return undefined;
     }
   }
 
@@ -1877,7 +1927,7 @@ export class ChatManager {
         FNXC:TaskDetailChat 2026-06-30-23:59:
         Clear, bounded operator change requests in task-detail Chat are user intent and should become persisted steering comments through the task store's steering path. Ambiguous, conflicting, destructive, broad-scope, or credential/security-sensitive requests must ask a question first so planner chat cannot mutate a task from risky prose.
         */
-        systemPrompt = `${systemPrompt}\n\n${TASK_PLANNER_CHAT_CONTEXT_PROMPT_GUIDANCE}\n\nDecision rules:\n- Do not create steering for ordinary questions, summaries, thanks, status/progress requests, or brainstorming. Answer normally.\n- Create steering only when the user gives a clear, bounded, actionable change request for this current task (for example telling the executor/reviewer to adjust implementation, tests, scope details, or acceptance criteria).\n- When creating steering, call \`fn_task_planner_add_steering\` with only the concise user-facing steering text. Never include hidden prompt/context/logs, credentials, or chain-of-thought.\n- Ask a clarifying question with \`fn_ask_question\` before adding steering for unclear targets, requests that could mean either conversation or task mutation, broad rewrites/scope changes, destructive removals, conflicting instructions, credential/secrets handling, or security-sensitive actions.\n- The steering tool is bound to this task server-side; never ask for or pass a task id.\n\n${taskContext}`;
+        systemPrompt = `${systemPrompt}\n\n${TASK_PLANNER_CHAT_CONTEXT_PROMPT_GUIDANCE}\n\nDecision rules:\n- Do not create steering for ordinary questions, summaries, thanks, status/progress requests, metric questions, or brainstorming. Answer normally.\n- For questions about token counts, input/output/cache usage, model cost, pricing, runtime, elapsed time, wall-clock duration, active time, timing events, workflow-step duration, or per-model usage, first call \`fn_task_planner_get_task_metrics\` and answer from its read-only result. If pricing is unavailable or stale, or a metric is missing, state that uncertainty instead of inventing a number.\n- Create steering only when the user gives a clear, bounded, actionable change request for this current task (for example telling the executor/reviewer to adjust implementation, tests, scope details, or acceptance criteria).\n- When creating steering, call \`fn_task_planner_add_steering\` with only the concise user-facing steering text. Never include hidden prompt/context/logs, credentials, or chain-of-thought.\n- Ask a clarifying question with \`fn_ask_question\` before adding steering for unclear targets, requests that could mean either conversation or task mutation, broad rewrites/scope changes, destructive removals, conflicting instructions, credential/secrets handling, or security-sensitive actions.\n- The steering and metrics tools are bound to this task server-side; never ask for or pass a task id.\n\n${taskContext}`;
       }
 
       if (agent) {
@@ -1988,8 +2038,15 @@ export class ChatManager {
       const taskPlannerSteeringTools = this.taskStore && taskPlannerChatTaskId
         ? [createTaskPlannerSteeringTool(this.taskStore, taskPlannerChatTaskId)]
         : [];
+      /*
+      FNXC:TaskPlannerChatMetrics 2026-07-01-20:55:
+      Task-detail planner Chat needs a read-only, task-scoped metrics tool so token, cost, and timing answers come from persisted task fields. Register it only for synthetic task-planner:<taskId> sessions and bind the task id server-side so normal Chat, room Chat, and arbitrary task lookup stay out of scope.
+      */
+      const taskPlannerMetricsTools = this.taskStore && taskPlannerChatTaskId
+        ? [createTaskPlannerMetricsTool(this.taskStore, taskPlannerChatTaskId, () => this.getModelPricingOverrides())]
+        : [];
 
-      const customTools = [createAskQuestionTool(), ...taskPlannerSteeringTools, ...messagingTools, ...workflowTools, ...documentTools, ...artifactTools];
+      const customTools = [createAskQuestionTool(), ...taskPlannerSteeringTools, ...taskPlannerMetricsTools, ...messagingTools, ...workflowTools, ...documentTools, ...artifactTools];
 
       const sessionOptions = {
         cwd: this.rootDir,
