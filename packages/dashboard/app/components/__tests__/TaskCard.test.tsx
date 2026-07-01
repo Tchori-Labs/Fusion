@@ -263,6 +263,47 @@ describe("TaskCard", () => {
     }
   });
 
+  it("enables GitHub tracking from the board card context menu and hides the action after refresh", async () => {
+    const cleanupGeometry = mockBoardContextMenuGeometry();
+    const onOpenDetail = vi.fn();
+    const addToast = vi.fn();
+    const onUpdateTask = vi.fn(async () => makeTask({ githubTracking: { enabled: true } as any }));
+    const { rerender } = render(
+      <TaskCard
+        task={makeTask({ githubTracking: undefined })}
+        projectId="project-1"
+        onOpenDetail={onOpenDetail}
+        addToast={addToast}
+        onUpdateTask={onUpdateTask}
+      />,
+    );
+
+    try {
+      fireEvent.contextMenu(document.querySelector(".card")!, { clientX: 24, clientY: 28 });
+      fireEvent.click(screen.getByRole("menuitem", { name: "Enable GitHub tracking" }));
+
+      await waitFor(() => expect(onUpdateTask).toHaveBeenCalledWith("FN-001", { githubTracking: { enabled: true } }));
+      expect(addToast).toHaveBeenCalledWith("Requested GitHub tracking issue creation", "info");
+      expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+      expect(onOpenDetail).not.toHaveBeenCalled();
+
+      rerender(
+        <TaskCard
+          task={makeTask({ githubTracking: { enabled: true } as any })}
+          projectId="project-1"
+          onOpenDetail={onOpenDetail}
+          addToast={addToast}
+          onUpdateTask={onUpdateTask}
+        />,
+      );
+      await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+      fireEvent.contextMenu(document.querySelector(".card")!, { clientX: 24, clientY: 28 });
+      expect(screen.queryByRole("menuitem", { name: "Enable GitHub tracking" })).not.toBeInTheDocument();
+    } finally {
+      cleanupGeometry();
+    }
+  });
+
   it("opens the board card context menu from keyboard as a viewport portal, selects an action, and closes", async () => {
     const cleanupGeometry = mockBoardContextMenuGeometry();
     const onOpenDetail = vi.fn();

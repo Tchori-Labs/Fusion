@@ -9,7 +9,7 @@ import { COLUMNS, DEFAULT_COLUMN, getErrorMessage, isColumn } from "@fusion/core
 import { resolveEffectiveAutoMerge } from "../../../core/src/task-merge";
 import { useColumnLabel } from "../i18n/labels";
 import { sortTasksForDisplayColumn } from "./taskSorting";
-import { batchUpdateTaskModels, fetchNodes, fetchTaskDetail, rebuildTaskSpec, refreshPrStatus } from "../api";
+import { batchUpdateTaskModels, fetchNodes, fetchTaskDetail, rebuildTaskSpec, refreshPrStatus, updateTask } from "../api";
 import { TaskDetailContent } from "./TaskDetailModal";
 import { PrCreateModal } from "./PrCreateModal";
 import type { BoardWorkflowColumn, BoardWorkflowsPayload, ModelInfo, NodeInfo } from "../api";
@@ -1579,6 +1579,21 @@ export function ListView({
     }
   }, [addToast, projectId, t]);
 
+  /*
+  FNXC:GitHubTracking 2026-07-01-00:00:
+  List row/card context menus use the same PATCH helper as Task Detail to enable GitHub tracking, then push the returned task into parent and split-detail snapshots. This keeps desktop right-click and mobile long-press menus stateful without changing row selection/open behavior.
+  */
+  const handleListContextEnableGithubTracking = useCallback(async (task: Task) => {
+    try {
+      const updatedTask = await updateTask(task.id, { githubTracking: { enabled: true } }, projectId);
+      onTasksUpdated?.([updatedTask]);
+      setSelectedTaskSnapshot((previous) => previous?.id === updatedTask.id ? ({ ...previous, ...updatedTask, githubTracking: updatedTask.githubTracking } as Task | TaskDetail) : previous);
+      addToast(t("taskDetail.githubTracking.issueCreationRequested", "Requested GitHub tracking issue creation"), "info");
+    } catch (err) {
+      addToast(t("taskDetail.updateFailed", "Failed to update {{id}}: {{error}}", { id: task.id, error: getErrorMessage(err) }), "error");
+    }
+  }, [addToast, onTasksUpdated, projectId, t]);
+
   const handleListPrCreated = useCallback((task: Task, prInfo: PrInfo) => {
     const nextPrInfos = [...(task.prInfos ?? (task.prInfo ? [task.prInfo] : [])), prInfo];
     onTasksUpdated?.([{ ...task, prInfo: nextPrInfos[0] ?? prInfo, prInfos: nextPrInfos }]);
@@ -1682,6 +1697,7 @@ export function ListView({
       } : undefined,
       onStartPrReview: () => setPrCreateState({ task }),
       onCheckPrStatus: task.prInfo ? () => void handleListContextCheckPrStatus(task) : undefined,
+      onEnableGithubTracking: onTasksUpdated ? () => void handleListContextEnableGithubTracking(task) : undefined,
     });
 
     const actions = [...model.actions];
@@ -1699,7 +1715,7 @@ export function ListView({
       actions.push({ id: model.reviewAction.id, label: model.reviewAction.label, disabled: model.reviewAction.disabled, onSelect: model.reviewAction.onSelect });
     }
     return actions.filter((action) => action.tone === "note" || action.disabled === true || Boolean(action.onSelect));
-  }, [addToast, autoMerge, columnFlagsById, confirm, getListColumnLabel, handleListContextCheckPrStatus, handleListContextMove, handleListTaskArchive, handleListTaskDelete, isMobile, listContextMenuColumns, mergeStrategy, onDuplicateTask, onMergeTask, onOpenDetail, onPauseTask, onResetTask, onRetryTask, onUnpauseTask, onArchiveTask, projectId, t]);
+  }, [addToast, autoMerge, columnFlagsById, confirm, getListColumnLabel, handleListContextCheckPrStatus, handleListContextEnableGithubTracking, handleListContextMove, handleListTaskArchive, handleListTaskDelete, isMobile, listContextMenuColumns, mergeStrategy, onDuplicateTask, onMergeTask, onOpenDetail, onPauseTask, onResetTask, onRetryTask, onUnpauseTask, onArchiveTask, onTasksUpdated, projectId, t]);
 
   const contextMenuActions = useMemo(
     () => (contextMenuState ? buildListContextMenuActions(contextMenuState.task) : []),

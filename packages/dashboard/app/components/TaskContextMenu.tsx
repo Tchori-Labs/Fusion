@@ -77,6 +77,7 @@ export interface BuildTaskActionMenuModelOptions {
   onMerge?: () => void;
   onStartPrReview?: () => void;
   onCheckPrStatus?: () => void;
+  onEnableGithubTracking?: () => void;
 }
 
 export function getTaskPrAutomationLabel(t: TFunction<"app">, status?: string): string | undefined {
@@ -230,6 +231,18 @@ export function buildTaskActionMenuModel(options: BuildTaskActionMenuModelOption
     actions.push({ id: "retry", label: t("taskDetail.retry.btn", "Retry"), onSelect: options.onRetry });
   }
 
+  /*
+  FNXC:GitHubTracking 2026-07-01-00:00:
+  Board and List task menus mirror Task Detail's GitHub tracking enablement with one shared descriptor. Only hosts that can PATCH and refresh local task state inject the callback, so untracked tasks get a working shortcut and already-enabled/linked tasks never leave an empty disabled shell.
+  */
+  if (options.onEnableGithubTracking && task.githubTracking?.enabled !== true) {
+    actions.push({
+      id: "enable-github-tracking",
+      label: t("taskDetail.githubTracking.enableCheckboxLabel", "Enable GitHub tracking"),
+      onSelect: options.onEnableGithubTracking,
+    });
+  }
+
   if (hasResetHandler && isMutableLiveColumn(task.column, currentColumnFlags)) {
     actions.push({ id: "reset", label: t("taskDetail.reset.btn", "Reset"), tone: "danger", onSelect: options.onReset });
   }
@@ -255,7 +268,8 @@ export function buildTaskActionMenuModel(options: BuildTaskActionMenuModelOption
       task.status === "awaiting-approval" ||
       canRetryTask ||
       isTaskPaused ||
-      hasAssignedAgent,
+      hasAssignedAgent ||
+      Boolean(options.onEnableGithubTracking && task.githubTracking?.enabled !== true),
     isTaskPaused,
   };
 }

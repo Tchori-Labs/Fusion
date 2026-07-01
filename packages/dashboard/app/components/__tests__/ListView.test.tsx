@@ -29,6 +29,7 @@ vi.mock("../../api", () => ({
   fetchBoardWorkflows: vi.fn(() => new Promise(() => {})),
   rebuildTaskSpec: vi.fn().mockResolvedValue({}),
   refreshPrStatus: vi.fn().mockResolvedValue({}),
+  updateTask: vi.fn(),
   api: vi.fn().mockResolvedValue({ sessions: [] }),
 }));
 
@@ -200,7 +201,7 @@ vi.mock("../TaskDetailModal", () => ({
   ),
 }));
 
-import { fetchTaskDetail, batchUpdateTaskModels, fetchBoardWorkflows, fetchNodes, refreshPrStatus } from "../../api";
+import { fetchTaskDetail, batchUpdateTaskModels, fetchBoardWorkflows, fetchNodes, refreshPrStatus, updateTask } from "../../api";
 
 const mockConfirm = vi.fn();
 const mockConfirmWithChoice = vi.fn();
@@ -715,6 +716,54 @@ describe("ListView", () => {
     expect(onRetryTask).not.toHaveBeenCalled();
     expect(onArchiveTask).not.toHaveBeenCalled();
     viewportSpy.mockRestore();
+  });
+
+  it("enables GitHub tracking from desktop and mobile list context menus without selecting rows", async () => {
+    const desktopViewportSpy = mockDesktopViewport();
+    const onOpenDetail = vi.fn();
+    const onTasksUpdated = vi.fn();
+    vi.mocked(updateTask).mockResolvedValueOnce(createMockTask({ id: "FN-020", title: "Desktop tracking", column: "todo", githubTracking: { enabled: true } as any }));
+    const desktopTasks = [createMockTask({ id: "FN-020", title: "Desktop tracking", column: "todo", githubTracking: undefined })];
+    const desktopRender = renderListView({ tasks: desktopTasks, onOpenDetail, onTasksUpdated });
+
+    const desktopRow = document.querySelector('.list-row[data-id="FN-020"]') as HTMLElement;
+    fireEvent.contextMenu(desktopRow, { clientX: 40, clientY: 50 });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Enable GitHub tracking" }));
+
+    await waitFor(() => expect(updateTask).toHaveBeenCalledWith("FN-020", { githubTracking: { enabled: true } }, TEST_PROJECT_ID));
+    expect(onTasksUpdated).toHaveBeenCalledWith([expect.objectContaining({ id: "FN-020", githubTracking: { enabled: true } })]);
+    expect(mockAddToast).toHaveBeenCalledWith("Requested GitHub tracking issue creation", "info");
+    expect(onOpenDetail).not.toHaveBeenCalled();
+    expect(desktopRow).not.toHaveClass("list-row--selected");
+    desktopRender.unmount();
+    desktopViewportSpy.mockRestore();
+
+    vi.mocked(updateTask).mockResolvedValueOnce(createMockTask({ id: "FN-021", title: "Mobile tracking", column: "todo", githubTracking: { enabled: true } as any }));
+    vi.useFakeTimers();
+    const mobileViewportSpy = mockMobileViewport();
+    const mobileOnOpenDetail = vi.fn();
+    const mobileOnTasksUpdated = vi.fn();
+    renderListView({ tasks: [createMockTask({ id: "FN-021", title: "Mobile tracking", column: "todo", githubTracking: { enabled: false } as any })], onOpenDetail: mobileOnOpenDetail, onTasksUpdated: mobileOnTasksUpdated });
+
+    const mobileCard = document.querySelector('.list-card[data-id="FN-021"]') as HTMLElement;
+    fireEvent.pointerDown(mobileCard, { pointerType: "touch", pointerId: 1, clientX: 24, clientY: 32 });
+    act(() => {
+      vi.advanceTimersByTime(550);
+    });
+    fireEvent.pointerUp(mobileCard, { pointerType: "touch", pointerId: 1, clientX: 24, clientY: 32 });
+    fireEvent.click(mobileCard);
+    expect(mobileOnOpenDetail).not.toHaveBeenCalled();
+
+    fireEvent.pointerUp(screen.getByRole("menuitem", { name: "Enable GitHub tracking" }), { pointerType: "touch", pointerId: 2 });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(updateTask).toHaveBeenLastCalledWith("FN-021", { githubTracking: { enabled: true } }, TEST_PROJECT_ID);
+    expect(mobileOnTasksUpdated).toHaveBeenCalledWith([expect.objectContaining({ id: "FN-021", githubTracking: { enabled: true } })]);
+    expect(mobileOnOpenDetail).not.toHaveBeenCalled();
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    mobileViewportSpy.mockRestore();
+    vi.useRealTimers();
   });
 
   it("shows refine for custom workflow complete-column rows", async () => {

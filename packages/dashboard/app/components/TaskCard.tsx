@@ -384,7 +384,7 @@ interface TaskCardProps {
   globalPaused?: boolean;
   onUpdateTask?: (
     id: string,
-    updates: { title?: string; description?: string; dependencies?: string[]; dismissNearDuplicate?: boolean }
+    updates: { title?: string; description?: string; dependencies?: string[]; dismissNearDuplicate?: boolean; githubTracking?: { enabled?: boolean } }
   ) => Promise<Task>;
   onArchiveTask?: (id: string, options?: { removeLineageReferences?: boolean }) => Promise<Task>;
   onUnarchiveTask?: (id: string) => Promise<Task>;
@@ -711,7 +711,9 @@ function areTaskCardPropsEqual(previous: TaskCardProps, next: TaskCardProps): bo
       */
       return areTaskBadgeInfosEqual(pr, nextPr);
     }) &&
-    areTaskBadgeInfosEqual(previousTask.issueInfo, nextTask.issueInfo)
+    areTaskBadgeInfosEqual(previousTask.issueInfo, nextTask.issueInfo) &&
+    // FNXC:GitHubTracking 2026-07-01-00:00: Context-menu tracking actions depend on githubTracking.enabled, so memoized cards must repaint when a PATCH enables tracking and remove the now-ineligible menu item.
+    JSON.stringify(previousTask.githubTracking ?? null) === JSON.stringify(nextTask.githubTracking ?? null)
   );
 }
 
@@ -1879,7 +1881,19 @@ function TaskCardComponent({
 
   FNXC:BoardCardActions 2026-06-30-13:02:
   Manual pull-request projects need a distinct Start PR Review callback from direct Merge & Close so context menus open PrCreateModal instead of calling the merge endpoint.
+
+  FNXC:GitHubTracking 2026-07-01-00:00:
+  Board card context menus may enable GitHub tracking only when the board host supplies onUpdateTask, because that callback owns the existing PATCH flow plus optimistic/local task refresh. This keeps right-click, keyboard context menu, and touch long-press actions from becoming dead menu items in dock/plugin card embeddings.
   */
+  const handleTaskActionEnableGithubTracking = useCallback(async () => {
+    if (!onUpdateTask) return;
+    try {
+      await onUpdateTask(task.id, { githubTracking: { enabled: true } });
+      addToast(t("taskDetail.githubTracking.issueCreationRequested", "Requested GitHub tracking issue creation"), "info");
+    } catch (err) {
+      addToast(t("taskDetail.updateFailed", "Failed to update {{id}}: {{error}}", { id: task.id, error: getErrorMessage(err) }), "error");
+    }
+  }, [addToast, onUpdateTask, task.id, t]);
   const taskActionColumnLabel = useCallback((column: ColumnId) => {
     return taskMoveColumns?.find((candidate) => candidate.id === column)?.label ?? columnLabel(column);
   }, [columnLabel, taskMoveColumns]);
@@ -1908,6 +1922,7 @@ function TaskCardComponent({
     onMerge: onMergeTask ? handleTaskActionMerge : undefined,
     onStartPrReview: () => setIsPrCreateOpen(true),
     onCheckPrStatus: task.prInfo ? handleTaskActionCheckPrStatus : undefined,
+    onEnableGithubTracking: onUpdateTask ? handleTaskActionEnableGithubTracking : undefined,
   }), [
     task,
     t,
@@ -1923,6 +1938,7 @@ function TaskCardComponent({
     handleTaskActionArchive,
     handleTaskActionCheckPrStatus,
     handleTaskActionDelete,
+    handleTaskActionEnableGithubTracking,
     handleTaskActionDuplicate,
     handleTaskActionMerge,
     handleTaskActionReset,
@@ -1933,6 +1949,7 @@ function TaskCardComponent({
     isPaused,
     onDeleteTask,
     onMergeTask,
+    onUpdateTask,
     onOpenDetail,
     onOpenRefine,
     onPauseTask,
@@ -1943,7 +1960,7 @@ function TaskCardComponent({
     task.prInfo,
   ]);
   const contextMenuActions = useMemo<TaskMenuActionDescriptor[]>(() => {
-    if (!onDeleteTask && !onArchiveTask && !onUnarchiveTask && !onDuplicateTask && !onRetryTask && !onResetTask && !onPauseTask && !onUnpauseTask && !onMergeTask && !onMoveTask && !onOpenRefine) {
+    if (!onDeleteTask && !onArchiveTask && !onUnarchiveTask && !onDuplicateTask && !onRetryTask && !onResetTask && !onPauseTask && !onUnpauseTask && !onMergeTask && !onMoveTask && !onOpenRefine && !onUpdateTask) {
       return [];
     }
     const actions = [...taskActionMenuModel.actions];
@@ -1966,7 +1983,7 @@ function TaskCardComponent({
       }
     }
     return actions.filter((action) => action.tone === "note" || action.disabled === true || Boolean(action.onSelect));
-  }, [handleTaskActionArchive, handleTaskActionMove, handleTaskActionUnarchive, onArchiveTask, onDeleteTask, onDuplicateTask, onMergeTask, onMoveTask, onOpenRefine, onPauseTask, onResetTask, onRetryTask, onUnarchiveTask, onUnpauseTask, t, task.column, taskActionMenuModel.actions, taskActionMenuModel.moveTransitions, taskActionMenuModel.reviewAction]);
+  }, [handleTaskActionArchive, handleTaskActionMove, handleTaskActionUnarchive, onArchiveTask, onDeleteTask, onDuplicateTask, onMergeTask, onMoveTask, onOpenRefine, onPauseTask, onResetTask, onRetryTask, onUnarchiveTask, onUnpauseTask, onUpdateTask, t, task.column, taskActionMenuModel.actions, taskActionMenuModel.moveTransitions, taskActionMenuModel.reviewAction]);
   const hasContextMenuActions = contextMenuActions.length > 0;
 
   const closeContextMenu = useCallback(() => {
@@ -1975,7 +1992,7 @@ function TaskCardComponent({
 
   useEffect(() => {
     closeContextMenu();
-  }, [closeContextMenu, task.column, task.id]);
+  }, [closeContextMenu, task.column, task.githubTracking?.enabled, task.id]);
 
   const clearLongPressTimer = useCallback(() => {
     if (longPressTimerRef.current) {

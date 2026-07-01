@@ -113,7 +113,7 @@ interface ColumnProps {
   globalPaused?: boolean;
   onUpdateTask?: (
     id: string,
-    updates: { title?: string; description?: string; dependencies?: string[] }
+    updates: { title?: string; description?: string; dependencies?: string[]; githubTracking?: { enabled?: boolean } }
   ) => Promise<Task>;
   onRetryTask?: (id: string) => Promise<Task>;
   onArchiveTask?: (id: string, options?: { removeLineageReferences?: boolean }) => Promise<Task>;

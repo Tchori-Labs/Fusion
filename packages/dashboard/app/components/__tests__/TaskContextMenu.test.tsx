@@ -48,6 +48,44 @@ describe("TaskContextMenu shared task action model", () => {
     expect(actionIds(makeTask({ column: "archived" }), { hasResetHandler: true })).toEqual(["delete", "respecify"]);
   });
 
+  it("exposes GitHub tracking enablement only for untracked tasks with a host callback", () => {
+    const onEnableGithubTracking = vi.fn();
+    const untracked = buildTaskActionMenuModel({
+      task: makeTask({ githubTracking: undefined }),
+      t,
+      columnLabel: columnLabel as any,
+      onEnableGithubTracking,
+    });
+    const disabled = buildTaskActionMenuModel({
+      task: makeTask({ githubTracking: { enabled: false } as any }),
+      t,
+      columnLabel: columnLabel as any,
+      onEnableGithubTracking,
+    });
+    const enabled = buildTaskActionMenuModel({
+      task: makeTask({ githubTracking: { enabled: true } as any }),
+      t,
+      columnLabel: columnLabel as any,
+      onEnableGithubTracking,
+    });
+    const linked = buildTaskActionMenuModel({
+      task: makeTask({ githubTracking: { enabled: true, issue: { owner: "o", repo: "r", number: 1 } } as any }),
+      t,
+      columnLabel: columnLabel as any,
+      onEnableGithubTracking,
+    });
+    const noCallback = buildTaskActionMenuModel({ task: makeTask(), t, columnLabel: columnLabel as any });
+
+    expect(untracked.actions.find((action) => action.id === "enable-github-tracking")?.label).toBe("Enable GitHub tracking");
+    expect(disabled.actions.map((action) => action.id)).toContain("enable-github-tracking");
+    expect(enabled.actions.map((action) => action.id)).not.toContain("enable-github-tracking");
+    expect(linked.actions.map((action) => action.id)).not.toContain("enable-github-tracking");
+    expect(noCallback.actions.map((action) => action.id)).not.toContain("enable-github-tracking");
+
+    untracked.actions.find((action) => action.id === "enable-github-tracking")?.onSelect?.();
+    expect(onEnableGithubTracking).toHaveBeenCalledTimes(1);
+  });
+
   it("exposes pause, unpause, and paused-by-agent note with detail labels", () => {
     const active = buildTaskActionMenuModel({ task: makeTask(), t, columnLabel: columnLabel as any });
     expect(active.actions.find((action) => action.id === "pause")?.label).toBe("Pause");
