@@ -7058,7 +7058,12 @@ export class TaskExecutor {
     FNXC:FastOptionalSteps 2026-06-30-09:14:
     Fast skips top-level custom prompt/script/gate review bodies by default, but an enabled optional-group template is explicit operator intent. The graph marks those template nodes so Browser Verification and custom optional groups still run under fast mode.
     */
-    if (live.executionMode === "fast" && !optionalGroupId && !cfg.seam && (node.kind === "prompt" || node.kind === "script" || node.kind === "gate")) {
+    const isCompletionSummaryNode = cfg.summaryTarget === "task" || node.id === "completion-summary";
+    /*
+    FNXC:WorkflowCompletion 2026-07-01-18:42:
+    Fast mode skips review/validation work, not the agent-authored completion summary. FN-7335 reached review with "Fast mode — custom graph node 'completion-summary' skipped"; keep summary nodes executable so fast tasks still produce the same review/done card summary as standard tasks.
+    */
+    if (live.executionMode === "fast" && !isCompletionSummaryNode && !optionalGroupId && !cfg.seam && (node.kind === "prompt" || node.kind === "script" || node.kind === "gate")) {
       executorLog.log(`${live.id}: fast mode — skipping custom graph node '${node.id}'`);
       await this.store.logEntry(
         live.id,

@@ -377,6 +377,24 @@ describe("fast mode workflow/runtime invariants", () => {
     expect(executeScript).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["completion-summary id", { id: "completion-summary", kind: "prompt", config: { prompt: "summarize" } }],
+    ["summaryTarget task", { id: "custom-summary", kind: "prompt", config: { prompt: "summarize", summaryTarget: "task" } }],
+  ])("does not skip completion summary nodes in fast mode by %s", async (_label, node) => {
+    const { executor } = makeExecutorForTask(task({ executionMode: "fast", worktree: "/tmp/wt" }));
+    const executeStep = vi.spyOn(executor as any, "executeWorkflowStep").mockResolvedValue({ success: true, output: "Done." });
+
+    const result = await (executor as any).runGraphCustomNode(
+      node,
+      task({ executionMode: "fast" }),
+      {},
+      undefined,
+    );
+
+    expect(result).toMatchObject({ outcome: "success", value: "passed" });
+    expect(executeStep).toHaveBeenCalledTimes(1);
+  });
+
   it.each(["prompt", "script", "gate"])("executes optional-group template %s nodes in fast mode", async (kind) => {
     const { executor } = makeExecutorForTask(task({ executionMode: "fast", worktree: "/tmp/wt" }));
     const executeStep = vi.spyOn(executor as any, "executeWorkflowStep").mockResolvedValue({ success: true });
