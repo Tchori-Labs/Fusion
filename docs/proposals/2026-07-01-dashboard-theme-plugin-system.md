@@ -47,8 +47,15 @@ Recommended model:
    - typography/font scale
    - semantic status colors
    - density presets
+   - imported from or exported to `DESIGN.md` files
 
-2. Component skinning
+2. DESIGN.md as the theme interchange format
+   - a theme should be representable as a `DESIGN.md` file in the project root or theme package
+   - the YAML front matter is the normative token source; the Markdown body explains taste, usage, and constraints for agents and humans
+   - Fusion should be able to lint DESIGN.md files with the `@google/design.md` CLI, including token references and WCAG contrast checks
+   - Fusion should eventually export a selected theme to Tailwind/DTCG JSON and import community DESIGN.md systems from sources such as designmd.ai
+
+3. Component skinning
    - wrappers or variants for shared primitives: cards, buttons, tabs, sidebars, tables, kanban columns, headers, modals
    - no backend access here; purely presentational
 
@@ -83,9 +90,11 @@ Each theme ships a manifest:
   "type": "dashboard-theme",
   "entry": "dist/index.js",
   "css": "dist/theme.css",
-  "capabilities": ["tokens", "componentVariants"],
+  "design": "DESIGN.md",
+  "capabilities": ["tokens", "designMd", "componentVariants"],
   "supports": {
-    "fusionDashboardApi": ">=0.1.0"
+    "fusionDashboardApi": ">=0.1.0",
+    "designMd": "alpha"
   }
 }
 ```
@@ -221,6 +230,7 @@ Create docs and types for:
 - file actions
 - navigation actions
 - theme token schema
+- DESIGN.md import/export and lint pipeline
 - plugin/theme manifest fields
 
 Acceptance criteria:
@@ -238,6 +248,9 @@ Add a small theme registry:
 - built-in polished-product theme
 - project-scoped selection setting
 - CSS variable injection
+- `DESIGN.md` import from project root or theme package
+- `@google/design.md` lint in the theme validation path
+- optional export to Tailwind/DTCG JSON for implementation tooling
 
 Acceptance criteria:
 
@@ -277,11 +290,12 @@ Acceptance criteria:
 
 ## Maintainer decision points
 
-1. Should v1 define “theme” as tokens only, or include view/shell plugins from the start?
+1. Should v1 define “theme” as DESIGN.md-backed tokens only, or include view/shell plugins from the start?
 2. Should theme selection be global, per project, or both?
 3. Should bundled themes live under `packages/dashboard` or `plugins/`?
 4. Should plugin dashboard views be required to use a scoped host API client instead of raw `fetch`?
 5. How strict should the security boundary be for local theme code?
+6. Should Fusion ship a DESIGN.md browser/importer for community systems from designmd.ai, or only support local files first?
 
 ## Recommended first move
 
