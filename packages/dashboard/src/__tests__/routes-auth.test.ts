@@ -1175,6 +1175,31 @@ describe("Droid CLI auth routes", () => {
         getSettings: vi.fn().mockResolvedValue({ useDroidCli: false }),
       }),
     });
+
+    /*
+    FNXC:DashboardTests 2026-06-30-17:15 (FN-5048 — no slow tests):
+    GET /auth/status probes claude/cursor/llama CLIs UNCONDITIONALLY (register-auth-routes.ts:
+    probeClaudeCli/probeCursorCliProvider/probeLlamaCpp run regardless of the enabled toggle).
+    The two /auth/status tests in this describe previously mocked only probeDroidCli, so the
+    other three ran real subprocess probes and each blocked on a real CLI-absent timeout — ~6s
+    per test (12s of the suite's wall time). Stub every CLI probe here so no real subprocess or
+    wall-clock wait remains; the droid-specific tests still override probeDroidCli as needed.
+    */
+    vi.spyOn(claudeCliProbeModule, "probeClaudeCli").mockResolvedValue({
+      available: false,
+      reason: "mocked unavailable",
+      probeDurationMs: 0,
+    });
+    vi.spyOn(runtimeProviderProbesModule, "probeCursorCliProvider").mockResolvedValue({
+      available: false,
+      reason: "mocked unavailable",
+      probeDurationMs: 0,
+    });
+    vi.spyOn(llamaCppProbeModule, "probeLlamaCpp").mockResolvedValue({
+      available: false,
+      reason: "mocked unavailable",
+      probeDurationMs: 0,
+    });
   });
 
   function buildApp(options?: Parameters<typeof createApiRoutes>[1]) {
