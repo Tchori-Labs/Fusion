@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 import { randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile, stat, writeFile, rename, unlink, rm } from "node:fs/promises";
 import { join } from "node:path";
-import { existsSync, watch, type Dirent, type FSWatcher } from "node:fs";
+import { existsSync, statSync, watch, type Dirent, type FSWatcher } from "node:fs";
 import { detectWorkspaceRepos, saveWorkspaceConfig, loadWorkspaceConfig } from "./git-repository.js";
 import type { Task, TaskDetail, TaskCreateInput, TaskAttachment, AgentLogEntry, BoardConfig, Column, ColumnId, CheckoutClaimPrecondition, MergeResult, Settings, GlobalSettings, ProjectSettings, ActivityLogEntry, ActivityEventType, TaskDocument, TaskDocumentRevision, TaskDocumentCreateInput, TaskDocumentWithTask, Artifact, ArtifactCreateInput, ArtifactType, ArtifactWithTask, InboxTask, TaskLogEntry, RunMutationContext, RunAuditEvent, RunAuditEventInput, RunAuditEventFilter, ArchivedTaskEntry, ArchiveAgentLogMode, TaskPriority, SourceType, WorkflowStepTemplate, Agent, AutostashOrphanRecord, TaskCommitAssociation, TaskCommitAssociationMatchSource, TaskCommitAssociationConfidence, CommitAssociationDiffBackfillReport, GithubIssueAction, MergeQueueEntry, MergeQueueEnqueueOptions, MergeQueueAcquireOptions, MergeQueueReleaseOutcome, HandoffToReviewOptions, GoalCitation, GoalCitationFilter, GoalCitationInput, GoalCitationSurface, BranchGroup, BranchGroupCreateInput, BranchGroupUpdate, TaskBranchAssignmentMode, MergeRequestRecord, MergeRequestState, MergeRequestWorkflowProjectionOptions, CompletionHandoffMarker, WorkflowWorkItem, WorkflowWorkItemDueFilter, WorkflowWorkItemKind, WorkflowWorkItemState, WorkflowWorkItemTransitionPatch, WorkflowWorkItemUpsertInput, PrEntity, PrEntityCreateInput, PrEntityUpdate, PrEntityState, PrThreadState, PrThreadOutcome, PrConflictState, PrChecksRollup, PrReviewDecision, PluginActivation, PluginActivationInput } from "./types.js";
 import { createActivityLogSnapshot, createRunAuditSnapshot, createTaskMetadataSnapshot, toTaskMetadataRecord, validateSnapshotEnvelope, type ActivityLogSnapshot, type RunAuditSnapshot, type TaskMetadataSnapshot } from "./shared-mesh-state.js";
@@ -163,7 +163,7 @@ import { SecretsStore } from "./secrets-store.js";
 import { MasterKeyManager } from "./master-key.js";
 import { hasSyncPassphraseConfigured } from "./secrets-sync-passphrase.js";
 import { getTaskDoneBypassBlocker, getTaskMergeBlocker, resolveTaskMergeTarget } from "./task-merge.js";
-import { getInReviewStallReason } from "./in-review-stall.js";
+import { DEFAULT_STALE_MERGING_MIN_AGE_MS, getInReviewStallReason } from "./in-review-stall.js";
 import { getInReviewStalledSignal } from "./in-review-stalled.js";
 import { getStalePausedReviewSignal } from "./stale-paused-review.js";
 import { getStalePausedTodoSignal } from "./stale-paused-todo.js";
@@ -174,6 +174,7 @@ import { createLogger } from "./logger.js";
 import {
   appendAgentLogEntriesSync,
   countAgentLogEntries,
+  getAgentLogFilePath,
   pruneAgentLogFiles as pruneAgentLogFileEntries,
   readAgentLogEntries,
   readAgentLogEntriesByTimeRange,
@@ -2686,6 +2687,53 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
       if (Number.isFinite(ms)) total += ms;
     }
     return total;
+  }
+
+  private getLatestAgentLogActivityMs(taskId: string): number | undefined {
+    let latest = Number.NEGATIVE_INFINITY;
+    for (let index = this.agentLogBuffer.length - 1; index >= 0; index -= 1) {
+      const entry = this.agentLogBuffer[index];
+      if (entry?.taskId !== taskId) continue;
+      const parsed = Date.parse(entry.timestamp);
+      if (Number.isFinite(parsed)) {
+        latest = Math.max(latest, parsed);
+        break;
+      }
+    }
+
+    try {
+      const filePath = getAgentLogFilePath(this.taskDir(taskId));
+      if (existsSync(filePath)) {
+        const fileMtimeMs = statSync(filePath).mtimeMs;
+        if (Number.isFinite(fileMtimeMs)) {
+          latest = Math.max(latest, fileMtimeMs);
+        }
+      }
+    } catch (error) {
+      storeLog.warn("Skipping agent-log freshness check for stalled badge hydration", {
+        taskId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+
+    return Number.isFinite(latest) ? latest : undefined;
+  }
+
+  private hasFreshAgentLogActivitySinceTaskUpdate(task: Pick<Task, "id" | "column" | "updatedAt">, now: number): boolean {
+    if (task.column !== "in-review") return false;
+    const latestAgentLogMs = this.getLatestAgentLogActivityMs(task.id);
+    if (latestAgentLogMs == null) return false;
+
+    const updatedAtMs = Date.parse(task.updatedAt);
+    if (Number.isFinite(updatedAtMs) && latestAgentLogMs <= updatedAtMs) {
+      return false;
+    }
+
+    /*
+    FNXC:WorkflowLifecycle 2026-07-01-23:27:
+    In-review merge/review agents stream progress to agent-log JSONL without necessarily mutating the task row. Treat fresh agent-log writes as active ownership for stall-badge hydration so the board does not show Stalled/Merge stalled while a merger is visibly making progress.
+    */
+    return Math.max(0, now - latestAgentLogMs) < DEFAULT_STALE_MERGING_MIN_AGE_MS;
   }
 
   private getTaskSelectClauseWithActivityLogLimit(limit: number): string {
@@ -5352,11 +5400,14 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
       const now = Date.now();
       const settings = await this.getSettingsFast();
       const mergeQueuedTaskIds = this.getMergeQueuedTaskIds();
+      const hasFreshAgentLogActivity = this.hasFreshAgentLogActivitySinceTaskUpdate(task, now);
+      const executingTaskIds = hasFreshAgentLogActivity ? new Set([task.id]) : undefined;
       task.inReviewStall = mergeQueuedTaskIds.has(task.id)
         ? undefined
         : getInReviewStallReason(task, {
           now,
           autoMerge: allowsAutoMergeProcessing(task, settings),
+          executingTaskIds,
           engineActiveSinceMs: settings.engineActiveSinceMs,
           engineActivationGraceMs: settings.engineActivationGraceMs,
         });
@@ -5366,10 +5417,11 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
           now,
           thresholdMs: settings.inReviewStalledThresholdMs,
           autoMerge: allowsAutoMergeProcessing(task, settings),
+          executingTaskIds,
           engineActiveSinceMs: settings.engineActiveSinceMs,
           engineActivationGraceMs: settings.engineActivationGraceMs,
         });
-      task.stalledReview = mergeQueuedTaskIds.has(task.id) ? undefined : detectStalledReview(task, { now });
+      task.stalledReview = mergeQueuedTaskIds.has(task.id) || hasFreshAgentLogActivity ? undefined : detectStalledReview(task, { now });
       // Derived at read time only; retrySummary is never persisted to SQLite.
       task.retrySummary = computeRetrySummary(task);
 
@@ -5904,9 +5956,12 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
     const activeTasks = await Promise.all((rows as unknown as TaskRow[]).map(async (row) => {
       const task = this.rowToTask(row);
       const isMergeQueued = mergeQueuedTaskIds.has(task.id);
+      const hasFreshAgentLogActivity = this.hasFreshAgentLogActivitySinceTaskUpdate(task, now);
+      const executingTaskIds = hasFreshAgentLogActivity ? new Set([task.id]) : undefined;
       task.inReviewStall = isMergeQueued ? undefined : getInReviewStallReason(task, {
         now,
         autoMerge: allowsAutoMergeProcessing(task, settings),
+        executingTaskIds,
         engineActiveSinceMs: settings.engineActiveSinceMs,
         engineActivationGraceMs: settings.engineActivationGraceMs,
       });
@@ -5920,6 +5975,7 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
         now,
         thresholdMs: settings.inReviewStalledThresholdMs,
         autoMerge: allowsAutoMergeProcessing(task, settings),
+        executingTaskIds,
         engineActiveSinceMs: settings.engineActiveSinceMs,
         engineActivationGraceMs: settings.engineActivationGraceMs,
       });
@@ -5948,7 +6004,7 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
           }
         }
       }
-      task.stalledReview = isMergeQueued ? undefined : detectStalledReview(task, { now });
+      task.stalledReview = isMergeQueued || hasFreshAgentLogActivity ? undefined : detectStalledReview(task, { now });
       // Derived at read time only; retrySummary is never persisted to SQLite.
       task.retrySummary = computeRetrySummary(task);
 
@@ -6423,9 +6479,12 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
     const tasks = rows.slice(0, resolvedLimit).map((row) => {
       const task = this.rowToTask(row);
       const isMergeQueued = mergeQueuedTaskIds.has(task.id);
+      const hasFreshAgentLogActivity = this.hasFreshAgentLogActivitySinceTaskUpdate(task, now);
+      const executingTaskIds = hasFreshAgentLogActivity ? new Set([task.id]) : undefined;
       task.inReviewStall = isMergeQueued ? undefined : getInReviewStallReason(task, {
         now,
         autoMerge: allowsAutoMergeProcessing(task, settings),
+        executingTaskIds,
         engineActiveSinceMs: settings.engineActiveSinceMs,
         engineActivationGraceMs: settings.engineActivationGraceMs,
       });
@@ -6439,6 +6498,7 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
         now,
         thresholdMs: settings.inReviewStalledThresholdMs,
         autoMerge: allowsAutoMergeProcessing(task, settings),
+        executingTaskIds,
         engineActiveSinceMs: settings.engineActiveSinceMs,
         engineActivationGraceMs: settings.engineActivationGraceMs,
       });
@@ -6468,7 +6528,7 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
         }
       }
       task.timedExecutionMs = this.computeTimedExecutionMs(task.log);
-      task.stalledReview = isMergeQueued ? undefined : detectStalledReview(task, { now });
+      task.stalledReview = isMergeQueued || hasFreshAgentLogActivity ? undefined : detectStalledReview(task, { now });
       // Derived at read time only; retrySummary is never persisted to SQLite.
       task.retrySummary = computeRetrySummary(task);
       task.log = [];
@@ -6588,9 +6648,12 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
     const activeMatches = await Promise.all(rows.map(async (row) => {
       const task = this.rowToTask(row);
       const isMergeQueued = mergeQueuedTaskIds.has(task.id);
+      const hasFreshAgentLogActivity = this.hasFreshAgentLogActivitySinceTaskUpdate(task, now);
+      const executingTaskIds = hasFreshAgentLogActivity ? new Set([task.id]) : undefined;
       task.inReviewStall = isMergeQueued ? undefined : getInReviewStallReason(task, {
         now,
         autoMerge: allowsAutoMergeProcessing(task, settings),
+        executingTaskIds,
         engineActiveSinceMs: settings.engineActiveSinceMs,
         engineActivationGraceMs: settings.engineActivationGraceMs,
       });
@@ -6604,6 +6667,7 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
         now,
         thresholdMs: settings.inReviewStalledThresholdMs,
         autoMerge: allowsAutoMergeProcessing(task, settings),
+        executingTaskIds,
         engineActiveSinceMs: settings.engineActiveSinceMs,
         engineActivationGraceMs: settings.engineActivationGraceMs,
       });

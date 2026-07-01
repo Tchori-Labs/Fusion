@@ -11,6 +11,7 @@ import type {
   FixFeatureCreatedPayload,
   ChatStore,
   AutomationStore,
+  AgentLogEntry,
 } from "@fusion/core";
 import type { AiSessionStore } from "./ai-session-store.js";
 
@@ -530,6 +531,15 @@ export function createSSE(
     const onMerged = (result: unknown) => {
       send(`event: task:merged\ndata: ${JSON.stringify(stripTaskEventHeavyFields(result))}\n\n`);
     };
+    const onAgentLog = (entry: AgentLogEntry) => {
+      const payload = {
+        taskId: entry.taskId,
+        timestamp: entry.timestamp,
+        type: entry.type,
+        agent: entry.agent,
+      };
+      send(`event: agent:log\ndata: ${JSON.stringify(payload)}\n\n`);
+    };
 
     const onArtifactRegistered = (artifact: unknown) => {
       /* FNXC:ArtifactRegistry 2026-06-27-00:00: Forward TaskStore's authoritative artifact registration event so live artifact surfaces refresh even when the best-effort inbox notification is absent or delayed. */
@@ -827,6 +837,7 @@ export function createSSE(
       store.off("task:updated", onUpdated);
       store.off("task:deleted", onDeleted);
       store.off("task:merged", onMerged);
+      store.off("agent:log", onAgentLog);
       store.off("artifact:registered", onArtifactRegistered);
       if (missionStore) {
         missionStore.off("mission:created", onMissionCreated);
@@ -937,6 +948,11 @@ export function createSSE(
     store.on("task:updated", onUpdated);
     store.on("task:deleted", onDeleted);
     store.on("task:merged", onMerged);
+    /*
+    FNXC:DashboardStallBadges 2026-07-01-23:42:
+    Agent log streaming is authoritative evidence that an in-review agent is active even when the task row has not changed. Forward compact log metadata on the board stream so clients can clear false Stalled/Merge stalled badges without rewriting the full task for every log line.
+    */
+    store.on("agent:log", onAgentLog);
     store.on("artifact:registered", onArtifactRegistered);
 
     if (missionStore) {
