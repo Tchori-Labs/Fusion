@@ -366,6 +366,92 @@ describe("register-command-center-routes", () => {
     expect((body.totals as { totalTokens: number }).totalTokens).toBe(200);
   });
 
+  it("returns every Last 30 days per-model bucket in JSON and CSV token analytics", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-02T00:00:00.000Z"));
+    dbA.prepare(
+      `INSERT INTO tasks
+         (id, description, "column", modelProvider, modelId,
+          tokenUsageInputTokens, tokenUsageOutputTokens, tokenUsageCachedTokens, tokenUsageCacheWriteTokens, tokenUsageTotalTokens,
+          tokenUsageLastUsedAt, tokenUsageModelProvider, tokenUsageModelId, tokenUsagePerModel, createdAt, updatedAt)
+       VALUES (?, 'desc', 'todo', NULL, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      "FN-last-30-multi",
+      950,
+      450,
+      0,
+      0,
+      1_400,
+      "2026-07-05T00:00:00.000Z",
+      "openai",
+      "gpt-5",
+      JSON.stringify([
+        {
+          modelProvider: "anthropic",
+          modelId: "claude-sonnet-4-5",
+          inputTokens: 700,
+          outputTokens: 300,
+          cachedTokens: 0,
+          cacheWriteTokens: 0,
+          totalTokens: 1_000,
+          firstUsedAt: "2026-06-15T00:00:00.000Z",
+          lastUsedAt: "2026-06-15T00:00:00.000Z",
+        },
+        {
+          modelProvider: "openai",
+          modelId: "gpt-5",
+          inputTokens: 250,
+          outputTokens: 150,
+          cachedTokens: 0,
+          cacheWriteTokens: 0,
+          totalTokens: 400,
+          firstUsedAt: "2026-06-20T00:00:00.000Z",
+          lastUsedAt: "2026-06-20T00:00:00.000Z",
+        },
+        {
+          modelProvider: "zai",
+          modelId: "glm-outside",
+          inputTokens: 10,
+          outputTokens: 10,
+          cachedTokens: 0,
+          cacheWriteTokens: 0,
+          totalTokens: 20,
+          firstUsedAt: "2026-07-03T00:00:00.000Z",
+          lastUsedAt: "2026-07-03T00:00:00.000Z",
+        },
+      ]),
+      "2026-06-15T00:00:00.000Z",
+      "2026-07-05T00:00:00.000Z",
+    );
+
+    const json = await request(
+      app,
+      "GET",
+      "/api/command-center/tokens?from=2026-06-02T00%3A00%3A00.000Z&groupBy=model&granularity=day&projectId=proj-a",
+    );
+    expect(json.status).toBe(200);
+    expect(json.body).toMatchObject({ from: "2026-06-02T00:00:00.000Z", to: "2026-07-02T00:00:00.000Z", groupBy: "model" });
+    const groups = new Map((json.body as { groups: { key: string | null; totalTokens: number }[] }).groups.map((group) => [group.key, group.totalTokens]));
+    expect(groups.get("claude-sonnet-4-5")).toBe(1_000);
+    expect(groups.get("gpt-5")).toBe(400);
+    expect(groups.has("glm-outside")).toBe(false);
+    expect((json.body as { totals: { totalTokens: number; nTasks: number } }).totals).toMatchObject({ totalTokens: 1_400, nTasks: 1 });
+    expect((json.body as { series: { bucket: string; totalTokens: number }[] }).series.map((point) => [point.bucket, point.totalTokens])).toEqual([
+      ["2026-06-15", 1_000],
+      ["2026-06-20", 400],
+    ]);
+
+    const csv = await request(
+      app,
+      "GET",
+      "/api/command-center/tokens?from=2026-06-02T00%3A00%3A00.000Z&groupBy=model&projectId=proj-a&format=csv",
+    );
+    expect(csv.status).toBe(200);
+    expect(csv.body as string).toContain("claude-sonnet-4-5");
+    expect(csv.body as string).toContain("gpt-5");
+    expect(csv.body as string).not.toContain("glm-outside");
+  });
+
   it("returns token time-series buckets when granularity is requested", async () => {
     const res = await request(
       app,

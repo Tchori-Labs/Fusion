@@ -101,6 +101,7 @@ function emptyTotals(): TokenTotals {
 }
 
 interface TaskTokenRow {
+  id: string;
   inputTokens: number | null;
   outputTokens: number | null;
   cachedTokens: number | null;
@@ -192,12 +193,17 @@ function finalizeCost(acc: CostAccumulator): CostResult {
   };
 }
 
-function parsePerModelRows(row: TaskTokenRow): TaskTokenRow[] {
-  if (!row.tokenUsagePerModel) return [];
+interface ParsedPerModelRows {
+  valid: boolean;
+  rows: TaskTokenRow[];
+}
+
+function parsePerModelRows(row: TaskTokenRow): ParsedPerModelRows {
+  if (!row.tokenUsagePerModel) return { valid: false, rows: [] };
   try {
     const parsed = JSON.parse(row.tokenUsagePerModel) as unknown;
-    if (!Array.isArray(parsed) || parsed.length === 0) return [];
-    return parsed
+    if (!Array.isArray(parsed) || parsed.length === 0) return { valid: false, rows: [] };
+    const rows = parsed
       .filter((entry): entry is Partial<TaskTokenUsagePerModel> => entry !== null && typeof entry === "object")
       .map((entry) => {
         const inputTokens = Number.isFinite(entry.inputTokens) ? Number(entry.inputTokens) : 0;
@@ -216,14 +222,20 @@ function parsePerModelRows(row: TaskTokenRow): TaskTokenRow[] {
           totalTokens,
           tokenUsageModelProvider: typeof entry.modelProvider === "string" ? entry.modelProvider : null,
           tokenUsageModelId: typeof entry.modelId === "string" ? entry.modelId : null,
+          tokenUsageLastUsedAt: typeof entry.lastUsedAt === "string" ? entry.lastUsedAt : row.tokenUsageLastUsedAt,
         };
       });
+    return { valid: rows.length > 0, rows };
   } catch {
-    return [];
+    return { valid: false, rows: [] };
   }
 }
 
-function addRow(totals: TokenTotals, row: TaskTokenRow): void {
+function isWithinRange(isoTimestamp: string, from?: string, to?: string): boolean {
+  return (from === undefined || isoTimestamp >= from) && (to === undefined || isoTimestamp <= to);
+}
+
+function addRow(totals: TokenTotals, row: TaskTokenRow, taskIds?: Set<string>): void {
   totals.inputTokens += row.inputTokens ?? 0;
   totals.outputTokens += row.outputTokens ?? 0;
   totals.cachedTokens += row.cachedTokens ?? 0;
@@ -237,7 +249,10 @@ function addRow(totals: TokenTotals, row: TaskTokenRow): void {
       (row.outputTokens ?? 0) +
       (row.cachedTokens ?? 0) +
       (row.cacheWriteTokens ?? 0);
-  totals.nTasks += 1;
+  if (!taskIds || !taskIds.has(row.id)) {
+    totals.nTasks += 1;
+    taskIds?.add(row.id);
+  }
 }
 
 function isoWeekBucket(isoTimestamp: string): string {
@@ -277,19 +292,28 @@ export function aggregateTokenAnalytics(
 ): TokenAnalytics {
   const clauses: string[] = ["tokenUsageLastUsedAt IS NOT NULL"];
   const params: string[] = [];
+  const rangeClauses: string[] = [];
   if (query.from !== undefined) {
-    clauses.push("tokenUsageLastUsedAt >= ?");
+    rangeClauses.push("tokenUsageLastUsedAt >= ?");
     params.push(query.from);
   }
   if (query.to !== undefined) {
-    clauses.push("tokenUsageLastUsedAt <= ?");
+    rangeClauses.push("tokenUsageLastUsedAt <= ?");
     params.push(query.to);
+  }
+  if (rangeClauses.length > 0) {
+    /*
+     * FNXC:CommandCenterTokenRanges 2026-07-02-00:00:
+     * Last 30 days model analytics must evaluate durable tokenUsagePerModel bucket timestamps, not only the task-level latest usage timestamp. Include candidate multi-model rows for in-memory bucket filtering while legacy rows stay narrowed by task tokenUsageLastUsedAt.
+     */
+    clauses.push(`((${rangeClauses.join(" AND ")}) OR tokenUsagePerModel IS NOT NULL)`);
   }
   const where = `WHERE ${clauses.join(" AND ")}`;
 
   const rows = db
     .prepare(
       `SELECT
+         id,
          tokenUsageInputTokens   AS inputTokens,
          tokenUsageOutputTokens  AS outputTokens,
          tokenUsageCachedTokens  AS cachedTokens,
@@ -318,34 +342,46 @@ export function aggregateTokenAnalytics(
   const now = query.now;
   const pricingOverrides = query.pricingOverrides;
 
+  const totalTaskIds = new Set<string>();
+  const groupTaskIds = new Map<string | null, Set<string>>();
+  const seriesTaskIds = new Map<string, Set<string>>();
+
   for (const row of rows) {
-    addRow(totals, row);
-    addRowCost(totalCost, row, now, pricingOverrides);
-    if (groupBy) {
-      const groupRows = (groupBy === "model" || groupBy === "provider") ? parsePerModelRows(row) : [];
-      const rowsForGroup = groupRows.length > 0 ? groupRows : [row];
-      for (const groupRow of rowsForGroup) {
-        const key = groupKeyFor(groupRow, groupBy);
+    const perModel = parsePerModelRows(row);
+    const rowInRange = isWithinRange(row.tokenUsageLastUsedAt, query.from, query.to);
+    const contributionRows = perModel.valid
+      ? perModel.rows.filter((bucketRow) => isWithinRange(bucketRow.tokenUsageLastUsedAt, query.from, query.to))
+      : rowInRange
+        ? [row]
+        : [];
+
+    for (const contributionRow of contributionRows) {
+      addRow(totals, contributionRow, totalTaskIds);
+      addRowCost(totalCost, contributionRow, now, pricingOverrides);
+      if (groupBy) {
+        const key = groupKeyFor(contributionRow, groupBy);
         let group = groupMap.get(key);
         if (!group) {
           group = { key, ...emptyTotals(), cost: { usd: null, unavailable: false, stale: false } };
           groupMap.set(key, group);
           groupCostMap.set(key, emptyCostAccumulator());
+          groupTaskIds.set(key, new Set<string>());
         }
-        addRow(group, groupRow);
-        addRowCost(groupCostMap.get(key)!, groupRow, now, pricingOverrides);
+        addRow(group, contributionRow, groupTaskIds.get(key)!);
+        addRowCost(groupCostMap.get(key)!, contributionRow, now, pricingOverrides);
       }
-    }
-    if (granularity) {
-      const bucket = bucketFor(row, granularity);
-      let point = seriesMap.get(bucket);
-      if (!point) {
-        point = { bucket, ...emptyTotals(), cost: { usd: null, unavailable: false, stale: false } };
-        seriesMap.set(bucket, point);
-        seriesCostMap.set(bucket, emptyCostAccumulator());
+      if (granularity) {
+        const bucket = bucketFor(contributionRow, granularity);
+        let point = seriesMap.get(bucket);
+        if (!point) {
+          point = { bucket, ...emptyTotals(), cost: { usd: null, unavailable: false, stale: false } };
+          seriesMap.set(bucket, point);
+          seriesCostMap.set(bucket, emptyCostAccumulator());
+          seriesTaskIds.set(bucket, new Set<string>());
+        }
+        addRow(point, contributionRow, seriesTaskIds.get(bucket)!);
+        addRowCost(seriesCostMap.get(bucket)!, contributionRow, now, pricingOverrides);
       }
-      addRow(point, row);
-      addRowCost(seriesCostMap.get(bucket)!, row, now, pricingOverrides);
     }
   }
 

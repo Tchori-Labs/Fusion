@@ -156,11 +156,11 @@ describe("token-analytics", () => {
     expect([...modelGroups.values()].reduce((sum, group) => sum + group.nTasks, 0)).toBe(2);
     expect(byModel.totals.nTasks).toBe(1);
 
-    const expectedTaskCost = costFor(
-      { inputTokens: 950, outputTokens: 450, cachedTokens: 0, cacheWriteTokens: 0 },
-      { provider: "openai", model: "gpt-5" },
+    expect(byModel.cost.usd).toBeCloseTo(
+      (modelGroups.get("claude-sonnet-4-5")?.cost.usd ?? 0) + (modelGroups.get("gpt-5")?.cost.usd ?? 0),
+      10,
     );
-    expect(byModel.cost).toEqual(expectedTaskCost);
+    expect(byModel.cost.unavailable).toBe(false);
 
     const byProvider = aggregateTokenAnalytics(db, { groupBy: "provider" });
     expect(byProvider.totals).toEqual(byModel.totals);
@@ -169,6 +169,121 @@ describe("token-analytics", () => {
     );
     expect(byProvider.groups.reduce((sum, group) => sum + group.totalTokens, 0)).toBe(byProvider.totals.totalTokens);
     expect(byProvider.totals.nTasks).toBe(1);
+  });
+
+  it("filters Last 30 days model groups by durable per-model bucket timestamps", () => {
+    const from = "2026-06-02T00:00:00.000Z";
+    const to = "2026-07-02T00:00:00.000Z";
+    insertTask(db, {
+      id: "last-30-multi",
+      inputTokens: 1_520,
+      outputTokens: 730,
+      cachedTokens: 110,
+      cacheWriteTokens: 40,
+      totalTokens: 2_400,
+      lastUsedAt: "2026-07-05T00:00:00.000Z",
+      tokenUsageModelProvider: "openai",
+      tokenUsageModelId: "gpt-5",
+      tokenUsagePerModel: [
+        {
+          modelProvider: "anthropic",
+          modelId: "claude-sonnet-4-5",
+          inputTokens: 700,
+          outputTokens: 300,
+          cachedTokens: 20,
+          cacheWriteTokens: 0,
+          totalTokens: 1_020,
+          firstUsedAt: "2026-06-02T00:00:00.000Z",
+          lastUsedAt: "2026-06-02T00:00:00.000Z",
+        },
+        {
+          modelProvider: "openai",
+          modelId: "gpt-5",
+          inputTokens: 250,
+          outputTokens: 150,
+          cachedTokens: 10,
+          cacheWriteTokens: 0,
+          totalTokens: 410,
+          firstUsedAt: "2026-06-15T00:00:00.000Z",
+          lastUsedAt: "2026-06-15T00:00:00.000Z",
+        },
+        {
+          modelProvider: "openai",
+          modelId: "gpt-5",
+          inputTokens: 50,
+          outputTokens: 50,
+          cachedTokens: 0,
+          cacheWriteTokens: 0,
+          totalTokens: 100,
+          firstUsedAt: "2026-07-02T00:00:00.000Z",
+          lastUsedAt: "2026-07-02T00:00:00.000Z",
+        },
+        {
+          inputTokens: 25,
+          outputTokens: 25,
+          cachedTokens: 0,
+          cacheWriteTokens: 0,
+          totalTokens: 50,
+          firstUsedAt: "2026-06-20T00:00:00.000Z",
+          lastUsedAt: "2026-06-20T00:00:00.000Z",
+        },
+        {
+          modelProvider: "zai",
+          modelId: "glm-outside",
+          inputTokens: 495,
+          outputTokens: 205,
+          cachedTokens: 80,
+          cacheWriteTokens: 40,
+          totalTokens: 820,
+          firstUsedAt: "2026-07-03T00:00:00.000Z",
+          lastUsedAt: "2026-07-03T00:00:00.000Z",
+        },
+      ],
+    });
+    insertTask(db, {
+      id: "malformed-fallback",
+      inputTokens: 40,
+      outputTokens: 10,
+      totalTokens: 50,
+      lastUsedAt: "2026-06-18T00:00:00.000Z",
+      tokenUsageModelProvider: "anthropic",
+      tokenUsageModelId: "claude-haiku-3-5",
+      tokenUsagePerModel: "not-json",
+    });
+    insertTask(db, {
+      id: "legacy-missing-per-model",
+      inputTokens: 30,
+      outputTokens: 20,
+      totalTokens: 50,
+      lastUsedAt: "2026-06-19T00:00:00.000Z",
+      tokenUsageModelProvider: "openai",
+      tokenUsageModelId: "gpt-4o-mini",
+    });
+
+    const byModel = aggregateTokenAnalytics(db, { from, to, groupBy: "model", granularity: "day" });
+    const groups = new Map(byModel.groups.map((group) => [group.key, group]));
+
+    expect(groups.get("claude-sonnet-4-5")).toMatchObject({ totalTokens: 1_020, inputTokens: 700, nTasks: 1 });
+    expect(groups.get("gpt-5")).toMatchObject({ totalTokens: 510, inputTokens: 300, nTasks: 1 });
+    expect(groups.get(null)).toMatchObject({ totalTokens: 50, inputTokens: 25, nTasks: 1 });
+    expect(groups.get("claude-haiku-3-5")).toMatchObject({ totalTokens: 50, nTasks: 1 });
+    expect(groups.get("gpt-4o-mini")).toMatchObject({ totalTokens: 50, nTasks: 1 });
+    expect(groups.has("glm-outside")).toBe(false);
+    expect(byModel.totals).toMatchObject({ inputTokens: 1_095, outputTokens: 555, cachedTokens: 30, cacheWriteTokens: 0, totalTokens: 1_680, nTasks: 3 });
+    expect(byModel.series?.map((point) => [point.bucket, point.totalTokens])).toEqual([
+      ["2026-06-02", 1_020],
+      ["2026-06-15", 410],
+      ["2026-06-18", 50],
+      ["2026-06-19", 50],
+      ["2026-06-20", 50],
+      ["2026-07-02", 100],
+    ]);
+    expect(byModel.cost.unavailable).toBe(true);
+
+    const byProvider = aggregateTokenAnalytics(db, { from, to, groupBy: "provider" });
+    expect(new Map(byProvider.groups.map((group) => [group.key, group.totalTokens]))).toEqual(
+      new Map([["anthropic", 1_070], ["openai", 560], [null, 50]]),
+    );
   });
 
   it("marks unpriced per-model buckets as cost unavailable instead of zero", () => {
@@ -199,10 +314,7 @@ describe("token-analytics", () => {
 
     expect(result.groups).toHaveLength(1);
     expect(result.groups[0]).toMatchObject({ key: "unknown-model", totalTokens: 100, cost: { usd: null, unavailable: true } });
-    expect(result.cost).toEqual(costFor(
-      { inputTokens: 60, outputTokens: 40, cachedTokens: 0, cacheWriteTokens: 0 },
-      { provider: "openai", model: "gpt-5" },
-    ));
+    expect(result.cost).toEqual({ usd: null, unavailable: true, stale: false });
   });
 
   it("falls back to the legacy snapshot when per-model JSON is malformed", () => {
