@@ -680,6 +680,8 @@ GitLab imports are HTTP API only and do not require or invoke `glab`. Operators 
 
 Duplicate detection checks existing non-archived task provenance and source URLs before creating another GitLab-imported task. GitLab linked tracking display, comments/notes, auto-close/reopen, Command Center signals/analytics, research/search support, and any GitLab-star prompt remain out of scope until the later GitLab parity tasks mapped in [GitLab Parity Inventory](./gitlab-parity-inventory.md).
 
+Linear issue import is available through the bundled **Linear Import** plugin, not the core GitHub/GitLab Import Tasks implementation. Operators enable the plugin from Plugin Manager, configure the plugin-owned Linear API key, then use the plugin dashboard view or plugin tools to browse and import issues. Imported Linear tasks are created in `triage`, include the Linear body (or `(no description)`) plus `Source: <url>`, and persist `sourceIssue.provider: "linear"` plus `source.sourceMetadata.provider: "linear"` with stable issue id, identifier, URL, team, state, assignee, and timestamps where available. Duplicate detection checks existing non-archived Linear provenance by issue id, identifier, and source URL before task creation and reports the existing task id when a duplicate is found.
+
 Import issues:
 
 - GitHub-imported tasks retain typed source issue metadata (`sourceIssue.provider/repository/externalIssueId/issueNumber/url`), which executor and merger flows use to include `Ref: owner/repo#N` in commit bodies.
