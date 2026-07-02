@@ -183,7 +183,7 @@ export async function createTaskBackendImpl(store: TaskStore, input: TaskCreateI
     // Record the inherited workflow selection now that the task row exists.
     if (pendingWorkflowSelection) {
       try {
-        store.writeTaskWorkflowSelection(task.id, pendingWorkflowSelection.workflowId, pendingWorkflowSelection.stepIds);
+        await store.writeTaskWorkflowSelection(task.id, pendingWorkflowSelection.workflowId, pendingWorkflowSelection.stepIds);
       } catch (err) {
         storeLog.warn("Failed to record inherited workflow selection", {
           taskId: task.id,
@@ -532,7 +532,7 @@ export async function createTaskImpl(store: TaskStore, input: TaskCreateInput, o
     // Record the inherited workflow selection now that the task row exists.
     if (pendingWorkflowSelection) {
       try {
-        store.writeTaskWorkflowSelection(task.id, pendingWorkflowSelection.workflowId, pendingWorkflowSelection.stepIds);
+        await store.writeTaskWorkflowSelection(task.id, pendingWorkflowSelection.workflowId, pendingWorkflowSelection.stepIds);
       } catch (err) {
         storeLog.warn("Failed to record inherited workflow selection", {
           taskId: task.id,
@@ -714,7 +714,7 @@ export async function createTaskWithReservedIdImpl(store: TaskStore, input: Task
     // Record the inherited workflow selection now that the task row exists.
     if (pendingWorkflowSelection) {
       try {
-        store.writeTaskWorkflowSelection(createdTask.id, pendingWorkflowSelection.workflowId, pendingWorkflowSelection.stepIds);
+        await store.writeTaskWorkflowSelection(createdTask.id, pendingWorkflowSelection.workflowId, pendingWorkflowSelection.stepIds);
       } catch (err) {
         storeLog.warn("Failed to record inherited workflow selection", {
           taskId: createdTask.id,

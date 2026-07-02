@@ -124,7 +124,7 @@ async function seedWorkflow(_cwd: string, name = "QA workflow"): Promise<string>
 async function readTaskWorkflowState(_cwd: string, taskId: string) {
   const store = h.store();
   const task = await store.getTask(taskId);
-  const selection = store.getTaskWorkflowSelection(taskId);
+  const selection = await store.getTaskWorkflowSelectionAsync(taskId);
   return { task, selection };
 }
 
@@ -3088,13 +3088,7 @@ pgTest("fn pi extension (runnable structured-output regression slice)", () => {
       expect(result.content[0].text).not.toContain("Agent  not found");
     });
 
-    // FNXC:PostgresCutover: skipped — clearing an assigned agentId via
-    // fn_task_update hits store.syncAgentTaskLinkOnReassignment, whose impl
-    // (remaining-ops-7.ts) still uses the removed SQLite store.db with no
-    // backendMode async branch. This is a PRODUCTION gap (not the AgentStore
-    // gap, which is fixed); re-enable once that path migrates to the async
-    // layer. Applies to the three agentId-clearing cases below.
-    it.skip("clears task assigned agent ID with empty string", async () => {
+    it("clears task assigned agent ID with empty string", async () => {
       const agentId = await seedAgent(tmpDir);
       const createTool = api.tools.get("fn_task_create")!;
       const created = await createTool.execute(
@@ -3128,7 +3122,7 @@ pgTest("fn pi extension (runnable structured-output regression slice)", () => {
       expect(show.details.task.assignedAgentId).toBeUndefined();
     });
 
-    it.skip("clears task assigned agent ID with whitespace", async () => {
+    it("clears task assigned agent ID with whitespace", async () => {
       const agentId = await seedAgent(tmpDir);
       const createTool = api.tools.get("fn_task_create")!;
       const created = await createTool.execute(
@@ -3159,7 +3153,7 @@ pgTest("fn pi extension (runnable structured-output regression slice)", () => {
       expect(show.details.task.assignedAgentId).toBeUndefined();
     });
 
-    it.skip("clears task assigned agent ID with literal null string", async () => {
+    it("clears task assigned agent ID with literal null string", async () => {
       const agentId = await seedAgent(tmpDir);
       const createTool = api.tools.get("fn_task_create")!;
       const created = await createTool.execute(
@@ -3939,12 +3933,7 @@ pgTest("fn pi extension (runnable structured-output regression slice)", () => {
       expect(task!.column).toBe("todo");
     });
 
-    // FNXC:PostgresCutover: skipped — readTaskWorkflowState calls
-    // store.getTaskWorkflowSelection, whose sync impl (remaining-ops-8.ts) still
-    // uses the removed SQLite store.db (no backendMode async branch, unlike the
-    // already-migrated readAllWorkflowDefinitionsImpl). PRODUCTION gap, not the
-    // AgentStore gap; re-enable once the getter gains a backendMode branch.
-    it.skip("delegates task with workflow_id selected and materialized", async () => {
+    it("delegates task with workflow_id selected and materialized", async () => {
       const agentId = await seedAgent(tmpDir, { name: "delegate-workflow-target" });
       const workflowId = await seedWorkflow(tmpDir, "Delegate workflow");
 

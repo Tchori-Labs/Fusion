@@ -193,7 +193,7 @@ export function resolveEffectiveWorkflowIdSyncImpl(store: TaskStore, taskId: str
 
 export async function clearTaskWorkflowSelectionImpl(store: TaskStore, taskId: string): Promise<void> {
     await store.withTaskLock(taskId, async () => {
-      store.removeMaterializedSelection(taskId);
+      await store.removeMaterializedSelection(taskId);
       await store.updateTaskUnlocked(taskId, { enabledWorkflowSteps: [] });
     });
 }

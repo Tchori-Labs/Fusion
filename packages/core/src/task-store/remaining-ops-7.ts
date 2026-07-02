@@ -12,6 +12,8 @@ import { countAgentLogEntries, readAgentLogEntries } from "../agent-log-file-sto
 import { BUILTIN_CODING_WORKFLOW_IR } from "../builtin-coding-workflow-ir.js";
 import { toJsonNullable } from "../db.js";
 import { DbTransaction, recordRunAuditEventWithinTransaction } from "../postgres/data-layer.js";
+import { and, eq } from "drizzle-orm";
+import * as schema from "../postgres/schema/index.js";
 import { runCommandAsync } from "../run-command.js";
 import { getStepParser } from "../step-parsers.js";
 import { getTaskMergeBlocker } from "../task-merge.js";
@@ -320,12 +322,33 @@ export function rewriteLineageChildrenForRemovalImpl(store: TaskStore, parentId:
     return rewrittenChildren;
 }
 
-export function syncAgentTaskLinkOnReassignmentImpl(store: TaskStore,
+export async function syncAgentTaskLinkOnReassignmentImpl(store: TaskStore,
     taskId: string,
     previousAgentId: string | undefined,
     newAgentId: string | undefined,
-  ): void {
+  ): Promise<void> {
     const updatedAt = new Date().toISOString();
+
+    /*
+    FNXC:PostgresCutover 2026-07-02-00:00:
+    Backend-mode agent-task-link sync: update the agents.taskId column via async Drizzle. Only the dedicated taskId column is authoritative in PG (agent.data jsonb is not read for the link), so the SQLite json_set/json_remove on data is not mirrored.
+    */
+    if (store.backendMode) {
+      const db = store.asyncLayer!.db;
+      if (previousAgentId) {
+        await db
+          .update(schema.project.agents)
+          .set({ taskId: null, updatedAt })
+          .where(and(eq(schema.project.agents.id, previousAgentId), eq(schema.project.agents.taskId, taskId)));
+      }
+      if (newAgentId) {
+        await db
+          .update(schema.project.agents)
+          .set({ taskId, updatedAt })
+          .where(eq(schema.project.agents.id, newAgentId));
+      }
+      return;
+    }
 
     if (previousAgentId) {
       store.db.prepare(`

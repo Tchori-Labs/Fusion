@@ -458,6 +458,11 @@ export function resolveTaskWorkflowIrSyncImpl(store: TaskStore, taskId: string):
 }
 
 export function getTaskWorkflowSelectionImpl(store: TaskStore, taskId: string): { workflowId: string; stepIds: string[] } | undefined {
+    /*
+    FNXC:PostgresCutover 2026-07-02-00:00:
+    Backend mode cannot synchronously read PostgreSQL, so return undefined and let the sync readers (resolveEffectiveWorkflowIdSync / resolveTaskWorkflowIrSync) fall back to their defaults. The authoritative read is getTaskWorkflowSelectionAsync; this also converts the prior PG-mode throw into a graceful default.
+    */
+    if (store.backendMode) return undefined;
     const row = store.db
       .prepare("SELECT workflowId, stepIds FROM task_workflow_selection WHERE taskId = ?")
       .get(taskId) as { workflowId: string; stepIds: string } | undefined;
@@ -472,7 +477,43 @@ export function getTaskWorkflowSelectionImpl(store: TaskStore, taskId: string): 
     return { workflowId: row.workflowId, stepIds };
 }
 
-export function writeTaskWorkflowSelectionImpl(store: TaskStore, taskId: string, workflowId: string, stepIds: string[]): void {
+/*
+FNXC:PostgresCutover 2026-07-02-00:00:
+Async backend-mode read of a task's workflow selection (PostgreSQL). stepIds is a JSONB array, returned by Drizzle already parsed. Returns undefined when no row exists. SQLite mode delegates to the sync impl.
+*/
+export async function getTaskWorkflowSelectionAsyncImpl(store: TaskStore, taskId: string): Promise<{ workflowId: string; stepIds: string[] } | undefined> {
+    if (!store.backendMode) return store.getTaskWorkflowSelection(taskId);
+    const layer = store.asyncLayer!;
+    const rows = await layer.db
+      .select({ workflowId: schema.project.taskWorkflowSelection.workflowId, stepIds: schema.project.taskWorkflowSelection.stepIds })
+      .from(schema.project.taskWorkflowSelection)
+      .where(eq(schema.project.taskWorkflowSelection.taskId, taskId))
+      .limit(1);
+    if (rows.length === 0) return undefined;
+    const row = rows[0]!;
+    let stepIds: string[] = [];
+    const parsed = row.stepIds as unknown;
+    if (Array.isArray(parsed)) stepIds = parsed.filter((s): s is string => typeof s === "string");
+    return { workflowId: row.workflowId, stepIds };
+}
+
+export async function writeTaskWorkflowSelectionImpl(store: TaskStore, taskId: string, workflowId: string, stepIds: string[]): Promise<void> {
+    const updatedAt = new Date().toISOString();
+    /*
+    FNXC:PostgresCutover 2026-07-02-00:00:
+    Backend-mode upsert of the task_workflow_selection row via async Drizzle (taskId is the primary key). stepIds is stored as a JSONB array.
+    */
+    if (store.backendMode) {
+      const layer = store.asyncLayer!;
+      await layer.db
+        .insert(schema.project.taskWorkflowSelection)
+        .values({ taskId, workflowId, stepIds, updatedAt })
+        .onConflictDoUpdate({
+          target: schema.project.taskWorkflowSelection.taskId,
+          set: { workflowId, stepIds, updatedAt },
+        });
+      return;
+    }
     store.db
       .prepare(
         `INSERT INTO task_workflow_selection (taskId, workflowId, stepIds, updatedAt)
@@ -482,10 +523,18 @@ export function writeTaskWorkflowSelectionImpl(store: TaskStore, taskId: string,
            stepIds = excluded.stepIds,
            updatedAt = excluded.updatedAt`,
       )
-      .run(taskId, workflowId, JSON.stringify(stepIds), new Date().toISOString());
+      .run(taskId, workflowId, JSON.stringify(stepIds), updatedAt);
 }
 
-export function removeMaterializedSelectionImpl(store: TaskStore, taskId: string): void {
+export async function removeMaterializedSelectionImpl(store: TaskStore, taskId: string): Promise<void> {
+    /*
+    FNXC:PostgresCutover 2026-07-02-00:00:
+    Backend-mode delete reuses purgeTaskWorkflowSelectionRowsAsyncImpl (read stepIds, delete workflow_steps children, delete the selection row) so PG stays in lockstep with the SQLite path.
+    */
+    if (store.backendMode) {
+      await purgeTaskWorkflowSelectionRowsAsyncImpl(store, taskId);
+      return;
+    }
     const existing = store.getTaskWorkflowSelection(taskId);
     if (existing) {
       for (const stepId of existing.stepIds) {

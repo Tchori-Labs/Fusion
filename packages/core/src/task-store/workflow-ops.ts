@@ -644,7 +644,7 @@ export async function selectTaskWorkflowImpl(store: TaskStore, taskId: string, w
       // Materialize the new steps and point the task at them BEFORE deleting the
       // prior selection's rows, so a mid-flight failure never leaves the task
       // referencing already-deleted step ids.
-      const priorSelection = store.getTaskWorkflowSelection(taskId);
+      const priorSelection = await store.getTaskWorkflowSelectionAsync(taskId);
       // U11/KTD-13: capture the OLD field schema (from the prior selection's IR)
       // before the selection row flips, so we can reconcile existing field values
       // against the NEW workflow's schema below.
@@ -653,7 +653,7 @@ export async function selectTaskWorkflowImpl(store: TaskStore, taskId: string, w
         def.ir.version === "v2" ? (def.ir.fields ?? []) : [];
       try {
         await store.updateTaskUnlocked(taskId, { enabledWorkflowSteps: ids });
-        store.writeTaskWorkflowSelection(taskId, workflowId, ids);
+        await store.writeTaskWorkflowSelection(taskId, workflowId, ids);
       } catch (err) {
         // The owner write (updateTask / selection upsert) failed, so the steps we
         // just materialized would orphan with no selection row pointing at them.

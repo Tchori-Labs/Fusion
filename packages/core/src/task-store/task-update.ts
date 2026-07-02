@@ -180,7 +180,7 @@ export async function updateTaskUnlockedImpl(store: TaskStore, id: string, updat
         });
       }
       if (assignmentChanged) {
-        store.syncAgentTaskLinkOnReassignment(id, previousAssignedAgentId, task.assignedAgentId);
+        await store.syncAgentTaskLinkOnReassignment(id, previousAssignedAgentId, task.assignedAgentId);
 
         if (task.checkedOutBy === previousAssignedAgentId) {
           task.checkedOutBy = undefined;
@@ -443,7 +443,7 @@ export async function updateTaskUnlockedImpl(store: TaskStore, id: string, updat
         // Pass the task's own workflow optional-group ids through untouched so a
         // toggled built-in group id (e.g. "browser-verification") is not remapped
         // to a materialized step row the executor never matches (code-review P1).
-        const taskWorkflowId = store.getTaskWorkflowSelection(task.id)?.workflowId;
+        const taskWorkflowId = (await store.getTaskWorkflowSelectionAsync(task.id))?.workflowId;
         task.enabledWorkflowSteps = await store.resolveEnabledWorkflowSteps(
           updates.enabledWorkflowSteps,
           await store.optionalGroupIdSet(taskWorkflowId),
