@@ -2716,6 +2716,7 @@ export function ChatView({ projectId, addToast, floating = false, compactLayout 
                     defaultModel,
                   );
                   const sessionModelTag = formatModelTag(sessionResolvedModel?.provider, sessionResolvedModel?.modelId) ?? "Fusion";
+                  const sessionTitle = session.title || t("chat.untitledSession", "Untitled");
 
                   return (
                     <div
@@ -2728,19 +2729,38 @@ export function ChatView({ projectId, addToast, floating = false, compactLayout 
                       }}
                       data-testid={`chat-session-${session.id}`}
                     >
-                      <button
-                        className="chat-session-delete-btn"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setConfirmDelete(session.id);
-                        }}
-                        data-testid="chat-session-delete-btn"
-                        aria-label={t("chat.deleteConversation", "Delete conversation")}
-                      >
-                        <Trash2 size={14} />
-                      </button>
+                      {/*
+                      FNXC:ChatSidebar 2026-07-02-00:00:
+                      Direct conversation rows need an always-discoverable rename affordance before delete while preserving row selection. Keep edit/delete as sibling buttons that stop propagation and share the existing rename/delete flows.
+                      */}
+                      <div className="chat-session-actions">
+                        <button
+                          type="button"
+                          className="btn-icon chat-session-action-btn chat-session-rename-btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openRenameDialog(session.id);
+                          }}
+                          data-testid="chat-session-rename-btn"
+                          aria-label={t("chat.renameConversationAria", "Rename conversation {{title}}", { title: sessionTitle })}
+                        >
+                          <Pencil size={14} />
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-icon chat-session-action-btn chat-session-delete-btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setConfirmDelete(session.id);
+                          }}
+                          data-testid="chat-session-delete-btn"
+                          aria-label={t("chat.deleteConversation", "Delete conversation")}
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
                       <div className="chat-session-title">
-                        {session.title || t("chat.untitledSession", "Untitled")}
+                        {sessionTitle}
                         {showUnreadDot ? (
                           <span
                             className="chat-unread-dot"
@@ -2935,8 +2955,14 @@ export function ChatView({ projectId, addToast, floating = false, compactLayout 
       {/* Rename Dialog */}
       {renameDialog && (
         <div className="chat-new-dialog-backdrop chat-view-dialog-backdrop" onClick={() => setRenameDialog(null)}>
-          <div className="chat-new-dialog chat-view-dialog" onClick={(e) => e.stopPropagation()}>
-            <h3>{t("chat.renameConversationTitle", "Rename Conversation")}</h3>
+          <div
+            className="chat-new-dialog chat-view-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="chat-rename-dialog-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 id="chat-rename-dialog-title">{t("chat.renameConversationTitle", "Rename Conversation")}</h3>
             <p className="chat-view-delete-dialog-copy">
               {t("chat.renameConversationBody", "Choose a new name for this conversation. Leave it blank to show Untitled.")}
             </p>

@@ -268,6 +268,78 @@ describe("ChatView mobile behavior", () => {
     }
   });
 
+  it("mobile mode: direct sidebar rows expose rename and delete buttons", async () => {
+    const restoreMatchMedia = mockMobileViewport();
+    const selectSession = vi.fn();
+    try {
+      const sessions = [
+        { id: "session-001", agentId: "agent-001", status: "active" as const, title: "Mobile Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" },
+      ];
+      setupMockChat({
+        sessions,
+        filteredSessions: sessions,
+        activeSession: null,
+        selectSession,
+      });
+
+      await renderWithAct(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+
+      const row = screen.getByTestId("chat-session-session-001");
+      const renameButton = within(row).getByTestId("chat-session-rename-btn");
+      const deleteButton = within(row).getByTestId("chat-session-delete-btn");
+      expect(renameButton).toHaveAccessibleName(/rename conversation mobile chat/i);
+      expect(deleteButton).toHaveAccessibleName(/delete conversation/i);
+      expect(renameButton.compareDocumentPosition(deleteButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(renameButton.closest(".chat-session-actions")).toBe(deleteButton.closest(".chat-session-actions"));
+
+      await userEvent.click(renameButton);
+      expect(selectSession).not.toHaveBeenCalled();
+      expect(screen.getByRole("dialog", { name: /rename conversation/i })).toBeInTheDocument();
+    } finally {
+      restoreMatchMedia.mockRestore();
+    }
+  });
+
+  it("mobile mode: quick session switcher rename affordance remains wired", async () => {
+    const restoreMatchMedia = mockMobileViewport();
+    const selectSession = vi.fn();
+    const renameSession = vi.fn().mockResolvedValue(undefined);
+    try {
+      const sessions = [
+        { id: "session-001", agentId: "agent-001", status: "active" as const, title: "Test Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" },
+        { id: "session-002", agentId: "agent-002", status: "active" as const, title: "Switcher Chat", createdAt: "2026-04-07T00:00:00.000Z", updatedAt: "2026-04-07T00:00:00.000Z" },
+      ];
+      setupMockChat({
+        sessions,
+        filteredSessions: sessions,
+        activeSession: sessions[0],
+        selectSession,
+        renameSession,
+      });
+
+      await renderWithAct(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+
+      await userEvent.click(screen.getByTestId("chat-mobile-session-trigger"));
+      await userEvent.click(screen.getByTestId("chat-mobile-session-rename-session-002"));
+
+      expect(selectSession).not.toHaveBeenCalled();
+      expect(screen.queryByTestId("chat-mobile-session-dropdown")).not.toBeInTheDocument();
+      const dialog = screen.getByRole("dialog", { name: /rename conversation/i });
+      const input = within(dialog).getByTestId("chat-rename-input") as HTMLInputElement;
+      expect(input).toHaveValue("Switcher Chat");
+
+      await userEvent.clear(input);
+      await userEvent.type(input, "Switcher Renamed");
+      await userEvent.click(within(dialog).getByTestId("chat-rename-save"));
+
+      await waitFor(() => {
+        expect(renameSession).toHaveBeenCalledWith("session-002", "Switcher Renamed");
+      });
+    } finally {
+      restoreMatchMedia.mockRestore();
+    }
+  });
+
   it("mobile mode: thread header title opens quick session switcher and closes after selection", async () => {
     const restoreMatchMedia = mockMobileViewport();
     const selectSession = vi.fn();
