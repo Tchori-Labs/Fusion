@@ -1,8 +1,9 @@
 // @vitest-environment node
 
-import { readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import type { TaskStore } from "@fusion/core";
 import { createServer } from "../server.js";
@@ -11,6 +12,7 @@ import { get as performGet, request as performRequest } from "../test-request.js
 const updateCheckMocks = vi.hoisted(() => ({
   performUpdateCheck: vi.fn(),
   performUpdateInstall: vi.fn(),
+  cliPackageImportMetaUrl: undefined as string | undefined,
 }));
 
 vi.mock("../update-check.js", async () => {
@@ -19,6 +21,14 @@ vi.mock("../update-check.js", async () => {
     ...actual,
     performUpdateCheck: updateCheckMocks.performUpdateCheck,
     performUpdateInstall: updateCheckMocks.performUpdateInstall,
+  };
+});
+
+vi.mock("../cli-package-version.js", async () => {
+  const actual = await vi.importActual<typeof import("../cli-package-version.js")>("../cli-package-version.js");
+  return {
+    ...actual,
+    getCliPackageVersion: (importMetaUrl?: string) => actual.getCliPackageVersion(updateCheckMocks.cliPackageImportMetaUrl ?? importMetaUrl),
   };
 });
 
@@ -88,11 +98,18 @@ function createMockStore(overrides: Partial<TaskStore> = {}): TaskStore {
   } as unknown as TaskStore;
 }
 
+function writePackageJson(dir: string, manifest: { name: string; version?: string }): void {
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "package.json"), JSON.stringify(manifest, null, 2), "utf-8");
+}
+
 afterEach(() => {
   updateCheckMocks.performUpdateCheck.mockReset();
   updateCheckMocks.performUpdateInstall.mockReset();
+  updateCheckMocks.cliPackageImportMetaUrl = undefined;
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 describe("POST /api/update-check/install", () => {
@@ -188,6 +205,63 @@ describe("GET /api/updates/check", () => {
       latestVersion: CLI_PACKAGE_VERSION,
       updateAvailable: false,
     });
+  });
+
+  it("returns updateAvailable=false for packaged desktop when registry latest matches desktop version", async () => {
+    const root = mkdtempSync(join(tmpdir(), "fusion-update-route-desktop-"));
+    try {
+      const dashboardDist = join(root, "node_modules", "@fusion", "dashboard", "dist");
+      writePackageJson(root, { name: "@fusion/desktop", version: "5.4.3" });
+      writePackageJson(join(root, "node_modules", "@fusion", "dashboard"), { name: "@fusion/dashboard", version: "0.0.0" });
+      mkdirSync(dashboardDist, { recursive: true });
+      updateCheckMocks.cliPackageImportMetaUrl = pathToFileURL(join(dashboardDist, "server.js")).href;
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue({
+          ok: true,
+          json: async () => ({ version: "5.4.3" }),
+        }),
+      );
+
+      const app = createServer(createMockStore());
+      const response = await performGet(app, "/api/updates/check");
+
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual({
+        currentVersion: "5.4.3",
+        latestVersion: "5.4.3",
+        updateAvailable: false,
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("fails closed when the current version is unresolved", async () => {
+    const root = mkdtempSync(join(tmpdir(), "fusion-update-route-unresolved-"));
+    try {
+      const dashboardDist = join(root, "node_modules", "@fusion", "dashboard", "dist");
+      writePackageJson(join(root, "node_modules", "@fusion", "dashboard"), { name: "@fusion/dashboard", version: "0.0.0" });
+      mkdirSync(dashboardDist, { recursive: true });
+      updateCheckMocks.cliPackageImportMetaUrl = pathToFileURL(join(dashboardDist, "server.js")).href;
+      vi.stubEnv("npm_package_version", undefined);
+      const fetchSpy = vi.fn();
+      vi.stubGlobal("fetch", fetchSpy);
+
+      const app = createServer(createMockStore());
+      const response = await performGet(app, "/api/updates/check");
+
+      expect(response.status).toBe(200);
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(response.body).toEqual({
+        currentVersion: "0.0.0",
+        latestVersion: null,
+        updateAvailable: false,
+        error: "Current Fusion version is unavailable",
+      });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("gracefully returns an error payload when npm registry is unreachable", async () => {

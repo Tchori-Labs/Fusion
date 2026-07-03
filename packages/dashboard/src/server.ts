@@ -72,7 +72,7 @@ import { createCliSessionsRouter } from "./routes/cli-sessions.js";
 import { getProjectIdFromRequest } from "./routes/context.js";
 import type { CliRelaunchRegistry } from "./cli-session-transport.js";
 import { validateRemoteAuthToken } from "./remote-auth.js";
-import { getCliPackageVersion } from "./cli-package-version.js";
+import { getCliPackageVersion, isUnresolvedCliPackageVersion } from "./cli-package-version.js";
 import {
   dayHasSamples,
   fileScopeInvariantFailuresPerDay,
@@ -1718,6 +1718,16 @@ export function createServer(store: TaskStore, options?: ServerOptions): ReturnT
   app.get("/api/updates/check", async (_req, res) => {
     const currentVersion = cliPackageVersion;
     res.set("Cache-Control", "no-store");
+
+    if (isUnresolvedCliPackageVersion(currentVersion)) {
+      res.status(200).json({
+        currentVersion,
+        latestVersion: null,
+        updateAvailable: false,
+        error: "Current Fusion version is unavailable",
+      });
+      return;
+    }
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 10_000);
