@@ -1655,9 +1655,36 @@ export function ModelOnboardingModal({
   );
 
   // Handle model selection from CustomModelDropdown
-  const handleModelSelect = useCallback((value: string) => {
-    setSelectedModel(value);
-  }, []);
+  const handleModelSelect = useCallback(
+    (value: string) => {
+      setSelectedModel(value);
+
+      /*
+       * FNXC:Onboarding 2026-07-03-09:15:
+       * Persist the picked model as the global default IMMEDIATELY on selection. Previously the choice
+       * lived only in local state until completeOnboarding ran on the final step, so a user who selected
+       * a model but exited or skipped before finishing lost the selection and then saw the post-onboarding
+       * "Select Default Model" banner despite having explicitly chosen one. Saving on pick makes the
+       * selection durable regardless of how onboarding is exited.
+       */
+      const slashIdx = value.indexOf("/");
+      const provider = slashIdx !== -1 ? value.slice(0, slashIdx) : undefined;
+      const modelId = slashIdx !== -1 ? value.slice(slashIdx + 1) : value;
+      const model = availableModels.find((m) => m.id === modelId);
+      const updates: Record<string, unknown> = {};
+      if (model) {
+        updates.defaultProvider = model.provider;
+        updates.defaultModelId = model.id;
+      } else if (provider && modelId) {
+        updates.defaultProvider = provider;
+        updates.defaultModelId = modelId;
+      }
+      if (updates.defaultModelId) {
+        void updateGlobalSettings(updates).catch(() => undefined);
+      }
+    },
+    [availableModels, updateGlobalSettings],
+  );
 
   const completeOnboarding = useCallback(async () => {
     try {
@@ -1665,13 +1692,26 @@ export function ModelOnboardingModal({
         modelOnboardingComplete: true,
       };
 
-      // If a model was selected, persist it as the default
-      if (selectedModel) {
-        const slashIdx = selectedModel.indexOf("/");
+      /*
+       * FNXC:Onboarding 2026-07-03-09:10:
+       * Persist a default model on completion so the post-onboarding "Select Default Model"
+       * recommendation does not fire for operators who connected a provider but never opened the model
+       * dropdown. selectedModel is only populated by an explicit dropdown pick (or a previously-saved
+       * default), so a fresh first-run where the user just connects Anthropic and clicks Continue would
+       * otherwise leave defaultProvider/defaultModelId unset and trip the false-positive banner. Prefer
+       * the explicit pick; otherwise fall back to the first available model from the connected provider.
+       * Only when no models are available at all do we leave the default unset.
+       */
+      const effectiveSelection =
+        selectedModel ||
+        (availableModels[0] ? `${availableModels[0].provider}/${availableModels[0].id}` : "");
+
+      if (effectiveSelection) {
+        const slashIdx = effectiveSelection.indexOf("/");
         const provider =
-          slashIdx !== -1 ? selectedModel.slice(0, slashIdx) : undefined;
+          slashIdx !== -1 ? effectiveSelection.slice(0, slashIdx) : undefined;
         const modelId =
-          slashIdx !== -1 ? selectedModel.slice(slashIdx + 1) : selectedModel;
+          slashIdx !== -1 ? effectiveSelection.slice(slashIdx + 1) : effectiveSelection;
 
         const model = availableModels.find((m) => m.id === modelId);
         if (model) {
