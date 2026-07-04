@@ -3037,14 +3037,30 @@ export function TaskDetailContent({
     /*
       FNXC:TaskDetailActivity 2026-07-03-18:00:
       Mobile iOS can emit visualViewport scroll/resize as part of the same tap sequence that opens the root-portaled Activity menu. Ignore only that short opening echo and keep the layout-viewport position fresh; later viewport, orientation, outside, Escape, task-change, and selection closes still clean up the menu.
+
+      FNXC:TaskDetailActivity 2026-07-04-19:10:
+      FN-7536: this recurred on Android/mobile Chrome because the window `resize`/`orientationchange`/`scroll` (capture) close path below had NO opening-guard, unlike visualViewport's. Tapping the Activity tab can itself trigger a same-gesture window `scroll` or `resize` echo (browser auto-scrolling the tapped element into view, URL-bar collapse, or IME/keyboard show), which closed the menu the instant it opened. Route ALL of resize/orientationchange/scroll through the SAME opening-viewport-guard as visualViewport so a same-gesture echo only repositions, while a later, real, viewport change still closes it.
     */
-    const handleVisualViewportChange = () => {
+    const handleGuardedViewportChange = () => {
       const now = typeof performance !== "undefined" ? performance.now() : Date.now();
       if (now <= activityViewMenuViewportGuardUntilRef.current) {
         updateActivityViewMenuPosition();
         return;
       }
       closeForViewportChange();
+    };
+
+    /*
+      FNXC:TaskDetailActivity 2026-07-04-19:10:
+      `.detail-tabs` is an intentional horizontal overflow scroller (FN-6xx tab strip), so scrolling it — including a mobile drag that brings the Activity tab into view — is benign, expected interaction, NOT a "true viewport change" that should close the menu. The window `scroll` listener uses capture so it also observes this nested scroller's scroll events; reposition-only (never close) when the scroll originated inside `.detail-tabs`.
+    */
+    const handleScrollChange = (event: Event) => {
+      const target = event.target;
+      if (target instanceof Node && activityViewDropdownRef.current?.closest(".detail-tabs")?.contains(target)) {
+        updateActivityViewMenuPosition();
+        return;
+      }
+      handleGuardedViewportChange();
     };
 
     let positionFrame = 0;
@@ -3056,26 +3072,26 @@ export function TaskDetailContent({
       });
     };
 
-    window.addEventListener("resize", closeForViewportChange);
-    window.addEventListener("orientationchange", closeForViewportChange);
-    window.addEventListener("scroll", closeForViewportChange, true);
+    window.addEventListener("resize", handleGuardedViewportChange);
+    window.addEventListener("orientationchange", handleGuardedViewportChange);
+    window.addEventListener("scroll", handleScrollChange, true);
     window.addEventListener(FLOATING_WINDOW_GEOMETRY_CHANGE_EVENT, schedulePositionUpdate);
     document.addEventListener("pointermove", schedulePositionUpdate, true);
     document.addEventListener("pointerup", schedulePositionUpdate, true);
     const visualViewport = window.visualViewport;
-    visualViewport?.addEventListener("resize", handleVisualViewportChange);
-    visualViewport?.addEventListener("scroll", handleVisualViewportChange);
+    visualViewport?.addEventListener("resize", handleGuardedViewportChange);
+    visualViewport?.addEventListener("scroll", handleGuardedViewportChange);
 
     return () => {
       if (positionFrame) cancelAnimationFrame(positionFrame);
-      window.removeEventListener("resize", closeForViewportChange);
-      window.removeEventListener("orientationchange", closeForViewportChange);
-      window.removeEventListener("scroll", closeForViewportChange, true);
+      window.removeEventListener("resize", handleGuardedViewportChange);
+      window.removeEventListener("orientationchange", handleGuardedViewportChange);
+      window.removeEventListener("scroll", handleScrollChange, true);
       window.removeEventListener(FLOATING_WINDOW_GEOMETRY_CHANGE_EVENT, schedulePositionUpdate);
       document.removeEventListener("pointermove", schedulePositionUpdate, true);
       document.removeEventListener("pointerup", schedulePositionUpdate, true);
-      visualViewport?.removeEventListener("resize", handleVisualViewportChange);
-      visualViewport?.removeEventListener("scroll", handleVisualViewportChange);
+      visualViewport?.removeEventListener("resize", handleGuardedViewportChange);
+      visualViewport?.removeEventListener("scroll", handleGuardedViewportChange);
     };
   }, [showActivityViewMenu, updateActivityViewMenuPosition]);
 
