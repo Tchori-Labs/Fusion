@@ -666,6 +666,11 @@ export {
   type PlannerRecoveryAttemptState,
   type PlannerRecoveryDecision,
   type DecidePlannerRecoveryInput,
+  classifyPlannerActionSideEffect,
+  requiresPlannerConfirmation,
+  type PlannerActionSideEffectClass,
+  type PlannerConfirmationRequest,
+  type ClassifyPlannerActionSideEffectInput,
 } from "@fusion/core";
 export {
   SECRET_MUTATION_TYPES,

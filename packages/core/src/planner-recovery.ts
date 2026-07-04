@@ -8,10 +8,13 @@
  * per-(task, watched-stage) attempt limit (`PLANNER_RECOVERY_MAX_ATTEMPTS`)
  * so recovery can never loop forever; once the budget is exhausted the
  * decision degrades to `"none"` with `exhausted: true` and the task is left
- * for human/other escalation. Merge/PR and destructive actions are
- * explicitly OUT of scope here (deferred to FN-7513's confirmation-gated
- * layer), and comprehensive human-control safeguards beyond a bare
- * `userPaused` skip are FN-7514's responsibility. This module is pure,
+ * for human/other escalation. Merge/PR and destructive/external-service
+ * actions are classified confirmation-required (FN-7513: `action:
+ * "await_confirmation"`, `requiresConfirmation: true`) rather than dispatched
+ * from this bounded layer — they only ever run once a
+ * `PlannerConfirmationRequest` is explicitly approved via the engine
+ * controller's `resolveConfirmation`. Comprehensive human-control safeguards
+ * beyond a bare `userPaused` skip are FN-7514's responsibility. This module is pure,
  * never-throws, and has NO engine imports — the engine-side dispatch lives
  * in `@fusion/engine`'s `PlannerRecoveryController`.
  *
@@ -29,9 +32,16 @@
  */
 
 import type { PlannerOversightLevel } from "./types.js";
+import { classifyPlannerActionSideEffect, requiresPlannerConfirmation, type PlannerActionSideEffectClass } from "./planner-confirmation.js";
 
-/** The bounded corrective actions autonomous planner recovery may take. */
-export type PlannerRecoveryActionKind = "inject_guidance" | "retry_step" | "request_targeted_fix" | "none";
+/**
+ * The bounded corrective actions autonomous planner recovery may take, plus
+ * `"await_confirmation"` (FN-7513) — the recovery layer has identified a
+ * confirmation-required action (merge/PR progression, or a destructive/
+ * external-service side effect) and is waiting on an explicit, recorded
+ * human approval before it may run.
+ */
+export type PlannerRecoveryActionKind = "inject_guidance" | "retry_step" | "request_targeted_fix" | "await_confirmation" | "none";
 
 /** Mirrors the delivered `OverseerWatchedStage` union (FN-7511). */
 export type PlannerRecoveryWatchedStage = "executor" | "reviewer" | "merger" | "pull-request" | "workflow-gate";
@@ -76,6 +86,23 @@ export interface PlannerRecoveryDecision {
   exhausted: boolean;
   watchedStage: PlannerRecoveryWatchedStage | null;
   sourceLinks: PlannerRecoverySourceLink[];
+  /**
+   * FN-7513: `true` when this decision's action must not run without an
+   * explicit, recorded human approval (`PlannerActionSideEffectClass` of
+   * `"merge_pr"` or `"destructive_external"`). `false` for bounded recovery
+   * (`inject_guidance` / `retry_step` / `request_targeted_fix`) and for
+   * `"none"` decisions, which take no action either way.
+   */
+  requiresConfirmation: boolean;
+  /** FN-7513: the side-effect class this decision's action was classified into. */
+  sideEffectClass: PlannerActionSideEffectClass;
+  /**
+   * FN-7513: for `action: "await_confirmation"`, the specific action name
+   * that would run once a matching `PlannerConfirmationRequest` is approved.
+   * Undefined for actions that dispatch immediately (bounded recovery) or
+   * for `"none"`.
+   */
+  proposedAction?: string;
 }
 
 /**
@@ -104,9 +131,11 @@ export interface DecidePlannerRecoveryInput {
  *  2. Attempt budget for the `(taskId, watchedStage)` already spent
  *     (`attemptCount >= attemptLimit`) → `"none"`, `exhausted: true` (stop
  *     autonomously; leave the task for escalation).
- *  3. `merger` / `pull-request` stages → `"none"` with a deferral reason —
- *     these require confirmation and are owned by FN-7513, never dispatched
- *     from this bounded layer.
+ *  3. `merger` / `pull-request` stages → `"await_confirmation"` with
+ *     `requiresConfirmation: true`, `sideEffectClass: "merge_pr"` (FN-7513) —
+ *     the decision names what WOULD run on approval but never dispatches it
+ *     from this bounded layer; only the engine controller's
+ *     `resolveConfirmation`, after an explicit human approval, may.
  *  4. `reviewer` stage → `"inject_guidance"`.
  *  5. `executor` / `workflow-gate` stage with `signal === "failed"` →
  *     `"request_targeted_fix"` when a source link carries a specific
@@ -132,6 +161,8 @@ export function decidePlannerRecovery(input: DecidePlannerRecoveryInput): Planne
         exhausted: false,
         watchedStage,
         sourceLinks,
+        requiresConfirmation: false,
+        sideEffectClass: "bounded_recovery",
       };
     }
 
@@ -144,6 +175,8 @@ export function decidePlannerRecovery(input: DecidePlannerRecoveryInput): Planne
         exhausted: false,
         watchedStage,
         sourceLinks,
+        requiresConfirmation: false,
+        sideEffectClass: "bounded_recovery",
       };
     }
 
@@ -156,22 +189,36 @@ export function decidePlannerRecovery(input: DecidePlannerRecoveryInput): Planne
         exhausted: true,
         watchedStage,
         sourceLinks,
+        requiresConfirmation: false,
+        sideEffectClass: "bounded_recovery",
       };
     }
 
+    // FNXC:PlannerOversight 2026-07-04-13:00: merger / pull-request stage
+    // actions beyond guidance/retry now surface as a confirmation-required
+    // `"await_confirmation"` decision (FN-7513) instead of the FN-7512
+    // `"none"` deferral — the recovery layer identifies what WOULD run on
+    // approval, but never dispatches it itself.
     if (snapshot.stage === "merger" || snapshot.stage === "pull-request") {
+      const proposedAction = snapshot.stage === "merger" ? "advance_merge" : "advance_pull_request";
+      const sideEffectClass = classifyPlannerActionSideEffect({ watchedStage: snapshot.stage, proposedAction });
       return {
-        action: "none",
-        reason: `Stage "${snapshot.stage}" requires confirmation-gated recovery (deferred to FN-7513)`,
+        action: "await_confirmation",
+        reason: `Stage "${snapshot.stage}" requires explicit confirmation before ${proposedAction.replace(/_/g, " ")} may run`,
         attemptCount,
         attemptLimit,
         exhausted: false,
         watchedStage,
         sourceLinks,
+        requiresConfirmation: requiresPlannerConfirmation(sideEffectClass),
+        sideEffectClass,
+        proposedAction,
       };
     }
 
     if (snapshot.stage === "reviewer") {
+      const proposedAction = "inject_guidance";
+      const sideEffectClass = classifyPlannerActionSideEffect({ watchedStage: snapshot.stage, proposedAction });
       return {
         action: "inject_guidance",
         reason: "Reviewer stage — injecting steering guidance",
@@ -180,14 +227,18 @@ export function decidePlannerRecovery(input: DecidePlannerRecoveryInput): Planne
         exhausted: false,
         watchedStage,
         sourceLinks,
+        requiresConfirmation: requiresPlannerConfirmation(sideEffectClass),
+        sideEffectClass,
       };
     }
 
     // executor / workflow-gate beyond this point.
     if (snapshot.signal === "failed") {
       const hasErrorSource = sourceLinks.some((link) => ERROR_SOURCE_KINDS.has(link.kind));
+      const proposedAction = hasErrorSource ? "request_targeted_fix" : "retry_step";
+      const sideEffectClass = classifyPlannerActionSideEffect({ watchedStage: snapshot.stage, proposedAction });
       return {
-        action: hasErrorSource ? "request_targeted_fix" : "retry_step",
+        action: proposedAction,
         reason: hasErrorSource
           ? "Failed stage with a specific error source — requesting a targeted fix"
           : "Failed stage with no specific error source — retrying the step",
@@ -196,18 +247,26 @@ export function decidePlannerRecovery(input: DecidePlannerRecoveryInput): Planne
         exhausted: false,
         watchedStage,
         sourceLinks,
+        requiresConfirmation: requiresPlannerConfirmation(sideEffectClass),
+        sideEffectClass,
       };
     }
 
-    return {
-      action: "inject_guidance",
-      reason: `Stage "${snapshot.stage}" signal "${snapshot.signal}" — injecting steering guidance`,
-      attemptCount,
-      attemptLimit,
-      exhausted: false,
-      watchedStage,
-      sourceLinks,
-    };
+    {
+      const proposedAction = "inject_guidance";
+      const sideEffectClass = classifyPlannerActionSideEffect({ watchedStage: snapshot.stage, proposedAction });
+      return {
+        action: "inject_guidance",
+        reason: `Stage "${snapshot.stage}" signal "${snapshot.signal}" — injecting steering guidance`,
+        attemptCount,
+        attemptLimit,
+        exhausted: false,
+        watchedStage,
+        sourceLinks,
+        requiresConfirmation: requiresPlannerConfirmation(sideEffectClass),
+        sideEffectClass,
+      };
+    }
   } catch {
     return {
       action: "none",
@@ -217,6 +276,8 @@ export function decidePlannerRecovery(input: DecidePlannerRecoveryInput): Planne
       exhausted: false,
       watchedStage: null,
       sourceLinks: [],
+      requiresConfirmation: false,
+      sideEffectClass: "bounded_recovery",
     };
   }
 }

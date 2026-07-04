@@ -1053,6 +1053,50 @@ export class ProjectEngine {
           : `[planner-oversight] targeted-fix requested: ${decision.reason}`;
         await store.addSteeringComment(task.id, text, "agent");
       },
+      // FNXC:PlannerOversight 2026-07-04-13:00:
+      // FN-7513 requirement: merge/PR actions beyond guidance/retry, and any
+      // destructive/external-service side effect, must never run
+      // autonomously — `requestConfirmation` ONLY records a pending
+      // `PlannerConfirmationRequest` via a planner-authored steering comment
+      // (reusing the same `addSteeringComment` channel as bounded recovery)
+      // so a human sees it; it never performs the side effect itself. The
+      // dashboard confirmation UI/badge that lets a human act on this is
+      // owned by FN-7515+/FN-7517.
+      requestConfirmation: async (task, request) => {
+        const text = `[planner-oversight] confirmation required (${request.sideEffectClass}): ${request.reason}`;
+        await store.addSteeringComment(task.id, text, "agent");
+      },
+      // FNXC:PlannerOversight 2026-07-04-14:30:
+      // FN-7513 code-review fix: a `"merge_pr"`-classified confirmation covers
+      // TWO distinct proposed actions (`decidePlannerRecovery` sets
+      // `proposedAction: "advance_merge"` for the `merger` stage and
+      // `"advance_pull_request"` for the `pull-request` stage) — they must NOT
+      // share one handler. Calling `store.mergeTask` unconditionally on every
+      // approved merge_pr request would let an approved PR-stage confirmation
+      // perform a direct task merge/cleanup instead of a PR-specific action,
+      // bypassing the PR workflow entirely. Branch on `request.proposedAction`
+      // (falling back to `request.watchedStage` defensively) and ONLY reuse
+      // the existing `store.mergeTask` merge-advance mechanism for
+      // `"advance_merge"` / the `merger` stage. `"advance_pull_request"` has
+      // no existing PR-advance mechanism to reuse yet (FN-7515+/FN-7517 own
+      // the PR-specific execution wiring) — it is intentionally a no-op here
+      // so an approved PR confirmation never falls through to a merge.
+      executeMergePrAction: async (taskId, request) => {
+        const proposedAction = request.proposedAction;
+        const isMergeAdvance = proposedAction === "advance_merge" || (!proposedAction && request.watchedStage === "merger");
+        if (!isMergeAdvance) {
+          // PR-stage (or any other non-merge-advance) approval: no reusable
+          // PR-advance mechanism exists yet — deliberately do nothing rather
+          // than fall back to a task merge.
+          return;
+        }
+        await store.mergeTask(taskId);
+      },
+      // FN-7513: no destructive/external execution handler is wired yet —
+      // `decidePlannerRecovery` does not currently produce a
+      // `destructive_external` action (FN-7511 has no destructive-action
+      // signal), so this is intentionally left unset; a future task can wire
+      // a concrete handler using existing safe helpers when one is needed.
     };
   }
 

@@ -68,12 +68,20 @@ describe("decidePlannerRecovery", () => {
     expect(decision.action).toBe("inject_guidance");
   });
 
-  it("defers merger and pull-request stages to none with a deferral reason", () => {
+  it("gates merger and pull-request stages behind confirmation (FN-7513) instead of none", () => {
     for (const stage of ["merger", "pull-request"] as const) {
       const decision = decidePlannerRecovery({ snapshot: observation({ stage, signal: "failed" }) });
-      expect(decision.action, `stage=${stage}`).toBe("none");
-      expect(decision.reason.toLowerCase()).toContain("deferred");
+      expect(decision.action, `stage=${stage}`).toBe("await_confirmation");
+      expect(decision.requiresConfirmation).toBe(true);
+      expect(decision.sideEffectClass).toBe("merge_pr");
+      expect(decision.proposedAction).toBeTruthy();
     }
+  });
+
+  it("keeps requiresConfirmation false for bounded-recovery decisions", () => {
+    const decision = decidePlannerRecovery({ snapshot: observation({ stage: "executor", signal: "failed" }) });
+    expect(decision.requiresConfirmation).toBe(false);
+    expect(decision.sideEffectClass).toBe("bounded_recovery");
   });
 
   it("returns none + exhausted true exactly at the attempt limit", () => {

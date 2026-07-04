@@ -442,6 +442,13 @@ export {
   type PlannerRecoveryDecision,
   type DecidePlannerRecoveryInput,
 } from "./planner-recovery.js";
+export {
+  classifyPlannerActionSideEffect,
+  requiresPlannerConfirmation,
+  type PlannerActionSideEffectClass,
+  type PlannerConfirmationRequest,
+  type ClassifyPlannerActionSideEffectInput,
+} from "./planner-confirmation.js";
 
 // ── Engine wiring (set by @fusion/engine at module load) ────────────
 export {
