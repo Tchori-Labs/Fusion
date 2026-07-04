@@ -75,7 +75,7 @@ export async function markLegacyAutoMergeStampsOnceImpl(store: TaskStore): Promi
     });
   }
 
-export async function appendAgentLogImpl(store: TaskStore, taskId: string, text: string, type: AgentLogEntry["type"], detail?: string, agent?: AgentLogEntry["agent"],): Promise<void> {
+export async function appendAgentLogImpl(store: TaskStore, taskId: string, text: string, type: AgentLogEntry["type"], detail?: string, agent?: AgentLogEntry["agent"], timing?: Pick<AgentLogEntry, "durationMs" | "timeToFirstTokenMs">,): Promise<void> {
     const timestamp = new Date().toISOString();
     const normalizedDetail = truncateAgentLogDetail(detail, type);
     const entry: AgentLogEntry = {
@@ -85,6 +85,8 @@ export async function appendAgentLogImpl(store: TaskStore, taskId: string, text:
       type,
       ...(normalizedDetail !== undefined && { detail: normalizedDetail }),
       ...(agent !== undefined && { agent }),
+      ...(timing?.durationMs !== undefined && { durationMs: timing.durationMs }),
+      ...(timing?.timeToFirstTokenMs !== undefined && { timeToFirstTokenMs: timing.timeToFirstTokenMs }),
     };
 
     // Buffer the entry for batched insertion to reduce WAL pressure.
@@ -110,6 +112,8 @@ export async function appendAgentLogImpl(store: TaskStore, taskId: string, text:
       type,
       detail: normalizedDetail ?? null,
       agent: agent ?? null,
+      durationMs: null,
+      timeToFirstTokenMs: null,
     });
     store.emit("agent:log", entry);
 

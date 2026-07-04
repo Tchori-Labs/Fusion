@@ -79,7 +79,16 @@ const quarantinedCliTests: string[] = [
   quarantines remaining CLI test files that construct a SQLite-backed store via inMemoryDb.
   These tests exercise the SQLite Database class being deleted in this feature. Quarantined
   on sight per AGENTS.md; mirrored in scripts/lib/test-quarantine.json.
+  FNXC:CliTests 2026-06-26-09:30:
+  extension.test.ts failed in CI full-suite shard 3/4 with 'Target cannot be null or undefined' in the fn_delegate_task test and was quarantined under the deletion ratchet.
+
+  FNXC:CliTests 2026-06-27-10:05:
+  FN-7119 re-ran extension.test.ts twice with the exclude removed and the fn_delegate_task null-target symptom no longer reproduces at HEAD. Keep this list empty so delegate-task validation coverage stays active in the package lane.
+
+  FNXC:CliTests 2026-07-04-10:40:
+  FN-7447 re-quarantines extension.test.ts after its built-dist-barrel fn_task_list test (line ~3084) timed out at 5000ms in full-suite shard 4/4 (run 28697507894) while passing locally at ~1.2s and in 3 of the 4 surrounding CI runs. The root-cause invariant is the loaded-lane signature: in-test dist-barrel recompilation (vi.resetModules + vi.importActual of the full @fusion/core dist barrel + a fresh dynamic import of extension.js) inside the default 5s timeout is CPU-bound and degrades non-linearly under 4-shard CI contention. This is the same signature rescued in FN-6483/FN-6705/FN-6795/FN-6839; widening the timeout is forbidden by the flaky-test rule and removing the recompilation removes the test's only purpose, so the file is excluded per the deletion ratchet rather than re-attempting a fifth fixture rescue. Mirrors scripts/lib/test-quarantine.json; collateral is the ~68 otherwise-stable tests in this file, recoverable via rescue before the 2026-07-18 deletion deadline.
   */
+  "src/__tests__/extension.test.ts",
 ];
 
 export default defineConfig({
@@ -126,6 +135,22 @@ export default defineConfig({
       {
         find: /^@fusion-plugin-examples\/cursor-runtime$/,
         replacement: resolve(__dirname, "../../plugins/fusion-plugin-cursor-runtime/src/index.ts"),
+      },
+      /*
+      FNXC:PluginTests 2026-07-04-09:30:
+      The roadmap plugin (@fusion-plugin-examples/roadmap) is imported by the CLI extension. Without source aliases, Vite resolves to the dist/ exports which don't exist in a source checkout.
+      */
+      {
+        find: /^@fusion-plugin-examples\/roadmap\/server$/,
+        replacement: resolve(__dirname, "../../plugins/fusion-plugin-roadmap/src/server/index.ts"),
+      },
+      {
+        find: /^@fusion-plugin-examples\/roadmap\/roadmap-suggestions$/,
+        replacement: resolve(__dirname, "../../plugins/fusion-plugin-roadmap/src/roadmap-suggestions.ts"),
+      },
+      {
+        find: /^@fusion-plugin-examples\/roadmap$/,
+        replacement: resolve(__dirname, "../../plugins/fusion-plugin-roadmap/src/index.ts"),
       },
       { find: /^@fusion\/test-utils$/, replacement: resolve(__dirname, "../core/src/__test-utils__/workspace.ts") },
     ],

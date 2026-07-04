@@ -121,22 +121,41 @@ describe("streamChatResponse SSE parser", () => {
     });
   });
 
-  it("fires onError when no stream events arrive before timeout", async () => {
+  it("keeps accepted streams open when no real stream events arrive before timeout", async () => {
     vi.useFakeTimers();
+    const encoder = new TextEncoder();
+    let streamController: ReadableStreamDefaultController<Uint8Array> | null = null;
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(new ReadableStream<Uint8Array>({
       start(controller) {
-        controller.enqueue(new TextEncoder().encode(": connected\n\n"));
+        streamController = controller;
+        controller.enqueue(encoder.encode(": connected\n\n"));
       },
     }), { status: 200 }));
 
     const onError = vi.fn();
-    streamChatResponse("s-1", "hi", { onError }, undefined, undefined, { firstEventTimeoutMs: 1_000 });
+    const textChunks: string[] = [];
+    const donePayloads: Array<{ messageId: string }> = [];
+    streamChatResponse("s-1", "hi", {
+      onText: (data) => textChunks.push(data),
+      onDone: (data) => donePayloads.push(data),
+      onError,
+    }, undefined, undefined, { firstEventTimeoutMs: 1_000 });
 
     await Promise.resolve();
     await Promise.resolve();
     await vi.advanceTimersByTimeAsync(1_100);
 
-    expect(onError).toHaveBeenCalledWith("Timed out waiting for first response event");
+    expect(onError).not.toHaveBeenCalled();
+
+    streamController?.enqueue(encoder.encode("event: text\ndata: \"Late reply\"\n\n"));
+    streamController?.enqueue(encoder.encode("event: done\ndata: {\"messageId\":\"msg-late\"}\n\n"));
+    streamController?.close();
+
+    await vi.waitFor(() => {
+      expect(textChunks).toEqual(["Late reply"]);
+      expect(donePayloads).toEqual([{ messageId: "msg-late" }]);
+    });
+    expect(onError).not.toHaveBeenCalled();
     vi.useRealTimers();
   });
 

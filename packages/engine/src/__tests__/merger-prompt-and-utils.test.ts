@@ -194,6 +194,10 @@ function createMockStore(taskOverrides: Partial<Task> = {}, allTasks: Task[] = [
     clearStaleExecutionStartBranchReferences: vi.fn().mockReturnValue([]),
     getVerificationCacheHit: vi.fn().mockReturnValue(null),
     recordVerificationCachePass: vi.fn(),
+    recordActivity: vi.fn().mockResolvedValue(undefined),
+    recordRunAuditEvent: vi.fn(),
+    enqueueMergeQueue: vi.fn(),
+    getMergeQueueSnapshot: vi.fn().mockReturnValue([]),
   } as unknown as TaskStore;
 }
 
@@ -308,7 +312,7 @@ describe("push-after-merge", () => {
     } as any);
   });
 
-  function setupAiMergeExecSyncWithPush(pushBehavior?: (attempt: number) => void) {
+  function setupAiMergeExecSyncWithPush(pushBehavior?: (attempt: number) => void, options?: { detachedHead?: boolean }) {
     let pushAttempts = 0;
 
     mockedExecSync.mockImplementation((cmd: any) => {
@@ -320,7 +324,14 @@ describe("push-after-merge", () => {
         throw err;
       }
       if (cmdStr.includes("rev-parse --verify")) return Buffer.from("abc123");
-      if (cmdStr.includes("git symbolic-ref --short HEAD")) return "main" as any;
+      if (cmdStr.includes("git symbolic-ref --short HEAD")) {
+        if (options?.detachedHead) {
+          const err = new Error("fatal: ref HEAD is not a symbolic ref") as Error & { status?: number };
+          err.status = 128;
+          throw err;
+        }
+        return "main" as any;
+      }
       if (cmdStr.includes("git rev-parse --abbrev-ref origin/HEAD")) return "origin/main" as any;
       if (cmdStr === "git rev-parse HEAD" || cmdStr.startsWith("git rev-parse HEAD ")) return "mergedcommit123" as any;
       if (cmdStr.includes("git log HEAD..")) return "- feat: something" as any;
@@ -355,6 +366,29 @@ describe("push-after-merge", () => {
     (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({
       ...DEFAULT_SETTINGS,
       mergeIntegrationWorktree: "cwd-main" as const,
+      pushAfterMerge: true,
+      pushRemote: "origin",
+      mergeStrategy: "direct",
+    });
+
+    const result = await aiMergeTask(store, "/tmp/root", "FN-050");
+
+    expect(result.pushedToRemote).toBe(true);
+    expect(
+      mockedExecSync.mock.calls.some((call) => String(call[0]).includes('git pull --rebase "origin" "main"')),
+    ).toBe(true);
+    expect(
+      mockedExecSync.mock.calls.some((call) => String(call[0]).includes('git push "origin" "main"')),
+    ).toBe(true);
+  });
+
+  it("FN-7490 uses the merge target branch for remote-only pushes when HEAD is detached", async () => {
+    setupAiMergeExecSyncWithPush(undefined, { detachedHead: true });
+
+    const store = createMockStore();
+    (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ...DEFAULT_SETTINGS,
+      mergeIntegrationWorktree: "reuse-task-worktree" as const,
       pushAfterMerge: true,
       pushRemote: "origin",
       mergeStrategy: "direct",
@@ -433,6 +467,68 @@ describe("push-after-merge", () => {
     expect(result.pushedToRemote).toBe(false);
     expect(result.pushError).toContain("permission denied");
     expect(store.moveTask).toHaveBeenCalledWith("FN-050", "done");
+  });
+
+  it.each([undefined, "", "   "])("FN-7490 falls back to origin and integration branch for empty pushRemote %s", async (pushRemote) => {
+    mockedExecSync.mockImplementation((cmd: any) => {
+      const cmdStr = String(cmd);
+      if (cmdStr.startsWith('git pull --rebase "origin" "main"')) return Buffer.from("");
+      if (cmdStr.startsWith('git push "origin" "main"')) return Buffer.from("");
+      if (cmdStr.includes("git symbolic-ref --short HEAD")) {
+        throw new Error("fatal: ref HEAD is not a symbolic ref");
+      }
+      if (cmdStr.includes("rev-parse --verify REBASE_HEAD")) {
+        const err = new Error("fatal: Needed a single revision");
+        throw err;
+      }
+      return Buffer.from("");
+    });
+
+    const store = createMockStore();
+    const result = await pushToRemoteAfterMerge(store, "/tmp/root", "FN-050", {
+      ...DEFAULT_SETTINGS,
+      pushAfterMerge: true,
+      pushRemote,
+    }, { integrationBranch: "main" });
+
+    expect(result.pushed).toBe(true);
+    expect(
+      mockedExecSync.mock.calls.some((call) => String(call[0]).startsWith('git pull --rebase "origin" "main"')),
+    ).toBe(true);
+    expect(
+      mockedExecSync.mock.calls.some((call) => String(call[0]).startsWith('git push "origin" "main"')),
+    ).toBe(true);
+  });
+
+  it("uses integration branch fallback for remote-only push targets", async () => {
+    mockedExecSync.mockImplementation((cmd: any) => {
+      const cmdStr = String(cmd);
+      if (cmdStr.startsWith('git pull --rebase "origin" "release"')) return Buffer.from("");
+      if (cmdStr.startsWith('git push "origin" "release"')) return Buffer.from("");
+      if (cmdStr.includes("git symbolic-ref --short HEAD")) {
+        throw new Error("fatal: ref HEAD is not a symbolic ref");
+      }
+      if (cmdStr.includes("rev-parse --verify REBASE_HEAD")) {
+        const err = new Error("fatal: Needed a single revision");
+        throw err;
+      }
+      return Buffer.from("");
+    });
+
+    const store = createMockStore();
+    const result = await pushToRemoteAfterMerge(store, "/tmp/root", "FN-050", {
+      ...DEFAULT_SETTINGS,
+      pushAfterMerge: true,
+      pushRemote: "origin",
+    }, { integrationBranch: "release" });
+
+    expect(result.pushed).toBe(true);
+    expect(
+      mockedExecSync.mock.calls.some((call) => String(call[0]).startsWith('git pull --rebase "origin" "release"')),
+    ).toBe(true);
+    expect(
+      mockedExecSync.mock.calls.some((call) => String(call[0]).startsWith('git push "origin" "release"')),
+    ).toBe(true);
   });
 
   it("uses custom remote and branch when configured", async () => {

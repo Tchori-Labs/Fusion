@@ -385,6 +385,8 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
     type: AgentLogEntry["type"];
     detail: string | null;
     agent: AgentLogEntry["agent"] | null;
+    durationMs: number | null;
+    timeToFirstTokenMs: number | null;
   }> = [];
   public agentLogFlushTimer: ReturnType<typeof setTimeout> | null = null;
   public static readonly AGENT_LOG_BUFFER_SIZE = 50;
@@ -1749,8 +1751,8 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   async deleteAttachment(id: string, filename: string): Promise<Task> {
     return deleteAttachmentImpl(this, id, filename);
   }
-  async appendAgentLog( taskId: string, text: string, type: AgentLogEntry["type"], detail?: string, agent?: AgentLogEntry["agent"], ): Promise<void> {
-    return appendAgentLogImpl(this, taskId, text, type, detail, agent);
+  async appendAgentLog( taskId: string, text: string, type: AgentLogEntry["type"], detail?: string, agent?: AgentLogEntry["agent"], timing?: Pick<AgentLogEntry, "durationMs" | "timeToFirstTokenMs">, ): Promise<void> {
+    return appendAgentLogImpl(this, taskId, text, type, detail, agent, timing);
   }
 
 /** Append a normalized telemetry row to `usage_events` (tool calls, messages, */
@@ -1766,6 +1768,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   async appendAgentLogBatch( entries: Array<{ taskId: string; text: string; type: AgentLogEntry["type"]; detail?: string; agent?: AgentLogEntry["agent"]; }>, ): Promise<void> {
     return appendAgentLogBatchImpl(this, entries);
   }
+
   async addTaskComment(id: string, text: string, author: string): Promise<Task> {
     return addTaskCommentImpl(this, id, text, author);
   }

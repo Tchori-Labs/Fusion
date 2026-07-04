@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import { cleanup, render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { EditorView } from "@codemirror/view";
 import path from "path";
 import { SettingsModal } from "../SettingsModal";
@@ -785,6 +785,8 @@ describe("SettingsModal", () => {
       });
       mockUseWorktrunkInstallStatus.mockReturnValue({
         status: "missing",
+        // Save re-verifies when enabling-but-unverified; still not installed → stays clamped off.
+        refresh: vi.fn().mockResolvedValue({ status: "missing" }),
         requestInstall: vi.fn(),
         requesting: false,
         version: undefined,
@@ -1240,14 +1242,14 @@ describe("SettingsModal", () => {
         expect(screen.getByPlaceholderText("origin")).toBeInTheDocument();
       });
 
-      it("includes pushAfterMerge and pushRemote in the save payload", async () => {
+      it("includes pushAfterMerge and trimmed pushRemote in the save payload", async () => {
         await settingsModalUser.click(
           screen.getByRole("checkbox", { name: /push to remote after merge/i }),
         );
 
         const pushRemoteInput = screen.getByLabelText("Push Remote");
         await settingsModalUser.clear(pushRemoteInput);
-        await settingsModalUser.type(pushRemoteInput, "upstream main");
+        await settingsModalUser.type(pushRemoteInput, "  upstream main  ");
 
         await settingsModalUser.click(screen.getByText("Save"));
 
@@ -1258,6 +1260,59 @@ describe("SettingsModal", () => {
         const payload = mockUpdateSettings.mock.calls[0][0];
         expect(payload.pushAfterMerge).toBe(true);
         expect(payload.pushRemote).toBe("upstream main");
+      });
+
+      it("renders persisted push remote settings after save and reload", async () => {
+        cleanup();
+        vi.clearAllMocks();
+        mockFetchSettings.mockResolvedValueOnce({
+          ...defaultSettings,
+          pushAfterMerge: true,
+          pushRemote: "upstream main",
+        });
+        mockFetchSettingsByScope.mockResolvedValueOnce({
+          global: defaultSettings,
+          project: { pushAfterMerge: true, pushRemote: "upstream main" },
+        });
+
+        renderModal({ initialSection: "merge" });
+        await screen.findByRole("checkbox", { name: /push to remote after merge/i });
+
+        expect(screen.getByRole("checkbox", { name: /push to remote after merge/i })).toBeChecked();
+        expect(screen.getByLabelText("Push Remote")).toHaveValue("upstream main");
+      });
+
+      it("hides and clears stale Push Remote when push-after-merge is disabled", async () => {
+        cleanup();
+        vi.clearAllMocks();
+        mockFetchSettings.mockResolvedValueOnce({
+          ...defaultSettings,
+          pushAfterMerge: true,
+          pushRemote: "upstream main",
+        });
+        mockFetchSettingsByScope.mockResolvedValueOnce({
+          global: defaultSettings,
+          project: { pushAfterMerge: true, pushRemote: "upstream main" },
+        });
+
+        renderModal({ initialSection: "merge" });
+        const pushAfterMergeToggle = await screen.findByRole("checkbox", { name: /push to remote after merge/i });
+        expect(screen.getByLabelText("Push Remote")).toHaveValue("upstream main");
+
+        await settingsModalUser.click(pushAfterMergeToggle);
+
+        expect(screen.queryByLabelText("Push Remote")).not.toBeInTheDocument();
+        expect(screen.queryByText("Git remote to push to")).not.toBeInTheDocument();
+
+        await settingsModalUser.click(screen.getByText("Save"));
+
+        await waitFor(() => {
+          expect(mockUpdateSettings).toHaveBeenCalledTimes(1);
+        });
+
+        const payload = mockUpdateSettings.mock.calls[0][0] as Record<string, unknown>;
+        expect(payload.pushAfterMerge).toBe(false);
+        expect(payload.pushRemote).toBeNull();
       });
 
       it("round-trips plan approval mode through project settings save", async () => {

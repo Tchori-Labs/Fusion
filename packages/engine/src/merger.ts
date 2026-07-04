@@ -6992,12 +6992,19 @@ function isRebaseInProgress(rootDir: string): boolean {
   }
 }
 
-function parsePushRemoteTarget(rootDir: string, pushRemote?: string): { remote: string; branch: string } {
+function parsePushRemoteTarget(rootDir: string, pushRemote?: string, fallbackBranch?: string): { remote: string; branch: string } {
   const rawTarget = pushRemote?.trim() || "origin";
   const [remoteToken, ...branchTokens] = rawTarget.split(/\s+/).filter(Boolean);
   const remote = remoteToken || "origin";
 
   let branch = branchTokens.join(" ").trim();
+  if (!branch) {
+    /*
+    FNXC:MergePush 2026-07-04-09:31:
+    Remote-only push targets must resolve to the merge integration branch, not the incidental HEAD of the worktree running post-merge git. Reuse-task-worktree can detach HEAD after advancing refs/heads/<integration>, so the direct merge call site supplies the authoritative integration branch before this helper falls back to symbolic-ref for standalone utility callers.
+    */
+    branch = fallbackBranch?.trim() || "";
+  }
   if (!branch) {
     branch = execSyncText("git symbolic-ref --short HEAD", {
       cwd: rootDir,
@@ -7288,13 +7295,14 @@ export async function pushToRemoteAfterMerge(
     runtimeHint?: string;
     assignedAgentRuntimeConfig?: Record<string, unknown>;
     onSession?: (session: { dispose: () => void }) => void;
+    integrationBranch?: string;
   },
 ): Promise<{ pushed: boolean; error?: string }> {
   let target: { remote: string; branch: string };
 
   try {
     throwIfAborted(options?.signal, taskId);
-    target = parsePushRemoteTarget(rootDir, settings.pushRemote);
+    target = parsePushRemoteTarget(rootDir, settings.pushRemote, options?.integrationBranch);
   } catch (error: unknown) {
     rethrowIfMergeAborted(error);
     const message = getCommandErrorMessage(error);
@@ -10806,6 +10814,7 @@ export async function aiMergeTask(
         runtimeHint: pushRuntimeHint,
         assignedAgentRuntimeConfig: pushAssignedAgent?.runtimeConfig,
         onSession: options.onSession,
+        integrationBranch: mergeTarget.branch,
       });
       if (pushResult.pushed) {
         mergerLog.log(`${taskId}: pushed merged result to remote`);

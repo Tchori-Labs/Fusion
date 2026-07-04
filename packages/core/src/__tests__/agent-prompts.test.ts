@@ -295,6 +295,23 @@ describe("resolveAgentPrompt", () => {
     expect(fastPrompt.split("\n").length).toBeLessThan(120);
   });
 
+  it("requires before-to-after transformation summaries across planning prompts", () => {
+    const prompts = [
+      resolveAgentPrompt("triage"),
+      builtinSeamPrompt("planning"),
+      builtinSeamPrompt("planning-fast"),
+    ];
+
+    for (const prompt of prompts) {
+      expect(prompt).toContain("## Before → After Transformation");
+      expect(prompt).toContain("Before");
+      expect(prompt).toContain("After");
+      expect(prompt).toContain("current state");
+      expect(prompt).toContain("target state");
+      expect(prompt).toContain("satisfies the user's request at a glance");
+    }
+  });
+
   it("triage planning prompt is sourced from workflow IR without an engine duplicate", () => {
     const corePrompt = resolveAgentPrompt("triage");
     const planningPrompt = resolvePlanningPromptFromIr(BUILTIN_CODING_WORKFLOW_IR);
@@ -306,18 +323,25 @@ describe("resolveAgentPrompt", () => {
     expect(triageSource).not.toContain(["FAST", "TRIAGE", "SYSTEM", "PROMPT"].join("_"));
     expect(triageSource).not.toMatch(/export const [A-Z_]*TRIAGE[A-Z_]*SYSTEM_PROMPT\s*=/);
     expect(planningPrompt).toBe(corePrompt);
-    expect(corePrompt).toContain("**Broad-scope decomposition signals:**");
-    expect(corePrompt).toContain("step count would reach {{triageSubtaskLargeStepSignal}} or more");
-    expect(corePrompt).toContain("would reach {{triageSubtaskAdditiveStepSignal}} or more");
-    expect(corePrompt).toContain("{{triageSubtaskFileScopeThreshold}} or more entries");
-    expect(corePrompt).toContain("at or above {{triageSubtaskRemediationBatchThreshold}} items");
+    expect(corePrompt).toContain("{{triageProactiveSubtaskSplittingEnabled}}");
+    expect(corePrompt).toContain("Explicit user-requested `breakIntoSubtasks: true` remains governed");
 
     const renderedPrompt = renderTriagePolicyPlaceholders(corePrompt, {});
+    expect(renderedPrompt).toContain("**Broad-scope decomposition signals:**");
     expect(renderedPrompt).toContain("step count would reach 9 or more");
     expect(renderedPrompt).toContain("would reach 12 or more");
     expect(renderedPrompt).toContain("20 or more entries");
     expect(renderedPrompt).toContain("at or above 30 items");
+    expect(renderedPrompt).toContain("Even when `breakIntoSubtasks` is not set to `true`, apply these thresholds proactively");
     expect(renderedPrompt).not.toContain("{{");
+
+    const disabledPrompt = renderTriagePolicyPlaceholders(corePrompt, {
+      triageProactiveSubtaskSplittingEnabled: false,
+    } as never);
+    expect(disabledPrompt).toContain("Proactive oversized-task splitting is DISABLED");
+    expect(disabledPrompt).toContain("Only create child tasks when `breakIntoSubtasks: true` is explicitly present");
+    expect(disabledPrompt).not.toContain("Even when `breakIntoSubtasks` is not set to `true`, apply these thresholds proactively");
+    expect(disabledPrompt).not.toContain("{{");
   });
 
   it("resolves custom seam prompts and ignores IRs without matching prompts", () => {

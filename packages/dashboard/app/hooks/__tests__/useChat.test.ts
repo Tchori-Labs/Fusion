@@ -3916,6 +3916,47 @@ describe("useChat", () => {
       expect(result.current.messages.some((message) => message.role === "assistant" && message.failureInfo?.summary === "Provider rate limit")).toBe(true);
     });
 
+    it("keeps accepted silent streams waiting and reconciles a late assistant message", async () => {
+      mockFetchChatSessions.mockResolvedValueOnce({
+        sessions: [makeSession({ id: "session-001", agentId: "agent-001" })],
+      });
+      mockFetchChatMessages.mockResolvedValueOnce({ messages: [] });
+
+      let doneHandler: ((data: { messageId: string; message?: ChatMessage }) => void) | undefined;
+      mockStreamChatResponse.mockImplementation((_sessionId, _content, handlers) => {
+        doneHandler = handlers.onDone;
+        return { close: vi.fn(), isConnected: () => true };
+      });
+
+      const addToast = vi.fn();
+      const { result } = renderHook(() => useChat("proj-123", addToast));
+      await waitFor(() => expect(result.current.sessions).toHaveLength(1));
+      act(() => result.current.selectSession("session-001"));
+      await waitFor(() => expect(result.current.activeSession?.id).toBe("session-001"));
+
+      act(() => result.current.sendMessage("slow prompt"));
+
+      await waitFor(() => {
+        expect(result.current.isStreaming).toBe(true);
+        expect(result.current.messages.some((message) => message.role === "user" && message.content === "slow prompt")).toBe(true);
+      });
+      expect(result.current.messages.some((message) => message.failureInfo?.summary === "Timed out waiting for first response event")).toBe(false);
+      expect(addToast).not.toHaveBeenCalledWith("Timed out waiting for first response event", "error");
+
+      act(() => {
+        doneHandler?.({
+          messageId: "msg-late-assistant",
+          message: makeMessage({ id: "msg-late-assistant", sessionId: "session-001", role: "assistant", content: "late answer" }),
+        });
+      });
+
+      await waitFor(() => {
+        expect(result.current.isStreaming).toBe(false);
+        expect(result.current.messages.some((message) => message.role === "assistant" && message.content === "late answer")).toBe(true);
+      });
+      expect(result.current.messages.some((message) => message.failureInfo?.summary === "Response failed")).toBe(false);
+    });
+
     it("does not keep optimistic sent message for pre-acceptance HTTP failures", async () => {
       mockFetchChatSessions.mockResolvedValueOnce({
         sessions: [makeSession({ id: "session-001", agentId: "agent-001" })],

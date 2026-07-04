@@ -12,6 +12,7 @@ import { AppModals } from "./components/AppModals";
 import { DashboardLoader, type DashboardLoaderStage } from "./components/DashboardLoader";
 import { TopProgressBar } from "./components/TopProgressBar";
 import { ExecutorStatusBar } from "./components/ExecutorStatusBar";
+import { TerminalModal } from "./components/TerminalModal";
 import { type CliActionId } from "./components/SessionNotificationBanner";
 import {
   isOnboardingCompleted,
@@ -937,15 +938,19 @@ function AppInner() {
     pushNav({ type: "modal", close: modalManager.closeGitHubImport });
   }, [modalManager, pushNav]);
 
+  const closeTerminalWithNav = useCallback(() => {
+    removeNav(modalManager.closeTerminal);
+    modalManager.closeTerminal();
+  }, [modalManager, removeNav]);
+
   const toggleTerminalWithNav = useCallback(() => {
     if (!modalManager.terminalOpen) {
       modalManager.toggleTerminal();
       pushNav({ type: "modal", close: modalManager.closeTerminal });
     } else {
-      removeNav(modalManager.closeTerminal);
-      modalManager.toggleTerminal();
+      closeTerminalWithNav();
     }
-  }, [modalManager, pushNav, removeNav]);
+  }, [closeTerminalWithNav, modalManager, pushNav]);
 
   const openFilesWithNav = useCallback((workspace?: string, initialFile?: string | null) => {
     modalManager.openFiles(workspace, initialFile);
@@ -1475,6 +1480,7 @@ function AppInner() {
         }
       />
       <DashboardBanners {...dashboardBannersProps} />
+      <div className="dashboard-project-stack" data-testid="dashboard-project-stack">
       <div className={`dashboard-project-shell${sidebarActive ? " dashboard-project-shell--with-sidebar" : ""}${rightDockActive ? " dashboard-project-shell--with-right-dock" : ""}`} data-testid="dashboard-project-shell">
         {sidebarActive && (
           <LeftSidebarNav
@@ -1510,6 +1516,16 @@ function AppInner() {
           <MainContent {...mainContentProps} />
         </div>
         {rightDock.dock}
+      </div>
+      {currentProject && (
+        <TerminalModal
+          isOpen={modalManager.terminalOpen}
+          onClose={closeTerminalWithNav}
+          initialCommand={modalManager.terminalInitialCommand}
+          initialCommandGeneration={modalManager.terminalInitialCommandGeneration}
+          projectId={currentProject.id}
+        />
+      )}
       </div>
       {rightDock.modal}
       {executorFooterVisible && currentProject && (
@@ -1645,6 +1661,9 @@ function AppInner() {
 
       FNXC:TaskPopupGeometry 2026-07-03-00:00:
       Every task-detail FloatingWindow keeps its per-task windowKey for DOM identity, dedupe, cascade fallback, and z-index independence, but all task-detail popups share one persisted geometry key so operators do not resize or reposition the popup between tasks.
+
+      FNXC:TaskPopupLayer 2026-07-04-18:36:
+      Ordinary task-detail popups belong to the board/task-detail layer, not the global floating-utility stack. Pass the task-detail layer so board/right-dock task opens preserve the visible board context while utility windows keep the higher app-wide raise/focus contract.
       */}
       {poppedOutTasks.map((snapshot) => {
         const liveTask = tasks.find((candidate) => candidate.id === snapshot.id) ?? snapshot;
@@ -1659,6 +1678,7 @@ function AppInner() {
             dragHandleSelector=".task-detail-content--embedded > .modal-header"
             className="floating-window--task-detail"
             persistGeometryKey={TASK_DETAIL_FLOATING_GEOMETRY_KEY}
+            layer="task-detail"
           >
             <TaskDetailContent
               task={liveTask}

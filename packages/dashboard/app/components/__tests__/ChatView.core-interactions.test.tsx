@@ -903,6 +903,47 @@ describe("ChatView core interactions", () => {
       expect(screen.queryByText("Loading messages...")).not.toBeInTheDocument();
     });
 
+    it("keeps desktop accepted silent requests as waiting instead of failure", async () => {
+      setupMockChat({
+        activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" },
+        messages: [
+          { id: "msg-001", sessionId: "session-001", role: "user", content: "Slow prompt", createdAt: "2026-04-08T00:00:00.000Z" },
+        ],
+        isStreaming: true,
+        streamingText: "",
+        streamingThinking: "",
+      });
+
+      await renderWithAct(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+
+      expect(screen.queryByText("Response failed")).not.toBeInTheDocument();
+      expect(screen.queryByText("Timed out waiting for first response event")).not.toBeInTheDocument();
+      expect(document.querySelector(".chat-message-content--failure")).not.toBeInTheDocument();
+      expect(document.querySelector(".chat-message--streaming")?.textContent).toContain("Working");
+    });
+
+    it("keeps mobile accepted silent requests in the visible thread", async () => {
+      const mediaQuerySpy = mockViewportMode("mobile");
+      setupMockChat({
+        activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" },
+        messages: [
+          { id: "msg-001", sessionId: "session-001", role: "user", content: "Slow mobile prompt", createdAt: "2026-04-08T00:00:00.000Z" },
+        ],
+        isStreaming: true,
+        streamingText: "",
+        streamingThinking: "",
+      });
+
+      await renderWithAct(<ChatView projectId="proj-123" addToast={vi.fn()} />);
+
+      expect(screen.queryByText("Response failed")).not.toBeInTheDocument();
+      expect(screen.queryByText("Timed out waiting for first response event")).not.toBeInTheDocument();
+      expect(document.querySelector(".chat-message--streaming")?.textContent).toContain("Working");
+      expect(screen.getByTestId("chat-back-btn")).toBeInTheDocument();
+
+      void mediaQuerySpy;
+    });
+
     it("shows waiting indicator when streaming starts before text arrives", async () => {
       setupMockChat({
         activeSession: { id: "session-001", agentId: "agent-001", status: "active", title: "Test Chat", createdAt: "2026-04-08T00:00:00.000Z", updatedAt: "2026-04-08T00:00:00.000Z" },

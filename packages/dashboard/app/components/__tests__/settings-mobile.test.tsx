@@ -43,6 +43,7 @@ const defaultSettings = {
 vi.mock("../../api", () => ({
   fetchProjects: vi.fn(() => Promise.resolve([])),
   fetchGitRemotes: vi.fn(() => Promise.resolve({ remotes: [] })),
+  fetchGitBranches: vi.fn(() => Promise.resolve([])),
   fetchSettings: vi.fn(() => Promise.resolve({ ...defaultSettings })),
   fetchSettingsByScope: vi.fn(() => Promise.resolve({ global: { ...defaultSettings }, project: {} })),
   updateSettings: vi.fn(() => Promise.resolve({ ...defaultSettings })),
@@ -149,7 +150,7 @@ vi.mock("../../hooks/useMemoryBackendStatus", () => ({
   })),
 }));
 
-import { fetchSettings } from "../../api";
+import { fetchSettings, updateSettings } from "../../api";
 
 function mockSettingsViewport(matches: boolean): void {
   Object.defineProperty(window, "matchMedia", {
@@ -276,6 +277,27 @@ describe("SettingsModal mobile adaptations", () => {
     expect(optionValues).toContain("research-project");
   });
 
+  it("filters the mobile section picker from settings search results with distinct duplicate labels", async () => {
+    mockSettingsViewport(true);
+    const user = userEvent.setup();
+    const { getByLabelText, getByTestId, queryByLabelText, getByText } = render(<SettingsModal onClose={vi.fn()} addToast={vi.fn()} />);
+    await waitFor(() => expect(fetchSettings).toHaveBeenCalled());
+
+    const search = getByTestId("settings-search-input");
+    await user.type(search, "mcp");
+
+    const picker = getByLabelText("Settings Section") as HTMLSelectElement;
+    const labels = Array.from(picker.options).map((opt) => opt.textContent);
+    expect(labels).toEqual(["Global — MCP Servers", "Project — MCP Servers"]);
+    expect(Array.from(picker.options).map((opt) => opt.value)).toEqual(["global-mcp", "mcp"]);
+
+    await user.clear(search);
+    await user.type(search, "research providers");
+
+    expect(queryByLabelText("Settings Section")).toBeNull();
+    expect(getByText("No sections match this search.")).toBeTruthy();
+  });
+
   it("can open memory settings from the mobile section picker", async () => {
     mockSettingsViewport(true);
     const user = userEvent.setup();
@@ -286,6 +308,33 @@ describe("SettingsModal mobile adaptations", () => {
 
     expect(await findByText(/Memory lives in/)).toBeTruthy();
     expect(getByLabelText("Memory File")).toBeTruthy();
+  });
+
+  it("keeps push remote reachable and clears its hidden shell on mobile", async () => {
+    mockSettingsViewport(true);
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 375 });
+    const user = userEvent.setup();
+    const { getByLabelText, queryByLabelText, getByRole, queryByText } = render(<SettingsModal onClose={vi.fn()} addToast={vi.fn()} />);
+    await waitFor(() => expect(fetchSettings).toHaveBeenCalled());
+
+    await user.selectOptions(getByLabelText("Settings Section"), "merge");
+    await user.click(getByRole("checkbox", { name: /push to remote after merge/i }));
+
+    const pushRemote = getByLabelText("Push Remote");
+    expect(pushRemote).toHaveAttribute("placeholder", "origin");
+    await user.type(pushRemote, "upstream main");
+
+    await user.click(getByRole("checkbox", { name: /push to remote after merge/i }));
+
+    expect(queryByLabelText("Push Remote")).toBeNull();
+    expect(queryByText("Git remote to push to")).toBeNull();
+
+    await user.click(getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(updateSettings).toHaveBeenCalled());
+
+    const payload = vi.mocked(updateSettings).mock.calls[0][0] as Record<string, unknown>;
+    expect(payload.pushAfterMerge).toBe(false);
+    expect(payload).not.toHaveProperty("pushRemote");
   });
 
   it("keeps research settings controls inside mobile containment wrappers", async () => {
@@ -413,6 +462,8 @@ describe("SettingsModal mobile adaptations", () => {
 
     expectMobileRule(css, ".settings-layout", "flex-direction: column;");
     expectMobileRule(css, ".settings-mobile-section-picker", "display: flex;");
+    expectMobileRule(css, ".settings-navigation", "width: 100%;");
+    expectMobileRule(css, ".settings-search", "padding: var(--space-md) var(--space-lg) var(--space-sm);");
     expectMobileRule(css, ".settings-sidebar", "display: none;");
     expectMobileRule(css, ".settings-nav-item", "display: flex;");
     expectMobileRule(css, ".settings-nav-item", "align-items: center;");
@@ -474,6 +525,8 @@ describe("SettingsModal mobile adaptations", () => {
   it("styles settings scrollbar rules for sidebar and content", () => {
     const css = loadAllAppCss();
 
+    expectBaseRule(css, ".settings-navigation", "border-right: var(--btn-border-width) solid var(--border);");
+    expectBaseRule(css, ".settings-search", "border-bottom: var(--btn-border-width) solid var(--border);");
     expectBaseRule(css, ".settings-sidebar", "scrollbar-color: var(--border) transparent;");
     expectBaseRule(css, ".settings-sidebar", "scrollbar-width: thin;");
     expectBaseRule(css, ".settings-sidebar::-webkit-scrollbar", "width: 6px;");

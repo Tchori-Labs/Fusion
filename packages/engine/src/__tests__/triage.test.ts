@@ -22,6 +22,7 @@ const { mockReviewStep, mockCreateFnAgent } = vi.hoisted(() => ({
 }));
 
 const TRIAGE_POLICY_PROMPT = resolveAgentPrompt("triage");
+const STANDARD_PLANNING_PROMPT = builtinSeamPrompt("planning");
 const FAST_PLANNING_PROMPT = builtinSeamPrompt("planning-fast");
 const RENDERED_TRIAGE_POLICY_PROMPT = renderTriagePolicyPlaceholders(TRIAGE_POLICY_PROMPT, {});
 
@@ -701,10 +702,11 @@ describe("canonical triage policy prompt", () => {
     expect(TRIAGE_POLICY_PROMPT).toContain(
       "## Proactive Subtask Breakdown for M/L Tasks",
     );
-    expect(TRIAGE_POLICY_PROMPT).toContain(
+    expect(TRIAGE_POLICY_PROMPT).toContain("{{triageProactiveSubtaskSplittingEnabled}}");
+    expect(RENDERED_TRIAGE_POLICY_PROMPT).toContain(
       "Even when `breakIntoSubtasks` is not set to `true`",
     );
-    expect(TRIAGE_POLICY_PROMPT).toContain(
+    expect(RENDERED_TRIAGE_POLICY_PROMPT).toContain(
       "Size S tasks should NOT be split",
     );
   });
@@ -714,13 +716,13 @@ describe("canonical triage policy prompt", () => {
     expect(RENDERED_TRIAGE_POLICY_PROMPT).toContain(
       "MORE THAN 3 different packages/modules",
     );
-    expect(TRIAGE_POLICY_PROMPT).toContain("MORE THAN {{triageSubtaskStepThreshold}} implementation steps");
+    expect(RENDERED_TRIAGE_POLICY_PROMPT).not.toContain("{{triageSubtaskStepThreshold}}");
   });
 
   it("biases toward keeping tasks whole and acknowledges coordination overhead", () => {
-    expect(TRIAGE_POLICY_PROMPT).toContain("Default to keeping the task whole");
-    expect(TRIAGE_POLICY_PROMPT).toContain("Coordination overhead");
-    expect(TRIAGE_POLICY_PROMPT).toContain(
+    expect(RENDERED_TRIAGE_POLICY_PROMPT).toContain("Default to keeping the task whole");
+    expect(RENDERED_TRIAGE_POLICY_PROMPT).toContain("Coordination overhead");
+    expect(RENDERED_TRIAGE_POLICY_PROMPT).toContain(
       "7-10 focused steps within a coherent scope is fine as one unit",
     );
   });
@@ -731,6 +733,25 @@ describe("FN-5893 invariant regression wording", () => {
     fileURLToPath(new URL("../../../core/src/agent-prompts.ts", import.meta.url)),
     "utf8",
   );
+
+  it("requires before-to-after transformation summaries in standard and fast planning prompts", () => {
+    for (const prompt of [
+      TRIAGE_POLICY_PROMPT,
+      STANDARD_PLANNING_PROMPT,
+      FAST_PLANNING_PROMPT,
+    ]) {
+      expect(prompt).toContain("## Before → After Transformation");
+      expect(prompt).toContain("Before");
+      expect(prompt).toContain("After");
+      expect(prompt).toContain("current state");
+      expect(prompt).toContain("target state");
+      expect(prompt).toContain("satisfies the user's request at a glance");
+    }
+
+    expect(STANDARD_PLANNING_PROMPT).toBe(TRIAGE_POLICY_PROMPT);
+    expect(FAST_PLANNING_PROMPT).not.toContain("## Review Level");
+    expect(FAST_PLANNING_PROMPT).not.toContain("## Proactive Subtask Breakdown");
+  });
 
   it("requires invariant-level regression coverage in standard, fast, and core triage prompts", () => {
     for (const prompt of [
@@ -899,6 +920,54 @@ describe("fast-mode triage", () => {
     await processor.specifyTask(task);
 
     expect(capturedSystemPrompt).toContain("## Review Level");
+  });
+
+  it("renders disabled proactive splitting while preserving explicit breakIntoSubtasks prompts", async () => {
+    const task = createTriageTask({ id: "FN-FAST-003", executionMode: "standard", breakIntoSubtasks: true });
+    const rootDir = await createTriageFixtureRoot("fn-7491-triage-");
+    const detail = { ...mockTaskDetail, id: task.id, breakIntoSubtasks: true, attachments: [], comments: [] };
+    const store = createMockStore({
+      getTask: vi.fn().mockResolvedValue(detail),
+      getSettings: vi.fn().mockResolvedValue({
+        maxConcurrent: 2,
+        maxWorktrees: 4,
+        pollIntervalMs: 10000,
+        groupOverlappingFiles: false,
+        autoMerge: true,
+        triageProactiveSubtaskSplittingEnabled: false,
+      } as Settings),
+    });
+
+    let capturedSystemPrompt = "";
+    const { promptWithFallback } = await import("../pi.js");
+    (promptWithFallback as ReturnType<typeof vi.fn>).mockImplementationOnce(async (_session: unknown, prompt: string) => {
+      await mkdir(join(rootDir, ".fusion", "tasks", "FN-FAST-003"), { recursive: true }).catch(() => undefined);
+      await writeFile(join(rootDir, ".fusion", "tasks", "FN-FAST-003", "PROMPT.md"), "# Task: FN-FAST-003 - Split\n\n## Mission\n\nDone.", { flag: "w" }).catch(() => undefined);
+      expect(prompt).toContain("## Subtask Breakdown Requested");
+      expect(prompt).toContain("The user has requested that this task be broken into smaller subtasks");
+      expect(prompt).not.toContain("## Subtask Consideration");
+    });
+    mockCreateFnAgent.mockImplementationOnce(async (opts: any) => {
+      capturedSystemPrompt = opts.systemPrompt;
+      return {
+        session: {
+          state: {},
+          sessionManager: { getLeafId: vi.fn().mockReturnValue(null) },
+          prompt: vi.fn().mockResolvedValue(undefined),
+          dispose: vi.fn(),
+          navigateTree: vi.fn(),
+        },
+      };
+    });
+
+    const processor = new TriageProcessor(store, rootDir);
+    await processor.specifyTask(task);
+
+    expect(capturedSystemPrompt).toContain("Proactive oversized-task splitting is DISABLED");
+    expect(capturedSystemPrompt).toContain("Only create child tasks when `breakIntoSubtasks: true` is explicitly present");
+    expect(capturedSystemPrompt).not.toContain("Even when `breakIntoSubtasks` is not set to `true`, apply these thresholds proactively");
+    expect(promptWithFallback).toHaveBeenCalled();
+    await cleanupTriageFixtureRoot(rootDir);
   });
 
   it("includes triage plugin contributions when provided", async () => {

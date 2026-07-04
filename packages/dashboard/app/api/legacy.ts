@@ -10510,9 +10510,11 @@ export function streamChatResponse(
         if (terminated || closedByUser || receivedStreamEvent) {
           return;
         }
-        terminated = true;
-        handlers.onError?.("Timed out waiting for first response event", { requestAccepted: true, receivedStreamEvent: false });
-        abortController.abort();
+        /*
+        FNXC:ChatReliability 2026-07-04-00:00:
+        Accepted chat requests can keep generating after the dashboard has not yet seen the first SSE event. Treat this timer as a non-terminal wait marker so the UI stays in-progress and can reconcile late persisted output instead of showing a false Response failed bubble.
+        */
+        firstEventTimer = null;
       }, firstEventTimeoutMs);
 
       const reader = res.body.getReader();

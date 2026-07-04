@@ -1191,6 +1191,77 @@ describe("TaskPlannerChatTab", () => {
     expect(screen.getAllByTestId("chat-question-response-submit")).toHaveLength(1);
   });
 
+  it("keeps accepted silent planner streams waiting and reconciles late history", async () => {
+    const user = userEvent.setup();
+    mockFetchTaskPlannerChatSession.mockResolvedValueOnce({ session: null });
+    mockFetchChatMessages.mockResolvedValueOnce({
+      messages: [
+        { id: "planner-user-slow", sessionId: "chat-planner", role: "user", content: "slow planner prompt", thinkingOutput: null, metadata: null, createdAt: "2026-07-01T00:00:00.000Z" },
+        { id: "planner-assistant-late", sessionId: "chat-planner", role: "assistant", content: "late planner answer", thinkingOutput: null, metadata: null, createdAt: "2026-07-01T00:00:01.000Z" },
+      ],
+    });
+    let doneHandler: any;
+    mockStreamChatResponse.mockImplementation((_sessionId, _content, handlers) => {
+      doneHandler = handlers.onDone;
+      return { close: vi.fn(), isConnected: () => true };
+    });
+
+    renderPlannerChat();
+    await screen.findByTestId("task-planner-chat-empty");
+    await user.type(screen.getByLabelText("Message planner chat"), "slow planner prompt");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+
+    expect(await screen.findByText("slow planner prompt")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByText("Timed out waiting for first response event")).not.toBeInTheDocument();
+    expect(screen.queryByText("Planner chat failed to respond")).not.toBeInTheDocument();
+    expect(document.querySelector(".chat-message--streaming")).toBeInTheDocument();
+
+    act(() => doneHandler?.({ messageId: "planner-assistant-late" }));
+
+    expect(await screen.findByText("late planner answer")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(document.querySelector(".chat-message--streaming")).not.toBeInTheDocument();
+  });
+
+  it("reattaches accepted silent planner streams without showing timeout errors", async () => {
+    const inFlightSession = makePlannerSession({
+      isGenerating: true,
+      inFlightGeneration: {
+        status: "generating",
+        streamingText: "",
+        streamingThinking: "",
+        toolCalls: [],
+        replayFromEventId: 9,
+        updatedAt: "2026-07-01T00:00:00.000Z",
+      },
+    });
+    mockFetchTaskPlannerChatSession.mockResolvedValueOnce({ session: inFlightSession });
+    mockFetchChatSession.mockResolvedValueOnce({ session: inFlightSession });
+    mockFetchChatMessages
+      .mockResolvedValueOnce({ messages: [] })
+      .mockResolvedValueOnce({
+        messages: [{ id: "planner-attached-late", sessionId: "chat-planner", role: "assistant", content: "attached late answer", thinkingOutput: null, metadata: null, createdAt: "2026-07-01T00:00:01.000Z" }],
+      });
+    let attachedDoneHandler: any;
+    mockAttachChatStream.mockImplementation((_sessionId, handlers) => {
+      attachedDoneHandler = handlers.onDone;
+      return { close: vi.fn(), isConnected: () => true };
+    });
+
+    renderPlannerChat();
+
+    await waitFor(() => expect(mockAttachChatStream).toHaveBeenCalledWith("chat-planner", expect.any(Object), undefined, { lastEventId: 9 }));
+    expect(screen.queryByText("Timed out waiting for first response event")).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(document.querySelector(".chat-message--streaming")).toBeInTheDocument();
+
+    act(() => attachedDoneHandler?.({ messageId: "planner-attached-late" }));
+
+    expect(await screen.findByText("attached late answer")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   it("keeps first planner message visible after accepted provider error and reconciles persisted history", async () => {
     const user = userEvent.setup();
     mockFetchTaskPlannerChatSession.mockResolvedValueOnce({ session: null });
