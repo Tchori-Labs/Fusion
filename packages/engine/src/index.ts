@@ -712,7 +712,7 @@ export {
 // ── Notification Service ──────────────────────────────────────
 export { NtfyNotificationProvider, NotificationService, WebhookNotificationProvider } from "./notification/index.js";
 export type { NtfyProviderConfig, NotificationServiceOptions, WebhookProviderConfig } from "./notification/index.js";
-export { CronRunner, type CronRunnerOptions, type AiPromptExecutor, createAiPromptExecutor } from "./cron-runner.js";
+export { CronRunner, type CronRunnerOptions, type AiPromptExecutor, createAiPromptExecutor, isInProcessBackupCommand, isInProcessMemoryBackupCommand, formatInProcessBackupError } from "./cron-runner.js";
 export { RoutineRunner, type RoutineRunnerOptions } from "./routine-runner.js";
 export { RoutineScheduler, type RoutineSchedulerOptions } from "./routine-scheduler.js";
 export { StuckTaskDetector, type StuckTaskDetectorOptions, type DisposableSession } from "./stuck-task-detector.js";
