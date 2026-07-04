@@ -430,6 +430,18 @@ export {
   applyWorkflowSettingsOverlay,
   type WorkflowSettingsOverlayInput,
 } from "./effective-settings-overlay.js";
+export {
+  decidePlannerRecovery,
+  PLANNER_RECOVERY_MAX_ATTEMPTS,
+  type PlannerRecoveryActionKind,
+  type PlannerRecoveryWatchedStage,
+  type PlannerRecoveryObservationSignal,
+  type PlannerRecoverySourceLink,
+  type PlannerRecoveryObservation,
+  type PlannerRecoveryAttemptState,
+  type PlannerRecoveryDecision,
+  type DecidePlannerRecoveryInput,
+} from "./planner-recovery.js";
 
 // ── Engine wiring (set by @fusion/engine at module load) ────────────
 export {

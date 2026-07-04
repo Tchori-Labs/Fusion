@@ -21,6 +21,7 @@ import type { WorktreePool } from "./worktree-pool.js";
 import type { ProjectRuntimeConfig } from "./project-runtime.js";
 import { PrMonitor } from "./pr-monitor.js";
 import { PlannerOverseerMonitor } from "./planner-overseer.js";
+import { PlannerRecoveryController, type PlannerRecoveryHandlers } from "./planner-recovery-controller.js";
 import type { PrNodeGithubOps } from "./pr-nodes.js";
 import { PrReconciler, type PrReconcileGithubOps } from "./pr-reconcile.js";
 import { PrCommentHandler } from "./pr-comment-handler.js";
@@ -335,6 +336,18 @@ export class ProjectEngine {
   private plannerOverseerPollTimer: ReturnType<typeof setInterval> | null = null;
   /** Conservative poll cadence for the records-only planner-overseer monitor (45s). */
   private static readonly PLANNER_OVERSEER_POLL_INTERVAL_MS = 45 * 1000;
+  /**
+   * FNXC:PlannerOversight 2026-07-04-12:00:
+   * FN-7512 bounded autonomous-recovery dispatcher. Consumes the FN-7511
+   * `plannerOverseer`'s recorded observations and, ONLY when the task's
+   * effective planner oversight level resolves to `"autonomous"`, dispatches
+   * one bounded action per poll tick (inject guidance / retry the step /
+   * request a targeted fix) through handlers wired to the existing
+   * steering-comment API and store retry/re-enqueue path. Never merge/PR or
+   * destructive actions (FN-7513 owns those); comprehensive human-control
+   * safeguards beyond the userPaused skip are FN-7514's responsibility.
+   */
+  private plannerRecoveryController?: PlannerRecoveryController;
   private prReconciler?: PrReconciler;
   private prCommentHandler?: PrCommentHandler;
   private notifier?: NtfyNotifier;
@@ -593,6 +606,14 @@ export class ProjectEngine {
     // FN-7511: Initialize the records-only planner-overseer monitor and start
     // its bounded, gated poll over in-flight tasks.
     this.plannerOverseer = new PlannerOverseerMonitor({ store });
+    // FN-7512: bounded autonomous-recovery dispatcher, wired to the existing
+    // steering-comment API + store retry/re-enqueue path only — no new
+    // session/tool/merge channel. Ticked from the same poll as the FN-7511
+    // observer, guarded to the "autonomous" effective level there.
+    this.plannerRecoveryController = new PlannerRecoveryController({
+      snapshotProvider: this.plannerOverseer,
+      handlers: this.buildPlannerRecoveryHandlers(store),
+    });
     this.startPlannerOverseerPoll(store);
 
     // 2. Initialize PrMonitor + PrCommentHandler
@@ -998,6 +1019,41 @@ export class ProjectEngine {
   /** Get the records-only PlannerOverseerMonitor (if initialized). See FN-7511. */
   getPlannerOverseer(): PlannerOverseerMonitor | undefined {
     return this.plannerOverseer;
+  }
+
+  /** Get the bounded PlannerRecoveryController (if initialized). See FN-7512. */
+  getPlannerRecoveryController(): PlannerRecoveryController | undefined {
+    return this.plannerRecoveryController;
+  }
+
+  /**
+   * FNXC:PlannerOversight 2026-07-04-12:00:
+   * Concrete FN-7512 handler wiring — ONLY reuses existing mechanisms:
+   * `injectGuidance`/`requestTargetedFix` post a planner-authored steering
+   * comment via `store.addSteeringComment` (the same channel the executor's
+   * real-time injection listener already watches); `retryStep` calls the
+   * store's existing in-progress→todo retry/re-enqueue path
+   * (`moveTask(id, "todo", { preserveProgress: true })`), preserving
+   * progress exactly like the auto-recovery/self-healing retry handlers do.
+   * No new session/tool/merge channel is introduced.
+   */
+  private buildPlannerRecoveryHandlers(store: TaskStore): PlannerRecoveryHandlers {
+    return {
+      injectGuidance: async (task, decision) => {
+        const text = `[planner-oversight] ${decision.reason}`;
+        await store.addSteeringComment(task.id, text, "agent");
+      },
+      retryStep: async (task) => {
+        await store.moveTask(task.id, "todo", { preserveProgress: true, moveSource: "engine" } as Parameters<TaskStore["moveTask"]>[2]);
+      },
+      requestTargetedFix: async (task, decision) => {
+        const sourceRef = decision.sourceLinks[0]?.ref;
+        const text = sourceRef
+          ? `[planner-oversight] targeted-fix requested: ${decision.reason} (source: ${sourceRef})`
+          : `[planner-oversight] targeted-fix requested: ${decision.reason}`;
+        await store.addSteeringComment(task.id, text, "agent");
+      },
+    };
   }
 
   /** Get the CronRunner (if initialized). */
@@ -1847,6 +1903,15 @@ export class ProjectEngine {
             continue;
           }
           await overseer.observeTask(task, level);
+
+          // FN-7512: one guarded, autonomous-only bounded recovery tick at the
+          // same passive seam FN-7511 uses for observation. Inert for every
+          // other effective level ("off"/"observe"/"steer" already `continue`d
+          // above); `PlannerRecoveryController.tick` itself skips userPaused
+          // tasks and never throws.
+          if (level === "autonomous" && this.plannerRecoveryController) {
+            await this.plannerRecoveryController.tick(task);
+          }
         } catch {
           // Best-effort per-task — never let one task's failure block the poll.
         }
@@ -1857,6 +1922,7 @@ export class ProjectEngine {
       for (const taskId of overseer.getObservedTaskIds()) {
         if (!inFlightIds.has(taskId)) {
           overseer.clear(taskId);
+          this.plannerRecoveryController?.clear(taskId);
         }
       }
     } catch {

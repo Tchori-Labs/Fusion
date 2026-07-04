@@ -648,6 +648,26 @@ export {
   type PlannerOverseerMonitorOptions,
 } from "./planner-overseer.js";
 export {
+  PlannerRecoveryController,
+  type PlannerRecoveryContext,
+  type PlannerRecoveryHandlers,
+  type PlannerRecoverySnapshotProvider,
+  type PlannerRecoveryObservationSource,
+  type PlannerRecoveryControllerOptions,
+} from "./planner-recovery-controller.js";
+export {
+  decidePlannerRecovery,
+  PLANNER_RECOVERY_MAX_ATTEMPTS,
+  type PlannerRecoveryActionKind,
+  type PlannerRecoveryWatchedStage,
+  type PlannerRecoveryObservationSignal,
+  type PlannerRecoverySourceLink,
+  type PlannerRecoveryObservation,
+  type PlannerRecoveryAttemptState,
+  type PlannerRecoveryDecision,
+  type DecidePlannerRecoveryInput,
+} from "@fusion/core";
+export {
   SECRET_MUTATION_TYPES,
   SECRET_AUDIT_PLAINTEXT_FORBIDDEN_KEYS,
   assertNoSecretPlaintext,

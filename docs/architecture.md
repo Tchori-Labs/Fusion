@@ -1378,6 +1378,68 @@ call happens here, and it emits no run-audit events or dashboard UI. Steering/re
 gates, human-control safeguards, and dashboard/UI/run-audit surfaces are deferred to FN-7512 through
 FN-7520; this module is the seam those subtasks read observations from.
 
+### Planner overseer bounded autonomous recovery (FN-7512)
+
+/*
+FNXC:PlannerOversight 2026-07-04-12:00:
+FN-7512 builds the bounded autonomous-recovery layer on top of FN-7511's observation seam. When the
+task's effective planner oversight level resolves to `"autonomous"`, the planner overseer may take ONE
+of three bounded corrective actions on the task's currently watched stage:
+  - **inject_guidance** — post a planner-authored steering comment into the active agent lane.
+  - **retry_step** — re-enqueue a stuck/failed step via the existing store retry/re-enqueue path.
+  - **request_targeted_fix** — post a steering comment tagged as a targeted-fix request, referencing
+    the observation's specific error source link.
+At every other effective level (`"off"`/`"observe"`/`"steer"`) the decision is always `"none"` — this
+layer is completely inert unless oversight is `"autonomous"`.
+*/
+
+`packages/core/src/planner-recovery.ts` declares the shared, engine-free recovery vocabulary:
+`PlannerRecoveryActionKind` (`inject_guidance | retry_step | request_targeted_fix | none`),
+`PlannerRecoveryObservation` (a structural mirror of FN-7511's `OverseerStageObservation` so the engine
+can pass one straight through with no adapter), `PlannerRecoveryAttemptState`, `PlannerRecoveryDecision`,
+and the pure, never-throw `decidePlannerRecovery(input)`. Decision rules, in order:
+
+1. No observation, or `oversightLevel !== "autonomous"` → `"none"`.
+2. The per-`(taskId, watchedStage)` attempt count has reached `PLANNER_RECOVERY_MAX_ATTEMPTS` (default
+   `3`, mirroring `MAX_RECOVERY_RETRIES` in `recovery-policy.ts`) → `"none"`, `exhausted: true` — the
+   layer stops autonomously and the task is left for escalation (FN-7514+ owns the human-control story).
+3. `merger` / `pull-request` stages → `"none"` with a deferral reason: these require confirmation and
+   are owned by FN-7513's confirmation-gated layer, never dispatched from here.
+4. `reviewer` stage → `"inject_guidance"`.
+5. `executor` / `workflow-gate` stage with `signal === "failed"` → `"request_targeted_fix"` when a
+   source link carries a specific fixable error (`failed-check` / `merge-error`), else `"retry_step"`.
+6. Any other `executor` / `workflow-gate` signal (stuck/blocked/progressing/awaiting-human) →
+   `"inject_guidance"`.
+
+`packages/engine/src/planner-recovery-controller.ts`'s `PlannerRecoveryController` is the dispatcher,
+mirroring the `AutoRecoveryDispatcher` + `StuckTaskDetector` handler-injection conventions: it holds an
+in-memory per-`(taskId, watchedStage)` attempt registry, calls `decidePlannerRecovery`, and — only when
+an action other than `"none"` is chosen — dispatches through injected `PlannerRecoveryHandlers`
+(`injectGuidance` / `retryStep` / `requestTargetedFix`, all optional and async), incrementing the
+attempt count only on a successful dispatch. `tick(task, ctx)` is a no-op (returns `null`) when
+`task.userPaused === true` or when there is no active observation, and never throws — any handler or
+snapshot-provider error degrades to a no-op.
+
+`ProjectEngine` wires one concrete `PlannerRecoveryController` alongside its `PlannerOverseerMonitor`,
+reusing ONLY existing mechanisms — no new session/tool/merge channel:
+
+- `injectGuidance` / `requestTargetedFix` → `store.addSteeringComment(taskId, text, "agent")` (the same
+  channel the executor's real-time injection listener already watches).
+- `retryStep` → `store.moveTask(taskId, "todo", { preserveProgress: true, moveSource: "engine" })` — the
+  same in-progress→todo retry/re-enqueue path auto-recovery and self-healing already use.
+
+`controller.tick(task)` is called from the SAME bounded 45s poll FN-7511 uses for `observeTask`, guarded
+so it only runs when the resolved effective level is `"autonomous"` (every other level already
+`continue`s before reaching the tick). Attempt state for a task is cleared (`controller.clear(taskId)`)
+whenever the task leaves the in-flight `in-progress`/`in-review` set, alongside the FN-7511 observation
+ring buffer.
+
+**Explicit scope boundaries (owned by later subtasks, not this layer):** merge/PR actions and
+destructive/external-service side effects (FN-7513, confirmation-gated); comprehensive human-pause /
+`autoMerge:false` / human-review terminal safeguards beyond the bare `userPaused` skip (FN-7514); a
+persisted intervention timeline (FN-7519); run-audit/activity events (FN-7520); and any dashboard UI
+(FN-7515+).
+
 ---
 
 ## 11) Multi-Project Architecture
