@@ -4955,6 +4955,8 @@ export interface ArchivedTaskEntry {
   /** Optional: planning model override for triage agent */
   planningModelProvider?: string;
   planningModelId?: string;
+  /** Per-task token/cost accounting (input/output/cache) preserved across archival. */
+  tokenUsage?: TaskTokenUsage;
   /** Optional: other metadata to preserve */
   breakIntoSubtasks?: boolean;
   noCommitsExpected?: boolean;
