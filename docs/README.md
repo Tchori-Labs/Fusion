@@ -138,6 +138,7 @@ FN-7088 links previously-unlinked first-class testing and baseline docs here so 
 | [Mission Completion Gate Contract](./missions-completion-contract.md) | Decision record for mission completion gate invariants and acceptance flow |
 
 | [Lost-Work Tasks Incident (2026-05-23)](./incidents/2026-05-23-lost-work-tasks.md) | Incident catalog of 9 lost-work tasks from no-op finalize and reuse-handoff bugs |
+| [GitLab Parity Inventory (FN-7421)](./gitlab-parity-inventory.md) | Implementation map for first-class GitLab support: import, linked issue tracking, comments, auth/settings UI, CLI/extension, and Command Center surfaces to mirror or explicitly exclude |
 
 ## External Resources
 
