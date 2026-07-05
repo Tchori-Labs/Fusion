@@ -265,7 +265,16 @@ export const registerAuthRoutes: ApiRouteRegistrar = (ctx) => {
       const url = new URL(trimmed);
       const searchCode = url.searchParams.get("code");
       if (searchCode) {
-        return trimmed;
+        if (url.protocol === "http:" || url.protocol === "https:") {
+          return trimmed;
+        }
+        const normalized = new URLSearchParams();
+        normalized.set("code", searchCode);
+        const searchState = url.searchParams.get("state");
+        if (searchState) {
+          normalized.set("state", searchState);
+        }
+        return normalized.toString();
       }
 
       const hash = url.hash.replace(/^#/, "").replace(/^\?/, "");
