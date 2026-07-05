@@ -288,3 +288,99 @@ describe("TaskDetailModal oversight controls", () => {
     expect(screen.queryByTestId("detail-overseer-explain")).not.toBeInTheDocument();
   });
 });
+
+/*
+ * FNXC:PlannerOversight 2026-07-04-19:45:
+ * FN-7521 Surface Enumeration requirement: cover the oversight quick-controls
+ * cluster (`.detail-meta-inline-controls`) at both desktop AND mobile
+ * (@media max-width: 768px) breakpoints. TaskDetailModal.tsx has no JS-side
+ * isMobile/matchMedia branch for this cluster — TaskDetailModal.css only
+ * wraps `.detail-meta-inline-controls` via a `@media (max-width: 768px)` CSS
+ * rule (flex-wrap, no conditional DOM). This suite proves the same controls
+ * are present (no leftover/missing shell) at a narrow `window.innerWidth`,
+ * guarding against a future mobile-only regression (FN-6115→FN-6123
+ * precedent in AGENTS.md: an affordance removal left an empty control shell
+ * on mobile only, because only the desktop surface was checked).
+ */
+describe("TaskDetailModal oversight controls — mobile breakpoint (FN-7521, @media max-width: 768px)", () => {
+  const originalInnerWidth = window.innerWidth;
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    mockConfirm.mockResolvedValue(true);
+    const api = await import("../../api");
+    vi.mocked(api.fetchBoardWorkflows).mockResolvedValue({ flagEnabled: false, defaultWorkflowId: "", workflows: [], taskWorkflowIds: {} });
+    vi.mocked(api.fetchWorkflowSettingValues).mockResolvedValue({ stored: {}, effective: {}, defaults: {} });
+    vi.mocked(api.nudgeOverseer).mockResolvedValue({ applied: false, reason: "oversight-off" });
+    vi.mocked(api.stopOverseer).mockResolvedValue({ applied: true, reason: "stopped" });
+    vi.mocked(api.explainOverseer).mockResolvedValue({ snapshot: null });
+    Object.defineProperty(window, "innerWidth", { value: 375, configurable: true });
+  });
+
+  afterEach(() => {
+    Object.defineProperty(window, "innerWidth", { value: originalInnerWidth, configurable: true });
+  });
+
+  it("still renders the quick level-change select at a 375px mobile viewport and writes on change", async () => {
+    const api = await import("../../api");
+    const mockUpdate = vi.fn().mockResolvedValue(makeTask({ id: "FN-201", plannerOversightLevel: "steer" }));
+    vi.mocked(api.updateTask).mockImplementation(mockUpdate as any);
+
+    render(
+      <TaskDetailModal
+        task={makeTask({ id: "FN-201", column: "todo", plannerOversightLevel: "observe" })}
+        onClose={noop}
+        onMoveTask={noopMove}
+        onDeleteTask={noopDelete}
+        onMergeTask={noopMerge}
+        onOpenDetail={noopOpenDetail}
+        addToast={noop}
+      />,
+    );
+
+    const select = await screen.findByTestId("detail-oversight-level-select");
+    expect(select).toBeTruthy();
+    fireEvent.change(select, { target: { value: "steer" } });
+
+    await waitFor(() => {
+      expect(mockUpdate).toHaveBeenCalledWith("FN-201", { plannerOversightLevel: "steer" }, undefined);
+    });
+  });
+
+  it("still renders enabled nudge/stop/explain controls at a 375px mobile viewport when the overseer is actively watching", async () => {
+    render(
+      <TaskDetailModal
+        task={makeTask({ id: "FN-202", column: "in-progress", plannerOversightLevel: "autonomous", plannerOverseerState: activeSnapshot })}
+        onClose={noop}
+        onMoveTask={noopMove}
+        onDeleteTask={noopDelete}
+        onMergeTask={noopMerge}
+        onOpenDetail={noopOpenDetail}
+        addToast={noop}
+      />,
+    );
+
+    expect(await screen.findByTestId("detail-overseer-nudge")).not.toBeDisabled();
+    expect(await screen.findByTestId("detail-overseer-stop")).toBeTruthy();
+    expect(await screen.findByTestId("detail-overseer-explain")).toBeTruthy();
+  });
+
+  it("still renders no oversight-control leftover shell at a 375px mobile viewport for the off+inactive default case", async () => {
+    render(
+      <TaskDetailModal
+        task={makeTask({ id: "FN-203", column: "todo", plannerOversightLevel: "off" })}
+        onClose={noop}
+        onMoveTask={noopMove}
+        onDeleteTask={noopDelete}
+        onMergeTask={noopMerge}
+        onOpenDetail={noopOpenDetail}
+        addToast={noop}
+      />,
+    );
+
+    await screen.findByTestId("detail-oversight-level-select");
+    expect(screen.queryByTestId("detail-overseer-nudge")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("detail-overseer-stop")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("detail-overseer-explain")).not.toBeInTheDocument();
+  });
+});

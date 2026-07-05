@@ -370,3 +370,70 @@ describe("TaskCard memo comparator — oversight level (FN-7516)", () => {
     ).toBe(true);
   });
 });
+
+/*
+ * FNXC:PlannerOversight 2026-07-04-19:45:
+ * FN-7521 Surface Enumeration requirement: "UI controls ... Desktop AND mobile
+ * (@media (max-width: 768px)) breakpoints where the control renders
+ * responsively." TaskCard.tsx has no JS-side isMobile/matchMedia branch for
+ * the oversight badge or overseer-state indicator — TaskCard.css scales
+ * `.card-oversight-badge`/`.card-overseer-state-badge` purely via a
+ * `@media (max-width: 768px)` CSS rule (no conditional DOM). This suite
+ * proves the invariant that matters for a JS unit test: setting a narrow
+ * `window.innerWidth` before render does not suppress the badge/indicator
+ * (guarding against a future `isMobile`-gated regression, per the FN-6115→
+ * FN-6123 mobile-empty-shell-shell precedent in AGENTS.md), and that the
+ * badge is absent under the same narrow viewport exactly when it is absent
+ * at desktop width (no accidental mobile-only leftover shell either).
+ */
+describe("TaskCard oversight badge/indicator — mobile breakpoint (FN-7521, @media max-width: 768px)", () => {
+  const originalInnerWidth = window.innerWidth;
+
+  afterEach(() => {
+    Object.defineProperty(window, "innerWidth", { value: originalInnerWidth, configurable: true });
+  });
+
+  function setMobileViewport() {
+    Object.defineProperty(window, "innerWidth", { value: 375, configurable: true });
+  }
+
+  it.each([
+    ["observe", "Observe"],
+    ["steer", "Steer"],
+    ["autonomous", "Auto-recovery"],
+  ] as const)("still renders the badge for level=%s at a 375px mobile viewport", (level, label) => {
+    setMobileViewport();
+    renderCard({ plannerOversightLevel: level, column: "todo" });
+
+    const badge = screen.getByTestId("card-oversight-badge");
+    expect(badge).toBeTruthy();
+    expect(badge.className).toContain(`card-oversight-badge--${level}`);
+    expect(badge.textContent).toBe(label);
+  });
+
+  it("still renders no badge (no empty shell) at a 375px mobile viewport when the effective level is off", () => {
+    setMobileViewport();
+    renderCard({ plannerOversightLevel: "off", column: "todo" });
+
+    expect(screen.queryByTestId("card-oversight-badge")).toBeNull();
+  });
+
+  // FNXC:PlannerOversight 2026-07-04-19:45: FN-7542 (already on main ahead of
+  // this branch's fork point) removed the active-overseer-state indicator
+  // entirely, so the mobile-breakpoint invariant for it collapses to "never
+  // renders, at any viewport" — matching the FN-7542 removal-regression
+  // coverage above.
+  it("still renders no active-overseer-state indicator at a 375px mobile viewport for a previously-monitorable in-progress task (FN-7542 removal holds on mobile too)", () => {
+    setMobileViewport();
+    renderCard({ plannerOversightLevel: "autonomous", column: "in-progress" });
+
+    expect(screen.queryByTestId("card-overseer-state-badge")).toBeNull();
+  });
+
+  it("still renders no indicator at a 375px mobile viewport when the task is not in a monitorable column", () => {
+    setMobileViewport();
+    renderCard({ plannerOversightLevel: "autonomous", column: "done" });
+
+    expect(screen.queryByTestId("card-overseer-state-badge")).toBeNull();
+  });
+});

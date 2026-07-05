@@ -1007,6 +1007,31 @@ describe("TaskStore", () => {
       expect(updated.title).toBe("Updated title");
     });
 
+    // FN-7521: explicitly round-trip the remaining two enum values ("autonomous"
+    // and "off") through createTask, so all four PlannerOversightLevel values
+    // are proven settable at the store layer, not just "steer"/"observe".
+    it("sets plannerOversightLevel to 'autonomous' via createTask and persists", async () => {
+      const created = await store.createTask({
+        description: "Task with explicit autonomous oversight override",
+        plannerOversightLevel: "autonomous",
+      });
+      expect(created.plannerOversightLevel).toBe("autonomous");
+
+      const persisted = await store.getTask(created.id);
+      expect(persisted.plannerOversightLevel).toBe("autonomous");
+    });
+
+    it("sets plannerOversightLevel to 'off' via createTask and persists", async () => {
+      const created = await store.createTask({
+        description: "Task with explicit off oversight override",
+        plannerOversightLevel: "off",
+      });
+      expect(created.plannerOversightLevel).toBe("off");
+
+      const persisted = await store.getTask(created.id);
+      expect(persisted.plannerOversightLevel).toBe("off");
+    });
+
     it("returns plannerOversightLevel in listTasks", async () => {
       await store.createTask({ description: "Steer task", plannerOversightLevel: "steer" });
       await store.createTask({ description: "Unspecified oversight task" });
