@@ -183,7 +183,7 @@ export function isFts5CorruptionError(error: unknown): boolean {
 
 // ── Schema Definition ────────────────────────────────────────────────
 
-const SCHEMA_VERSION = 137;
+const SCHEMA_VERSION = 138;
 
 const TASKS_FTS_AUTOMERGE = 8;
 const TASKS_FTS_CRISISMERGE = 16;
@@ -300,6 +300,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   thinkingLevel TEXT,
   executionMode TEXT DEFAULT 'standard',
   plannerOversightLevel TEXT,
+  awaitingApprovalReason TEXT,
   tokenUsageInputTokens INTEGER,
   tokenUsageOutputTokens INTEGER,
   tokenUsageCachedTokens INTEGER,
@@ -5568,6 +5569,24 @@ export class Database {
        */
       this.applyMigration(137, () => {
         this.addColumnIfMissing("tasks", "plannerOversightLevel", "TEXT");
+      });
+    }
+
+    if (version < 138) {
+      /*
+       * FNXC:PlanApproval 2026-07-04-21:35:
+       * FN-7559 — release-authorization and manual plan-approval both park a task
+       * with status "awaiting-approval" and rendered an identical operator-facing
+       * badge/Approve-Plan affordance, so operators with auto-approve-all enabled
+       * could not tell an intentionally-not-bypassed release-authorization hold
+       * from a (never-fired, since bypassed) manual gate — read as "auto-approve is
+       * broken". This nullable discriminator is set only by the release-authorization
+       * gate (packages/engine/src/triage.ts) so the dashboard can render a distinct,
+       * truthful label and hide the manual Approve/Reject affordance for that hold.
+       * Additive-only: NULL means an ordinary manual-approval hold (or no hold).
+       */
+      this.applyMigration(138, () => {
+        this.addColumnIfMissing("tasks", "awaitingApprovalReason", "TEXT");
       });
     }
 

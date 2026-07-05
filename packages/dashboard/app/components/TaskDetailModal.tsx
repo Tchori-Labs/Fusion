@@ -2570,6 +2570,17 @@ export function TaskDetailContent({
   }, [onArchiveTask, confirm, task.id, nearDuplicateOf, addToast, requestClose]);
 
   const isTaskPaused = task.paused || task.userPaused;
+  /*
+   * FNXC:PlanApproval 2026-07-04-21:35:
+   * FN-7559: release-authorization holds and manual plan-approval holds both
+   * use status "awaiting-approval" (auto-approve-all intentionally bypasses only
+   * the manual gate — see FNXC:PlanApproval in types.ts). Gate the manual
+   * Approve/Reject Plan affordance to genuine manual holds only — clicking
+   * "Approve Plan" on a release-authorization hold would let a release-class
+   * spec bypass FN-6481's explicit-marker requirement via a plain button click.
+   */
+  const isAwaitingApproval = task.column === "triage" && task.status === "awaiting-approval";
+  const isReleaseAuthorizationHold = isAwaitingApproval && task.awaitingApprovalReason === "release-authorization";
 
   const handleTogglePause = useCallback(async () => {
     try {
@@ -5565,8 +5576,10 @@ export function TaskDetailContent({
             </>
           ) : (
             <>
-              {/* Approve/Reject Plan buttons for tasks awaiting approval — always visible */}
-              {task.column === "triage" && task.status === "awaiting-approval" && workingTask.prompt && (
+              {/* Approve/Reject Plan buttons — only for genuine manual plan-approval
+                  holds (FN-7559: a release-authorization hold shares the same
+                  status but must never be resolvable via this plain button click). */}
+              {isAwaitingApproval && !isReleaseAuthorizationHold && workingTask.prompt && (
                 <>
                   <button className="btn btn-primary btn-sm" onClick={handleApprovePlan}>
                     {t("taskDetail.plan.approveBtn", "Approve Plan")}
@@ -5577,10 +5590,26 @@ export function TaskDetailContent({
                 </>
               )}
 
+              {/* FN-7559: release-authorization holds are surfaced with a truthful,
+                  distinct reason instead of the manual Approve/Reject affordance —
+                  auto-approve-all does not (and must not) bypass this gate, and
+                  resolving it requires the explicit authorization marker in a
+                  regenerated spec, not a plain approval click. */}
+              {isReleaseAuthorizationHold && (
+                <span className="modal-hold-reason modal-hold-reason--release-authorization">
+                  {t(
+                    "taskDetail.plan.releaseAuthorizationHold",
+                    "Awaiting release authorization — add the explicit authorization marker to the spec and resubmit.",
+                  )}
+                </span>
+              )}
+
               {/* Standalone Delete button for triage-column tasks — triage tasks
                   hide the Actions dropdown (see condition below) so the user has
-                  no quick way to delete a freshly-created task otherwise. */}
-              {task.column === "triage" && task.status !== "awaiting-approval" && !canRetryTask && (
+                  no quick way to delete a freshly-created task otherwise. Release-
+                  authorization holds no longer render the Approve/Reject affordance,
+                  so Delete remains available for them too (FN-7559). */}
+              {task.column === "triage" && (!isAwaitingApproval || isReleaseAuthorizationHold) && !canRetryTask && (
                 <button
                   className="btn btn-sm btn-danger"
                   onClick={handleDelete}

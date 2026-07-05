@@ -1823,6 +1823,59 @@ describe("schema migrations", () => {
     db.close();
   });
 
+  /*
+   * FNXC:PlanApproval 2026-07-04-21:35:
+   * FN-7559: migration 138 adds the awaitingApprovalReason discriminator so
+   * a release-authorization hold (status "awaiting-approval") can be told apart
+   * from a manual plan-approval hold sharing the identical status. Additive-only,
+   * no backfill — legacy rows stay NULL, meaning "no reason recorded" (either no
+   * hold, or an ordinary manual hold).
+   */
+  it("migrates v137 databases by adding awaitingApprovalReason column with legacy rows staying NULL (no backfill)", () => {
+    tmpDir = makeTmpDir();
+    const fusionDir = join(tmpDir, ".fusion");
+    const db = new Database(fusionDir);
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS __meta (key TEXT PRIMARY KEY, value TEXT);
+      CREATE TABLE IF NOT EXISTS tasks (
+        id TEXT PRIMARY KEY,
+        description TEXT NOT NULL,
+        "column" TEXT NOT NULL,
+        status TEXT,
+        createdAt TEXT NOT NULL,
+        updatedAt TEXT NOT NULL,
+        executionMode TEXT DEFAULT 'standard',
+        plannerOversightLevel TEXT
+      );
+      CREATE TABLE IF NOT EXISTS config (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        nextId INTEGER DEFAULT 1,
+        nextWorkflowStepId INTEGER DEFAULT 1,
+        settings TEXT DEFAULT '{}',
+        workflowSteps TEXT DEFAULT '[]',
+        updatedAt TEXT
+      );
+    `);
+    db.exec("INSERT INTO __meta (key, value) VALUES ('schemaVersion', '137')");
+    db.exec("INSERT INTO __meta (key, value) VALUES ('lastModified', '1000')");
+    db.exec(`INSERT INTO tasks (id, description, "column", status, createdAt, updatedAt) VALUES ('FN-1', 'legacy', 'triage', 'awaiting-approval', '2026-01-01', '2026-01-01')`);
+
+    db.init();
+
+    expect(db.getSchemaVersion()).toBe(SCHEMA_VERSION);
+
+    const cols = db.prepare("PRAGMA table_info(tasks)").all() as Array<{ name: string }>;
+    expect(cols.map((col) => col.name)).toContain("awaitingApprovalReason");
+
+    const task = db.prepare("SELECT awaitingApprovalReason FROM tasks WHERE id = 'FN-1'").get() as {
+      awaitingApprovalReason: string | null;
+    };
+    expect(task.awaitingApprovalReason).toBeNull();
+
+    db.close();
+  });
+
   it("migrates v43 databases by adding task token-usage aggregate columns with null-compatible defaults", () => {
     tmpDir = makeTmpDir();
     const fusionDir = join(tmpDir, ".fusion");

@@ -2664,7 +2664,13 @@ describe("requirePlanApproval setting", () => {
       { requirePlanApproval: false, planApprovalMode: "auto-approve-all" } as Settings,
     );
 
-    expect(store.updateTask).toHaveBeenCalledWith("FN-RELEASE", expect.objectContaining({ status: "awaiting-approval" }));
+    /*
+     * FN-7559: also assert the release gate stamps awaitingApprovalReason so
+     * the dashboard can distinguish this hold from a manual-approval hold that
+     * shares the same status — this is the actual fix for "tasks wait for
+     * approval even though auto-approve is on".
+     */
+    expect(store.updateTask).toHaveBeenCalledWith("FN-RELEASE", expect.objectContaining({ status: "awaiting-approval", awaitingApprovalReason: "release-authorization" }));
     expect(store.moveTask).not.toHaveBeenCalled();
     expect(recordActivity).toHaveBeenCalledWith(expect.objectContaining({ type: "task:release-authorization-required" }));
     expect(store.logEntry).toHaveBeenCalledWith(
@@ -2672,6 +2678,60 @@ describe("requirePlanApproval setting", () => {
       "Release authorization required — leaving task in triage awaiting release authorization",
       expect.any(String),
     );
+  });
+
+  /*
+   * FNXC:PlanApproval 2026-07-04-21:35:
+   * FN-7559 — root cause + fix regression test. Confirms all three symptom cases
+   * from the task's "Symptom Verification" section in one place: (a) a
+   * release-class hold still parks with a distinct awaitingApprovalReason even
+   * under auto-approve-all, (b) the manual gate's own awaiting-approval write
+   * always clears/omits that reason (never "release-authorization"), proving the
+   * operator can always tell the two holds apart from the persisted task state
+   * alone — not just from log text.
+   */
+  it("FN-7559: release-authorization hold carries a reason distinct from the manual gate's own awaiting-approval write", async () => {
+    const releaseTask = createTriageTask({
+      id: "FN-RELEASE2",
+      title: "Release @runfusion/fusion patch",
+      status: "planning",
+      sourceType: "agent_heartbeat",
+    } as Partial<Task>);
+    const releaseStore = createMockStore({
+      getTask: vi.fn().mockResolvedValue(releaseTask),
+    } as Partial<TaskStore>);
+    const releaseProcessor = new TriageProcessor(releaseStore, rootDir);
+    await (releaseProcessor as unknown as {
+      finalizeApprovedTask(task: Task, writtenInput: string, settings: Settings): Promise<void>;
+    }).finalizeApprovedTask(
+      releaseTask,
+      "# Task: FN-RELEASE2 - Release @runfusion/fusion patch\n\n## Mission\n\nRun pnpm release --yes.\n",
+      { requirePlanApproval: false, planApprovalMode: "auto-approve-all" } as Settings,
+    );
+    const releaseUpdateCall = (releaseStore.updateTask as ReturnType<typeof vi.fn>).mock.calls.find(
+      (call: unknown[]) => (call[1] as Record<string, unknown>)?.status === "awaiting-approval",
+    );
+    expect(releaseUpdateCall?.[1]).toMatchObject({ awaitingApprovalReason: "release-authorization" });
+
+    const manualTask = createTriageTask({
+      id: "FN-MANUAL2",
+      status: "planning",
+    } as Partial<Task>);
+    const manualStore = createMockStore({
+      getTask: vi.fn().mockResolvedValue(manualTask),
+    } as Partial<TaskStore>);
+    const manualProcessor = new TriageProcessor(manualStore, rootDir);
+    await (manualProcessor as unknown as {
+      finalizeApprovedTask(task: Task, writtenInput: string, settings: Settings): Promise<void>;
+    }).finalizeApprovedTask(
+      manualTask,
+      "# Task: FN-MANUAL2 - Ordinary task\n\n## Mission\n\nDo the thing.\n",
+      { requirePlanApproval: true, planApprovalMode: "require-all" } as Settings,
+    );
+    const manualUpdateCall = (manualStore.updateTask as ReturnType<typeof vi.fn>).mock.calls.find(
+      (call: unknown[]) => (call[1] as Record<string, unknown>)?.status === "awaiting-approval",
+    );
+    expect(manualUpdateCall?.[1]).toMatchObject({ awaitingApprovalReason: null });
   });
 
   /*
@@ -3145,8 +3205,15 @@ Forbidden paths / non-goals:
 
     expect(recovered).toBe(true);
     expect(store.moveTask).not.toHaveBeenCalled();
+    /*
+     * FN-7559: the manual gate's own awaiting-approval write now explicitly
+     * clears awaitingApprovalReason (defense against a stale "release-authorization"
+     * reason surviving a replan) so this genuine manual hold is never mistaken
+     * for a release-authorization hold in the dashboard.
+     */
     expect(store.updateTask).toHaveBeenCalledWith("FN-001", {
       status: "awaiting-approval",
+      awaitingApprovalReason: null,
     });
     expect(store.logEntry).toHaveBeenCalledWith(
       "FN-001",

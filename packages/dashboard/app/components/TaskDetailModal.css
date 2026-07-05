@@ -2888,6 +2888,17 @@ The original operator prompt is now rendered as Markdown (shared PROMPT.md rende
   color: var(--text-dim);
 }
 
+/*
+FNXC:PlanApproval 2026-07-04-21:35:
+FN-7559: truthful informational label shown instead of the manual Approve/Reject
+Plan affordance when a task's awaiting-approval hold is from release authorization
+(not the manual gate) — auto-approve-all does not bypass this gate.
+*/
+.modal-hold-reason {
+  font-size: 12px;
+  color: var(--triage);
+}
+
 .modal-edit-hint kbd {
   background: var(--card);
   border: 1px solid var(--border);

@@ -2462,6 +2462,22 @@ export interface Task {
    *  recovery retry. Scheduler and triage processor skip tasks whose
    *  `nextRecoveryAt` is still in the future. Cleared alongside `recoveryRetryCount`. */
   nextRecoveryAt?: string;
+  /*
+   * FNXC:PlanApproval 2026-07-04-21:35:
+   * FN-7559: release authorization (packages/engine/src/triage-release-authorization.ts)
+   * and the ordinary manual plan-approval gate (packages/core/src/plan-approval.ts,
+   * resolvePlanApprovalRequired) both park a task with status "awaiting-approval" and
+   * previously rendered an identical badge/Approve-Plan affordance in the dashboard.
+   * Project auto-approve-all (planApprovalMode: "auto-approve-all") bypasses ONLY the
+   * manual gate — release authorization is an independent safety gate it never skips —
+   * so an operator with auto-approve on could not tell a still-parked release hold from
+   * a (never-fired) manual hold and reasonably concluded auto-approve was broken.
+   * Set to "release-authorization" only by the release-authorization gate; the manual
+   * gate always writes it back to undefined/null so a stale reason from an earlier pass
+   * never survives past the manual gate's own awaiting-approval. Undefined means either
+   * no hold or an ordinary manual-approval hold.
+   */
+  awaitingApprovalReason?: "release-authorization";
   /** Thinking level for AI agent sessions — controls reasoning effort (off/minimal/low/medium/high) */
   thinkingLevel?: ThinkingLevel;
   /** Execution mode for task implementation.

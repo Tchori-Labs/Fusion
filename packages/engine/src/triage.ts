@@ -2499,7 +2499,14 @@ export class TriageProcessor {
         promptText: written,
       });
       if (releaseGateDecision.action === "block") {
-        const approvalUpdates: Record<string, unknown> = { status: "awaiting-approval" };
+        /*
+         * FNXC:ReleaseAuthorizationGate 2026-07-04-21:35:
+         * FN-7559: stamp awaitingApprovalReason so the dashboard can tell this
+         * release-authorization hold apart from the (independently gated, never
+         * bypassed by auto-approve-all) manual plan-approval hold, which shares
+         * the same status: "awaiting-approval". See FNXC:PlanApproval in types.ts.
+         */
+        const approvalUpdates: Record<string, unknown> = { status: "awaiting-approval", awaitingApprovalReason: "release-authorization" };
         if (shouldApplyPromptDeclaredTitle && promptDeclaredTitle) {
           approvalUpdates.title = promptDeclaredTitle;
         }
@@ -2566,7 +2573,15 @@ export class TriageProcessor {
     FN-7526 re-verified this invariant end to end: every finalizeApprovedTask caller (specifyTask, recoverApprovedTask, retryUnavailablePlanReview, tryFinalizeExplicitDuplicateMarker) already derives `settings` from mergeEffectiveSettings so planApprovalMode (never a MOVED_SETTINGS_KEYS/workflow-owned key) survives any stored workflow requirePlanApproval overlay untouched. No production defect was found; regression tests were added across every surface to lock the invariant so a future bare-settings call site (e.g. `{ requirePlanApproval }` without planApprovalMode) is caught immediately instead of silently reintroducing the reported parking behavior.
     */
     if (resolvePlanApprovalRequired(settings)) {
-      const approvalUpdates: Record<string, unknown> = { status: "awaiting-approval" };
+      /*
+       * FNXC:PlanApproval 2026-07-04-21:35:
+       * FN-7559: explicitly clear awaitingApprovalReason on the manual gate's own
+       * awaiting-approval write so a stale "release-authorization" reason left over
+       * from an earlier pass on this same task (e.g. a replan after the release
+       * gate parked it, now passing the release gate but still requiring manual
+       * approval) never survives into this genuinely-manual hold.
+       */
+      const approvalUpdates: Record<string, unknown> = { status: "awaiting-approval", awaitingApprovalReason: null };
       if (shouldApplyPromptDeclaredTitle && promptDeclaredTitle) {
         approvalUpdates.title = promptDeclaredTitle;
       }
