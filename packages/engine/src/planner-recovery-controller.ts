@@ -30,6 +30,14 @@
  * once per (taskId, watchedStage, reason) — repeated `tick()`s for the same
  * still-withheld reason do not re-emit until the reason changes or the task
  * leaves the withheld state, so the audit trail isn't spammed every poll.
+ *
+ * FNXC:PlannerOversight 2026-07-04-19:45:
+ * FN-7551 adds the optional `onConfirmationResolved` handler, invoked from
+ * `resolveConfirmation` for both "approved" and "denied" outcomes so the
+ * engine wiring (`project-engine.ts`) can emit a matching
+ * `emitOverseerConfirmation({..., outcome: "succeeded"|"skipped"})`
+ * resolution entry through the FN-7520 façade. Purely additive/audit-only —
+ * it does not change the approve/deny execution semantics above.
  */
 
 import type { PlannerConfirmationRequest, PlannerRecoveryDecision, PlannerRecoveryObservation, Settings, Task } from "@fusion/core";
@@ -103,6 +111,24 @@ export interface PlannerRecoveryHandlers {
   recordHumanControlWithheld?: (
     task: Task,
     decision: OverseerHumanControlDecision & { reason: OverseerHumanControlWithholdReason },
+    ctx: PlannerRecoveryContext,
+  ) => Promise<void>;
+  /**
+   * FNXC:PlannerOversight 2026-07-04-19:45:
+   * FN-7551: audit-only notification invoked from `resolveConfirmation` for
+   * BOTH `"approved"` and `"denied"` resolutions, mirroring the optional/
+   * never-throw contract of `recordHumanControlWithheld`. This handler must
+   * NOT perform (or influence) the approve/deny execution path itself —
+   * that remains `executeMergePrAction`/`executeDestructiveExternalAction`,
+   * invoked separately from `executeApproved`. Callers wire this to
+   * `emitOverseerConfirmation({..., outcome: resolution === "approved" ?
+   * "succeeded" : "skipped"})` so the intervention timeline shows both the
+   * request and its resolution. Optional; a missing handler is a pure no-op.
+   */
+  onConfirmationResolved?: (
+    taskId: string,
+    request: PlannerConfirmationRequest,
+    resolution: "approved" | "denied",
     ctx: PlannerRecoveryContext,
   ) => Promise<void>;
 }
@@ -458,6 +484,16 @@ export class PlannerRecoveryController {
         if (stage) {
           const attemptKey = this.attemptKey(taskId, stage);
           this.attempts.set(attemptKey, (this.attempts.get(attemptKey) ?? 0) + 1);
+        }
+      }
+
+      // FN-7551: audit-only resolution notification, additive to the
+      // approve/deny execution above — never influences it. Best-effort.
+      if (this.handlers.onConfirmationResolved) {
+        try {
+          await this.handlers.onConfirmationResolved(taskId, resolved, resolution, ctx);
+        } catch (err) {
+          this.logger.warn(`onConfirmationResolved handler failed for ${taskId}: ${(err as Error)?.message ?? String(err)}`);
         }
       }
 

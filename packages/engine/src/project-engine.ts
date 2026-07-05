@@ -13,8 +13,27 @@ import type {
   ResearchSynthesisRequest,
   ResearchSynthesisResult,
   PlannerOverseerRuntimeSnapshot,
+  PlannerInterventionSourceLink,
+  PlannerOversightStage,
 } from "@fusion/core";
-import { allowsAutoMergeProcessing, compareTasksByPriorityThenAgeAndId, getTaskHardMergeBlocker, isSharedBranchGroupMemberIntegration, isWorkspaceTask, normalizeMergerMode, resolveEffectivePlannerOversightLevel, resolveEffectiveSettings, resolveMaxAutoMergeRetries, sortTasksByPriorityThenAgeAndId } from "@fusion/core";
+import {
+  allowsAutoMergeProcessing,
+  compareTasksByPriorityThenAgeAndId,
+  emitOverseerConfirmation,
+  emitOverseerEscalation,
+  emitOverseerObservation,
+  emitOverseerRecoveryAttempt,
+  emitOverseerRetry,
+  emitOverseerSteering,
+  getTaskHardMergeBlocker,
+  isSharedBranchGroupMemberIntegration,
+  isWorkspaceTask,
+  normalizeMergerMode,
+  resolveEffectivePlannerOversightLevel,
+  resolveEffectiveSettings,
+  resolveMaxAutoMergeRetries,
+  sortTasksByPriorityThenAgeAndId,
+} from "@fusion/core";
 import { assemblePlannerOverseerRuntimeSnapshot } from "./planner-overseer-runtime-snapshot.js";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -351,6 +370,27 @@ export class ProjectEngine {
    * safeguards beyond the userPaused skip are FN-7514's responsibility.
    */
   private plannerRecoveryController?: PlannerRecoveryController;
+  /**
+   * FNXC:PlannerOversight 2026-07-04-19:45:
+   * FN-7551 requirement: real overseer decision points (observation,
+   * steering/retry/targeted-fix, confirmation request+resolution, and
+   * bounded-recovery escalation) must emit exactly one `overseer:intervention`
+   * run-audit entry through the FN-7520 `emitOverseer*` façade with the real
+   * `TaskStore`, so the dashboard intervention timeline reflects live engine
+   * activity instead of only synthetic unit-test entries. Emission must be
+   * deduped so the 45s poll does not flood the timeline: this map tracks the
+   * last emitted `"stage:signal"` per taskId for observations, mirroring
+   * FN-7514's `lastWithheldReason` dedup pattern. Cleared alongside the
+   * monitor/controller ring buffers whenever a task leaves the in-flight set.
+   */
+  private readonly plannerObservationEmitDedup = new Map<string, string>();
+  /**
+   * FNXC:PlannerOversight 2026-07-04-19:45:
+   * FN-7551: tracks `(taskId, stage)` pairs that have already had a bounded-
+   * recovery escalation emitted so a stage that stays exhausted across many
+   * subsequent polls emits exactly one `escalate` entry, not one per poll.
+   */
+  private readonly plannerEscalationEmitDedup = new Set<string>();
   private prReconciler?: PrReconciler;
   private prCommentHandler?: PrCommentHandler;
   private notifier?: NtfyNotifier;
@@ -608,7 +648,16 @@ export class ProjectEngine {
 
     // FN-7511: Initialize the records-only planner-overseer monitor and start
     // its bounded, gated poll over in-flight tasks.
-    this.plannerOverseer = new PlannerOverseerMonitor({ store });
+    this.plannerOverseer = new PlannerOverseerMonitor({
+      store,
+      // FN-7551: emit one deduped `overseer:intervention` observation entry
+      // through the FN-7520 façade for each real observation the monitor
+      // records, using the real TaskStore. Best-effort — never throws (the
+      // monitor already swallows callback errors around `onObservation`).
+      onObservation: (observation) => {
+        this.emitOverseerObservationDeduped(store, observation);
+      },
+    });
     // FN-7512: bounded autonomous-recovery dispatcher, wired to the existing
     // steering-comment API + store retry/re-enqueue path only — no new
     // session/tool/merge channel. Ticked from the same poll as the FN-7511
@@ -1123,6 +1172,12 @@ export class ProjectEngine {
       const updatedTask = await store.updateTask(taskId, { plannerOversightLevel: "off" });
       this.plannerOverseer?.clear(taskId);
       this.plannerRecoveryController?.clear(taskId);
+      // FN-7551: release the observation/escalation emission-dedup state too,
+      // so if oversight is later re-enabled for this task, the first new
+      // observation/escalation emits rather than staying suppressed by stale
+      // dedup keys from before the stop.
+      this.plannerObservationEmitDedup.delete(taskId);
+      this.clearPlannerEscalationDedup(taskId);
 
       return { applied: true, reason: "stopped", task: updatedTask };
     } catch (err) {
@@ -1146,6 +1201,120 @@ export class ProjectEngine {
   }
 
   /**
+   * FNXC:PlannerOversight 2026-07-04-19:45:
+   * FN-7551 mapping helper: converts the `{kind, ref, url?}` source-link shape
+   * shared by `OverseerSourceLink` (FN-7511 observations) and
+   * `PlannerRecoverySourceLink` (FN-7512/FN-7513 decisions) into the FN-7520
+   * façade's `PlannerInterventionSourceLink` shape (`{kind, label, target, url}`),
+   * using `ref` as both `label` and `target` when no richer label exists.
+   * Never throws; an empty/undefined input yields `undefined` so callers can
+   * omit `sourceLinks` entirely rather than pass an empty array.
+   */
+  private toInterventionSourceLinks(
+    links: ReadonlyArray<{ kind: string; ref: string; url?: string }> | undefined,
+  ): PlannerInterventionSourceLink[] | undefined {
+    if (!links || links.length === 0) return undefined;
+    return links.map((link) => ({
+      kind: link.kind as PlannerInterventionSourceLink["kind"],
+      label: link.ref || link.kind,
+      target: link.ref,
+      url: link.url,
+    }));
+  }
+
+  /**
+   * FNXC:PlannerOversight 2026-07-04-19:45:
+   * FN-7551: best-effort wrapper shared by every non-observation emission
+   * call-site (steering/retry/targeted-fix/confirmation/escalation) —
+   * swallows and logs any façade/store failure so an audit-emission error
+   * never breaks the dispatching handler or the poll (mirrors the
+   * try/catch-degrade-to-no-op contract every FN-7512/FN-7513/FN-7514
+   * handler already follows).
+   */
+  private emitOverseerInterventionSafe(fn: () => void): void {
+    try {
+      fn();
+    } catch (err) {
+      runtimeLog.warn(`Failed to emit overseer intervention: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  /**
+   * FNXC:PlannerOversight 2026-07-04-19:45:
+   * FN-7551: emits one `overseer:intervention` `observe` entry through
+   * `emitOverseerObservation` for a real `OverseerStageObservation`, deduped
+   * per `(taskId, stage:signal)` so a 45s poll of an unchanged watched stage
+   * does not append a new observation entry every cycle — only a changed
+   * `(stage, signal)` pair emits. Best-effort: any store/façade failure is
+   * swallowed so it never breaks `PlannerOverseerMonitor#observeTask`/the poll.
+   */
+  private emitOverseerObservationDeduped(store: TaskStore, observation: import("./planner-overseer.js").OverseerStageObservation): void {
+    try {
+      const dedupKey = `${observation.stage}:${observation.signal}`;
+      const last = this.plannerObservationEmitDedup.get(observation.taskId);
+      if (last === dedupKey) {
+        return;
+      }
+      this.plannerObservationEmitDedup.set(observation.taskId, dedupKey);
+      emitOverseerObservation({
+        store,
+        taskId: observation.taskId,
+        stage: observation.stage,
+        reason: observation.reason,
+        sourceLinks: this.toInterventionSourceLinks(observation.sources),
+      });
+    } catch (err) {
+      runtimeLog.warn(
+        `Failed to emit overseer observation intervention for ${observation.taskId}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  /**
+   * FNXC:PlannerOversight 2026-07-04-19:45:
+   * FN-7551: emits one `overseer:intervention` `escalate` entry through
+   * `emitOverseerEscalation` when a `(taskId, stage)` pair's bounded-recovery
+   * budget is exhausted, deduped so it is emitted exactly once while the
+   * stage stays exhausted across subsequent polls (a stage that later
+   * un-exhausts — e.g. cleared via `clear(taskId)` on terminal transition —
+   * clears the dedup entry and may escalate again in a future exhaustion).
+   * Best-effort; never throws out of the poll.
+   */
+  private emitOverseerEscalationDeduped(
+    store: TaskStore,
+    taskId: string,
+    decision: { watchedStage: PlannerOversightStage | null; reason: string; attemptCount: number; attemptLimit: number; sourceLinks: ReadonlyArray<{ kind: string; ref: string; url?: string }> },
+  ): void {
+    if (!decision.watchedStage) return;
+    const dedupKey = `${taskId}::${decision.watchedStage}`;
+    if (this.plannerEscalationEmitDedup.has(dedupKey)) {
+      return;
+    }
+    this.plannerEscalationEmitDedup.add(dedupKey);
+    this.emitOverseerInterventionSafe(() =>
+      emitOverseerEscalation({
+        store,
+        taskId,
+        stage: decision.watchedStage as PlannerOversightStage,
+        reason: decision.reason,
+        attemptCount: decision.attemptCount,
+        attemptLimit: decision.attemptLimit,
+        sourceLinks: this.toInterventionSourceLinks(decision.sourceLinks),
+      }),
+    );
+  }
+
+  /** FN-7551: clears any escalation-dedup entries for `taskId` across every watched stage. */
+  private clearPlannerEscalationDedup(taskId: string): void {
+    const prefix = `${taskId}::`;
+    for (const key of [...this.plannerEscalationEmitDedup]) {
+      if (key.startsWith(prefix)) {
+        this.plannerEscalationEmitDedup.delete(key);
+      }
+    }
+  }
+
+  /**
    * FNXC:PlannerOversight 2026-07-04-12:00:
    * Concrete FN-7512 handler wiring — ONLY reuses existing mechanisms:
    * `injectGuidance`/`requestTargetedFix` post a planner-authored steering
@@ -1161,9 +1330,34 @@ export class ProjectEngine {
       injectGuidance: async (task, decision) => {
         const text = `[planner-oversight] ${decision.reason}`;
         await store.addSteeringComment(task.id, text, "agent");
+        // FN-7551: emit the steering intervention entry AFTER the steering
+        // comment succeeds, through the real store, so the timeline reflects
+        // the same guidance the agent actually saw.
+        this.emitOverseerInterventionSafe(() =>
+          emitOverseerSteering({
+            store,
+            taskId: task.id,
+            stage: (decision.watchedStage ?? "executor") as PlannerOversightStage,
+            reason: decision.reason,
+            sourceLinks: this.toInterventionSourceLinks(decision.sourceLinks),
+          }),
+        );
       },
-      retryStep: async (task) => {
+      retryStep: async (task, decision) => {
         await store.moveTask(task.id, "todo", { preserveProgress: true, moveSource: "engine" } as Parameters<TaskStore["moveTask"]>[2]);
+        // FN-7551: the attempt just dispatched — record it as attemptCount + 1
+        // (decision.attemptCount is the count BEFORE this dispatch).
+        this.emitOverseerInterventionSafe(() =>
+          emitOverseerRetry({
+            store,
+            taskId: task.id,
+            stage: (decision.watchedStage ?? "executor") as PlannerOversightStage,
+            reason: decision.reason,
+            attemptCount: decision.attemptCount + 1,
+            attemptLimit: decision.attemptLimit,
+            sourceLinks: this.toInterventionSourceLinks(decision.sourceLinks),
+          }),
+        );
       },
       requestTargetedFix: async (task, decision) => {
         const sourceRef = decision.sourceLinks[0]?.ref;
@@ -1171,6 +1365,17 @@ export class ProjectEngine {
           ? `[planner-oversight] targeted-fix requested: ${decision.reason} (source: ${sourceRef})`
           : `[planner-oversight] targeted-fix requested: ${decision.reason}`;
         await store.addSteeringComment(task.id, text, "agent");
+        this.emitOverseerInterventionSafe(() =>
+          emitOverseerRecoveryAttempt({
+            store,
+            taskId: task.id,
+            stage: (decision.watchedStage ?? "executor") as PlannerOversightStage,
+            reason: decision.reason,
+            attemptCount: decision.attemptCount + 1,
+            attemptLimit: decision.attemptLimit,
+            sourceLinks: this.toInterventionSourceLinks(decision.sourceLinks),
+          }),
+        );
       },
       // FNXC:PlannerOversight 2026-07-04-13:00:
       // FN-7513 requirement: merge/PR actions beyond guidance/retry, and any
@@ -1184,6 +1389,33 @@ export class ProjectEngine {
       requestConfirmation: async (task, request) => {
         const text = `[planner-oversight] confirmation required (${request.sideEffectClass}): ${request.reason}`;
         await store.addSteeringComment(task.id, text, "agent");
+        this.emitOverseerInterventionSafe(() =>
+          emitOverseerConfirmation({
+            store,
+            taskId: task.id,
+            stage: request.watchedStage as PlannerOversightStage,
+            reason: request.reason,
+            sourceLinks: this.toInterventionSourceLinks(request.sourceLinks),
+          }),
+        );
+      },
+      // FNXC:PlannerOversight 2026-07-04-19:45:
+      // FN-7551: audit-only confirmation-RESOLUTION emission. Invoked from
+      // `PlannerRecoveryController.resolveConfirmation` for both "approved"
+      // and "denied" outcomes, mirroring the request-path emission above so
+      // the timeline shows both the request and its resolution. Never touches
+      // the approve/deny execution path itself.
+      onConfirmationResolved: async (taskId, request, resolution) => {
+        this.emitOverseerInterventionSafe(() =>
+          emitOverseerConfirmation({
+            store,
+            taskId,
+            stage: request.watchedStage as PlannerOversightStage,
+            reason: request.reason,
+            outcome: resolution === "approved" ? "succeeded" : "skipped",
+            sourceLinks: this.toInterventionSourceLinks(request.sourceLinks),
+          }),
+        );
       },
       // FNXC:PlannerOversight 2026-07-04-14:30:
       // FN-7513 code-review fix: a `"merge_pr"`-classified confirmation covers
@@ -2111,7 +2343,13 @@ export class ProjectEngine {
           // human-review) BEFORE any action/confirmation classification —
           // never throws.
           if (level === "autonomous" && this.plannerRecoveryController) {
-            await this.plannerRecoveryController.tick(task, { settings: engineSettings });
+            const decision = await this.plannerRecoveryController.tick(task, { settings: engineSettings });
+            // FN-7551: bounded-recovery exhaustion is an escalation-worthy
+            // event — emit exactly one `escalate` entry per (taskId, stage)
+            // while the stage remains exhausted across subsequent polls.
+            if (decision?.exhausted && decision.watchedStage) {
+              this.emitOverseerEscalationDeduped(store, task.id, decision);
+            }
           }
         } catch {
           // Best-effort per-task — never let one task's failure block the poll.
@@ -2124,6 +2362,8 @@ export class ProjectEngine {
         if (!inFlightIds.has(taskId)) {
           overseer.clear(taskId);
           this.plannerRecoveryController?.clear(taskId);
+          this.plannerObservationEmitDedup.delete(taskId);
+          this.clearPlannerEscalationDedup(taskId);
         }
       }
     } catch {
