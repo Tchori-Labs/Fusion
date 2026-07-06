@@ -2750,6 +2750,7 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
 
     // Re-read the run to get the updated state
     const updatedRun = this.getValidatorRun(runId)!;
+    this.emit("validator-run:completed", updatedRun, result, durationMs);
 
     if (result === "passed") {
       const passedFeature = this.getFeature(run.featureId);
@@ -2757,8 +2758,6 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
         this.reconcileSupersededGeneratedFixFeatures(passedFeature.sliceId);
       }
     }
-
-    this.emit("validator-run:completed", updatedRun, result, durationMs);
 
     return updatedRun;
   }
@@ -3178,6 +3177,10 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
    * feature is later validated successfully, older descendants are no longer
    * actionable remediation work. Leaving them blocked/defined keeps the slice
    * pending forever even though the authoritative source feature has passed.
+   *
+   * FNXC:Missions 2026-07-05-22:09:
+   * Superseded generated Fix Features must become terminal and lose live board-task ownership.
+   * Otherwise mission recovery can keep resuming stale remediation tasks after the source feature is already validated.
    */
   reconcileSupersededGeneratedFixFeatures(sliceId: string): { supersededCount: number; featureIds: string[] } {
     const features = this.listFeatures(sliceId);
@@ -3211,17 +3214,22 @@ export class MissionStore extends EventEmitter<MissionStoreEvents> {
       .filter((feature) => feature.status !== "done" || feature.loopState !== "passed" || feature.lastValidatorStatus !== "passed")
       .map((feature) => feature.id);
 
-    for (const featureId of supersededFeatureIds) {
-      this.updateFeature(featureId, {
-        status: "done",
-        loopState: "passed",
-        lastValidatorStatus: "passed",
-      });
-    }
-
     if (supersededFeatureIds.length > 0) {
-      this.recomputeSliceStatus(sliceId);
-      this.db.bumpLastModified();
+      this.db.transaction(() => {
+        for (const featureId of supersededFeatureIds) {
+          const feature = this.getFeature(featureId);
+          if (!feature) continue;
+          this.updateFeature(featureId, {
+            status: "done",
+            taskId: undefined,
+            loopState: "passed",
+            lastValidatorStatus: "passed",
+          });
+          if (feature.taskId) {
+            this.db.prepare("UPDATE tasks SET missionId = NULL, sliceId = NULL WHERE id = ? AND \"deletedAt\" IS NULL").run(feature.taskId);
+          }
+        }
+      });
     }
 
     return {

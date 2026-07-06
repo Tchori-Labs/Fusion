@@ -663,6 +663,47 @@ describe("MissionExecutionLoop", () => {
 
       expect(missionStore.startValidatorRun).not.toHaveBeenCalled();
     });
+
+    it("skips superseded generated fixes from the stale recovery snapshot", async () => {
+      const mission = createMockMission({ id: "M-SUPERSEDE", status: "active" });
+      missionStore._clear();
+      missionStore._setMission(mission);
+
+      const slice = createMockSlice({ id: "SL-SUPERSEDE", milestoneId: "MS-001", status: "active" });
+      const source = createMockFeature({
+        id: "F-SOURCE",
+        sliceId: slice.id,
+        status: "done",
+        loopState: "passed",
+        lastValidatorStatus: "passed",
+      });
+      const staleFix = createMockFeature({
+        id: "F-STALE-FIX",
+        sliceId: slice.id,
+        status: "defined",
+        loopState: "validating",
+        generatedFromFeatureId: source.id,
+        taskId: "FN-stale-fix",
+      });
+      missionStore._setFeature(source);
+      missionStore._setFeature(staleFix);
+      taskStore._setTask({ id: "FN-stale-fix", column: "done" });
+      wireHierarchy(slice, [source, staleFix]);
+
+      loop = new MissionExecutionLoop({
+        taskStore: taskStore as any,
+        missionStore: missionStore as any,
+        rootDir: "/tmp",
+      });
+      loop.start();
+
+      const result = await loop.recoverActiveMissions();
+
+      expect(missionStore.reconcileSupersededGeneratedFixFeatures).toHaveBeenCalledWith(slice.id);
+      expect(missionStore.transitionLoopState).not.toHaveBeenCalledWith(staleFix.id, "implementing");
+      expect(taskStore.getTask).not.toHaveBeenCalledWith("FN-stale-fix");
+      expect(result).toEqual({ recoveredCount: 1 });
+    });
   });
 
   describe("reapStaleValidatorRuns", () => {
