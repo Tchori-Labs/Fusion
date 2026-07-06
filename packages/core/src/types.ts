@@ -6189,6 +6189,17 @@ export interface PlanningSummary {
   priority?: TaskPriority;
   suggestedDependencies: string[];
   keyDeliverables: string[];
+  /**
+   * FNXC:PlanningMode 2026-07-05-00:00:
+   * The planning AI proposes plan-specific deepening topics (instead of the
+   * fixed, regex-derived generic buckets) so the "Would you like to go
+   * deeper?" checkpoint surfaces suggestions aligned with the user's actual
+   * plan — including angles they had not anticipated. Optional so existing
+   * persisted rows/payloads without it remain valid; the dashboard falls
+   * back to the generic theme candidates when absent or empty
+   * (FN-7616 / issue #1912).
+   */
+  deepeningThemes?: Array<{ id?: string; label: string; description?: string }>;
 }
 
 /** Response from planning endpoints - either a question or the final summary */
