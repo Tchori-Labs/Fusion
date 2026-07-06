@@ -1073,6 +1073,11 @@ export class ProjectEngine {
     return this.runtime.getChatStore();
   }
 
+  /** Get the project-scoped PluginRunner (if initialized). */
+  getPluginRunner() {
+    return this.runtime.getPluginRunner();
+  }
+
   attachChatStore(chatStore: NotificationChatStore): void {
     this.notificationService?.attachChatStore(chatStore);
   }

@@ -93,10 +93,18 @@ export function getOrCreateScopedChatManager(
   store: TaskStore,
   chatStore: ChatStore,
   pluginRunner?: ConstructorParameters<typeof ChatManager>[3],
+  refreshPluginRunner = false,
 ): ChatManager {
   const key = store.getFusionDir();
   const cached = scopedChatManagerCache.get(key);
-  if (cached) return cached;
+  if (cached) {
+    if (refreshPluginRunner && pluginRunner) {
+      cached.setPluginRunner(pluginRunner);
+    }
+    return cached;
+  }
+  // FNXC:PostgresCutover 2026-07-05-20:10: keep the backend AsyncDataLayer on
+  // the chat AgentStore (merge union with main's Hermes plugin-runner refresh).
   const agentStore = new AgentStore({ rootDir: store.getFusionDir(), asyncLayer: store.getAsyncLayer() ?? undefined });
   const manager = new ChatManager(
     chatStore,
