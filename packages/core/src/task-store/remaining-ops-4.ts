@@ -7,6 +7,7 @@
  * instance as its first parameter and performs byte-identical work.
  */
 import {TaskStore, isWorkflowColumnsCompatibilityFlagEnabled} from "../store.js";
+import {resolveEntryColumnId} from "../workflow-reconciliation.js";
 import * as schema from "../postgres/schema/index.js";
 import type {MoveTaskOptions, MoveTaskInternalOptions} from "../store.js";
 import {TASK_BRANCH_CONTEXT_METADATA_KEY} from "../store.js";
@@ -582,7 +583,7 @@ export function toWorkflowDefinitionImpl(store: TaskStore, row: { id: string; na
     };
   }
 
-export async function materializeDefaultWorkflowStepsImpl(store: TaskStore): Promise<{ workflowId: string; stepIds: string[] } | undefined> {
+export async function materializeDefaultWorkflowStepsImpl(store: TaskStore): Promise<{ workflowId: string; stepIds: string[]; entryColumnId?: string } | undefined> {
     const workflowId = await store.getDefaultWorkflowId();
     if (!workflowId) return undefined;
     const def = await store.getWorkflowDefinition(workflowId);
@@ -596,7 +597,9 @@ export async function materializeDefaultWorkflowStepsImpl(store: TaskStore): Pro
     // (accepts branching graphs). Interpreter-deferred tolerance is no longer
     // needed since branching is a valid shape.
     parseWorkflowIr(def.ir);
-    return { workflowId, stepIds: resolveDefaultOnOptionalGroupIds(def.ir) };
+    // FNXC:CodingIdeasWorkflow 2026-07-05-19:45: surface the workflow's manual
+    // intake column (main FN-7591 parity).
+    return { workflowId, stepIds: resolveDefaultOnOptionalGroupIds(def.ir), entryColumnId: resolveEntryColumnId(def.ir) };
   }
 
 export async function reconcileTaskCustomFieldsForSchemaImpl(store: TaskStore, taskId: string, oldFieldDefs: WorkflowFieldDefinition[], newFieldDefs: WorkflowFieldDefinition[], dropOrphans = false,): Promise<void> {

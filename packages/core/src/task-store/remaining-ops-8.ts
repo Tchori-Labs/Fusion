@@ -8,6 +8,7 @@
  */
 
 import { TaskStore } from "../store.js";
+import {resolveEntryColumnId} from "../workflow-reconciliation.js";
 import { pruneAgentLogFiles as pruneAgentLogFileEntries, readAgentLogEntriesByTimeRange } from "../agent-log-file-store.js";
 import { BUILTIN_CODING_WORKFLOW_IR } from "../builtin-coding-workflow-ir.js";
 import { BUILTIN_WORKFLOWS, getBuiltinWorkflow, getRequiredPluginIdForBuiltinWorkflow, isBuiltinWorkflowEnabled, isBuiltinWorkflowId, isBuiltinWorkflowPluginGated } from "../builtin-workflows.js";
@@ -664,7 +665,7 @@ export async function materializeWorkflowStepsImpl(store: TaskStore,
 
 export async function materializeExplicitWorkflowStepsImpl(store: TaskStore,
     workflowId: string,
-  ): Promise<{ workflowId: string; stepIds: string[] }> {
+  ): Promise<{ workflowId: string; stepIds: string[]; entryColumnId?: string }> {
     const def = await store.getWorkflowDefinition(workflowId);
     if (!def) throw new Error(`Workflow '${workflowId}' not found`);
     if (def.kind === "fragment") {
@@ -673,7 +674,10 @@ export async function materializeExplicitWorkflowStepsImpl(store: TaskStore,
     // FNXC:LegacyWorkflowEngineRemoval 2026-07-02-00:00:
     // FN-7360 removed the legacy linear compiler; validation is now parseWorkflowIr.
     parseWorkflowIr(def.ir);
-    return { workflowId, stepIds: resolveDefaultOnOptionalGroupIds(def.ir) };
+    // FNXC:CodingIdeasWorkflow 2026-07-05-19:45: surface the workflow's manual
+    // intake column so create paths can land the task there instead of the
+    // hard-coded "triage" (main FN-7591 parity; the cutover copies predated it).
+    return { workflowId, stepIds: resolveDefaultOnOptionalGroupIds(def.ir), entryColumnId: resolveEntryColumnId(def.ir) };
 }
 
 export async function selectTaskWorkflowAndReconcileImpl(store: TaskStore,

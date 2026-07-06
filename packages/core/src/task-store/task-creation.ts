@@ -97,6 +97,7 @@ export async function createTaskBackendImpl(store: TaskStore, input: TaskCreateI
       : undefined;
 
     let pendingWorkflowSelection: { workflowId: string; stepIds: string[] } | undefined;
+    let resolvedEntryColumn: string | undefined;
     /*
     FNXC:WorkflowCreation 2026-07-05-14:30:
     User-facing task creation can submit a selected workflowId and optional-group
@@ -120,6 +121,7 @@ export async function createTaskBackendImpl(store: TaskStore, input: TaskCreateI
           ? (resolvedWorkflowSteps ?? [])
           : undefined;
         resolvedWorkflowSteps = explicitStepIds ?? selected.stepIds;
+        resolvedEntryColumn = selected.entryColumnId;
         pendingWorkflowSelection = {
           workflowId: selected.workflowId,
           stepIds: explicitStepIds ?? selected.stepIds,
@@ -130,6 +132,7 @@ export async function createTaskBackendImpl(store: TaskStore, input: TaskCreateI
         const inherited = await store.materializeDefaultWorkflowSteps();
         if (inherited) {
           resolvedWorkflowSteps = inherited.stepIds;
+          resolvedEntryColumn = inherited.entryColumnId;
           pendingWorkflowSelection = inherited;
         }
       } catch (err) {
@@ -185,7 +188,7 @@ export async function createTaskBackendImpl(store: TaskStore, input: TaskCreateI
         title,
         resolvedWorkflowSteps,
         reservation.taskId,
-        { invokeTaskCreatedHook: shouldInvokeTaskCreatedHook && !hasPendingSummarization },
+        { invokeTaskCreatedHook: shouldInvokeTaskCreatedHook && !hasPendingSummarization, resolvedEntryColumn },
       );
       await allocator.commitDistributedTaskIdReservation({
         reservationId: reservation.reservationId,
@@ -269,7 +272,7 @@ export async function createTaskBackendImpl(store: TaskStore, input: TaskCreateI
     return task;
   }
 
-export async function _createTaskInternalBackendImpl(store: TaskStore, input: TaskCreateInput, title: string | undefined, resolvedWorkflowSteps: string[] | undefined, id: string, options?: { createdAt?: string; updatedAt?: string; promptOverride?: string; invokeTaskCreatedHook?: boolean; },): Promise<Task> {
+export async function _createTaskInternalBackendImpl(store: TaskStore, input: TaskCreateInput, title: string | undefined, resolvedWorkflowSteps: string[] | undefined, id: string, options?: { createdAt?: string; updatedAt?: string; promptOverride?: string; invokeTaskCreatedHook?: boolean; resolvedEntryColumn?: string; },): Promise<Task> {
     const layer = store.asyncLayer!;
     const now = options?.createdAt ?? new Date().toISOString();
     const normalizedTitle = normalizeTitleForTaskId(title, id);
@@ -292,7 +295,10 @@ export async function _createTaskInternalBackendImpl(store: TaskStore, input: Ta
       branchContext: input.branchContext,
       autoMerge: input.autoMerge,
       autoMergeProvenance: input.autoMerge === undefined ? undefined : "user",
-      column: input.column || "triage",
+      // FNXC:CodingIdeasWorkflow 2026-07-05-19:45: land the task in its
+      // workflow's manual intake column (e.g. Coding (Ideas) → "ideas") when
+      // no explicit column is given (main FN-7591 parity).
+      column: input.column || options?.resolvedEntryColumn || "triage",
       dependencies: input.dependencies || [],
       breakIntoSubtasks: input.breakIntoSubtasks === true ? true : undefined,
       noCommitsExpected: input.noCommitsExpected === true ? true : undefined,
@@ -354,8 +360,17 @@ export async function _createTaskInternalBackendImpl(store: TaskStore, input: Ta
     await store.writeTaskJsonFile(dir, task);
 
     // Write PROMPT.md (same logic as SQLite path).
+    /*
+    FNXC:CodingIdeasWorkflow 2026-07-05-19:45:
+    A freshly created task needs the bootstrap stub only when it lands in a
+    column the triage service will plan from — the legacy "triage" intake or a
+    workflow's resolved manual intake (e.g. Coding (Ideas) → "ideas"). Direct
+    creates into other columns keep generateSpecifiedPrompt (main parity).
+    */
+    const isIntakeColumn = task.column === "triage"
+      || (options?.resolvedEntryColumn !== undefined && task.column === options.resolvedEntryColumn);
     const prompt = options?.promptOverride
-      ?? (task.column === "triage"
+      ?? (isIntakeColumn
         ? buildBootstrapPrompt(id, task.title, task.description)
         : store.generateSpecifiedPrompt(task));
     const validation = validateFileScopeInPromptContent(prompt);
@@ -475,6 +490,7 @@ export async function createTaskImpl(store: TaskStore, input: TaskCreateInput, o
     // When a project default workflow is configured, new tasks inherit it
     // (compiled to steps) ahead of the legacy default-on step behavior.
     let pendingWorkflowSelection: { workflowId: string; stepIds: string[] } | undefined;
+    let resolvedEntryColumn: string | undefined;
     // U6/R3/KTD-4: an explicit create-time workflowId beats the project default.
     // `null` is an explicit opt-out (no workflow), `string` materializes that
     // workflow, `undefined` falls through to the default-workflow behavior below.
@@ -502,6 +518,7 @@ export async function createTaskImpl(store: TaskStore, input: TaskCreateInput, o
           ? (resolvedWorkflowSteps ?? [])
           : undefined;
         resolvedWorkflowSteps = explicitStepIds ?? selected.stepIds;
+        resolvedEntryColumn = selected.entryColumnId;
         pendingWorkflowSelection = {
           workflowId: selected.workflowId,
           stepIds: explicitStepIds ?? selected.stepIds,
@@ -512,6 +529,7 @@ export async function createTaskImpl(store: TaskStore, input: TaskCreateInput, o
         const inherited = await store.materializeDefaultWorkflowSteps();
         if (inherited) {
           resolvedWorkflowSteps = inherited.stepIds;
+          resolvedEntryColumn = inherited.entryColumnId;
           pendingWorkflowSelection = inherited;
         }
       } catch (err) {
@@ -555,7 +573,7 @@ export async function createTaskImpl(store: TaskStore, input: TaskCreateInput, o
             title,
             resolvedWorkflowSteps,
             taskId,
-            { invokeTaskCreatedHook: shouldInvokeTaskCreatedHook && !hasPendingSummarization },
+            { invokeTaskCreatedHook: shouldInvokeTaskCreatedHook && !hasPendingSummarization, resolvedEntryColumn },
           );
         },
       });
@@ -678,6 +696,7 @@ export async function createTaskWithReservedIdImpl(store: TaskStore, input: Task
       : undefined;
 
     let pendingWorkflowSelection: { workflowId: string; stepIds: string[] } | undefined;
+    let resolvedEntryColumn: string | undefined;
     // U6/R3/KTD-4: an explicit create-time workflowId beats the project default,
     // mirroring createTask(). `null` is an explicit opt-out, `string` materializes
     // that workflow, `undefined` falls through to the default-workflow behavior.
@@ -705,6 +724,7 @@ export async function createTaskWithReservedIdImpl(store: TaskStore, input: Task
           ? (resolvedWorkflowSteps ?? [])
           : undefined;
         resolvedWorkflowSteps = explicitStepIds ?? selected.stepIds;
+        resolvedEntryColumn = selected.entryColumnId;
         pendingWorkflowSelection = {
           workflowId: selected.workflowId,
           stepIds: explicitStepIds ?? selected.stepIds,
@@ -717,6 +737,7 @@ export async function createTaskWithReservedIdImpl(store: TaskStore, input: Task
         const inherited = await store.materializeDefaultWorkflowSteps();
         if (inherited) {
           resolvedWorkflowSteps = inherited.stepIds;
+          resolvedEntryColumn = inherited.entryColumnId;
           pendingWorkflowSelection = inherited;
         }
       } catch (err) {
@@ -757,6 +778,7 @@ export async function createTaskWithReservedIdImpl(store: TaskStore, input: Task
         updatedAt: options.updatedAt,
         promptOverride: options.prompt,
         invokeTaskCreatedHook: options.invokeTaskCreatedHook,
+        resolvedEntryColumn,
       });
     } catch (err) {
       // The task row was never created, so any default-workflow steps we
@@ -780,7 +802,7 @@ export async function createTaskWithReservedIdImpl(store: TaskStore, input: Task
     return createdTask;
   }
 
-export async function _createTaskInternalImpl(store: TaskStore, input: TaskCreateInput, title: string | undefined, resolvedWorkflowSteps: string[] | undefined, id: string, options?: { createdAt?: string; updatedAt?: string; promptOverride?: string; invokeTaskCreatedHook?: boolean; },): Promise<Task> {
+export async function _createTaskInternalImpl(store: TaskStore, input: TaskCreateInput, title: string | undefined, resolvedWorkflowSteps: string[] | undefined, id: string, options?: { createdAt?: string; updatedAt?: string; promptOverride?: string; invokeTaskCreatedHook?: boolean; resolvedEntryColumn?: string; },): Promise<Task> {
     const now = options?.createdAt ?? new Date().toISOString();
     // FN-5077: null normalized titles are treated as "no title" and allow standard fallback/summarization behavior.
     const normalizedTitle = normalizeTitleForTaskId(title, id);
@@ -803,7 +825,10 @@ export async function _createTaskInternalImpl(store: TaskStore, input: TaskCreat
       branchContext: input.branchContext,
       autoMerge: input.autoMerge,
       autoMergeProvenance: input.autoMerge === undefined ? undefined : "user",
-      column: input.column || "triage",
+      // FNXC:CodingIdeasWorkflow 2026-07-05-19:45: land the task in its
+      // workflow's manual intake column (e.g. Coding (Ideas) → "ideas") when
+      // no explicit column is given (main FN-7591 parity).
+      column: input.column || options?.resolvedEntryColumn || "triage",
       dependencies: input.dependencies || [],
       breakIntoSubtasks: input.breakIntoSubtasks === true ? true : undefined,
       noCommitsExpected: input.noCommitsExpected === true ? true : undefined,
@@ -853,8 +878,17 @@ export async function _createTaskInternalImpl(store: TaskStore, input: TaskCreat
     // Update cache if watcher is active
     if (store.isWatching) store.taskCache.set(id, { ...task });
 
+    /*
+    FNXC:CodingIdeasWorkflow 2026-07-05-19:45:
+    A freshly created task needs the bootstrap stub only when it lands in a
+    column the triage service will plan from — the legacy "triage" intake or a
+    workflow's resolved manual intake (e.g. Coding (Ideas) → "ideas"). Direct
+    creates into other columns keep generateSpecifiedPrompt (main parity).
+    */
+    const isIntakeColumn = task.column === "triage"
+      || (options?.resolvedEntryColumn !== undefined && task.column === options.resolvedEntryColumn);
     const prompt = options?.promptOverride
-      ?? (task.column === "triage"
+      ?? (isIntakeColumn
         ? buildBootstrapPrompt(id, task.title, task.description)
         : store.generateSpecifiedPrompt(task));
     const validation = validateFileScopeInPromptContent(prompt);

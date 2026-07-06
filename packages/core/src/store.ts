@@ -833,7 +833,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   /**
    * FNXC:RuntimeTaskOrchestrationAsync 2026-06-24-13:25:
    */
-  public async _createTaskInternalBackend( input: TaskCreateInput, title: string | undefined, resolvedWorkflowSteps: string[] | undefined, id: string, options?: { createdAt?: string; updatedAt?: string; promptOverride?: string; invokeTaskCreatedHook?: boolean; }, ): Promise<Task> {
+  public async _createTaskInternalBackend( input: TaskCreateInput, title: string | undefined, resolvedWorkflowSteps: string[] | undefined, id: string, options?: { createdAt?: string; updatedAt?: string; promptOverride?: string; invokeTaskCreatedHook?: boolean; resolvedEntryColumn?: string; }, ): Promise<Task> {
     return _createTaskInternalBackendImpl(this, input, title, resolvedWorkflowSteps, id, options);
   }
 
@@ -852,7 +852,7 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   async applyReplicatedTaskCreate(payload: MeshReplicatedTaskCreatePayload): Promise<MeshReplicatedTaskApplyResult> {
     return applyReplicatedTaskCreateImpl(this, payload);
   }
-  public async _createTaskInternal( input: TaskCreateInput, title: string | undefined, resolvedWorkflowSteps: string[] | undefined, id: string, options?: { createdAt?: string; updatedAt?: string; promptOverride?: string; invokeTaskCreatedHook?: boolean; }, ): Promise<Task> {
+  public async _createTaskInternal( input: TaskCreateInput, title: string | undefined, resolvedWorkflowSteps: string[] | undefined, id: string, options?: { createdAt?: string; updatedAt?: string; promptOverride?: string; invokeTaskCreatedHook?: boolean; resolvedEntryColumn?: string; }, ): Promise<Task> {
     /*
     FNXC:SqliteFinalRemoval 2026-06-25-10:35:
     Route to the async backend variant when the store is in backend mode so
@@ -2193,10 +2193,10 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
 
   /** Resolve the project-default workflow into materialized step ids, or null
    *  when no default is set / it is missing / it does not compile. */
-  public async materializeDefaultWorkflowSteps(): Promise<{ workflowId: string; stepIds: string[] } | undefined> {
+  public async materializeDefaultWorkflowSteps(): Promise<{ workflowId: string; stepIds: string[]; entryColumnId?: string } | undefined> {
     return materializeDefaultWorkflowStepsImpl(this);
   }
-  public async materializeExplicitWorkflowSteps( workflowId: string, ): Promise<{ workflowId: string; stepIds: string[] }> {
+  public async materializeExplicitWorkflowSteps( workflowId: string, ): Promise<{ workflowId: string; stepIds: string[]; entryColumnId?: string }> {
     return materializeExplicitWorkflowStepsImpl(this, workflowId);
   }
   async selectTaskWorkflow(taskId: string, workflowId: string): Promise<string[]> {

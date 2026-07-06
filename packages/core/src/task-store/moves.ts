@@ -14,6 +14,9 @@ import type {Task, Column, ColumnId, HandoffToReviewOptions} from "../types.js";
 import {VALID_TRANSITIONS, COLUMNS} from "../types.js";
 import {serializeWorkflowIr} from "../workflow-ir.js";
 import {resolveAllowedColumns, workflowHasColumn} from "../workflow-transitions.js";
+import {isBuiltinWorkflowId, getBuiltinWorkflow} from "../builtin-workflows.js";
+import {BUILTIN_CODING_WORKFLOW_IR} from "../builtin-coding-workflow-ir.js";
+import {parseWorkflowIr} from "../workflow-ir.js";
 import {findWorkflowColumn, resolveColumnPluginGates} from "../plugin-gate-verdict.js";
 import {getTraitRegistry} from "../trait-registry.js";
 import {resolveColumnCapacity} from "../workflow-capacity.js";
@@ -26,6 +29,34 @@ import {recordRunAuditEventWithinTransaction} from "../postgres/data-layer.js";
 import {getTaskMergeBlocker} from "../task-merge.js";
 import {__setTaskActivityLogLimitsForTesting} from "../task-store/comments.js";
 import {readTaskRow as readTaskRowAsync, readTaskRowInTransaction, upsertTaskRowInTransaction} from "../task-store/async-persistence.js";
+
+/*
+FNXC:PostgresCutover 2026-07-05-19:50:
+Backend-aware task-workflow IR resolution for move validation. The sync
+resolver (resolveTaskWorkflowIrSync) cannot read the task_workflow_selection
+row in backend mode (PostgreSQL is async-only) and silently falls back to
+builtin:coding — which rejected every move out of a custom workflow column
+(e.g. Coding (Ideas) "ideas"). Moves are async, so resolve the selection via
+getTaskWorkflowSelectionAsync and map it to the same IR the sync path would.
+*/
+async function resolveTaskWorkflowIrForMove(store: TaskStore, id: string): Promise<WorkflowIr> {
+  if (!store.backendMode) {
+    return store.resolveTaskWorkflowIrSync(id);
+  }
+  const selection = await store.getTaskWorkflowSelectionAsync(id);
+  const workflowId = selection?.workflowId;
+  if (!workflowId) return store.applyBuiltInPromptOverridesSync("builtin:coding", BUILTIN_CODING_WORKFLOW_IR);
+  if (isBuiltinWorkflowId(workflowId)) {
+    const builtin = getBuiltinWorkflow(workflowId);
+    return store.applyBuiltInPromptOverridesSync(workflowId, builtin?.ir ?? BUILTIN_CODING_WORKFLOW_IR);
+  }
+  try {
+    const def = await store.getWorkflowDefinition(workflowId);
+    return def ? parseWorkflowIr(def.ir) : BUILTIN_CODING_WORKFLOW_IR;
+  } catch {
+    return BUILTIN_CODING_WORKFLOW_IR;
+  }
+}
 import {enqueueMergeQueueInTransaction, dequeueMergeQueueOnColumnExitInTransaction} from "../task-store/async-merge-coordination.js";
 
 export async function moveTaskImpl(store: TaskStore, id: string, toColumn: ColumnId, options?: MoveTaskOptions,): Promise<Task> {
@@ -141,7 +172,7 @@ export async function moveTaskInternalImpl(store: TaskStore, id: string, toColum
     // pass-through slot). An explicit option value wins; otherwise derive it.
     const bypassGuards = store.resolveWorkflowBypassGuards(moveSource, options);
     const workflowIr: WorkflowIr | undefined = useWorkflow
-      ? store.resolveTaskWorkflowIrSync(id)
+      ? await resolveTaskWorkflowIrForMove(store, id)
       : undefined;
 
     if (task.column === toColumn) {
@@ -420,11 +451,22 @@ export async function moveTaskInternalImpl(store: TaskStore, id: string, toColum
         !sourceIsLegacy &&
         (COLUMNS as readonly string[]).includes(toColumn);
       if (!isEvacuation) {
-        // Legacy flag-OFF branch (useWorkflow === false): both columns are
-        // guaranteed legacy ids here — a non-legacy `toColumn` returns `?? []`
-        // and rejects below, and flag-OFF tasks never hold custom column ids.
-        // The `as Column` is provably safe within this branch (#1403).
-        const validTargets = VALID_TRANSITIONS[task.column as Column] ?? [];
+        /*
+        FNXC:WorkflowColumns 2026-07-05-19:30:
+        Workflow columns graduated to always-on (no experimental flag emitted), so this "flag-OFF"
+        branch is the DEFAULT move path for nearly every project — the strict compat flag reads false
+        because nothing sets it. Legacy columns (triage/todo/in-progress/in-review/done/archived) are
+        validated verbatim by VALID_TRANSITIONS, preserving the legacy bare-Error contract. But a task
+        can legitimately sit in a NON-legacy workflow column now (e.g. Coding (Ideas) → "ideas"), which
+        VALID_TRANSITIONS cannot key — the old code returned `?? []` and rejected EVERY move out of it
+        ("Invalid transition: 'ideas' → 'todo'. Valid targets: none"). Resolve a non-legacy source
+        column's targets from the task's own workflow adjacency instead, still throwing the same
+        legacy-style bare Error (not TransitionRejectionError) so the flag-OFF characterization contract
+        holds for legacy columns. Ported from main's FN-7591 fix into the extracted moves.ts.
+        */
+        const validTargets = sourceIsLegacy
+          ? (VALID_TRANSITIONS[task.column as Column] ?? [])
+          : resolveAllowedColumns(await resolveTaskWorkflowIrForMove(store, id), task.column);
         if (!validTargets.includes(toColumn as Column)) {
           throw new Error(
             `Invalid transition: '${task.column}' → '${toColumn}'. ` +
