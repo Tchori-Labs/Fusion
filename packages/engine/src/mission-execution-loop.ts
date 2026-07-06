@@ -249,7 +249,21 @@ export class MissionExecutionLoop extends EventEmitter {
           for (const slice of milestone.slices) {
             if (slice.status !== "active") continue;
 
+            const supersededFixes = this.missionStore.reconcileSupersededGeneratedFixFeatures(slice.id);
+            const supersededFeatureIds = new Set(supersededFixes.featureIds);
+            if (supersededFixes.supersededCount > 0) {
+              loopLog.warn(
+                `Recovery: superseded ${supersededFixes.supersededCount} generated Fix Features in slice ${slice.id} `
+                + "because an ancestor feature already passed validation",
+              );
+              recoveredCount += supersededFixes.supersededCount;
+            }
+
             for (const feature of slice.features) {
+              if (supersededFeatureIds.has(feature.id)) {
+                continue;
+              }
+
               // Features in validating state need to be re-validated
               if (feature.loopState === "validating") {
                 loopLog.log(`Recovery: re-queuing validating feature ${feature.id}`);

@@ -338,6 +338,33 @@ function createMockMissionStore() {
 
       return fixFeature;
     }),
+    reconcileSupersededGeneratedFixFeatures: vi.fn((sliceId: string) => {
+      let supersededCount = 0;
+      const featureIds: string[] = [];
+      const featureHasPassed = (feature: MissionFeature | undefined) =>
+        feature?.lastValidatorStatus === "passed" || feature?.loopState === "passed";
+      const hasPassedAncestor = (feature: MissionFeature, seen = new Set<string>()): boolean => {
+        const sourceFeatureId = feature.generatedFromFeatureId;
+        if (!sourceFeatureId || seen.has(sourceFeatureId)) return false;
+        seen.add(sourceFeatureId);
+        const sourceFeature = features.get(sourceFeatureId);
+        return featureHasPassed(sourceFeature) || (sourceFeature ? hasPassedAncestor(sourceFeature, seen) : false);
+      };
+      for (const feature of [...features.values()]) {
+        if (feature.sliceId !== sliceId || !feature.generatedFromFeatureId || !hasPassedAncestor(feature)) continue;
+        if (feature.status === "done" && feature.loopState === "passed" && feature.lastValidatorStatus === "passed") continue;
+        features.set(feature.id, {
+          ...feature,
+          status: "done",
+          loopState: "passed",
+          lastValidatorStatus: "passed",
+          updatedAt: new Date().toISOString(),
+        });
+        supersededCount += 1;
+        featureIds.push(feature.id);
+      }
+      return { supersededCount, featureIds };
+    }),
     triageFeature: vi.fn(async (featureId: string) => {
       const feature = features.get(featureId);
       if (!feature) throw new Error(`Feature ${featureId} not found`);
@@ -635,6 +662,47 @@ describe("MissionExecutionLoop", () => {
       await loop.recoverActiveMissions();
 
       expect(missionStore.startValidatorRun).not.toHaveBeenCalled();
+    });
+
+    it("skips superseded generated fixes from the stale recovery snapshot", async () => {
+      const mission = createMockMission({ id: "M-SUPERSEDE", status: "active" });
+      missionStore._clear();
+      missionStore._setMission(mission);
+
+      const slice = createMockSlice({ id: "SL-SUPERSEDE", milestoneId: "MS-001", status: "active" });
+      const source = createMockFeature({
+        id: "F-SOURCE",
+        sliceId: slice.id,
+        status: "done",
+        loopState: "passed",
+        lastValidatorStatus: "passed",
+      });
+      const staleFix = createMockFeature({
+        id: "F-STALE-FIX",
+        sliceId: slice.id,
+        status: "defined",
+        loopState: "validating",
+        generatedFromFeatureId: source.id,
+        taskId: "FN-stale-fix",
+      });
+      missionStore._setFeature(source);
+      missionStore._setFeature(staleFix);
+      taskStore._setTask({ id: "FN-stale-fix", column: "done" });
+      wireHierarchy(slice, [source, staleFix]);
+
+      loop = new MissionExecutionLoop({
+        taskStore: taskStore as any,
+        missionStore: missionStore as any,
+        rootDir: "/tmp",
+      });
+      loop.start();
+
+      const result = await loop.recoverActiveMissions();
+
+      expect(missionStore.reconcileSupersededGeneratedFixFeatures).toHaveBeenCalledWith(slice.id);
+      expect(missionStore.transitionLoopState).not.toHaveBeenCalledWith(staleFix.id, "implementing");
+      expect(taskStore.getTask).not.toHaveBeenCalledWith("FN-stale-fix");
+      expect(result).toEqual({ recoveredCount: 1 });
     });
   });
 
