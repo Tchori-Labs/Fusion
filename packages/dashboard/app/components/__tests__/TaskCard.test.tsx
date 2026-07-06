@@ -26,7 +26,9 @@ vi.mock("lucide-react", () => ({
   Zap: () => <svg data-testid="icon-zap" />,
   AlertTriangle: () => null,
   ArrowUpRight: () => null,
-  Eye: () => null,
+  // FN-7592: the overseer badge now renders an icon child instead of a text label,
+  // so tests must see a real SVG (like Zap) rather than a no-op render.
+  Eye: () => <svg data-testid="icon-eye" />,
 }));
 
 vi.mock("../ProviderIcon", () => ({
@@ -317,9 +319,13 @@ describe("TaskCard", () => {
 
     render(<TaskCard task={task} onOpenDetail={noop} addToast={noop} />);
 
+    // FN-7592: the badge is now an icon-only glyph. The readable label moved from
+    // textContent to aria-label; the composed tooltip is unchanged on title.
     const badge = screen.getByTestId("planner-overseer-state-badge");
-    expect(badge.textContent).not.toBe("awaiting-confirmation");
-    expect(badge.textContent).toBe("Awaiting confirmation");
+    expect(badge.querySelector("svg")).toBeInTheDocument();
+    expect(badge.getAttribute("aria-label")).not.toBe("awaiting-confirmation");
+    expect(badge.getAttribute("aria-label")).toBe("Awaiting confirmation");
+    expect(badge.getAttribute("data-planner-overseer-state")).toBe("awaiting-confirmation");
 
     const title = badge.getAttribute("title") ?? "";
     expect(title).not.toBe("Planner overseer: awaiting-confirmation");
@@ -343,8 +349,12 @@ describe("TaskCard", () => {
       },
     });
     const { unmount } = render(<TaskCard task={watchingTask} onOpenDetail={noop} addToast={noop} />);
+    // FN-7592: icon-only badge — assert the accessible name via aria-label and the
+    // per-state color hook via data-planner-overseer-state, not raw text content.
     let badge = screen.getByTestId("planner-overseer-state-badge");
-    expect(badge.textContent).toBe("Overseer watching");
+    expect(badge.querySelector("svg")).toBeInTheDocument();
+    expect(badge.getAttribute("aria-label")).toBe("Overseer watching");
+    expect(badge.getAttribute("data-planner-overseer-state")).toBe("watching");
     expect(badge.getAttribute("title")).not.toMatch(/undefined/);
     unmount();
 
@@ -361,7 +371,12 @@ describe("TaskCard", () => {
     });
     render(<TaskCard task={recoveringTask} onOpenDetail={noop} addToast={noop} />);
     badge = screen.getByTestId("planner-overseer-state-badge");
-    expect(badge.textContent).toBe("Overseer recovering");
+    expect(badge.querySelector("svg")).toBeInTheDocument();
+    expect(badge.getAttribute("aria-label")).toBe("Overseer recovering");
+    // Distinct states expose distinct data-planner-overseer-state values, which is the
+    // hook TaskCard.css keys per-state color off of (jsdom cannot compute color-mix()).
+    expect(badge.getAttribute("data-planner-overseer-state")).toBe("recovering");
+    expect(badge.getAttribute("data-planner-overseer-state")).not.toBe("watching");
     const title = badge.getAttribute("title") ?? "";
     expect(title).not.toMatch(/undefined/);
     expect(title.length).toBeGreaterThan(0);
@@ -6394,5 +6409,158 @@ describe("TaskCard custom field badges (U13/KTD-14)", () => {
       />,
     );
     expect(screen.queryByTestId("card-field-badges")).toBeNull();
+  });
+});
+
+/*
+FNXC:CodingIdeasWorkflow 2026-07-05-00:00:
+FN-7596 regression-tests the TaskCard "Start" affordance that promotes a Coding (Ideas) manual-intake card. `showStartAction` requires taskColumnFlags.intake and a non-"triage" column; `startTargetColumn` derives the destination from `taskMoveColumns` (first non-intake/non-archived/non-hiddenFromBoard column) rather than a hard-coded "todo" string, per the FNXC comment at its call site.
+*/
+describe("TaskCard Start affordance (FN-7596)", () => {
+  it("renders the Start button for a manual-intake column with onMoveTask provided", () => {
+    render(
+      <TaskCard
+        task={makeTask({ column: "ideas" as any })}
+        taskColumnFlags={{ intake: true }}
+        onOpenDetail={noop}
+        addToast={noop}
+        onMoveTask={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId("card-start-FN-001")).toBeInTheDocument();
+  });
+
+  it("omits the Start button when the column is not flagged as an intake", () => {
+    render(
+      <TaskCard
+        task={makeTask({ column: "ideas" as any })}
+        taskColumnFlags={{ intake: false }}
+        onOpenDetail={noop}
+        addToast={noop}
+        onMoveTask={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByTestId("card-start-FN-001")).toBeNull();
+  });
+
+  it("omits the Start button for the triage column even when intake is flagged", () => {
+    render(
+      <TaskCard
+        task={makeTask({ column: "triage" })}
+        taskColumnFlags={{ intake: true }}
+        onOpenDetail={noop}
+        addToast={noop}
+        onMoveTask={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByTestId("card-start-FN-001")).toBeNull();
+  });
+
+  it("omits the Start button when no onMoveTask handler is provided", () => {
+    render(
+      <TaskCard
+        task={makeTask({ column: "ideas" as any })}
+        taskColumnFlags={{ intake: true }}
+        onOpenDetail={noop}
+        addToast={noop}
+      />,
+    );
+
+    expect(screen.queryByTestId("card-start-FN-001")).toBeNull();
+  });
+
+  it("derives the Start target from taskMoveColumns instead of a hard-coded 'todo' string", async () => {
+    const onMoveTask = vi.fn().mockResolvedValue(makeTask({ column: "custom-working-stage" as any }));
+    const addToast = vi.fn();
+    // The intake column itself, plus a non-intake working column that is NOT literally
+    // named "todo", must win over any coincidental fallback — proving derivation, not a hard-coded string.
+    const taskMoveColumns = [
+      { id: "ideas" as any, label: "Ideas", flags: { intake: true } },
+      { id: "custom-working-stage" as any, label: "Custom Working Stage", flags: {} },
+      { id: "todo" as any, label: "Todo", flags: {} },
+    ];
+
+    render(
+      <TaskCard
+        task={makeTask({ column: "ideas" as any })}
+        taskColumnFlags={{ intake: true }}
+        taskMoveColumns={taskMoveColumns}
+        onOpenDetail={noop}
+        addToast={addToast}
+        onMoveTask={onMoveTask}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("card-start-FN-001"));
+
+    await waitFor(() => expect(onMoveTask).toHaveBeenCalledWith("FN-001", "custom-working-stage"));
+  });
+
+  it("falls back to 'todo' when taskMoveColumns metadata is unavailable", async () => {
+    const onMoveTask = vi.fn().mockResolvedValue(makeTask({ column: "todo" }));
+    render(
+      <TaskCard
+        task={makeTask({ column: "ideas" as any })}
+        taskColumnFlags={{ intake: true }}
+        onOpenDetail={noop}
+        addToast={noop}
+        onMoveTask={onMoveTask}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("card-start-FN-001"));
+
+    await waitFor(() => expect(onMoveTask).toHaveBeenCalledWith("FN-001", "todo"));
+  });
+
+  it("disables the button and shows the Starting label while the move is in flight, then shows a success toast", async () => {
+    let resolveMove: (task: ReturnType<typeof makeTask>) => void = () => {};
+    const onMoveTask = vi.fn().mockImplementation(
+      () => new Promise((resolve) => { resolveMove = resolve; }),
+    );
+    const addToast = vi.fn();
+
+    render(
+      <TaskCard
+        task={makeTask({ column: "ideas" as any })}
+        taskColumnFlags={{ intake: true }}
+        onOpenDetail={noop}
+        addToast={addToast}
+        onMoveTask={onMoveTask}
+      />,
+    );
+
+    const startButton = screen.getByTestId("card-start-FN-001");
+    fireEvent.click(startButton);
+
+    await waitFor(() => expect(startButton).toBeDisabled());
+    expect(startButton.textContent).toContain("Starting");
+
+    resolveMove(makeTask({ column: "todo" }));
+
+    await waitFor(() => expect(addToast).toHaveBeenCalledWith(expect.stringContaining("FN-001"), "success"));
+    await waitFor(() => expect(startButton).not.toBeDisabled());
+  });
+
+  it("shows an error toast when the Start move fails", async () => {
+    const onMoveTask = vi.fn().mockRejectedValue(new Error("move blocked"));
+    const addToast = vi.fn();
+
+    render(
+      <TaskCard
+        task={makeTask({ column: "ideas" as any })}
+        taskColumnFlags={{ intake: true }}
+        onOpenDetail={noop}
+        addToast={addToast}
+        onMoveTask={onMoveTask}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("card-start-FN-001"));
+
+    await waitFor(() => expect(addToast).toHaveBeenCalledWith("move blocked", "error"));
   });
 });
