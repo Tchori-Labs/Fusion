@@ -116,13 +116,27 @@ export async function findProvenLandedCommit(
       if (base) range = `${base.trim()}..${intRef}`;
     }
     const trailer = `${FUSION_TASK_ID_TRAILER_KEY}: ${taskId}`;
-    const found = await gitCapture(
+    /*
+    FNXC:Workspace 2026-07-07-10:50 (Phase C A1 precision — Greptile P1, trailer-line verification):
+    `git log --grep=<trailer> --fixed-strings` is a substring search over the WHOLE commit message,
+    so a later changelog/diagnostic commit that merely mentions the trailer text in its body would
+    be selected over the actual squash commit. Use --grep only as a prefilter, then require an actual
+    trailer LINE (a line whose trimmed text is exactly the trailer) via `git show -s --format=%B`.
+    Candidates are reverse-chronological, so the first one with an exact trailer line is the task's
+    own landing commit.
+    */
+    const candidates = await gitCapture(
       ["log", "--format=%H", `--grep=${trailer}`, "--fixed-strings", range],
       repoRootDir,
     );
-    if (found) {
-      const firstSha = found.trim().split("\n")[0];
-      if (firstSha) return firstSha;
+    if (candidates) {
+      for (const sha of candidates.trim().split("\n")) {
+        if (!sha) continue;
+        const body = await gitCapture(["show", "-s", "--format=%B", sha], repoRootDir);
+        if (body && body.split("\n").some((line) => line.trim() === trailer)) {
+          return sha;
+        }
+      }
     }
   }
   return undefined;

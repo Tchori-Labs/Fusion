@@ -374,14 +374,20 @@ describeIfGit("landWorkspaceTask — DB-failure resilience (Phase C review A1/A4
     expect(store.task.status ?? null).toBeNull();
 
     /*
-    FNXC:Workspace 2026-07-07-10:30 (Phase C A1 precision regression — Greptile P1):
-    Simulate an intervening sub-repo land: advance repo-a's integration tip with an UNRELATED
-    commit AFTER the task's squash landed (tipAfterFirst) but BEFORE the lost-persist retry. The
-    recovered landedSha must be the task's OWN landing commit (tipAfterFirst), NOT the later
-    unrelated tip — otherwise finalize would attribute a wrong commit to this repo.
+    FNXC:Workspace 2026-07-07-10:55 (Phase C A1 precision regression — Greptile P1, two surfaces):
+    Advance repo-a's integration tip with an intervening commit whose MESSAGE BODY mentions the
+    trailer text "Fusion-Task-Id: FN-2002" (a changelog/diagnostic-style mention, NOT a real trailer
+    line) AFTER the task's squash landed (tipAfterFirst) but BEFORE the lost-persist retry. This
+    covers both precision surfaces: (1) the recovered landedSha must be the task's OWN landing commit
+    (tipAfterFirst), not the later tip; (2) the substring --grep prefilter must NOT select the
+    body-mention commit — findProvenLandedCommit requires an actual trailer line, so it skips the
+    mention and returns the real squash commit.
     */
     configureIdentity(fx.repoPath("repo-a"));
-    fx.git("repo-a", 'git commit --allow-empty -m "unrelated intervening land (no Fusion-Task-Id trailer)"');
+    fx.git(
+      "repo-a",
+      'git commit --allow-empty -m "unrelated intervening land" -m "changelog: relates to Fusion-Task-Id: FN-2002 (body mention, not a trailer line)"',
+    );
     const tipAfterIntervening = fx.git("repo-a", "git rev-parse refs/heads/main");
     expect(tipAfterIntervening).not.toBe(tipAfterFirst);
 
