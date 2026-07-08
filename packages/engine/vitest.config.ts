@@ -103,9 +103,35 @@ export default defineConfig({
           made the single-file @fusion/core bundle above pay off. NOT landed; the
           wiring was reverted to this @fusion/core-only state. See FN-7670's task
           docs document for the full closure/mock-boundary analysis, the A/B
-          methodology and data, and the negative-result rationale, before
-          re-attempting this lever with a different bundle shape (e.g. a single
-          combined engine-graph entry rather than 14 separate root entries).
+          methodology and data, and the negative-result rationale.
+
+          FNXC:EngineTests 2026-07-08-06:20:
+          FN-7673 re-attempted this lever with a SINGLE COMBINED-ENTRY design
+          (all 14 mock-safe roots redirected via a resolveId plugin to ONE
+          packages/engine/.gate-bundle/engine.mjs, no `splitting`, mirroring the
+          @fusion/core bundle's one-alias/one-output-file shape) rather than
+          FN-7670's 14-separate-root design. It achieved the design goal (149
+          first-party inputs -> 1 output file) and full coverage parity (335/335)
+          but a TRUE interleaved A/B (5 warm pairs + 1 cold pair) showed the
+          combined-entry bundle is CONSISTENTLY SLOWER than this @fusion/core-only
+          baseline — warm median real +29.1% slower, import-phase aggregate
+          +74.0% slower, holding across every pair (not within this host's noise
+          band, unlike FN-7670's inconclusive result). Working theory: funnelling
+          all 14 original relative-import sites through a `resolveId`-plugin
+          redirect to one large (2.3MB) synthetic `export *` file adds more
+          transform/resolution overhead than it saves, unlike the @fusion/core
+          bundle's plain `resolve.alias` (a single fixed target, no per-specifier
+          plugin hook). NOT landed; wiring fully reverted to this @fusion/core-
+          only state (both the engine-graph scans and the combined-entry builder
+          were removed from scripts/build-engine-core-gate-bundle.mjs, and the
+          resolveId plugin was removed from this file — full diff in FN-7673's
+          git history). This lever (bundling the @fusion/engine relative-import
+          graph for the engine-core gate, in either a 14-file or single-combined-
+          entry shape) is now considered CLOSED — do not re-attempt without new
+          evidence changing the underlying cost model. See FN-7673's task docs
+          document for the full A/B data, the mock-boundary risk finding (a
+          combined-entry design broke a shared-test-helper vi.mock in a way
+          FN-7670's per-root design never could), and the closure rationale.
           */
           alias: {
             "@fusion/core": resolve(__dirname, "../core/.gate-bundle/core.mjs"),
