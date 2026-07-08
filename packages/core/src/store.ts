@@ -202,7 +202,7 @@ import {
 } from "./distributed-task-id.js";
 import { detectStalledReview } from "./stalled-review-detector.js";
 import { computeRetrySummary } from "./retry-summary.js";
-import { archiveAsSameAgentDuplicate, findSameAgentDuplicates } from "./duplicate-intake.js";
+import { archiveAsSameAgentDuplicate, flagSameAgentDuplicate, findSameAgentDuplicates } from "./duplicate-intake.js";
 import { isNearDuplicateCanonicalInactive } from "./near-duplicate-canonical.js";
 import {
   detectTaskIdIntegrityAnomalies,
@@ -5252,8 +5252,25 @@ ${TASK_UPSERT_SQL_ASSIGNMENTS}
       const siblingTaskIds = matches.filter((match) => !match.tombstoned).map((match) => match.id);
       if (siblingTaskIds.length === 0) return;
       const scores = Object.fromEntries(matches.filter((match) => !match.tombstoned).map((match) => [match.id, match.score]));
-      await archiveAsSameAgentDuplicate(this, task.id, siblingTaskIds, scores);
-      task.column = "archived";
+      /*
+      FNXC:DuplicateIntake 2026-07-07-00:00 (FN-7658):
+      Operators do not want same-agent duplicates silently vanishing into `archived`
+      during intake. Default (`autoArchiveDuplicateTasksEnabled` falsey) flags the
+      duplicate in place via the near-duplicate marker so a human decides (Keep/Archive
+      chip). Only an explicit `true` restores the pre-FN-7658 auto-archive behavior.
+      NOTE: the tombstone-resurrection block above (`TombstonedTaskResurrectionError`)
+      is a distinct safety mechanism and is intentionally NOT gated by this setting —
+      it always fires regardless of `autoArchiveDuplicateTasksEnabled`.
+      */
+      if (settings.autoArchiveDuplicateTasksEnabled === true) {
+        await archiveAsSameAgentDuplicate(this, task.id, siblingTaskIds, scores);
+        task.column = "archived";
+      } else {
+        const appliedPatch = await flagSameAgentDuplicate(this, task.id, siblingTaskIds, scores);
+        if (appliedPatch) {
+          task.sourceMetadata = { ...(task.sourceMetadata ?? {}), ...appliedPatch };
+        }
+      }
     } catch (error) {
       if (error instanceof TombstonedTaskResurrectionError) {
         throw error;

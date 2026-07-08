@@ -6546,6 +6546,8 @@
       "addIgnoredPath": " Add ignored path ",
       "archiveAgentLog": "Archive Agent Log",
       "archiveCompletedTasksAfterDays": "Archive Completed Tasks After (days)",
+      "autoArchiveDuplicateTasks": " Automatically archive duplicate tasks ",
+      "autoArchiveDuplicateTasksHelp": "Automatically archive tasks detected as same-agent duplicates on creation (off by default). When disabled, duplicates are flagged in place with the yellow Duplicate chip and Keep/Archive actions instead of being archived automatically.",
       "backlogNoTaskAutoClaimIsExecutorOnly": "Backlog/no-task auto-claim is executor-only by default. Enable to let engineer-role agents auto-claim unowned backlog tasks; explicit routing and delegation are unchanged. Default: off.",
       "browse": " Browse ",
       "closeParenPeriod": ").",
