@@ -87,6 +87,25 @@ export default defineConfig({
           dead-locking the core↔engine circular-import DI
           (`void import("@fusion/core").then(setCreateFnAgent...)` in
           packages/engine/src/index.ts) for no measured gain.
+
+          FNXC:EngineTests 2026-07-08-06:20:
+          FN-7670 prototyped extending this same lever to the @fusion/engine
+          RELATIVE-import production graph (`../merger.js`, `../hold-release.js`,
+          `../scheduler.js`, `../workflow-node-handlers.js`, ...) that the 18 gate
+          files reach directly — NOT the barrel above, which stays untouched per
+          the paragraph above regardless. It built a fully working, coverage-
+          parity-preserving, mock-safe bundle (171 first-party files → 35 output
+          files via esbuild multi-entry splitting) but an interleaved, host-load-
+          controlled A/B showed NO clear incremental wall-time win over this
+          @fusion/core-only bundle (delta within this host's own ~2.5x run-to-run
+          noise band) — the byte-size growth of 14 separate large root bundles
+          (e.g. one alone reached 1.3MB) offset the per-file-dispatch savings that
+          made the single-file @fusion/core bundle above pay off. NOT landed; the
+          wiring was reverted to this @fusion/core-only state. See FN-7670's task
+          docs document for the full closure/mock-boundary analysis, the A/B
+          methodology and data, and the negative-result rationale, before
+          re-attempting this lever with a different bundle shape (e.g. a single
+          combined engine-graph entry rather than 14 separate root entries).
           */
           alias: {
             "@fusion/core": resolve(__dirname, "../core/.gate-bundle/core.mjs"),
