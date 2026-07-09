@@ -11,7 +11,7 @@ import { existsSync, lstatSync, realpathSync } from "node:fs";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import type { TaskStore, Task, TaskDetail, TaskTokenUsage, StepStatus, Settings, WorkflowStep, MissionStore, Slice, AgentState, AgentCapability, RunMutationContext, AgentHeartbeatConfig, Agent, AgentMemoryInclusionMode, ProjectSettings, MergeResult, WorkflowIrNode, WorkflowIrNodeKind, WorkflowStepResult as CoreWorkflowStepResult } from "@fusion/core";
 import { getUnmetSchedulingDependencies } from "./scheduler.js";
-import { RetryStormError, TaskDeletedError, serializeRetryStormError, isExperimentalFeatureEnabled, resolveWorkflowIrForTask, resolveColumnAgentBinding, resolveEffectiveAgent, instanceNodeId, getWorkflowExtensionRegistry, getBuiltinWorkflow, parseNoOpCompletionMarker, allowsAutoMergeProcessing, isSharedBranchGroupMemberIntegration, resolveMaxAutoMergeRetries, resolveOptionalStepRevisionBudget, resolveOptionalReviewRevisionBudget, COMPLETION_SUMMARY_NODE_ID, upsertWorkflowStepResult, AWAITING_APPROVAL_PAUSE_REASON } from "@fusion/core";
+import { RetryStormError, TaskDeletedError, serializeRetryStormError, isExperimentalFeatureEnabled, resolveWorkflowIrForTask, resolveColumnAgentBinding, resolveEffectiveAgent, instanceNodeId, getWorkflowExtensionRegistry, getBuiltinWorkflow, parseNoOpCompletionMarker, allowsAutoMergeProcessing, resolveEffectiveAutoMerge, isSharedBranchGroupMemberIntegration, resolveMaxAutoMergeRetries, resolveOptionalStepRevisionBudget, resolveOptionalReviewRevisionBudget, COMPLETION_SUMMARY_NODE_ID, upsertWorkflowStepResult, AWAITING_APPROVAL_PAUSE_REASON } from "@fusion/core";
 import { finalizeProvenAutoMergeTask } from "./auto-merge-finalization.js";
 import { mergeEffectiveSettings } from "./effective-settings.js";
 import type { TaskStep, WorkflowIr, WorkflowFieldDefinition, WorkflowColumnAgent, EffectiveAgentInput, WorkflowWorkEngineDispatchResult } from "@fusion/core";
@@ -8086,6 +8086,7 @@ export class TaskExecutor {
     }
     const sharedBranchMember = isSharedBranchGroupMemberIntegration(live);
     if (!sharedBranchMember && !allowsAutoMergeProcessing(live, settings)) return false;
+    if (!sharedBranchMember && resolveEffectiveAutoMerge(live, settings) === false) return false;
     if ((live.mergeRetries ?? 0) >= resolveMaxAutoMergeRetries(settings)) return false;
     return true;
   }
@@ -8122,6 +8123,37 @@ export class TaskExecutor {
       && live.error.includes(PAUSE_ABORT_PARK_ERROR_MARKER)
       && live.error.includes("engine abort during pause/resume")
       && live.error.includes(`at node '${nodeId}'`);
+  }
+
+  private async isBenignManualMergeHoldPauseAbort(
+    live: TaskDetail,
+    result: WorkflowGraphTaskRunResult,
+    abortProvenance: "global-pause" | "merge-seam" | "hard-cancel" | "completion-finalize" | undefined,
+    pausedAborted: boolean,
+  ): Promise<boolean> {
+    /*
+    FNXC:WorkflowLifecycle 2026-07-09-14:54:
+    FN-7749 / Runfusion#1979: with auto-merge off, a manual merge hold is the healthy `in-review` resting state for Merge & Close. A benign hard-cancel pause/resume abort at any merge-region node must not park the task failed; FN-5147 forbids moving, failing, or re-enqueueing the row, so this classifier only permits preserving `in-review` and clearing a stale pause-abort status/error.
+    */
+    if (!pausedAborted) return false;
+    if (abortProvenance !== "hard-cancel") return false;
+    if (live.paused || live.userPaused === true) return false;
+    if (live.column !== "in-review") return false;
+    if (live.mergeDetails?.mergeConfirmed === true) return false;
+    if (this.isTerminalMergeGraphFailureValue(this.graphFailureValue(result))) return false;
+    const failedNode = result.visitedNodeIds[result.visitedNodeIds.length - 1];
+    if (!this.isMergeGraphFailure(failedNode)) return false;
+    const cleanRow = live.status == null && live.error == null;
+    const staleParkedFailure = this.isStalePauseAbortParkFailure(live, failedNode);
+    if (!cleanRow && !staleParkedFailure) return false;
+    let settings: Settings | undefined;
+    try {
+      settings = await this.store.getSettings();
+    } catch {
+      return false;
+    }
+    if (isSharedBranchGroupMemberIntegration(live)) return false;
+    return !allowsAutoMergeProcessing(live, settings) || resolveEffectiveAutoMerge(live, settings) === false;
   }
 
   private async handleStaleInReviewPlanPauseAbortReplay(
@@ -8555,6 +8587,23 @@ export class TaskExecutor {
         if (await this.routeGraphMergeFailureToRetry(live, result, abortProvenance)) {
           return;
         }
+      }
+      if (genuinePauseAbort && await this.isBenignManualMergeHoldPauseAbort(live, result, abortProvenance, pausedAborted)) {
+        /*
+        FNXC:WorkflowLifecycle 2026-07-09-14:56:
+        FN-7749 / Runfusion#1979: auto-merge-off manual merge hold is terminal-until-human-merged, not an executor failure. Preserve the `in-review` row for Merge & Close, do not invoke merge retry, and clear only stale pause-abort status/error so FN-5147's no-backward-move/no-reenqueue contract stays intact.
+        */
+        this.clearPausedAborted(task.id);
+        this.activeWorktrees.delete(task.id);
+        const manualHoldBenign = "Workflow graph run ended at manual merge hold with auto-merge off — benign, in-review manual-hold state preserved for Merge & Close";
+        executorLog.log(`${task.id}: ${manualHoldBenign}`);
+        await this.store.logEntry(task.id, manualHoldBenign, undefined, this.getRunContextFor(task.id));
+        if (live.status != null || live.error != null) {
+          await this.store.logEntry(task.id, "Auto-recovered: cleared stale auto-merge-off manual merge hold pause-abort failure — failure notification suppressed", undefined, this.getRunContextFor(task.id));
+          await this.store.updateTask(task.id, { status: null, error: null }, this.getRunContextFor(task.id));
+        }
+        await this.persistTokenUsage(task.id);
+        return;
       }
       if (genuinePauseAbort && this.isBenignInReviewPauseAbort(live, result, abortProvenance, pausedAborted, this.userCanceledTaskIds.has(task.id))) {
         this.clearPausedAborted(task.id);
