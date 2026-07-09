@@ -12,12 +12,14 @@ interface GrokCliProviderCardProps {
 }
 
 /*
-FNXC:GrokCli 2026-07-08-00:00:
-FN-7705: mirrors CursorCliProviderCard.tsx end to end. The one contract
-difference is auth messaging — Grok is API-key auth (GROK_API_KEY env var or
-~/.grok/user-settings.json apiKey), not OAuth/session, so the
-not-authenticated status text references those setting locations instead of
-a login flow.
+FNXC:GrokCli 2026-07-09-00:00:
+FN-7716: readiness now mirrors CursorCliProviderCard.tsx exactly — connected
+/ ready state = enabled + binary available, no key requirement. The `grok`
+CLI resolves its own credentials (env var, project `.env`, `grok -k`,
+GROK_BASE_URL, etc.), so Fusion no longer blocks Enable or shows a
+not-authenticated error solely because it couldn't see a key. Key presence is
+surfaced ONLY as a non-blocking informational hint (`apiKeyDetected`) noting
+that the direct xAI streaming path will use $GROK_API_KEY when present.
 */
 export function GrokCliProviderCard({ authenticated, compact = false, onToggled }: GrokCliProviderCardProps) {
   const { t } = useTranslation("app");
@@ -68,7 +70,7 @@ export function GrokCliProviderCard({ authenticated, compact = false, onToggled 
 
   const currentlyEnabled = status?.enabled ?? authenticated;
   const binaryAvailable = status?.binary.available ?? false;
-  const apiKeyPresent = status?.binary.authenticated ?? false;
+  const apiKeyDetected = status?.binary.apiKeyDetected ?? false;
   const trimmedBinaryPath = binaryPathInput.trim();
   const savedBinaryPath = status?.binaryPath ?? "";
   const binaryPathChanged = trimmedBinaryPath !== savedBinaryPath;
@@ -154,20 +156,24 @@ export function GrokCliProviderCard({ authenticated, compact = false, onToggled 
   );
 
   /*
-  FNXC:GrokCli 2026-07-08-00:00:
-  Grok is API-key auth (no login flow), so a binary-available-but-no-key
-  state must guide the operator to GROK_API_KEY / ~/.grok/user-settings.json
-  rather than a generic "not connected" message.
+  FNXC:GrokCli 2026-07-09-00:00:
+  FN-7716: the `grok` CLI owns its own authentication, so a binary-available
+  state is "ready" regardless of whether Fusion detected a key — no blocking
+  "set GROK_API_KEY" error. When no key was detected, append a subtle,
+  non-blocking hint that the direct xAI streaming path uses $GROK_API_KEY
+  when present; this never gates Enable or the connected/ready state.
   */
   const statusText = !status
     ? t("setup.grokCli.probing", "Probing local CLI…")
     : !status.binary.available
       ? status.binary.reason ?? t("setup.grokCli.binaryNotFound", "`grok` not found on PATH")
-      : !apiKeyPresent
-        ? t("setup.grokCli.noApiKey", "Binary found, but no API key is configured. Set GROK_API_KEY or ~/.grok/user-settings.json.")
-        : currentlyEnabled
-          ? t("setup.grokCli.connected", "Connected{{version}}", { version: status.binary.version ? ` — ${status.binary.version}` : "" })
-          : t("setup.grokCli.detectedPrompt", "Detected. Click Enable to route calls through Grok CLI.");
+      : currentlyEnabled
+        ? t("setup.grokCli.connected", "Connected{{version}}", { version: status.binary.version ? ` — ${status.binary.version}` : "" })
+        : t("setup.grokCli.detectedPrompt", "Detected. Click Enable to route calls through Grok CLI.");
+
+  const apiKeyHint = status?.binary.available && !apiKeyDetected
+    ? t("setup.grokCli.noApiKeyHint", "No Grok API key detected by Fusion; the CLI will use its own credentials. The direct xAI streaming path uses GROK_API_KEY when present.")
+    : null;
 
   if (compact) {
     return (
@@ -182,6 +188,7 @@ export function GrokCliProviderCard({ authenticated, compact = false, onToggled 
         </div>
         <div className="grok-cli-provider-card__body" data-testid="grok-cli-provider-card-body">
           <small className="settings-muted">{statusText}</small>
+          {apiKeyHint ? <small className="settings-muted grok-cli-provider-card__key-hint">{apiKeyHint}</small> : null}
           {binaryPathControl}
         </div>
       </div>
@@ -197,6 +204,7 @@ export function GrokCliProviderCard({ authenticated, compact = false, onToggled 
         <strong className="onboarding-provider-card__name">{t("setup.grokCli.providerName", "Grok — via Grok CLI")}</strong>
         <span className="onboarding-provider-card__description">{t("setup.grokCli.description", "Route AI calls through your local Grok CLI runtime.")}</span>
         <small className="settings-muted">{statusText}</small>
+        {apiKeyHint ? <small className="settings-muted grok-cli-provider-card__key-hint">{apiKeyHint}</small> : null}
       </div>
       <div className="onboarding-provider-card__actions">{actions}</div>
     </div>

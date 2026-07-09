@@ -18,6 +18,16 @@ status line and binary-path control render flush against the card's left/right/b
   padding: 0 var(--space-md) var(--space-sm);
 }
 
+/*
+FNXC:GrokCli 2026-07-09-00:00:
+FN-7716: the no-Fusion-visible-key hint is informational only (never blocking), so it renders one
+notch quieter than the primary status line via reduced opacity on the shared `.settings-muted` tone
+— no new color token, no hardcoded hex.
+*/
+.grok-cli-provider-card__key-hint {
+  opacity: 0.75;
+}
+
 .grok-cli-binary-path-control {
   display: grid;
   gap: var(--space-xs);

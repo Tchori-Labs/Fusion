@@ -684,13 +684,17 @@ export const registerAuthRoutes: ApiRouteRegistrar = (ctx) => {
       }
 
       /*
-      FNXC:GrokCli 2026-07-08-00:00:
-      FN-7705: inject the synthetic "Grok — via Grok CLI" provider, mirroring
-      the cursor-cli injection above. Unlike Cursor (OAuth/session auth,
-      `authenticated` derived from toggle+binary availability only), Grok is
-      API-key auth — `authenticated` also requires the probe's own
-      `authenticated` flag (GROK_API_KEY / ~/.grok/user-settings.json apiKey
-      presence), per the PROMPT.md contract.
+      FNXC:GrokCli 2026-07-09-00:00:
+      FN-7716: inject the synthetic "Grok — via Grok CLI" provider, mirroring
+      the cursor-cli injection above EXACTLY — `authenticated` derives from
+      toggle+binary availability only. The `grok` CLI resolves its own
+      credentials from more sources than Fusion can see (env var, project
+      `.env`, `GROK_BASE_URL`, `grok -k`, sandbox secrets), so requiring a
+      Fusion-visible API key produced false "not authenticated" states for
+      operators with a fully working CLI. Key presence is exposed only via
+      `grokBinary.apiKeyDetected` as a non-blocking informational field on the
+      status route (see GET /providers/grok-cli/status below) — it never
+      gates this `authenticated` flag.
       */
       if (store) {
         let grokEnabled = false;
@@ -704,7 +708,7 @@ export const registerAuthRoutes: ApiRouteRegistrar = (ctx) => {
         providers.push({
           id: "grok-cli",
           name: "Grok — via Grok CLI",
-          authenticated: grokEnabled && grokBinary.available && grokBinary.authenticated === true,
+          authenticated: grokEnabled && grokBinary.available,
           type: "cli" as const,
         });
       }

@@ -21,13 +21,20 @@ binary on PATH — Fusion never downloads or bundles the CLI itself.
 
 - Provider ID: `grok-cli`
 - Binary probe: `grok --version`
-- **Auth model — API key, not OAuth/session.** Grok has no `status`/`whoami`
-  subcommand. Authentication is derived from key PRESENCE only:
-  1. `GROK_API_KEY` environment variable, or
-  2. `~/.grok/user-settings.json` → `{ "apiKey": "..." }`
-  Base URL defaults to `https://api.x.ai/v1`. A missing/unreadable/malformed
-  key configuration fails closed to `authenticated: false` with an
-  actionable reason — never throws.
+- **Auth model — the `grok` CLI owns its own authentication; Fusion does
+  not require a Fusion-visible API key to enable/use it (FN-7716).** Grok
+  has no `status`/`whoami` subcommand, so Fusion probes binary availability
+  only and treats a working binary as "ready" (`authenticated: true`). The
+  CLI itself resolves credentials from more sources than Fusion can see
+  (`GROK_API_KEY` env var, a project `.env`, `grok -k <key>`,
+  `GROK_BASE_URL`, sandbox secrets, etc.). Fusion additionally probes two of
+  those locations — the `GROK_API_KEY` env var and
+  `~/.grok/user-settings.json` → `{ "apiKey": "..." }` — purely as a
+  **non-blocking informational hint** (`apiKeyDetected`); it never gates
+  Enable or the authenticated state, and a missing/unreadable/malformed
+  settings file degrades gracefully (never throws). The direct xAI
+  OpenAI-compatible streaming path (base URL `https://api.x.ai/v1`) still
+  uses `$GROK_API_KEY` when present, independent of the CLI provider.
 - Model discovery: `grok models` (plain-text output, with pricing hints per
   the upstream README). The exact line shape is
   `upstream-pending-verification`, so discovery parses conservatively: the
@@ -38,17 +45,20 @@ binary on PATH — Fusion never downloads or bundles the CLI itself.
 
 ## Enable via Settings → Authentication
 
-1. Install the `grok` CLI and set `GROK_API_KEY` (or populate
-   `~/.grok/user-settings.json`).
+1. Install the `grok` CLI and authenticate it by any method it supports
+   (env var, project `.env`, `grok -k`, etc.) — Fusion does not need to see
+   the key.
 2. Open Settings → Authentication in the Fusion dashboard.
-3. The "Grok — via Grok CLI" card shows probe status (binary found, API key
-   present). Click **Enable** once the binary is available.
+3. The "Grok — via Grok CLI" card shows probe status. Click **Enable** once
+   the binary is available; a non-blocking hint appears only if Fusion did
+   not detect a key, noting the direct xAI streaming path uses
+   `GROK_API_KEY` when present.
 4. Discovered Grok models (via `grok models`) then merge into the model
    picker under the `grok-cli` provider id.
 
 ## Notes
 
-Do not invent a `grok status`/`whoami` JSON auth contract — Grok is
-API-key auth. See `AGENTS.md`'s "External-integration evidence" policy for
-why the release/checksum fields above stay at
-`upstream-pending-verification`.
+Do not invent a `grok status`/`whoami` JSON auth contract — readiness is
+derived from binary availability, mirroring the Cursor CLI provider. See
+`AGENTS.md`'s "External-integration evidence" policy for why the
+release/checksum fields above stay at `upstream-pending-verification`.

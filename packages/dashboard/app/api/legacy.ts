@@ -1971,7 +1971,10 @@ export interface CursorCliStatus {
 export interface GrokCliStatus {
   binary: {
     available: boolean;
+    /** FNXC:GrokCli 2026-07-09-00:00: FN-7716 — "ready" (binary available), not "key present"; the grok CLI owns auth. */
     authenticated?: boolean;
+    /** FNXC:GrokCli 2026-07-09-00:00: FN-7716 — non-blocking informational hint that Fusion detected a Grok API key. Never gates readiness. */
+    apiKeyDetected?: boolean;
     version?: string;
     binaryPath?: string;
     configuredBinaryPath?: string;

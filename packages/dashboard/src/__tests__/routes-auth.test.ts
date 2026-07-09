@@ -2385,10 +2385,11 @@ describe("Droid CLI auth routes", () => {
     expect(probeSpy).not.toHaveBeenCalled();
   });
 
-  it("GET /providers/grok-cli/status returns readiness from toggle and binary", async () => {
+  it("GET /providers/grok-cli/status returns readiness from toggle and binary, passing through apiKeyDetected as informational", async () => {
     vi.spyOn(runtimeProviderProbesModule, "probeGrokCliProvider").mockResolvedValue({
       available: true,
       authenticated: true,
+      apiKeyDetected: false,
       version: "grok 1.0.0",
       probeDurationMs: 8,
     });
@@ -2404,12 +2405,15 @@ describe("Droid CLI auth routes", () => {
     expect(res.body.enabled).toBe(true);
     expect(res.body.binaryPath).toBe("/opt/Grok/grok");
     expect(res.body.binary.available).toBe(true);
+    expect(res.body.binary.authenticated).toBe(true);
+    expect(res.body.binary.apiKeyDetected).toBe(false);
   });
 
-  it("GET /auth/status probes Grok CLI with the stored override and requires API-key presence for authenticated:true", async () => {
+  it("GET /auth/status probes Grok CLI with the stored override and derives authenticated:true from toggle+binary availability only", async () => {
     vi.spyOn(runtimeProviderProbesModule, "probeGrokCliProvider").mockResolvedValue({
       available: true,
       authenticated: true,
+      apiKeyDetected: true,
       version: "grok 1.0.0",
       binaryPath: "/opt/Grok/grok",
       configuredBinaryPath: "/opt/Grok/grok",
@@ -2432,12 +2436,48 @@ describe("Droid CLI auth routes", () => {
     );
   });
 
-  it("GET /auth/status reports grok-cli authenticated:false when the binary is available but no API key is configured", async () => {
+  /*
+  FNXC:GrokCli 2026-07-09-00:00:
+  FN-7716 Symptom Verification: exact reproduction of the original
+  false-negative at the route layer — `useGrokCli` enabled, binary available,
+  but no Fusion-visible API key (probe reports `authenticated: false` with a
+  "GROK_API_KEY is not set" style reason under the OLD probe contract; under
+  the NEW contract the probe itself now reports `authenticated: true` with
+  `apiKeyDetected: false`). This test asserts the injected `grok-cli`
+  `/auth/status` provider is `authenticated: true` in that state (mirroring
+  Cursor's `cursorEnabled && cursorBinary.available` — no key requirement),
+  proving the false negative is resolved end-to-end through the route.
+  */
+  it("GET /auth/status reports grok-cli authenticated:true when the binary is available but no API key is detected — proves the original false-negative is resolved", async () => {
     vi.spyOn(runtimeProviderProbesModule, "probeGrokCliProvider").mockResolvedValue({
       available: true,
-      authenticated: false,
-      reason: "GROK_API_KEY is not set and ~/.grok/user-settings.json was not found",
+      authenticated: true,
+      apiKeyDetected: false,
+      reason: "No Grok API key detected by Fusion (GROK_API_KEY unset, ~/.grok/user-settings.json not found); the CLI will use its own credentials.",
       version: "grok 1.0.0",
+      probeDurationMs: 8,
+    });
+    store.getGlobalSettingsStore = vi.fn().mockReturnValue({
+      ...createMockGlobalSettingsStore(),
+      getSettings: vi.fn().mockResolvedValue({ useGrokCli: true }),
+    });
+
+    const res = await GET(buildApp(), "/api/auth/status");
+
+    expect(res.status).toBe(200);
+    expect(res.body.providers).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "grok-cli", authenticated: true }),
+      ]),
+    );
+  });
+
+  it("GET /auth/status reports grok-cli authenticated:false when the binary is unavailable, regardless of the enabled toggle", async () => {
+    vi.spyOn(runtimeProviderProbesModule, "probeGrokCliProvider").mockResolvedValue({
+      available: false,
+      authenticated: false,
+      apiKeyDetected: false,
+      reason: "grok not found on PATH",
       probeDurationMs: 8,
     });
     store.getGlobalSettingsStore = vi.fn().mockReturnValue({

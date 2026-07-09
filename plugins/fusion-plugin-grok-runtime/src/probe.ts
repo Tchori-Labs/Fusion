@@ -25,22 +25,25 @@ function summarizeFailure(binary: string, stdout: string, stderr: string): strin
 }
 
 /*
-FNXC:GrokCli 2026-07-08-00:00:
-Grok is API-key auth, NOT an OAuth/session CLI like Cursor — there is no
-`grok status --format json` (or `whoami`) subcommand to probe. Auth is a Grok
-API key supplied via the `GROK_API_KEY` env var OR `~/.grok/user-settings.json`
-`{ "apiKey": ... }` (per the upstream README, verified 2026-07-08). We derive
-`authenticated` from key PRESENCE only — env var first, then the settings
-file — and fail closed to `authenticated: false` with an actionable reason on
-a missing key or an unreadable/malformed settings file. Never throw: a
-missing/corrupt `~/.grok/user-settings.json` must degrade gracefully, not
-crash the probe. Do NOT invent a status subcommand for Grok (AGENTS.md /
-PROMPT.md "Do NOT").
+FNXC:GrokCli 2026-07-09-00:00:
+FN-7716: the `grok` CLI resolves its OWN credentials from more sources than
+Fusion can inspect (project `.env`, `GROK_BASE_URL`, `grok -k`, sandbox
+secrets), on top of the two locations Fusion checks below (`GROK_API_KEY` env
+var, `~/.grok/user-settings.json` `{ apiKey }`). Requiring Fusion to see a key
+before treating the provider as "authenticated" produced false negatives for
+operators whose CLI was fully authenticated via a method Fusion doesn't
+check. Key presence is therefore surfaced ONLY as a non-blocking informational
+signal (`apiKeyDetected`) consumed by `probeGrokBinary` below — it never gates
+readiness/`authenticated`, which now derives solely from binary availability,
+mirroring the Cursor CLI provider (`authenticated: cursorEnabled &&
+cursorBinary.available`). Never throw: a missing/corrupt
+`~/.grok/user-settings.json` must degrade gracefully, not crash the probe. Do
+NOT invent a status subcommand for Grok (AGENTS.md / PROMPT.md "Do NOT").
 */
-async function probeGrokApiKeyPresence(): Promise<{ authenticated: boolean; reason?: string }> {
+async function probeGrokApiKeyPresence(): Promise<{ detected: boolean; reason?: string }> {
   const envKey = process.env.GROK_API_KEY;
   if (typeof envKey === "string" && envKey.trim().length > 0) {
-    return { authenticated: true };
+    return { detected: true };
   }
 
   const settingsPath = join(homedir(), ".grok", "user-settings.json");
@@ -48,17 +51,17 @@ async function probeGrokApiKeyPresence(): Promise<{ authenticated: boolean; reas
   try {
     raw = await readFile(settingsPath, "utf-8");
   } catch {
-    return { authenticated: false, reason: "GROK_API_KEY is not set and ~/.grok/user-settings.json was not found" };
+    return { detected: false, reason: "No Grok API key detected by Fusion (GROK_API_KEY unset, ~/.grok/user-settings.json not found); the CLI will use its own credentials." };
   }
 
   try {
     const parsed = JSON.parse(raw) as { apiKey?: unknown };
     if (typeof parsed?.apiKey === "string" && parsed.apiKey.trim().length > 0) {
-      return { authenticated: true };
+      return { detected: true };
     }
-    return { authenticated: false, reason: "~/.grok/user-settings.json has no non-empty apiKey field" };
+    return { detected: false, reason: "No Grok API key detected by Fusion (~/.grok/user-settings.json has no non-empty apiKey field); the CLI will use its own credentials." };
   } catch {
-    return { authenticated: false, reason: "~/.grok/user-settings.json is malformed JSON" };
+    return { detected: false, reason: "No Grok API key detected by Fusion (~/.grok/user-settings.json is malformed JSON); the CLI will use its own credentials." };
   }
 }
 
@@ -81,13 +84,15 @@ export async function probeGrokBinary(options?: { timeoutMs?: number; binaryPath
       probeDurationMs: Date.now() - startedAt,
     };
     if (version.code === 0) {
-      const auth = await probeGrokApiKeyPresence();
+      // FNXC:GrokCli 2026-07-09-00:00: readiness = binary available; the CLI owns auth (FN-7716).
+      const keyPresence = await probeGrokApiKeyPresence();
       return {
         available: true,
-        authenticated: auth.authenticated,
+        authenticated: true,
+        apiKeyDetected: keyPresence.detected,
         ...common,
         version: version.stdout.trim() || undefined,
-        reason: auth.authenticated ? undefined : auth.reason,
+        reason: keyPresence.detected ? undefined : keyPresence.reason,
       };
     }
   }
@@ -98,6 +103,7 @@ export async function probeGrokBinary(options?: { timeoutMs?: number; binaryPath
   return {
     available: false,
     authenticated: false,
+    apiKeyDetected: false,
     configuredBinaryPath,
     usingConfiguredBinaryPath: false,
     diagnostics: failureDetails.length > 0 ? failureDetails : undefined,

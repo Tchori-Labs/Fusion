@@ -16,7 +16,7 @@ describe("probeGrokBinary", () => {
     delete process.env.GROK_API_KEY;
   });
 
-  it("reports authenticated:true when GROK_API_KEY is set", async () => {
+  it("reports authenticated:true and apiKeyDetected:true when GROK_API_KEY is set", async () => {
     process.env.GROK_API_KEY = "xai-test-key";
     vi.mocked(runGrokCommand).mockResolvedValueOnce({ code: 0, stdout: "grok 1.0.0", stderr: "" });
 
@@ -26,11 +26,12 @@ describe("probeGrokBinary", () => {
     expect(readFile).not.toHaveBeenCalled();
     expect(result.available).toBe(true);
     expect(result.authenticated).toBe(true);
+    expect(result.apiKeyDetected).toBe(true);
     expect(result.version).toBe("grok 1.0.0");
     expect(result.reason).toBeUndefined();
   });
 
-  it("falls back to ~/.grok/user-settings.json apiKey when GROK_API_KEY is unset", async () => {
+  it("reports apiKeyDetected:true from ~/.grok/user-settings.json apiKey when GROK_API_KEY is unset", async () => {
     vi.mocked(runGrokCommand).mockResolvedValueOnce({ code: 0, stdout: "grok 1.0.0", stderr: "" });
     vi.mocked(readFile).mockResolvedValueOnce(JSON.stringify({ apiKey: "xai-from-file" }));
 
@@ -38,38 +39,53 @@ describe("probeGrokBinary", () => {
 
     expect(result.available).toBe(true);
     expect(result.authenticated).toBe(true);
+    expect(result.apiKeyDetected).toBe(true);
   });
 
-  it("fails closed to authenticated:false with an actionable reason when no key is configured", async () => {
+  /*
+  FNXC:GrokCli 2026-07-09-00:00:
+  FN-7716 Symptom Verification: this is the exact reproduction of the
+  original false-negative — binary available, no Fusion-visible key
+  (GROK_API_KEY unset, ~/.grok/user-settings.json unreadable). BEFORE the fix
+  this asserted `authenticated: false` with a "GROK_API_KEY is not set"
+  reason. AFTER the fix, readiness is decoupled from key presence: the CLI
+  is treated as ready (`authenticated: true`) because the binary works, and
+  the previous key-presence signal now surfaces only as the non-blocking
+  `apiKeyDetected: false` informational field.
+  */
+  it("reports authenticated:true (readiness) with apiKeyDetected:false when no key is configured — proves the original false-negative is resolved", async () => {
     vi.mocked(runGrokCommand).mockResolvedValueOnce({ code: 0, stdout: "grok 1.0.0", stderr: "" });
     vi.mocked(readFile).mockRejectedValueOnce(new Error("ENOENT"));
 
     const result = await probeGrokBinary();
 
     expect(result.available).toBe(true);
-    expect(result.authenticated).toBe(false);
-    expect(result.reason).toContain("GROK_API_KEY is not set");
+    expect(result.authenticated).toBe(true);
+    expect(result.apiKeyDetected).toBe(false);
+    expect(result.reason).toContain("No Grok API key detected by Fusion");
   });
 
-  it("fails closed to authenticated:false on malformed ~/.grok/user-settings.json", async () => {
+  it("reports apiKeyDetected:false on malformed ~/.grok/user-settings.json without blocking authenticated", async () => {
     vi.mocked(runGrokCommand).mockResolvedValueOnce({ code: 0, stdout: "grok 1.0.0", stderr: "" });
     vi.mocked(readFile).mockResolvedValueOnce("not json at all");
 
     const result = await probeGrokBinary();
 
     expect(result.available).toBe(true);
-    expect(result.authenticated).toBe(false);
+    expect(result.authenticated).toBe(true);
+    expect(result.apiKeyDetected).toBe(false);
     expect(result.reason).toContain("malformed JSON");
   });
 
-  it("fails closed to authenticated:false when the settings file has no non-empty apiKey", async () => {
+  it("reports apiKeyDetected:false when the settings file has no non-empty apiKey", async () => {
     vi.mocked(runGrokCommand).mockResolvedValueOnce({ code: 0, stdout: "grok 1.0.0", stderr: "" });
     vi.mocked(readFile).mockResolvedValueOnce(JSON.stringify({ apiKey: "" }));
 
     const result = await probeGrokBinary();
 
     expect(result.available).toBe(true);
-    expect(result.authenticated).toBe(false);
+    expect(result.authenticated).toBe(true);
+    expect(result.apiKeyDetected).toBe(false);
     expect(result.reason).toContain("no non-empty apiKey field");
   });
 
@@ -83,13 +99,14 @@ describe("probeGrokBinary", () => {
     expect(runGrokCommand).toHaveBeenCalledWith("grok", ["--version"], 3000);
   });
 
-  it("reports binary unavailable with actionable diagnostics when the candidate fails", async () => {
+  it("reports binary unavailable with authenticated:false and actionable diagnostics when the candidate fails", async () => {
     vi.mocked(runGrokCommand).mockResolvedValueOnce({ code: 127, stdout: "", stderr: "spawn error: ENOENT: grok" });
 
     const result = await probeGrokBinary();
 
     expect(result.available).toBe(false);
     expect(result.authenticated).toBe(false);
+    expect(result.apiKeyDetected).toBe(false);
     expect(result.reason).toContain("not found");
     expect(result.reason).toContain("grok: spawn error: ENOENT");
   });
@@ -105,6 +122,7 @@ describe("probeGrokBinary", () => {
     expect(runGrokCommand).toHaveBeenNthCalledWith(1, "/missing/grok", ["--version"], 3000);
     expect(runGrokCommand).toHaveBeenNthCalledWith(2, "grok", ["--version"], 3000);
     expect(result.available).toBe(true);
+    expect(result.authenticated).toBe(true);
     expect(result.binaryPath).toBe("grok");
     expect(result.usingConfiguredBinaryPath).toBe(false);
     expect(result.diagnostics?.[0]).toContain("/missing/grok: spawn error: ENOENT");

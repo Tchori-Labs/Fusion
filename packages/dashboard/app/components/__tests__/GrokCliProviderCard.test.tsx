@@ -13,7 +13,7 @@ vi.mock("../../api", () => ({
 }));
 
 const baseStatus = {
-  binary: { available: true, authenticated: true, version: "1.0.0", binaryPath: "/usr/local/bin/grok", probeDurationMs: 5 },
+  binary: { available: true, authenticated: true, apiKeyDetected: true, version: "1.0.0", binaryPath: "/usr/local/bin/grok", probeDurationMs: 5 },
   enabled: true,
   binaryPath: "/usr/local/bin/grok",
   extension: null,
@@ -21,13 +21,14 @@ const baseStatus = {
 };
 
 /*
-FNXC:GrokCli 2026-07-08-00:00:
-Regression coverage mirroring CursorCliProviderCard.test.tsx (FN-7695) for FN-7705: the compact
+FNXC:GrokCli 2026-07-09-00:00:
+FN-7716: regression coverage mirroring CursorCliProviderCard.test.tsx (FN-7695). The compact
 card's below-header content (status line + binary-path control) must be nested inside
 `.grok-cli-provider-card__body` (data-testid="grok-cli-provider-card-body") rather than being a
 bare direct child of `.auth-provider-card`. The non-compact onboarding layout must NOT render
-this wrapper. Additionally covers the API-key-auth-specific "no API key configured" status text
-that has no Cursor equivalent (Cursor is OAuth/session, not API-key).
+this wrapper. Also covers the Symptom Verification invariant: binary-available-but-no-key must
+render a non-blocking ready state (no "Set GROK_API_KEY" blocking copy) with only a subtle
+informational apiKeyDetected hint — the CLI owns its own authentication.
 */
 describe("GrokCliProviderCard", () => {
   beforeEach(() => {
@@ -64,16 +65,34 @@ describe("GrokCliProviderCard", () => {
     expect(body).toContainElement(status);
   });
 
-  it("shows an actionable no-API-key message when the binary is available but no key is configured", async () => {
+  /*
+  FNXC:GrokCli 2026-07-09-00:00:
+  FN-7716 Symptom Verification: BEFORE the fix, binary-available + no-key
+  rendered a blocking "Set GROK_API_KEY" not-authenticated message and the
+  Enable action was effectively meaningless because `authenticated` was
+  false. AFTER the fix, this exact state (`authenticated: true,
+  apiKeyDetected: false`) must render a non-blocking connected/ready state
+  plus only a subtle informational hint — never the blocking copy.
+  */
+  it("shows a non-blocking ready state (not a blocking no-API-key error) when the binary is available but no key is detected", async () => {
     fetchGrokCliStatus.mockResolvedValue({
       ...baseStatus,
-      binary: { ...baseStatus.binary, authenticated: false },
+      binary: { ...baseStatus.binary, authenticated: true, apiKeyDetected: false },
     });
 
-    render(<GrokCliProviderCard authenticated={false} compact />);
+    render(<GrokCliProviderCard authenticated compact />);
 
-    const status = await screen.findByText(/GROK_API_KEY/i);
-    expect(status.textContent).toContain("~/.grok/user-settings.json");
+    const status = await screen.findByText(/Connected/i);
+    expect(status).toBeInTheDocument();
+
+    const hint = await screen.findByText(/No Grok API key detected by Fusion/i);
+    expect(hint.textContent).toContain("GROK_API_KEY");
+
+    expect(screen.queryByText(/Set GROK_API_KEY/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Binary found, but no API key is configured/i)).not.toBeInTheDocument();
+
+    const enableButton = screen.queryByRole("button", { name: /Enable/i });
+    expect(enableButton).not.toBeInTheDocument();
   });
 
   it("keeps the body wrapper present when a pathMessage is shown after a failed save", async () => {
