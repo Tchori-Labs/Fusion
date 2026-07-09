@@ -6,6 +6,7 @@ import type {
 } from "@fusion/core";
 import {
   COMMAND_EXECUTION_FN_TOOLS,
+  FILE_SCOPE_FN_TOOLS,
   FILE_WRITE_BUILTIN_TOOLS,
   FILE_WRITE_DELETE_FN_TOOLS,
   NETWORK_API_TOOLS,
@@ -36,6 +37,8 @@ const FILE_WRITE_DELETE_TOOLS = FILE_WRITE_DELETE_FN_TOOLS;
 const COMMAND_EXECUTION_TOOLS = COMMAND_EXECUTION_FN_TOOLS;
 // FNXC:ToolGovernance 2026-07-09-00:00: FN-7728 — mirror agent-action-gate.ts's review_gate_bypass classification here so the permanent-agent gate resolves fn_task_bypass_review identically (no two-path drift).
 const REVIEW_GATE_BYPASS_TOOLS = REVIEW_GATE_BYPASS_FN_TOOLS;
+// FNXC:ToolGovernance 2026-07-09-08:30: FN-7737 — mirror agent-action-gate.ts's file_scope classification here so the permanent-agent gate resolves fn_task_file_scope_add identically (no two-path drift).
+const FILE_SCOPE_TOOLS = FILE_SCOPE_FN_TOOLS;
 
 function normalizeArgs(args: unknown): Record<string, unknown> {
   return args && typeof args === "object" ? (args as Record<string, unknown>) : {};
@@ -116,6 +119,9 @@ export function classifyPermanentAgentToolCall(
   }
   if (REVIEW_GATE_BYPASS_TOOLS.has(toolName)) {
     return { category: "review_gate_bypass", recognized: true };
+  }
+  if (FILE_SCOPE_TOOLS.has(toolName)) {
+    return { category: "file_scope", recognized: true };
   }
   if (TASK_AGENT_MUTATION_TOOLS.has(toolName)) {
     return { category: "task_agent_mutation", recognized: true };

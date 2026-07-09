@@ -5,6 +5,7 @@ import {
   ACTION_GATE_TASK_AGENT_MANAGEMENT_TOOLS,
   COMMAND_EXECUTION_FN_TOOLS,
   COORDINATION_EXEMPT_TOOLS,
+  FILE_SCOPE_FN_TOOLS,
   FILE_WRITE_DELETE_FN_TOOLS,
   NETWORK_API_TOOLS,
   PERMANENT_AGENT_TASK_MUTATION_TOOLS,
@@ -25,6 +26,7 @@ const unrestrictedPolicy: AgentPermissionPolicy = {
     network_api: "allow",
     task_agent_mutation: "allow",
     review_gate_bypass: "allow",
+    file_scope: "allow",
   },
 };
 
@@ -37,6 +39,7 @@ const approvalRequiredPolicy: AgentPermissionPolicy = {
     network_api: "require-approval",
     task_agent_mutation: "require-approval",
     review_gate_bypass: "require-approval",
+    file_scope: "require-approval",
   },
 };
 
@@ -49,6 +52,7 @@ const blockedPolicy: AgentPermissionPolicy = {
     network_api: "block",
     task_agent_mutation: "block",
     review_gate_bypass: "block",
+    file_scope: "block",
   },
 };
 
@@ -283,6 +287,69 @@ describe("gating-classifications parity", () => {
       args: {},
       permissionPolicy,
     })).toMatchObject({ category: "review_gate_bypass", disposition: "block" });
+  });
+
+  // FN-7737 (Surface Enumeration: gate paths): fn_task_file_scope_add must classify as file_scope
+  // identically in BOTH evaluateAgentActionGate and the permanent-agent gate, never task_agent_mutation
+  // or file_write_delete, never the unrecognized-tool exempt fallback, and honor allow/require-approval/block
+  // plus toolRules override.
+  it("governs fn_task_file_scope_add as file_scope in both gate paths, distinct from task_agent_mutation/file_write_delete", () => {
+    expect(TASK_AGENT_MUTATION_TOOLS.has("fn_task_file_scope_add")).toBe(false);
+    expect(ACTION_GATE_TASK_AGENT_MANAGEMENT_TOOLS.has("fn_task_file_scope_add")).toBe(false);
+    expect(PERMANENT_AGENT_TASK_MUTATION_TOOLS.has("fn_task_file_scope_add")).toBe(false);
+    expect(FILE_WRITE_DELETE_FN_TOOLS.has("fn_task_file_scope_add")).toBe(false);
+    expect((COORDINATION_EXEMPT_TOOLS as readonly string[]).includes("fn_task_file_scope_add")).toBe(false);
+    expect(READONLY_FN_TOOLS.has("fn_task_file_scope_add")).toBe(false);
+    expect(FILE_SCOPE_FN_TOOLS.has("fn_task_file_scope_add")).toBe(true);
+    expect(classifyPermanentAgentToolCall("fn_task_file_scope_add")).toEqual({
+      category: "file_scope",
+      recognized: true,
+    });
+
+    for (const [permissionPolicy, disposition] of policyMatrix) {
+      expect(resolvePermanentAgentToolDecision({
+        toolName: "fn_task_file_scope_add",
+        args: {},
+        gating: { permissionPolicy },
+      })).toMatchObject({
+        category: "file_scope",
+        disposition,
+        recognized: true,
+      });
+      expect(evaluateAgentActionGate({
+        agentId: "a1",
+        toolName: "fn_task_file_scope_add",
+        args: {},
+        permissionPolicy,
+      })).toMatchObject({
+        category: "file_scope",
+        disposition,
+      });
+    }
+  });
+
+  it("applies exact tool overrides consistently for governed file_scope", () => {
+    const permissionPolicy: AgentPermissionPolicy = {
+      ...unrestrictedPolicy,
+      presetId: "custom",
+      rules: {
+        ...unrestrictedPolicy.rules,
+        file_scope: "allow",
+      },
+      toolRules: { fn_task_file_scope_add: "block" },
+    };
+
+    expect(resolvePermanentAgentToolDecision({
+      toolName: "fn_task_file_scope_add",
+      args: {},
+      gating: { permissionPolicy },
+    })).toMatchObject({ category: "file_scope", disposition: "block", recognized: true });
+    expect(evaluateAgentActionGate({
+      agentId: "a1",
+      toolName: "fn_task_file_scope_add",
+      args: {},
+      permissionPolicy,
+    })).toMatchObject({ category: "file_scope", disposition: "block" });
   });
 
   it("applies exact tool overrides consistently for governed task creation", () => {

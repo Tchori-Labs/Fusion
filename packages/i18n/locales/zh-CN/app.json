@@ -169,6 +169,10 @@
       "taskAgentMutation": {
         "description": "任务状态变更、委派或代理生命周期操作。",
         "label": "任务/代理变更"
+      },
+      "fileScope": {
+        "description": "",
+        "label": ""
       }
     },
     "categoryExamples": "{{label}} 示例",

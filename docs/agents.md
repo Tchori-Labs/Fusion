@@ -147,9 +147,11 @@ V1 runtime action categories:
 - `command_execution`
 - `network_api`
 - `task_agent_mutation`
+- `review_gate_bypass` (FN-7728; governs the `fn_task_bypass_review` merge-gate override — the `unrestricted`/grant-all preset overrides it to `require-approval` instead of `allow`, stricter than the uniform preset disposition)
+- `file_scope` (FN-7737; governs the `fn_task_file_scope_add` File Scope additional-approval action — stays on the UNIFORM per-preset disposition, so `unrestricted`/grant-all resolves it to `allow` like every other plain category)
 - `none` (classifier-only read-only result; never stored as a policy rule key)
 
-`permissionPolicy` uses the five sensitive categories above (everything except `none`) plus optional exact `toolRules`, with the FN-3545 disposition contract:
+`permissionPolicy` uses the sensitive categories above (everything except `none`) plus optional exact `toolRules`, with the FN-3545 disposition contract:
 
 - `allow`
 - `block`
@@ -166,6 +168,8 @@ The engine classifies tool calls by behavior (not namespace alone):
 - `git_write`: mutating git shell commands run via `bash`
 - `network_api`: external/network-facing tools (for example `fn_research_run`, `fn_research_cancel`, `fn_web_fetch`, `worktrunk_install`; `fn_research_retry` is permanent-agent network-classified and remains action-gate read-only/exception behavior)
 - `task_agent_mutation`: task/agent/workflow mutation tools (for example `fn_update_agent_config`, `fn_task_pause`, `fn_spawn_agent`, `fn_task_create`, `fn_task_update`, `fn_task_promote`, `fn_task_refine`, and workflow mutators such as `fn_workflow_create`, `fn_workflow_update`, `fn_workflow_delete`, `fn_workflow_settings`, `fn_workflow_select`; action-gate-only task coordination tools like `fn_delegate_task`, `fn_task_import_github`, and `fn_task_import_github_issue` use this category in action-gate evaluation)
+- `review_gate_bypass` (FN-7728): the operator-only `fn_task_bypass_review` merge-gate override, classified via the shared `REVIEW_GATE_BYPASS_FN_TOOLS` set in `gating-classifications.ts` so both gate paths agree; never falls back to `task_agent_mutation` or the unrecognized-tool exempt fallback.
+- `file_scope` (FN-7737): `fn_task_file_scope_add`, the tool an executing agent uses to extend its task's declared `## File Scope` beyond the initial spec at runtime, classified via the shared `FILE_SCOPE_FN_TOOLS` set in `gating-classifications.ts` so both gate paths agree; distinct from `task_agent_mutation`/`file_write_delete` and never falls back to the unrecognized-tool exempt fallback.
 - Dashboard permission editors now show per-category example tools sourced from `AGENT_PERMISSION_POLICY_CATEGORY_TOOL_EXAMPLES` in `@fusion/core`, exact-tool override controls, plus a read-only exempt-tools panel for coordination/messaging bypass tools.
 - `none`: positively recognized read-only tools (`read`, `grep`, `find`, `ls`, list/show/get-style `fn_*` tools, plus permanent-agent coordination helpers like `fn_delegate_task`, `fn_task_import_github`, and `fn_task_import_github_issue`). Artifact tools mirror `fn_task_document_write` in the shipped allow-lists: `fn_artifact_register`, `fn_artifact_list`, and `fn_artifact_view` are present in `READONLY_FN_TOOLS` and `COORDINATION_EXEMPT_TOOLS`, so registration is treated as coordination/registry publication instead of a broad mutation approval.
 
@@ -1564,12 +1568,14 @@ POST /api/agents/:id/ratings
 
 ## Permission Policies
 
-Permanent-agent sensitive actions are gated across five categories:
+Permanent-agent sensitive actions are gated across these categories:
 - `git_write`
 - `file_write_delete`
 - `command_execution`
 - `network_api`
 - `task_agent_mutation`
+- `review_gate_bypass` (FN-7728; overridden to `require-approval` under `unrestricted`/grant-all)
+- `file_scope` (FN-7737; uniform disposition, so `unrestricted`/grant-all resolves it to `allow`)
 
 Each category can be set to one disposition:
 - `allow`

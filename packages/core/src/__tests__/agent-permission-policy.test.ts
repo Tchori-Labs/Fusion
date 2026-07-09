@@ -38,6 +38,7 @@ describe("agent-permission-policy", () => {
   it("normalizes unrestricted preset with all categories allow, except review_gate_bypass which stays require-approval", () => {
     // FN-7728: review_gate_bypass intentionally diverges from the uniform unrestricted default —
     // a merge-gate bypass must never be silently allowed by default even under the permissive preset.
+    // FN-7737: file_scope stays on the uniform "allow" default (no override), unlike review_gate_bypass.
     const policy = normalizeAgentPermissionPolicyFromPreset("unrestricted");
     for (const category of AGENT_PERMISSION_POLICY_ACTION_CATEGORIES) {
       if (category === "review_gate_bypass") {
@@ -145,6 +146,50 @@ describe("agent-permission-policy", () => {
     for (const toolName of AGENT_PERMISSION_POLICY_EXEMPT_TOOL_EXAMPLES) {
       expect(COORDINATION_EXEMPT_TOOLS).toContain(toolName);
     }
+  });
+
+  // FN-7737: file_scope regression coverage.
+  describe("file_scope category", () => {
+    it("is a distinct category from task_agent_mutation/file_write_delete with fn_task_file_scope_add as its example tool", () => {
+      expect(AGENT_PERMISSION_POLICY_ACTION_CATEGORIES).toContain("file_scope");
+      expect(AGENT_PERMISSION_POLICY_CATEGORY_TOOL_EXAMPLES.file_scope).toEqual(["fn_task_file_scope_add"]);
+      expect(AGENT_PERMISSION_POLICY_CATEGORY_TOOL_EXAMPLES.task_agent_mutation).not.toContain("fn_task_file_scope_add");
+      expect(AGENT_PERMISSION_POLICY_CATEGORY_TOOL_EXAMPLES.file_write_delete).not.toContain("fn_task_file_scope_add");
+    });
+
+    it("resolves to allow under unrestricted (uniform grant-all, unlike review_gate_bypass), require-approval under approval-required, and block under locked-down", () => {
+      expect(normalizeAgentPermissionPolicyFromPreset("unrestricted").rules.file_scope).toBe("allow");
+      expect(normalizeAgentPermissionPolicyFromPreset("approval-required").rules.file_scope).toBe("require-approval");
+      expect(normalizeAgentPermissionPolicyFromPreset("locked-down").rules.file_scope).toBe("block");
+    });
+
+    it("can be overridden independently under a custom policy without changing task_agent_mutation", () => {
+      const policy = normalizeAgentPermissionPolicy({
+        presetId: "custom",
+        rules: { file_scope: "block" },
+      });
+
+      expect(policy.rules.file_scope).toBe("block");
+      expect(policy.rules.task_agent_mutation).toBe("allow");
+    });
+
+    it("resolves a stored policy missing the file_scope key to the preset default (no migration required)", () => {
+      const effective = resolveEffectiveAgentPermissionPolicy({
+        presetId: "custom",
+        rules: { task_agent_mutation: "block" } as never,
+      });
+
+      expect(effective.rules.file_scope).toBe("allow");
+    });
+
+    it("lets the project default override file_scope independently", () => {
+      const effective = resolveEffectiveAgentPermissionPolicy(undefined, {
+        rules: { file_scope: "block" },
+      });
+
+      expect(effective.rules.file_scope).toBe("block");
+      expect(effective.rules.task_agent_mutation).toBe("allow");
+    });
   });
 
   // FN-7728: review_gate_bypass regression coverage.

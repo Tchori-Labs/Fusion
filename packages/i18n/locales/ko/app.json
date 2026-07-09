@@ -169,6 +169,10 @@
       "taskAgentMutation": {
         "description": "작업 상태 변경, 위임 또는 에이전트 수명 주기 작업.",
         "label": "작업/에이전트 변경"
+      },
+      "fileScope": {
+        "description": "",
+        "label": ""
       }
     },
     "categoryExamples": "{{label}} 예시",

@@ -20,6 +20,7 @@ describe("AgentPermissionPolicyEditor", () => {
           network_api: "allow",
           task_agent_mutation: "allow",
           review_gate_bypass: "allow",
+          file_scope: "allow",
         } }}
         onChange={onChange}
       />,
@@ -59,6 +60,7 @@ describe("AgentPermissionPolicyEditor", () => {
           network_api: "allow",
           task_agent_mutation: "allow",
           review_gate_bypass: "allow",
+          file_scope: "allow",
         } }}
         onChange={onChange}
       />,
@@ -120,6 +122,7 @@ describe("AgentPermissionPolicyEditor", () => {
           network_api: "allow",
           task_agent_mutation: "allow",
           review_gate_bypass: "allow",
+          file_scope: "allow",
         } }}
         onChange={onChange}
       />,
@@ -157,6 +160,7 @@ describe("AgentPermissionPolicyEditor", () => {
           network_api: "allow",
           task_agent_mutation: "allow",
           review_gate_bypass: "allow",
+          file_scope: "allow",
         }, toolRules: { fn_task_create: "block" } }}
         onChange={onChange}
       />,
@@ -178,6 +182,7 @@ describe("AgentPermissionPolicyEditor", () => {
           network_api: "allow",
           task_agent_mutation: "allow",
           review_gate_bypass: "allow",
+          file_scope: "allow",
         }, toolRules: { fn_task_create: "allow" } }}
         projectDefaultToolRules={{ fn_task_create: "block" }}
         onChange={() => {}}
@@ -232,6 +237,38 @@ describe("AgentPermissionPolicyEditor", () => {
 
     expect(new Set(rowCategories)).toEqual(new Set(AGENT_PERMISSION_POLICY_ACTION_CATEGORIES));
     expect(rowCategories).toHaveLength(AGENT_PERMISSION_POLICY_ACTION_CATEGORIES.length);
+  });
+
+  // FN-7737: file_scope category row regression coverage.
+  it("renders the file_scope row and emits an updated rules payload when its disposition changes", () => {
+    const onChange = vi.fn();
+    render(
+      <AgentPermissionPolicyEditor
+        mode="project-default"
+        value={{ presetId: "custom", rules: {
+          git_write: "allow",
+          file_write_delete: "allow",
+          command_execution: "allow",
+          network_api: "allow",
+          task_agent_mutation: "allow",
+          review_gate_bypass: "allow",
+          file_scope: "allow",
+        } }}
+        onChange={onChange}
+      />,
+    );
+
+    const row = screen.getByText("File Scope expansion").closest(".agent-policy-row");
+    expect(row).toBeTruthy();
+    expect(row).toHaveAttribute("data-category", "file_scope");
+
+    const select = row!.querySelector("select") as HTMLSelectElement;
+    expect(select).toBeTruthy();
+    fireEvent.change(select, { target: { value: "block" } });
+
+    const payload = onChange.mock.calls.at(-1)?.[0] as AgentPermissionPolicy;
+    expect(payload.rules.file_scope).toBe("block");
+    expect(payload.rules.task_agent_mutation).toBe("allow");
   });
 
   it("keeps exempt tools panel read-only", () => {

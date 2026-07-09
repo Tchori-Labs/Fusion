@@ -6696,6 +6696,9 @@ export type AgentPermission = (typeof AGENT_PERMISSIONS)[number];
 /**
  * FNXC:ToolPermissions 2026-07-09-00:00:
  * FN-7728 adds `review_gate_bypass` as a first-class sensitive action category distinct from `task_agent_mutation`. It governs merge-gate override tools (e.g. `fn_task_bypass_review`, delivered by FN-7720) so operators can independently allow/require-approval/block "who may bypass a failed review gate" without touching ordinary task-mutation policy. It defaults to a stricter disposition than the uniform preset default (see agent-permission-policy.ts) and is resolved identically by both evaluateAgentActionGate and the permanent-agent gate via the shared gating-classifications.ts source.
+ *
+ * FNXC:ToolPermissions 2026-07-09-08:30:
+ * FN-7737 adds `file_scope` as a first-class sensitive action category governing the File Scope additional-approval action (`fn_task_file_scope_add`, an executor-visible tool that extends a task's declared `## File Scope` beyond its initial spec at runtime). Unlike `review_gate_bypass`, `file_scope` intentionally keeps the UNIFORM grant-all disposition — the `unrestricted` preset resolves it to `allow` via `buildRules("allow")` with no override patch, since File Scope self-extension is an ordinary executor-scope action, not a merge-gate override. It is resolved identically by both evaluateAgentActionGate and the permanent-agent gate via the shared `FILE_SCOPE_FN_TOOLS` set in gating-classifications.ts.
  */
 export const PERMANENT_AGENT_ACTION_CATEGORIES = [
   "git_write",
@@ -6704,6 +6707,7 @@ export const PERMANENT_AGENT_ACTION_CATEGORIES = [
   "network_api",
   "task_agent_mutation",
   "review_gate_bypass",
+  "file_scope",
   "none",
 ] as const;
 
@@ -6721,6 +6725,7 @@ export const AGENT_PERMISSION_POLICY_ACTION_CATEGORIES: readonly PermanentAgentS
   "network_api",
   "task_agent_mutation",
   "review_gate_bypass",
+  "file_scope",
 ] as const;
 
 export const AGENT_PERMISSION_POLICY_CATEGORY_TOOL_EXAMPLES: Record<
@@ -6755,6 +6760,8 @@ export const AGENT_PERMISSION_POLICY_CATEGORY_TOOL_EXAMPLES: Record<
   ],
   /* FNXC:ToolPermissions 2026-07-09-00:00: FN-7728 — review_gate_bypass governs merge-gate override tools as a distinct, more-restricted permission from ordinary task mutation. fn_task_bypass_review (FN-7720) is CLI/pi-extension operator-tool-only; it is never exposed to executor/reviewer/triage agent tool lists. */
   review_gate_bypass: ["fn_task_bypass_review"],
+  /* FNXC:ToolPermissions 2026-07-09-08:30: FN-7737 — file_scope governs the File Scope additional-approval action (fn_task_file_scope_add), which lets an executing agent extend its task's declared ## File Scope beyond the initial spec at runtime. Unlike review_gate_bypass, it keeps the uniform grant-all default (handled by "allow" under the unrestricted preset), so it is not patched by a *Override-style function. */
+  file_scope: ["fn_task_file_scope_add"],
 };
 
 export const AGENT_PERMISSION_POLICY_EXEMPT_TOOL_EXAMPLES: readonly string[] = [

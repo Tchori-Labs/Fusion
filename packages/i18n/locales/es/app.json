@@ -169,6 +169,10 @@
       "taskAgentMutation": {
         "description": "Cambios de estado de tareas, delegación o acciones del ciclo de vida del agente.",
         "label": "Mutación de tarea/agente"
+      },
+      "fileScope": {
+        "description": "",
+        "label": ""
       }
     },
     "categoryExamples": "Ejemplos de {{label}}",

@@ -164,6 +164,10 @@
         "description": "Runs shell commands and scripts.",
         "label": "Command execution"
       },
+      "fileScope": {
+        "description": "Extending a task's declared File Scope beyond its initial spec at runtime.",
+        "label": "File Scope expansion"
+      },
       "fileWriteDelete": {
         "description": "Create, edit, or remove files in the workspace.",
         "label": "File writes/deletes"
