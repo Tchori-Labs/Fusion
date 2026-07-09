@@ -149,4 +149,37 @@ describe("getGrokPickerModels caching", () => {
 
     expect(mockedDiscover).toHaveBeenCalledTimes(2);
   });
+
+  // FN-7710: mirrors the Cursor picker cache negative-TTL hardening — a transient
+  // cold-start empty/unavailable result must not poison the cache for the full 60s TTL.
+  it("re-fetches an empty/unavailable result well before the full 60s TTL elapses", async () => {
+    mockedDiscover.mockResolvedValueOnce({ models: [], source: "probe", fallbackUsed: true, reason: "binary unavailable" });
+    let clock = 1000;
+    const now = () => clock;
+
+    const first = await getGrokPickerModels({ binaryPath: "grok-test-8", ttlMs: 60_000, now });
+    expect(first).toEqual([]);
+
+    // Well past a short negative-TTL window, but far short of the full 60s TTL.
+    clock += 10_000;
+    mockedDiscover.mockResolvedValueOnce({ models: [{ id: "grok-4" }], source: "models-text", fallbackUsed: false });
+    const second = await getGrokPickerModels({ binaryPath: "grok-test-8", ttlMs: 60_000, now });
+
+    expect(second).toEqual([
+      { provider: "grok-cli", id: "grok-4", name: "grok-4", reasoning: false, contextWindow: 0 },
+    ]);
+    expect(mockedDiscover).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps a successful non-empty result cached for the full requested TTL (unlike an empty result)", async () => {
+    mockedDiscover.mockResolvedValueOnce({ models: [{ id: "grok-4" }], source: "models-text", fallbackUsed: false });
+    let clock = 1000;
+    const now = () => clock;
+
+    await getGrokPickerModels({ binaryPath: "grok-test-9", ttlMs: 60_000, now });
+    clock += 10_000; // inside the 60s TTL for a non-empty result
+    await getGrokPickerModels({ binaryPath: "grok-test-9", ttlMs: 60_000, now });
+
+    expect(mockedDiscover).toHaveBeenCalledTimes(1);
+  });
 });

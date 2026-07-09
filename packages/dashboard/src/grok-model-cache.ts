@@ -40,6 +40,19 @@ export const GROK_PICKER_PROVIDER_ID = "grok-cli" as const;
 const DEFAULT_TTL_MS = 60_000;
 
 /**
+ * FNXC:ModelCatalog 2026-07-08-00:00:
+ * FN-7710: mirrors the Cursor picker cache's negative-TTL hardening
+ * (cursor-model-cache.ts). A transient cold-start empty/unavailable discovery result was
+ * previously cached for the full `DEFAULT_TTL_MS` (60s), same as a real successful result —
+ * so a first-load empty right after the provider is toggled on could persist for a minute.
+ * Empty/unavailable results now use this much shorter negative TTL so a transient cold-start
+ * empty self-heals quickly, while a non-empty successful discovery keeps the normal 60s TTL.
+ * Single-flight and never-throw/never-spawn-per-request guarantees are unchanged — only how
+ * long an empty result is trusted.
+ */
+const EMPTY_RESULT_TTL_MS = 5_000;
+
+/**
  * Map Grok CLI discovery output into the stable `/api/models` row shape.
  *
  * The discovered `id` is used as the stable model id. `name` falls back to
@@ -78,6 +91,8 @@ interface CacheEntry {
   fetchedAt: number;
   /** The resolved (possibly empty, on failure/unavailability) model list. */
   models: GrokPickerModel[];
+  /** The TTL that applies to this specific entry (short for empty results; see FN-7710). */
+  ttlMs: number;
 }
 
 /** Per-binaryPath cache of the most recently resolved Grok picker models. */
@@ -130,7 +145,7 @@ export async function getGrokPickerModels(
   const nowMs = now();
 
   const cached = cache.get(binaryPath);
-  if (cached && nowMs - cached.fetchedAt < ttlMs) {
+  if (cached && nowMs - cached.fetchedAt < cached.ttlMs) {
     return cached.models;
   }
 
@@ -158,7 +173,11 @@ export async function getGrokPickerModels(
 
   try {
     const models = await fetchPromise;
-    cache.set(binaryPath, { fetchedAt: now(), models });
+    // FN-7710: empty/unavailable results use a short negative TTL so a
+    // transient cold-start empty self-heals quickly instead of persisting
+    // for the full 60s TTL (see FNXC:ModelCatalog comment above).
+    const effectiveTtlMs = models.length === 0 ? EMPTY_RESULT_TTL_MS : ttlMs;
+    cache.set(binaryPath, { fetchedAt: now(), models, ttlMs: effectiveTtlMs });
     return models;
   } finally {
     inFlight.delete(binaryPath);

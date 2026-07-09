@@ -52,6 +52,19 @@ export const CURSOR_PICKER_PROVIDER_ID = "cursor-cli" as const;
 const DEFAULT_TTL_MS = 60_000;
 
 /**
+ * FNXC:ModelCatalog 2026-07-08-00:00:
+ * FN-7710: A transient cold-start empty/unavailable discovery result (e.g. the
+ * `cursor-agent` binary racing keychain/IDE warm-up right after the provider is toggled on)
+ * was previously cached for the full `DEFAULT_TTL_MS` (60s), same as a real successful
+ * result — so a first-load empty could persist for a minute even after the CLI became
+ * available. Empty/unavailable results now use this much shorter negative TTL so a
+ * transient cold-start empty self-heals quickly, while a non-empty successful discovery
+ * keeps using the normal 60s TTL. Single-flight and never-throw/never-spawn-per-request
+ * guarantees are unchanged — only how long an empty result is trusted.
+ */
+const EMPTY_RESULT_TTL_MS = 5_000;
+
+/**
  * Map Cursor CLI discovery output into the stable `/api/models` row shape.
  *
  * The discovered `id` is used as the stable model id (it is the CLI's own
@@ -95,6 +108,8 @@ interface CacheEntry {
   fetchedAt: number;
   /** The resolved (possibly empty, on failure/unavailability) model list. */
   models: CursorPickerModel[];
+  /** The TTL that applies to this specific entry (short for empty results; see FN-7710). */
+  ttlMs: number;
 }
 
 /** Per-binaryPath cache of the most recently resolved Cursor picker models. */
@@ -149,7 +164,7 @@ export async function getCursorPickerModels(
   const nowMs = now();
 
   const cached = cache.get(binaryPath);
-  if (cached && nowMs - cached.fetchedAt < ttlMs) {
+  if (cached && nowMs - cached.fetchedAt < cached.ttlMs) {
     return cached.models;
   }
 
@@ -177,7 +192,11 @@ export async function getCursorPickerModels(
 
   try {
     const models = await fetchPromise;
-    cache.set(binaryPath, { fetchedAt: now(), models });
+    // FN-7710: empty/unavailable results use a short negative TTL so a
+    // transient cold-start empty self-heals quickly instead of persisting
+    // for the full 60s TTL (see FNXC:ModelCatalog comment above).
+    const effectiveTtlMs = models.length === 0 ? EMPTY_RESULT_TTL_MS : ttlMs;
+    cache.set(binaryPath, { fetchedAt: now(), models, ttlMs: effectiveTtlMs });
     return models;
   } finally {
     inFlight.delete(binaryPath);

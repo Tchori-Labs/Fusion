@@ -181,4 +181,38 @@ describe("getCursorPickerModels caching", () => {
 
     expect(mockedDiscover).toHaveBeenCalledTimes(2);
   });
+
+  // FN-7710: a transient cold-start empty/unavailable result must not poison
+  // the cache for the full 60s TTL — it self-heals after a much shorter
+  // negative-TTL window while a non-empty result keeps the normal TTL.
+  it("re-fetches an empty/unavailable result well before the full 60s TTL elapses", async () => {
+    mockedDiscover.mockResolvedValueOnce({ models: [], source: "probe", fallbackUsed: true, reason: "binary unavailable" });
+    let clock = 1000;
+    const now = () => clock;
+
+    const first = await getCursorPickerModels({ binaryPath: "cursor-test-8", ttlMs: 60_000, now });
+    expect(first).toEqual([]);
+
+    // Well past a short negative-TTL window, but far short of the full 60s TTL.
+    clock += 10_000;
+    mockedDiscover.mockResolvedValueOnce({ models: [{ id: "cursor/sonnet" }], source: "json", fallbackUsed: false });
+    const second = await getCursorPickerModels({ binaryPath: "cursor-test-8", ttlMs: 60_000, now });
+
+    expect(second).toEqual([
+      { provider: "cursor-cli", id: "cursor/sonnet", name: "cursor/sonnet", reasoning: false, contextWindow: 0 },
+    ]);
+    expect(mockedDiscover).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps a successful non-empty result cached for the full requested TTL (unlike an empty result)", async () => {
+    mockedDiscover.mockResolvedValueOnce({ models: [{ id: "cursor/sonnet" }], source: "json", fallbackUsed: false });
+    let clock = 1000;
+    const now = () => clock;
+
+    await getCursorPickerModels({ binaryPath: "cursor-test-9", ttlMs: 60_000, now });
+    clock += 10_000; // inside the 60s TTL for a non-empty result
+    await getCursorPickerModels({ binaryPath: "cursor-test-9", ttlMs: 60_000, now });
+
+    expect(mockedDiscover).toHaveBeenCalledTimes(1);
+  });
 });
