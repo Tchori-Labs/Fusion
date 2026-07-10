@@ -3470,6 +3470,14 @@ export interface GlobalSettings {
   /** Global baseline AI model ID for title summarization.
    *  Must be set together with `titleSummarizerGlobalProvider`. */
   titleSummarizerGlobalModelId?: string;
+  /** Optional global execution-lane thinking override. Inherits `defaultThinkingLevel` when unset. */
+  executionGlobalThinkingLevel?: ThinkingLevel;
+  /** Optional global planning-lane thinking override. Inherits `defaultThinkingLevel` when unset. */
+  planningGlobalThinkingLevel?: ThinkingLevel;
+  /** Optional global reviewer-lane thinking override. Inherits `defaultThinkingLevel` when unset. */
+  validatorGlobalThinkingLevel?: ThinkingLevel;
+  /** Optional global summarization-lane thinking override. Inherits `defaultThinkingLevel` when unset. */
+  titleSummarizerGlobalThinkingLevel?: ThinkingLevel;
   /** The daemon authentication token (format: fn_<32 hex chars>).
    *  Used for authenticating CLI clients to the daemon server. */
   daemonToken?: string;
@@ -4072,6 +4080,12 @@ export interface ProjectSettings {
   /** Project-level override for the base default AI model ID.
    *  Must be set together with `defaultProviderOverride`. */
   defaultModelIdOverride?: string;
+  /**
+   * FNXC:Settings-ThinkingLevel 2026-07-10-00:00:
+   * Settings model lanes carry optional thinking overrides that inherit `defaultThinkingLevel` when unset. Runtime precedence is task `thinkingLevel` > lane thinking override > global `defaultThinkingLevel`.
+   * Optional project default-lane thinking override used when a task does not set its own thinking level.
+   */
+  defaultThinkingLevelOverride?: ThinkingLevel;
   /** Project-level AI model provider for task execution (executor agent).
    *  This is the execution lane that overrides the global `executionGlobalProvider`.
    *  Must be set together with `executionModelId`. Falls back to
@@ -4601,6 +4615,8 @@ export interface ProjectSettings {
    *  Must be set together with `titleSummarizerProvider`. Falls back to planningModelId,
    *  then defaultModelId if not specified. */
   titleSummarizerModelId?: string;
+  /** Optional project summarization-lane thinking override. Inherits `defaultThinkingLevel` when unset. */
+  titleSummarizerThinkingLevel?: ThinkingLevel;
   /** Fallback model provider for title summarization. When unset, falls back to
    *  planning fallback, then global fallback. Must be set together with
    *  `titleSummarizerFallbackModelId`. */

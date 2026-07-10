@@ -3,11 +3,15 @@ import {
   extractRuntimeHint,
   extractRuntimeModel,
   resolveExecutorSessionModel,
+  resolveExecutorThinkingLevel,
   resolveHeartbeatSessionModels,
   resolveImplicitPlanningFallbackModel,
   resolveMergerSessionModel,
   resolvePlanningSessionModel,
+  resolvePlanningThinkingLevel,
+  resolveTitleSummarizerThinkingLevel,
   resolveValidatorSessionModel,
+  resolveValidatorThinkingLevel,
 } from "../agent-session-helpers.js";
 
 const { resolveRuntimeMock } = vi.hoisted(() => ({
@@ -20,6 +24,38 @@ vi.mock("../runtime-resolution.js", async () => {
     ...actual,
     resolveRuntime: resolveRuntimeMock,
   };
+});
+
+
+describe("resolve model-lane thinking levels", () => {
+  it("applies task > execution lane > project default lane > global default precedence", () => {
+    const settings = {
+      defaultThinkingLevel: "low",
+      defaultThinkingLevelOverride: "medium",
+      executionGlobalThinkingLevel: "high",
+    } as const;
+
+    expect(resolveExecutorThinkingLevel("xhigh", settings)).toBe("xhigh");
+    expect(resolveExecutorThinkingLevel(undefined, settings)).toBe("high");
+    expect(resolveExecutorThinkingLevel(undefined, { defaultThinkingLevelOverride: "medium", defaultThinkingLevel: "low" })).toBe("medium");
+    expect(resolveExecutorThinkingLevel(undefined, { defaultThinkingLevel: "low" })).toBe("low");
+  });
+
+  it("resolves planning, reviewer, and summarization lane overrides before the global default", () => {
+    expect(resolvePlanningThinkingLevel({ planningGlobalThinkingLevel: "minimal", defaultThinkingLevel: "high" })).toBe("minimal");
+    expect(resolveValidatorThinkingLevel(undefined, { validatorGlobalThinkingLevel: "medium", defaultThinkingLevel: "low" })).toBe("medium");
+    expect(resolveValidatorThinkingLevel("xhigh", { validatorGlobalThinkingLevel: "medium", defaultThinkingLevel: "low" })).toBe("xhigh");
+    expect(resolveTitleSummarizerThinkingLevel({
+      titleSummarizerThinkingLevel: "high",
+      titleSummarizerGlobalThinkingLevel: "medium",
+      defaultThinkingLevel: "low",
+    })).toBe("high");
+    expect(resolveTitleSummarizerThinkingLevel({
+      titleSummarizerGlobalThinkingLevel: "medium",
+      defaultThinkingLevelOverride: "minimal",
+      defaultThinkingLevel: "low",
+    })).toBe("medium");
+  });
 });
 
 describe("extractRuntimeHint", () => {

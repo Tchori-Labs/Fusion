@@ -108,12 +108,16 @@ Fusion automatically falls back to ntfy's JSON publish format when a notificatio
 | `grokCliBinaryPath` | `string` | `undefined` | Optional global, machine-local Grok CLI executable override used by Settings → Authentication, status/enable validation, probes, and model discovery. Leave unset/blank to auto-detect `grok` on PATH. Invalid non-empty saves are rejected with bounded diagnostics. |
 | `executionGlobalProvider` | `string` | `undefined` | Global baseline provider for task execution. Project `executionProvider` overrides this. |
 | `executionGlobalModelId` | `string` | `undefined` | Global baseline model ID for task execution. |
+| `executionGlobalThinkingLevel` | `ThinkingLevel` | `undefined` | Optional global execution-lane thinking override. Inherits `defaultThinkingLevel` when unset. |
 | `planningGlobalProvider` | `string` | `undefined` | Global baseline provider for planning. Project `planningProvider` overrides this. |
 | `planningGlobalModelId` | `string` | `undefined` | Global baseline model ID for planning. |
+| `planningGlobalThinkingLevel` | `ThinkingLevel` | `undefined` | Optional global planning-lane thinking override. Inherits `defaultThinkingLevel` when unset. |
 | `validatorGlobalProvider` | `string` | `undefined` | Global baseline provider for validator/reviewer runs. Project `validatorProvider` overrides this. |
 | `validatorGlobalModelId` | `string` | `undefined` | Global baseline model ID for validator/reviewer runs. |
+| `validatorGlobalThinkingLevel` | `ThinkingLevel` | `undefined` | Optional global reviewer-lane thinking override. Inherits `defaultThinkingLevel` when unset. |
 | `titleSummarizerGlobalProvider` | `string` | `undefined` | Global baseline provider for title summarization. Project `titleSummarizerProvider` overrides this. |
 | `titleSummarizerGlobalModelId` | `string` | `undefined` | Global baseline model ID for title summarization. |
+| `titleSummarizerGlobalThinkingLevel` | `ThinkingLevel` | `undefined` | Optional global summarization-lane thinking override. Inherits `defaultThinkingLevel` when unset. |
 | `daemonToken` | `string` | `undefined` | Daemon authentication token (`fn_<32 hex chars>`) used by CLI clients. |
 | `daemonPort` | `number` | `4040` | Port for daemon/serve mode binding. |
 | `daemonHost` | `string` | `"127.0.0.1"` | Host for daemon/serve mode binding. Defaults to localhost only; pass `"0.0.0.0"` to expose on all interfaces. |
@@ -527,6 +531,7 @@ Default notes:
 | `planningFallbackModelId` | `string` | `undefined` | Fallback model ID for planning. |
 | `defaultProviderOverride` | `string` | `undefined` | Project-level override for global default provider baseline. |
 | `defaultModelIdOverride` | `string` | `undefined` | Project-level override for global default model baseline. |
+| `defaultThinkingLevelOverride` | `ThinkingLevel` | `undefined` | Optional project default-lane thinking override used when a task does not set `thinkingLevel`; inherits `defaultThinkingLevel` when unset. |
 | `executionProvider` | `string` | `undefined` | Provider for task execution agents. |
 | `executionModelId` | `string` | `undefined` | Model ID for task execution agents. |
 | `validatorProvider` | `string` | `undefined` | Provider for plan/code reviewers. |
@@ -643,6 +648,7 @@ GitLab configuration examples: leave both URL fields blank for GitLab.com (`http
 | `useAiMergeCommitSummary` | `boolean` | `true` | Use AI-generated merge commit summaries (subject + bullet body + diff-stat) instead of raw step-commit subject lists. |
 | `titleSummarizerProvider` | `string` | `undefined` | Provider for title summarization. |
 | `titleSummarizerModelId` | `string` | `undefined` | Model ID for title summarization. |
+| `titleSummarizerThinkingLevel` | `ThinkingLevel` | `undefined` | Optional project summarization-lane thinking override. Inherits `titleSummarizerGlobalThinkingLevel` or `defaultThinkingLevel` when unset. |
 | `titleSummarizerFallbackProvider` | `string` | `undefined` | Fallback provider for title summarization. |
 | `titleSummarizerFallbackModelId` | `string` | `undefined` | Fallback model ID for title summarization. |
 | `prTitlePromptInstructions` | `string` | `undefined` | Optional project guidance appended to the Create PR dialog's AI metadata system prompt for the generated PR title. Blank or whitespace-only values are treated as unset and keep the default prompt behavior. |
@@ -964,6 +970,8 @@ Short-lived token bounds are enforced server-side:
 ## Model Selection Hierarchy
 
 Fusion resolves task models through workflow-backed lane values first, then global lane defaults, then the project/global default model fallback. The common workflow lanes are stored as setting values on the project's default workflow and can be edited with dropdown controls from Settings -> Project Models -> Default workflow model lanes (persisted by the Settings modal's primary Save) or from workflow editor -> Settings -> Values for declared workflow lanes and fallbacks. General-scope fallback selection remains the global Fallback Model picker in Settings -> General Models.
+
+Settings model lanes can also carry optional thinking/reasoning effort overrides in the same model dropdown. Empty thinking values inherit the global `defaultThinkingLevel`; explicit lane values are cleared by the lane reset action. Runtime thinking precedence is task `thinkingLevel` > lane thinking override > `defaultThinkingLevel`, and the value still flows through pi.ts' existing thinking/reasoning-conflict fallback (Fusion retries without the explicit level when a provider rejects conflicting thinking parameters).
 
 When the planning lane has neither `planningFallback*` nor a global `fallback*` pair configured, triage now derives an **implicit fallback** from the resolved project/global default (execution) model (FN-7719). This lets a retryable primary planner-model failure (e.g. a provider 404/429) recover via one distinct swap instead of permanently failing triage with "no fallback configured" — the operator's chosen primary planner lane is unchanged, and the implicit fallback is skipped when it would equal the primary model or when test mode is active.
 

@@ -3957,7 +3957,8 @@
       "medium": "中等",
       "minimal": "最小",
       "off": "關閉",
-      "xhigh": "極高"
+      "xhigh": "極高",
+      "defaultWithLevel": "Default ({{level}})"
     },
     "placeholders": {
       "selectExecutor": "選擇執行器模型…",

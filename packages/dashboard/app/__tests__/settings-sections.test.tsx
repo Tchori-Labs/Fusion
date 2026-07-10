@@ -19,6 +19,7 @@ import { NotificationsSection } from "../components/settings/sections/Notificati
 import { ExperimentalSection } from "../components/settings/sections/ExperimentalSection";
 import { MovedSettingsStub } from "../components/settings/sections/MovedSettingsStub";
 import { ProjectModelsSection } from "../components/settings/sections/ProjectModelsSection";
+import { GlobalModelsSection } from "../components/settings/sections/GlobalModelsSection";
 import { PromptsSection } from "../components/settings/sections/PromptsSection";
 import { SecretsSection } from "../components/settings/sections/SecretsSection";
 import { WorktreesSection } from "../components/settings/sections/WorktreesSection";
@@ -46,16 +47,26 @@ vi.mock("../api", async (importOriginal) => {
   };
 });
 vi.mock("../components/CustomModelDropdown", () => ({
-  CustomModelDropdown: ({ id, label, value, onChange, menuWidth = "trigger" }: { id?: string; label: string; value?: string; onChange?: (value: string) => void; menuWidth?: "trigger" | "readable" }) => (
-    <button
-      type="button"
-      data-testid={`mock-model-dropdown-${id ?? label}`}
-      data-menu-width={menuWidth}
-      data-value={value ?? ""}
-      onClick={() => onChange?.("anthropic/claude-sonnet-4-5")}
-    >
-      {label}
-    </button>
+  CustomModelDropdown: ({ id, label, value, onChange, menuWidth = "trigger", showThinkingLevel = false, thinkingLevel = "", onThinkingLevelChange, defaultThinkingLevel }: { id?: string; label: string; value?: string; onChange?: (value: string) => void; menuWidth?: "trigger" | "readable"; showThinkingLevel?: boolean; thinkingLevel?: string; onThinkingLevelChange?: (value: string) => void; defaultThinkingLevel?: string }) => (
+    <div>
+      <button
+        type="button"
+        data-testid={`mock-model-dropdown-${id ?? label}`}
+        data-menu-width={menuWidth}
+        data-value={value ?? ""}
+        data-thinking-visible={showThinkingLevel ? "true" : "false"}
+        data-thinking-value={thinkingLevel}
+        data-default-thinking={defaultThinkingLevel ?? ""}
+        onClick={() => onChange?.("anthropic/claude-sonnet-4-5")}
+      >
+        {label}
+      </button>
+      {showThinkingLevel ? (
+        <button type="button" data-testid={`mock-thinking-${id ?? label}`} onClick={() => onThinkingLevelChange?.(thinkingLevel ? "" : "high")}>
+          thinking:{thinkingLevel || "inherit"}
+        </button>
+      ) : null}
+    </div>
   ),
 }));
 
@@ -285,6 +296,36 @@ describe("WorktreesSection", () => {
   });
 });
 
+describe("GlobalModelsSection", () => {
+  it("wires global model lane thinking overrides", () => {
+    const updateLaneThinkingValue = vi.fn();
+    render(
+      <GlobalModelsSection
+        scopeBanner={null}
+        form={{ defaultThinkingLevel: "low" } as SettingsFormState}
+        setForm={vi.fn()}
+        availableModels={[{ provider: "anthropic", id: "claude-sonnet-4-5", name: "Claude Sonnet 4.5" }]}
+        modelsLoading={false}
+        globalModelLanes={[{ laneId: "execution", label: "Execution", helperText: "Execution", fallbackOrder: "default", globalProviderKey: "executionGlobalProvider", globalModelKey: "executionGlobalModelId", globalThinkingKey: "executionGlobalThinkingLevel" } as never]}
+        getLaneThinkingValue={() => "medium"}
+        updateLaneThinkingValue={updateLaneThinkingValue}
+        resetLaneThinkingValue={vi.fn()}
+        favoriteProviders={[]}
+        favoriteModels={[]}
+        onToggleFavorite={vi.fn()}
+        onToggleModelFavorite={vi.fn()}
+        addToast={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId("mock-model-dropdown-global-execution-model")).toHaveAttribute("data-thinking-visible", "true");
+    expect(screen.getByTestId("mock-model-dropdown-global-execution-model")).toHaveAttribute("data-thinking-value", "medium");
+    expect(screen.getByTestId("mock-model-dropdown-global-execution-model")).toHaveAttribute("data-default-thinking", "low");
+    fireEvent.click(screen.getByTestId("mock-thinking-global-execution-model"));
+    expect(updateLaneThinkingValue).toHaveBeenCalledWith(expect.objectContaining({ laneId: "execution" }), "");
+  });
+});
+
 describe("ProjectModelsSection", () => {
   const models = {
     modelLanes: [],
@@ -292,6 +333,9 @@ describe("ProjectModelsSection", () => {
     getLaneValue: () => "",
     updateLaneValue: vi.fn(),
     resetLaneValue: vi.fn(),
+    getLaneThinkingValue: () => "",
+    updateLaneThinkingValue: vi.fn(),
+    resetLaneThinkingValue: vi.fn(),
     availableModels: [],
     modelsLoading: false,
     favoriteProviders: [],
@@ -329,6 +373,42 @@ describe("ProjectModelsSection", () => {
     expect(screen.getByTestId("mock-model-dropdown-summarizationModel")).toHaveAttribute("data-menu-width", "readable");
     expect(screen.getByTestId("mock-model-dropdown-preset-executor-model")).toHaveAttribute("data-menu-width", "readable");
     expect(screen.getByTestId("mock-model-dropdown-preset-validator-model")).toHaveAttribute("data-menu-width", "readable");
+  });
+
+  it("wires project model lane thinking overrides and reset", () => {
+    const updateLaneThinkingValue = vi.fn();
+    const resetLaneThinkingValue = vi.fn();
+    const resetLaneValue = vi.fn();
+    render(
+      <ProjectModelsSection
+        scopeBanner={null}
+        form={{ defaultThinkingLevel: "medium" } as SettingsFormState}
+        setForm={vi.fn()}
+        models={{
+          ...models,
+          modelLanes: [
+            { laneId: "default", label: "Default", helperText: "Default", fallbackOrder: "global", projectThinkingKey: "defaultThinkingLevelOverride" },
+          ] as never,
+          getLaneThinkingValue: () => "high",
+          updateLaneThinkingValue,
+          resetLaneThinkingValue,
+          resetLaneValue,
+          availableModels: [{ provider: "anthropic", id: "claude-sonnet-4-5", name: "Claude Sonnet 4.5" }],
+        }}
+        addToast={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId("mock-model-dropdown-defaultModel")).toHaveAttribute("data-thinking-visible", "true");
+    expect(screen.getByTestId("mock-model-dropdown-defaultModel")).toHaveAttribute("data-thinking-value", "high");
+    expect(screen.getByTestId("mock-model-dropdown-defaultModel")).toHaveAttribute("data-default-thinking", "medium");
+
+    fireEvent.click(screen.getByTestId("mock-thinking-defaultModel"));
+    expect(updateLaneThinkingValue).toHaveBeenCalledWith(expect.objectContaining({ laneId: "default" }), "");
+
+    fireEvent.click(screen.getByText(/Reset/));
+    expect(resetLaneValue).toHaveBeenCalledWith(expect.objectContaining({ laneId: "default" }));
+    expect(resetLaneThinkingValue).toHaveBeenCalledWith(expect.objectContaining({ laneId: "default" }));
   });
 
   it("opts default workflow model lane dropdowns into readable menu width", async () => {

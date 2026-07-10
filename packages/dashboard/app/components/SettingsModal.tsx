@@ -2404,8 +2404,10 @@ export function SettingsModal({
     label: string;
     globalProviderKey: keyof GlobalSettings;
     globalModelKey: keyof GlobalSettings;
+    globalThinkingKey?: keyof GlobalSettings;
     projectProviderKey: keyof Settings;
     projectModelKey: keyof Settings;
+    projectThinkingKey?: keyof Settings;
     helperText: string;
     fallbackOrder: string;
   }
@@ -2419,6 +2421,7 @@ export function SettingsModal({
       globalModelKey: "defaultModelId",
       projectProviderKey: "defaultProviderOverride",
       projectModelKey: "defaultModelIdOverride",
+      projectThinkingKey: "defaultThinkingLevelOverride",
       helperText: "Default AI model used for task execution when no per-task override is set.",
       fallbackOrder: "Project override → Global default lane → Automatic resolution",
     },
@@ -2427,6 +2430,7 @@ export function SettingsModal({
       label: "Execution Model",
       globalProviderKey: "executionGlobalProvider",
       globalModelKey: "executionGlobalModelId",
+      globalThinkingKey: "executionGlobalThinkingLevel",
       projectProviderKey: "executionProvider",
       projectModelKey: "executionModelId",
       helperText: "AI model used for task implementation (executor agent).",
@@ -2437,6 +2441,7 @@ export function SettingsModal({
       label: "Planning Model",
       globalProviderKey: "planningGlobalProvider",
       globalModelKey: "planningGlobalModelId",
+      globalThinkingKey: "planningGlobalThinkingLevel",
       projectProviderKey: "planningProvider",
       projectModelKey: "planningModelId",
       helperText: "AI model used for task planning.",
@@ -2447,6 +2452,7 @@ export function SettingsModal({
       label: "Reviewer Model",
       globalProviderKey: "validatorGlobalProvider",
       globalModelKey: "validatorGlobalModelId",
+      globalThinkingKey: "validatorGlobalThinkingLevel",
       projectProviderKey: "validatorProvider",
       projectModelKey: "validatorModelId",
       helperText: "AI model used for code and specification review.",
@@ -2457,8 +2463,10 @@ export function SettingsModal({
       label: "Title and Git Commit Message Summarization Model",
       globalProviderKey: "titleSummarizerGlobalProvider",
       globalModelKey: "titleSummarizerGlobalModelId",
+      globalThinkingKey: "titleSummarizerGlobalThinkingLevel",
       projectProviderKey: "titleSummarizerProvider",
       projectModelKey: "titleSummarizerModelId",
+      projectThinkingKey: "titleSummarizerThinkingLevel",
       helperText: "AI model used for auto-generating task titles and merge commit summaries.",
         fallbackOrder: "Project override → Global summarization lane → Project planning lane → Project default lane → Global default lane → Automatic resolution",
     },
@@ -2529,6 +2537,29 @@ export function SettingsModal({
       [lane.projectProviderKey]: undefined,
       [lane.projectModelKey]: undefined,
     }));
+  }
+
+
+  /**
+   * FNXC:Settings-ThinkingLevel 2026-07-10-00:00:
+   * SettingsModal owns lane thinking persistence just like lane model persistence. Empty values clear the override so the engine falls back through task > lane > global default without sections writing settings directly.
+   */
+  function getLaneThinkingValue(lane: ModelLane, scope: "project" | "global" = "project"): string {
+    const key = scope === "project" ? lane.projectThinkingKey : lane.globalThinkingKey;
+    return key ? ((form[key as keyof Settings] as string | undefined) ?? "") : "";
+  }
+
+  function updateLaneThinkingValue(lane: ModelLane, level: string, scope: "project" | "global" = "project"): void {
+    const key = scope === "project" ? lane.projectThinkingKey : lane.globalThinkingKey;
+    if (!key) return;
+    setForm((f) => ({
+      ...f,
+      [key]: level || undefined,
+    }));
+  }
+
+  function resetLaneThinkingValue(lane: ModelLane, scope: "project" | "global" = "project"): void {
+    updateLaneThinkingValue(lane, "", scope);
   }
 
   const openOverlapPathPicker = useCallback((index: number) => {
@@ -3218,6 +3249,9 @@ export function SettingsModal({
             availableModels={availableModels}
             modelsLoading={modelsLoading}
             globalModelLanes={MODEL_LANES.filter((lane) => lane.laneId !== "default")}
+            getLaneThinkingValue={(lane) => getLaneThinkingValue(lane, "global")}
+            updateLaneThinkingValue={(lane, level) => updateLaneThinkingValue(lane, level, "global")}
+            resetLaneThinkingValue={(lane) => resetLaneThinkingValue(lane, "global")}
             favoriteProviders={favoriteProviders}
             favoriteModels={favoriteModels}
             onToggleFavorite={handleToggleFavorite}
@@ -3267,6 +3301,9 @@ export function SettingsModal({
               getLaneValue,
               updateLaneValue,
               resetLaneValue,
+              getLaneThinkingValue,
+              updateLaneThinkingValue,
+              resetLaneThinkingValue,
               availableModels,
               modelsLoading,
               favoriteProviders,

@@ -20,6 +20,9 @@ export interface GlobalModelsSectionProps extends SectionBaseProps {
     modelsLoading: boolean;
     /** Global model lanes (i.e. MODEL_LANES without the `default` lane). */
     globalModelLanes: ModelLane[];
+    getLaneThinkingValue: (lane: ModelLane) => string;
+    updateLaneThinkingValue: (lane: ModelLane, level: string) => void;
+    resetLaneThinkingValue: (lane: ModelLane) => void;
     favoriteProviders: string[];
     favoriteModels: string[];
     onToggleFavorite: (provider: string) => void;
@@ -27,7 +30,7 @@ export interface GlobalModelsSectionProps extends SectionBaseProps {
     addToast: (message: string, type?: ToastType) => void;
     projectId?: string;
 }
-export function GlobalModelsSection({ scopeBanner, form, setForm, availableModels, modelsLoading, globalModelLanes, favoriteProviders, favoriteModels, onToggleFavorite, onToggleModelFavorite, addToast, projectId, }: GlobalModelsSectionProps) {
+export function GlobalModelsSection({ scopeBanner, form, setForm, availableModels, modelsLoading, globalModelLanes, getLaneThinkingValue, updateLaneThinkingValue, resetLaneThinkingValue, favoriteProviders, favoriteModels, onToggleFavorite, onToggleModelFavorite, addToast, projectId, }: GlobalModelsSectionProps) {
     const { t } = useTranslation("app");
     const selectedValue = form.defaultProvider && form.defaultModelId
         ? `${form.defaultProvider}/${form.defaultModelId}`
@@ -103,6 +106,7 @@ export function GlobalModelsSection({ scopeBanner, form, setForm, availableModel
                 const provider = form[lane.globalProviderKey as keyof Settings] as string | undefined;
                 const model = form[lane.globalModelKey as keyof Settings] as string | undefined;
                 const value = provider && model ? `${provider}/${model}` : "";
+                const thinkingValue = getLaneThinkingValue(lane);
                 return (<div className="form-group" key={`global-${lane.laneId}`}>
                 <label htmlFor={`global-${lane.laneId}-model`}>{lane.label}</label>
                 <CustomModelDropdown id={`global-${lane.laneId}-model`} label={lane.label} models={availableModels} value={value} onChange={(selected) => {
@@ -112,6 +116,7 @@ export function GlobalModelsSection({ scopeBanner, form, setForm, availableModel
                                 [lane.globalProviderKey]: undefined,
                                 [lane.globalModelKey]: undefined,
                             }));
+                            resetLaneThinkingValue(lane);
                             return;
                         }
                         const slashIdx = selected.indexOf("/");
@@ -120,7 +125,7 @@ export function GlobalModelsSection({ scopeBanner, form, setForm, availableModel
                             [lane.globalProviderKey]: selected.slice(0, slashIdx),
                             [lane.globalModelKey]: selected.slice(slashIdx + 1),
                         }));
-                    }} placeholder={t("settings.globalModels.useDefault", "Use default")} favoriteProviders={favoriteProviders} onToggleFavorite={onToggleFavorite} favoriteModels={favoriteModels} onToggleModelFavorite={onToggleModelFavorite}/>
+                    }} placeholder={t("settings.globalModels.useDefault", "Use default")} favoriteProviders={favoriteProviders} onToggleFavorite={onToggleFavorite} favoriteModels={favoriteModels} onToggleModelFavorite={onToggleModelFavorite} showThinkingLevel={Boolean(lane.globalThinkingKey)} thinkingLevel={thinkingValue} onThinkingLevelChange={(level) => updateLaneThinkingValue(lane, level)} defaultThinkingLevel={form.defaultThinkingLevel}/>
                 <small>{lane.helperText}</small>
               </div>);
             })}

@@ -3937,6 +3937,8 @@ export default interface Resources {
       "preset": "Preset",
       "reviewerModel": "Reviewer Model",
       "reviewerPlaceholder": "Select reviewer model…",
+      "thinkingDefault": "Default ({{level}})",
+      "thinkingModel": "Thinking",
       "title": "Select Models",
       "useDefault": "Use default",
       "usingDefault": "Using default"
@@ -3980,6 +3982,7 @@ export default interface Resources {
       "noResults": "No models match '{{filter}}'",
       "options": {
         "default": "Default",
+        "defaultWithLevel": "Default ({{level}})",
         "high": "High",
         "low": "Low",
         "medium": "Medium",

@@ -182,6 +182,14 @@ export const DEFAULT_GLOBAL_SETTINGS = {
   validatorGlobalModelId: undefined,
   titleSummarizerGlobalProvider: undefined,
   titleSummarizerGlobalModelId: undefined,
+  /*
+  FNXC:Settings-ThinkingLevel 2026-07-10-00:00:
+  Global model lanes can override the default thinking effort independently. Undefined preserves the existing inheritance to `defaultThinkingLevel`.
+  */
+  executionGlobalThinkingLevel: undefined,
+  planningGlobalThinkingLevel: undefined,
+  validatorGlobalThinkingLevel: undefined,
+  titleSummarizerGlobalThinkingLevel: undefined,
   // Daemon mode settings
   daemonToken: undefined,
   daemonPort: 4040,
@@ -400,6 +408,11 @@ export const DEFAULT_PROJECT_SETTINGS = {
   // Project-level default override (NOT moved — stays project-scoped)
   defaultProviderOverride: undefined,
   defaultModelIdOverride: undefined,
+  /*
+  FNXC:Settings-ThinkingLevel 2026-07-10-00:00:
+  Project model lanes can carry optional thinking overrides. Undefined means inherit the global default thinking effort; runtime precedence remains task > lane override > global default.
+  */
+  defaultThinkingLevelOverride: undefined,
   modelPresets: [],
   autoSelectModelPreset: false,
   completionDocumentationMode: "off",
@@ -561,6 +574,7 @@ export const DEFAULT_PROJECT_SETTINGS = {
   // Title-summarizer model lanes stay project-scoped (not moved in U4).
   titleSummarizerProvider: undefined,
   titleSummarizerModelId: undefined,
+  titleSummarizerThinkingLevel: undefined,
   titleSummarizerFallbackProvider: undefined,
   titleSummarizerFallbackModelId: undefined,
   prTitlePromptInstructions: undefined,

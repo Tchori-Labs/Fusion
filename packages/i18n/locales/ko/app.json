@@ -3957,7 +3957,8 @@
       "medium": "중간",
       "minimal": "최소",
       "off": "끔",
-      "xhigh": "매우 높음"
+      "xhigh": "매우 높음",
+      "defaultWithLevel": "Default ({{level}})"
     },
     "placeholders": {
       "selectExecutor": "실행자 모델 선택…",

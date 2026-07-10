@@ -89,6 +89,7 @@ import {
   extractRuntimeHint,
   resolveImplicitPlanningFallbackModel,
   resolvePlanningSessionModel,
+  resolvePlanningThinkingLevel,
 } from "./agent-session-helpers.js";
 import { mergeEffectiveSettings } from "./effective-settings.js";
 import { detectDanglingTaskDocReferences, formatDanglingDiagnostic } from "./spec-validation/task-document-references.js";
@@ -1160,7 +1161,7 @@ export class TriageProcessor {
           fallbackModelId: hasExplicitPlanningFallback
             ? settings.planningFallbackModelId
             : (hasExplicitGlobalFallback ? settings.fallbackModelId : implicitPlanningFallback.modelId),
-          defaultThinkingLevel: settings.defaultThinkingLevel,
+          defaultThinkingLevel: resolvePlanningThinkingLevel(settings),
           runAuditor,
           settings,
           // FNXC:McpConfig 2026-06-25-23:17: Primary triage planning is an AI lane, so it receives the store-resolved MCP set while the pi runtime-support guard decides whether to forward it without logging secret material.
@@ -1178,7 +1179,7 @@ export class TriageProcessor {
           }),
         });
 
-        const modelDesc = formatModelMarkerDetails(describeModel(session), settings.defaultThinkingLevel);
+        const modelDesc = formatModelMarkerDetails(describeModel(session), resolvePlanningThinkingLevel(settings));
         planLog.log(`${task.id}: using model ${modelDesc}`);
         await this.store.logEntry(task.id, `Triage using model: ${modelDesc}`);
         await this.store.appendAgentLog(

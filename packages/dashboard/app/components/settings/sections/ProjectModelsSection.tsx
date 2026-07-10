@@ -94,6 +94,9 @@ export interface ProjectModelsSectionModelProps {
     getLaneValue: (lane: ModelLane) => string;
     updateLaneValue: (lane: ModelLane, value: string) => void;
     resetLaneValue: (lane: ModelLane) => void;
+    getLaneThinkingValue: (lane: ModelLane) => string;
+    updateLaneThinkingValue: (lane: ModelLane, level: string) => void;
+    resetLaneThinkingValue: (lane: ModelLane) => void;
     availableModels: ModelInfo[];
     modelsLoading: boolean;
     favoriteProviders: string[];
@@ -129,7 +132,7 @@ export interface ProjectModelsSectionProps extends SectionBaseProps {
 }
 export function ProjectModelsSection({ scopeBanner, form, setForm, models, projectId, onOpenWorkflowSettings, registerWorkflowLaneSaver, }: ProjectModelsSectionProps) {
     const { t } = useTranslation("app");
-    const { modelLanes, getLaneStatus, getLaneValue, updateLaneValue, resetLaneValue, availableModels, modelsLoading, favoriteProviders, favoriteModels, onToggleFavorite, onToggleModelFavorite, editingPresetId, setEditingPresetId, presetDraft, setPresetDraft, onSavePresetDraft, confirmDelete, } = models;
+    const { modelLanes, getLaneStatus, getLaneValue, updateLaneValue, resetLaneValue, getLaneThinkingValue, updateLaneThinkingValue, resetLaneThinkingValue, availableModels, modelsLoading, favoriteProviders, favoriteModels, onToggleFavorite, onToggleModelFavorite, editingPresetId, setEditingPresetId, presetDraft, setPresetDraft, onSavePresetDraft, confirmDelete, } = models;
     const presets = form.modelPresets || [];
     const presetOptions = presets.map((preset) => ({ id: preset.id, name: preset.name }));
     const inUsePresetIds = new Set(Object.values(form.defaultPresetBySize || {}).filter(Boolean));
@@ -296,7 +299,8 @@ export function ProjectModelsSection({ scopeBanner, form, setForm, models, proje
           {projectModelLanes.map((lane) => {
                 const status = getLaneStatus(lane);
                 const value = getLaneValue(lane);
-                const isOverridden = status === "overridden";
+                const thinkingValue = getLaneThinkingValue(lane);
+                const isOverridden = status === "overridden" || Boolean(thinkingValue);
                 const laneLabel = getProjectLaneLabel(lane);
                 return (<div className="form-group" key={lane.laneId}>
                 <div className="settings-model-lane-label-row">
@@ -307,9 +311,9 @@ export function ProjectModelsSection({ scopeBanner, form, setForm, models, proje
                 </div>
                 <div className="settings-model-lane-control-row">
                   <div className="settings-model-lane-control-main">
-                    <CustomModelDropdown id={`${lane.laneId}Model`} label={laneLabel} models={availableModels} value={value} onChange={(val) => updateLaneValue(lane, val)} placeholder={lane.laneId === "default" ? "Use global default" : "Use global"} favoriteProviders={favoriteProviders} onToggleFavorite={onToggleFavorite} favoriteModels={favoriteModels} onToggleModelFavorite={onToggleModelFavorite} menuWidth="readable"/>
+                    <CustomModelDropdown id={`${lane.laneId}Model`} label={laneLabel} models={availableModels} value={value} onChange={(val) => updateLaneValue(lane, val)} placeholder={lane.laneId === "default" ? "Use global default" : "Use global"} favoriteProviders={favoriteProviders} onToggleFavorite={onToggleFavorite} favoriteModels={favoriteModels} onToggleModelFavorite={onToggleModelFavorite} menuWidth="readable" showThinkingLevel={Boolean(lane.projectThinkingKey)} thinkingLevel={thinkingValue} onThinkingLevelChange={(level) => updateLaneThinkingValue(lane, level)} defaultThinkingLevel={form.defaultThinkingLevel}/>
                   </div>
-                  {isOverridden && (<button type="button" className="btn btn-ghost btn-sm" title={t("settings.projectModels.resetToInheritFromGlobal", "Reset to inherit from global")} onClick={() => resetLaneValue(lane)} style={{ whiteSpace: "nowrap" }}>{t("settings.projectModels.reset", " Reset ")}</button>)}
+                  {isOverridden && (<button type="button" className="btn btn-ghost btn-sm" title={t("settings.projectModels.resetToInheritFromGlobal", "Reset to inherit from global")} onClick={() => { resetLaneValue(lane); resetLaneThinkingValue(lane); }} style={{ whiteSpace: "nowrap" }}>{t("settings.projectModels.reset", " Reset ")}</button>)}
                 </div>
                 <small>
                   {getProjectLaneHelperText(lane)}{t("settings.projectModels.fallsBackTo", " Falls back to: ")}{lane.fallbackOrder}.

@@ -26,6 +26,7 @@ import {
   describeAgentModel,
   promptWithAutoRetry,
   resolveExecutorSessionModel,
+  resolveExecutorThinkingLevel,
 } from "./agent-session-helpers.js";
 import type { AgentActionGateContext } from "./agent-action-gate.js";
 import type { SkillSelectionContext } from "./skill-resolver.js";
@@ -1344,7 +1345,7 @@ Follow instructions precisely and avoid unrelated changes.`,
               defaultModelId: executorModelId,
               fallbackProvider: settings.fallbackProvider,
               fallbackModelId: settings.fallbackModelId,
-              defaultThinkingLevel: taskDetail.thinkingLevel ?? settings.defaultThinkingLevel,
+              defaultThinkingLevel: resolveExecutorThinkingLevel(taskDetail.thinkingLevel, settings),
               runAuditor: createRunAuditor(this.store, {
                 runId: generateSyntheticRunId("workflow-step", taskDetail.id),
                 // Column-agent attribution (U4): the effective column agent is the

@@ -84,6 +84,8 @@ import {
   createResolvedAgentSession,
   extractRuntimeHint,
   resolveExecutorSessionModel,
+  resolveExecutorThinkingLevel,
+  resolveValidatorThinkingLevel,
 } from "./agent-session-helpers.js";
 import { buildSessionSkillContext } from "./session-skill-context.js";
 import type { SkillSelectionContext } from "./skill-resolver.js";
@@ -6658,7 +6660,7 @@ export class TaskExecutor {
               defaultModelId: settings.defaultModelId,
               fallbackProvider: settings.fallbackProvider,
               fallbackModelId: settings.fallbackModelId,
-              defaultThinkingLevel: detail.thinkingLevel ?? settings.defaultThinkingLevel,
+              defaultThinkingLevel: resolveExecutorThinkingLevel(detail.thinkingLevel, settings),
               taskValidatorProvider: detail.validatorModelProvider,
               taskValidatorModelId: detail.validatorModelId,
               projectValidatorProvider: settings.validatorProvider,
@@ -10541,7 +10543,7 @@ export class TaskExecutor {
         );
         const executorFallbackProvider = settings.fallbackProvider;
         const executorFallbackModelId = settings.fallbackModelId;
-        const executorThinkingLevel = detail.thinkingLevel ?? settings.defaultThinkingLevel;
+        const executorThinkingLevel = resolveExecutorThinkingLevel(detail.thinkingLevel, settings);
 
         // U1 telemetry: now that the session model/provider/node are resolved,
         // give the agent logger the context it needs to emit usage_events tool
@@ -13560,7 +13562,7 @@ export class TaskExecutor {
               defaultModelId: settings.defaultModelId,
               fallbackProvider: settings.fallbackProvider,
               fallbackModelId: settings.fallbackModelId,
-              defaultThinkingLevel: latestDetailForReview.thinkingLevel ?? settings.defaultThinkingLevel,
+              defaultThinkingLevel: resolveValidatorThinkingLevel(latestDetailForReview.thinkingLevel, settings),
               // Task-level validator override (from task)
               taskValidatorProvider: latestDetailForReview.validatorModelProvider,
               taskValidatorModelId: latestDetailForReview.validatorModelId,
@@ -13988,7 +13990,7 @@ Do not refactor, rename broadly, or make opportunistic improvements.
         onToolEnd: logger.onToolEnd,
         defaultProvider: executorProvider,
         defaultModelId: executorModelId,
-        defaultThinkingLevel: settings.defaultThinkingLevel,
+        defaultThinkingLevel: resolveExecutorThinkingLevel(task.thinkingLevel, settings),
         runAuditor: createRunAuditor(this.store, this.getRunContextFor(task.id)),
         settings,
         taskEnv: extraEnv,
@@ -15078,7 +15080,7 @@ You have access to the file system to review changes.${inlineFixBlock}${verdictB
         defaultModelId: modelId,
         fallbackProvider: settings.fallbackProvider,
         fallbackModelId: settings.fallbackModelId,
-        defaultThinkingLevel: settings.defaultThinkingLevel,
+        defaultThinkingLevel: resolveExecutorThinkingLevel(task.thinkingLevel, settings),
         runAuditor: createRunAuditor(this.store, this.getRunContextFor(task.id)),
         settings,
         taskEnv: stepEnv,
@@ -15096,7 +15098,7 @@ You have access to the file system to review changes.${inlineFixBlock}${verdictB
 
       const workflowModelDetails = formatModelMarkerDetails(
         describeModel(session),
-        settings.defaultThinkingLevel,
+        resolveExecutorThinkingLevel(task.thinkingLevel, settings),
         [
           useOverride && attemptLabel === "primary" ? "workflow step override" : "",
           attemptLabel === "fallback" ? "fallback after timeout" : "",

@@ -3957,7 +3957,8 @@
       "medium": "Medio",
       "minimal": "Mínimo",
       "off": "Desactivado",
-      "xhigh": "Muy alto"
+      "xhigh": "Muy alto",
+      "defaultWithLevel": "Default ({{level}})"
     },
     "placeholders": {
       "selectExecutor": "Seleccione modelo de ejecución…",

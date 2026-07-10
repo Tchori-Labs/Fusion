@@ -3967,7 +3967,8 @@
       "medium": "Medium",
       "minimal": "Minimal",
       "off": "Off",
-      "xhigh": "Very High"
+      "xhigh": "Very High",
+      "defaultWithLevel": "Default ({{level}})"
     },
     "placeholders": {
       "selectExecutor": "Select executor model…",
