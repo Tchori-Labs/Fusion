@@ -2540,7 +2540,18 @@ export class ProjectEngine {
     try {
       this.reconcileStaleMergeActive();
       const store = this.runtime.getTaskStore();
-      const cwd = this.config.workingDirectory;
+      /*
+      FNXC:AutoMergeLifecycle 2026-07-10 (fork review, TrinaryCompute/postgres-v057):
+      Root the merge git operations at the STORE's project root, not the engine
+      config's workingDirectory. In the in-process dashboard the config value
+      resolved to process.cwd() (the dashboard dir), so
+      `git rev-parse --verify refs/heads/fusion/<task>` ran in the wrong repo and
+      every merge aborted with `branch "fusion/<task>" is missing — work appears
+      lost`. The store is project-rooted (see startup-factory Step 7); the
+      config fallback keeps engine test fakes (no getRootDir) green and is a
+      no-op in deployments where the two already agree.
+      */
+      const cwd = store.getRootDir?.() ?? this.config.workingDirectory;
 
       while (this.mergeQueue.length > 0 && !this.shuttingDown) {
         const shadowCandidateTaskId = await this.getShadowMergeRequestCandidateId();

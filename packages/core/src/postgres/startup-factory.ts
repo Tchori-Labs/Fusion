@@ -415,9 +415,19 @@ export async function createTaskStoreForBackend(
   const asyncLayer = createAsyncDataLayer(connections);
 
   // Step 7: construct the TaskStore in backend mode.
+  /*
+  FNXC:PostgresCutover 2026-07-10 (fork review, TrinaryCompute/postgres-v057):
+  When BOTH projectId and rootDir are provided, the explicit rootDir must win.
+  Previously the projectId branch dropped options.rootDir and re-resolved the
+  path via CentralCore from process.cwd(), so a scoped store could root at the
+  DASHBOARD's cwd instead of the project dir. The observable failure: createTask
+  wrote the bootstrap PROMPT.md stub under the dashboard cwd while triage wrote
+  the real spec under the project dir, so isUnplannedForExecution kept reading
+  the stale stub and pinned every card "unplanned" forever (never dispatched).
+  */
   let taskStore: TaskStore;
   try {
-    if (options.projectId) {
+    if (options.projectId && !options.rootDir) {
       taskStore = await TaskStore.getOrCreateForProject(
         options.projectId,
         undefined,

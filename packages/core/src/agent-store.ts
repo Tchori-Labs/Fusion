@@ -3385,7 +3385,15 @@ export class AgentStore extends EventEmitter {
     for (const agent of agents) {
       this.agentSnapshotCache.set(agent.id, this.watchSnapshotOf(agent));
     }
-    this.lastKnownModified = this.db.getLastModified();
+    /*
+    FNXC:PostgresCutover 2026-07-10 (fork review): db.getLastModified() is the
+    sqlite __meta counter and throws in backend mode — startWatching previously
+    logged "SQLite Database is not available in backend mode" at startup and
+    fell back to the 60s audit sweep. In backend mode there is no cheap
+    cross-process modified counter, so the gate is disabled and every poll tick
+    runs the (already bounded) listAgents diff directly.
+    */
+    this.lastKnownModified = this.backendMode ? 0 : this.db.getLastModified();
 
     this.watchPoll.start({
       dir: this.rootDir,
@@ -3413,9 +3421,12 @@ export class AgentStore extends EventEmitter {
     if (this.pollingInProgress) return;
     this.pollingInProgress = true;
     try {
-      const currentModified = this.db.getLastModified();
-      if (currentModified <= this.lastKnownModified) return;
-      this.lastKnownModified = currentModified;
+      if (!this.backendMode) {
+        // sqlite-only cheap gate; backend mode diffs every tick (see startWatching).
+        const currentModified = this.db.getLastModified();
+        if (currentModified <= this.lastKnownModified) return;
+        this.lastKnownModified = currentModified;
+      }
 
       const agents = await this.listAgents({ includeEphemeral: true });
       const seenIds = new Set<string>();
