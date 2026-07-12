@@ -3279,11 +3279,6 @@ function TaskCardComponent({
               )}
             </div>
           )}
-          {task.size && (
-            <span className={`card-size-badge size-${task.size.toLowerCase()}`}>
-              {task.size}
-            </span>
-          )}
           {/*
           FNXC:TaskCardMenu 2026-07-10-12:00:
           Visible entry point for the card's action menu (Edit/Delete/Review/New chat/Interventions…)
@@ -3306,6 +3301,15 @@ function TaskCardComponent({
             >
               <MoreHorizontal size={14} />
             </button>
+          )}
+          {/*
+          FNXC:TaskCardLayout 2026-07-11-00:00 (FN-7846):
+          The size badge must be the last item in the right-aligned header-actions cluster so its right edge uses the card's `--card-padding`, matching the top margin on desktop and mobile while preserving the FN-7837 no-orphaned-second-row grouping.
+          */}
+          {task.size && (
+            <span className={`card-size-badge size-${task.size.toLowerCase()}`}>
+              {task.size}
+            </span>
           )}
         </div>
         )}

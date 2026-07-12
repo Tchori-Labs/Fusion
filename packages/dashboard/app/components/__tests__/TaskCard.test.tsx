@@ -3476,6 +3476,27 @@ describe("TaskCard", () => {
     expect(actionsContainer?.contains(sizeBadge)).toBe(true);
   });
 
+  it("renders size badge as the right-most header action after trailing controls", () => {
+    const { container } = render(
+      <TaskCard
+        task={makeTask({ column: "in-progress", status: "executing" as any, size: "M" })}
+        onOpenDetail={noop}
+        addToast={noop}
+        onPauseTask={async () => makeTask({ paused: true })}
+      />,
+    );
+    const actionsContainer = container.querySelector(".card-header-actions") as HTMLElement | null;
+    const menuButton = container.querySelector(".card-menu-btn");
+    const sizeBadge = container.querySelector(".card-size-badge");
+
+    expect(actionsContainer).not.toBeNull();
+    expect(menuButton).not.toBeNull();
+    expect(sizeBadge).not.toBeNull();
+    expect(actionsContainer?.contains(menuButton)).toBe(true);
+    expect(actionsContainer?.lastElementChild).toBe(sizeBadge);
+    expect(sizeBadge?.nextElementSibling).toBeNull();
+  });
+
   it("places card-header-actions as a direct header child after the wrapped badge group", () => {
     const { container } = render(
       <TaskCard
