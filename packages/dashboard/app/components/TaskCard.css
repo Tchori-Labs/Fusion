@@ -516,7 +516,7 @@ FN-6774 removes the saturated stuck-task edge stripe from board cards. Keep the 
 }
 
 .card-priority-badge {
-  /* FNXC:PriorityColorCoding 2026-07-11-00:00: Priority badges add a glyph beside the label; keep inline-flex geometry and token spacing so badge height/wrap invariants do not change. */
+  /* FNXC:PriorityIconOnlyBadge 2026-07-12-00:00: FN-7867 removes visible priority text from board cards, so these shared spacing declarations no longer add card text width; keep them to preserve the Task Detail priority chip/select geometry that reuses the same badge class. */
   gap: var(--space-xs);
   letter-spacing: 0.4px;
 }
