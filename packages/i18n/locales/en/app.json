@@ -8370,6 +8370,7 @@
   "todo": {
     "addItemPlaceholder": "Add a todo item",
     "addList": "Add list",
+    "allDoneHidden": "All items are complete. Choose Show done to view them.",
     "assignAgent": "Assign {{text}} to agent",
     "cancelItemEdit": "Cancel item edit",
     "cancelList": "Cancel list",
@@ -8398,6 +8399,7 @@
     "failedToCreateTask": "Failed to create task: {{error}}",
     "failedToLoadAgents": "Failed to load agents: {{error}}",
     "failedUpdateItem": "Failed to update item",
+    "hideDone": "Hide done",
     "failedUpdateItemToast": "Failed to update todo item",
     "itemsLabel": "Todo items",
     "lists": "Lists",
@@ -8417,6 +8419,7 @@
     "saveListRename": "Save list rename",
     "selectList": "Select list {{title}}",
     "selectListEmpty": "Select a list from the sidebar",
+    "showDone": "Show done",
     "startPlanning": "Start planning from {{text}}",
     "taskCreatedAndAssigned": "Created {{id}} and assigned to {{agent}}",
     "taskCreatedFromTodo": "Created {{id}} from todo",

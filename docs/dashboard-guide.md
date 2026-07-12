@@ -904,6 +904,9 @@ Navigation:
 - Desktop/tablet: **Left sidebar → Todos** when the Todo view is enabled
 - Mobile: **More** sheet → **Todos**
 
+<!-- FNXC:Todos 2026-07-12-00:00: Todo operators can declutter long selected lists with a per-project Hide done / Show done toggle while the completion count remains based on all items. -->
+Use the items header **Hide done** toggle to hide completed todo items in the selected list; switch it back with **Show done** when you need to review completed work. The completed/total count still reflects all items in the list.
+
 For full behavior, API contracts, and storage details, use the canonical [Todo View guide](./todo-view.md).
 
 ## Research View
