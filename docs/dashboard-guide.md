@@ -636,15 +636,16 @@ Task Detail has two terminal-adjacent tabs when both are applicable: **Session**
 
 On Windows, the embedded terminal starts a supported shell inside Fusion, such as Command Prompt (`cmd.exe`) or Windows PowerShell. Windows Terminal (`wt.exe`) is an external terminal host and is not required or launched for the embedded panel, so Fusion should not show native Windows Terminal help/version popups while starting a terminal. If embedded terminal startup fails, Fusion shows an inline error with **Retry** instead of a blocking native dialog; install or repair Windows Terminal separately with `winget install Microsoft.WindowsTerminal` only if you want to use Windows Terminal outside Fusion.
 
+<!-- FNXC:TerminalFooter 2026-07-11-20:45: FN-7829 moved all terminal action controls (font size, Clear, Shortcuts, Preferences, status, pin, and pop-out) into the bottom terminal footer at every width, and desktop/tablet tabs now fall back to the mobile-style selector when the tab strip cannot fit its container. -->
 Use the terminal on desktop/tablet:
 
 1. Select the **Terminal** button in the footer executor status bar.
-   Expected outcome: the terminal opens as a bottom-docked overlay panel with the active shell session and a draggable top resize handle. On true desktop (wider than the tablet tier) the font size / clear / shortcuts / preferences controls render in the terminal header; on tablet widths (769-1024px) those same controls render in a bottom action-control footer bar instead, so the narrower tablet header does not overflow (the tab strip, workspace picker, and close button stay in the header on both).
-2. Select **Pin terminal (push content)** — from the terminal header on desktop, or the bottom action-control footer on tablet.
+   Expected outcome: the terminal opens as a bottom-docked overlay panel with the active shell session and a draggable top resize handle. The font size / clear / shortcuts / preferences controls, connection status, pin, and pop-out controls render in the terminal's bottom action-control footer at every desktop/tablet width, so the header only has to carry the tab affordance, title/status, workspace picker, and close button.
+2. Select **Pin terminal (push content)** from the bottom action-control footer.
    Expected outcome: the terminal moves into a persisted below-application panel that reserves space instead of covering the board, chat, or right sidebar. Select **Unpin terminal (overlay content)** to return to the overlay docked panel.
 3. Drag the top edge of the docked or pinned panel.
    Expected outcome: the panel height changes within its viewport-safe bounds and persists per project, with pinned mode clamped shorter so the application remains usable.
-4. Select **Pop out** — from the terminal header on desktop, or the bottom action-control footer on tablet.
+4. Select **Pop out** from the bottom action-control footer.
    Expected outcome: the terminal switches to a floating window that can be dragged and freely resized; size, position, and display mode are saved per project.
 5. Select **Dock** in the floating terminal.
    Expected outcome: the terminal returns to the bottom docked overlay panel using the saved docked height.
@@ -656,7 +657,7 @@ Use the terminal on mobile:
 1. Open the bottom navigation **More** sheet and select **Terminal**.
    Expected outcome: the terminal opens as a full-screen, keyboard-aware modal rather than the desktop/tablet docked or floating surface.
 2. Use the **Terminal tab** selector to switch between terminal tabs, or use the adjacent **+** action to open another Project Root terminal.
-   Expected outcome: every terminal tab appears in the dropdown, switching preserves the active session, and the desktop horizontal tab strip is not shown on mobile.
+   Expected outcome: every terminal tab appears in the dropdown, switching preserves the active session, and the desktop horizontal tab strip is not shown on mobile. The same selector also appears on desktop/tablet when a narrow docked or floating terminal does not have enough room to show the whole tab strip.
 3. When multiple tabs are open, use **Close current tab** beside the selector, then close the modal when finished.
    Expected outcome: mobile can close the active terminal tab without exposing a cramped horizontal tab strip, and terminal sessions reconnect/recover normally without desktop dock state affecting the mobile layout.
 

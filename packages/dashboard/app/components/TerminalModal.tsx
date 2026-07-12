@@ -357,22 +357,21 @@ function isTerminalMobileViewport(): boolean {
   return window.innerWidth <= 768 || (hasTouchScreen && (getTerminalViewportWidth(true) <= 768 || getTerminalViewportHeight(true) <= 480));
 }
 
+interface TabsOverflowMeasurement {
+  scrollWidth: number;
+  clientWidth: number;
+  currentlyOverflowing?: boolean;
+}
+
+const TERMINAL_TABS_OVERFLOW_HYSTERESIS = 1;
+
 /*
-FNXC:TerminalFooter 2026-07-08-15:00:
-FN-7684: on a tablet-width viewport (769-1024px, the project's canonical tablet
-tier — `--tablet-breakpoint: 1024px`) the terminal is NOT mobile but its header
-still overflows if it renders the full desktop `.terminal-actions` cluster (the
-zoom/font-size controls, Shortcuts/Preferences toggles, connection status, and
-help text collide with the pin/pop-out/close icons — see attachment 1863.png).
-This flag is checked ONLY when `isTerminalMobileViewport()` is false, so mobile
-always wins the mobile fullscreen shell; it gates relocating the shared action-
-control fragment into the `.terminal-status-bar` footer on tablet too (FN-7560
-established the footer for mobile).
+FNXC:TerminalTabs 2026-07-11-20:28:
+FN-7829 treats terminal tab collapse as a container-width decision, not a viewport breakpoint. Collapse only after content exceeds the available tab region by a small hysteresis gap, and expand as soon as the strip fits again so narrow floated/docked desktop panels can use the mobile-style dropdown without changing mobile behavior.
 */
-function isTerminalTabletViewport(): boolean {
-  if (typeof window === "undefined") return false;
-  if (isTerminalMobileViewport()) return false;
-  return window.innerWidth >= 769 && window.innerWidth <= 1024;
+export function evaluateTabsOverflow({ scrollWidth, clientWidth, currentlyOverflowing = false }: TabsOverflowMeasurement): boolean {
+  if (clientWidth <= 0) return false;
+  return currentlyOverflowing ? scrollWidth > clientWidth : scrollWidth > clientWidth + TERMINAL_TABS_OVERFLOW_HYSTERESIS;
 }
 
 function isMacPlatform(): boolean {
@@ -572,8 +571,7 @@ export function TerminalModal({ isOpen, onClose, initialCommand, initialCommandG
   const [floatingSize, setFloatingSize] = useState<TerminalFloatSize>(() => readTerminalFloatSize(projectId));
   const [floatingPosition, setFloatingPosition] = useState<TerminalFloatPosition>(() => readTerminalFloatPosition(readTerminalFloatSize(projectId), projectId));
   const [isMobileTerminal, setIsMobileTerminal] = useState(() => isTerminalMobileViewport());
-  // FNXC:TerminalFooter 2026-07-08-15:00: FN-7684 tablet tier (769-1024px, non-mobile) — keeps the desktop display modes (docked/floating/pinned-below), only the action-control render location changes.
-  const [isTabletTerminal, setIsTabletTerminal] = useState(() => isTerminalTabletViewport());
+  const [tabsOverflow, setTabsOverflow] = useState(false);
   /*
   FNXC:Terminal 2026-07-10-00:00:
   FN-7813 embedded mode is parent-layout owned: render in-flow, skip portal/overlay/display-mode chrome, and keep the shared xterm/session/resize observers so Task Detail gets the same terminal behavior without taking over the viewport.
@@ -590,6 +588,8 @@ export function TerminalModal({ isOpen, onClose, initialCommand, initialCommandG
   
   const terminalRef = useRef<HTMLDivElement>(null);
   const modalRef = useRef<HTMLDivElement>(null);
+  const terminalTabRegionRef = useRef<HTMLDivElement>(null);
+  const terminalTabsMeasureRef = useRef<HTMLDivElement>(null);
   const terminalWorkspacePickerRef = useRef<HTMLDivElement>(null);
   const terminalWorkspaceTriggerRef = useRef<HTMLButtonElement>(null);
   const terminalWorkspaceMenuRef = useRef<HTMLDivElement>(null);
@@ -650,8 +650,6 @@ export function TerminalModal({ isOpen, onClose, initialCommand, initialCommandG
     */
     const updateViewportMode = () => {
       setIsMobileTerminal(isTerminalMobileViewport());
-      // FNXC:TerminalFooter 2026-07-08-15:00: FN-7684 — keep isTabletTerminal in sync from the SAME resize/visualViewport listeners as isMobileTerminal rather than adding a second competing listener.
-      setIsTabletTerminal(isTerminalTabletViewport());
     };
     updateViewportMode();
     window.addEventListener("resize", updateViewportMode);
@@ -661,6 +659,13 @@ export function TerminalModal({ isOpen, onClose, initialCommand, initialCommandG
       window.visualViewport?.removeEventListener("resize", updateViewportMode);
     };
   }, [isOpen]);
+
+  const checkTabsFit = useCallback(() => {
+    const measuredTabs = terminalTabsMeasureRef.current;
+    if (!measuredTabs) return;
+    const { scrollWidth, clientWidth } = measuredTabs;
+    setTabsOverflow((current) => evaluateTabsOverflow({ scrollWidth, clientWidth, currentlyOverflowing: current }));
+  }, []);
 
   const setDisplayMode = useCallback((mode: TerminalDisplayMode) => {
     setDisplayModeState(writeTerminalDisplayMode(mode, projectId));
@@ -1074,6 +1079,30 @@ export function TerminalModal({ isOpen, onClose, initialCommand, initialCommandG
     storageScope: scopeId ? `task:${scopeId}` : undefined,
     defaultCwd,
   });
+
+  useEffect(() => {
+    if (!isOpen) {
+      setTabsOverflow(false);
+      return;
+    }
+    checkTabsFit();
+    window.addEventListener("resize", checkTabsFit);
+    const observer = typeof ResizeObserver === "undefined"
+      ? null
+      : new ResizeObserver(() => checkTabsFit());
+    if (observer) {
+      if (terminalTabRegionRef.current) observer.observe(terminalTabRegionRef.current);
+      if (terminalTabsMeasureRef.current) observer.observe(terminalTabsMeasureRef.current);
+    }
+    return () => {
+      window.removeEventListener("resize", checkTabsFit);
+      observer?.disconnect();
+    };
+  }, [checkTabsFit, isOpen, tabs.length]);
+
+  useEffect(() => {
+    checkTabsFit();
+  }, [checkTabsFit, tabs]);
 
   /*
   FNXC:Terminal 2026-07-06-09:15:
@@ -2334,16 +2363,8 @@ export function TerminalModal({ isOpen, onClose, initialCommand, initialCommandG
   } as CSSProperties;
 
   /*
-  FNXC:TerminalFooter 2026-07-08-15:00:
-  Single source of truth for the terminal action-control cluster (reconnect/restart,
-  font-size, Clear, Shortcuts toggle, Preferences toggle, connection status, exit code,
-  help text, and the desktop-only pin/pop-out toggles). Rendered in exactly ONE place
-  per breakpoint: inside the header `.terminal-actions` ONLY on true desktop (>1024px,
-  !isMobileTerminal && !isTabletTerminal), or inside a dedicated bottom
-  `.terminal-status-bar` footer on BOTH mobile (<=768px, FN-7560) and tablet
-  (769-1024px, FN-7684) so the narrower header does not crowd the tab strip/dropdown,
-  workspace picker, and close button. Same fragment, one location per breakpoint —
-  never duplicate these handlers elsewhere.
+  FNXC:TerminalFooter 2026-07-11-20:20:
+  FN-7829 moves the single terminal action-control cluster (reconnect/restart, font-size, Clear, Shortcuts toggle, Preferences toggle, connection status, exit code, help text, and the non-mobile pin/pop-out toggles) into the bottom `.terminal-status-bar` footer at every breakpoint. The header never renders `.terminal-actions`; keeping this as one shared fragment rendered in exactly one footer location prevents handler drift across desktop, tablet, mobile, floating, docked, pinned-below, and embedded modes.
   */
   const terminalActionControls = (
     <>
@@ -2425,6 +2446,99 @@ export function TerminalModal({ isOpen, onClose, initialCommand, initialCommandG
     </>
   );
 
+  const renderTerminalTabStrip = (measuring = false) => (
+    <div
+      ref={measuring || !tabsOverflow ? terminalTabsMeasureRef : undefined}
+      className={`terminal-tabs${measuring ? " terminal-tabs--measuring" : ""}`}
+      data-testid={measuring ? "terminal-tabs-measuring" : "terminal-tabs"}
+      aria-hidden={measuring || undefined}
+    >
+      {tabs.map((tab) => (
+        <div
+          key={tab.id}
+          className={`terminal-tab ${tab.isActive ? "terminal-tab--active" : ""}`}
+          onClick={measuring ? undefined : () => setActiveTab(tab.id)}
+          title={tab.title}
+          role={measuring ? undefined : "tab"}
+          aria-selected={measuring ? undefined : tab.isActive}
+        >
+          <span className="terminal-tab-label">{tab.title}</span>
+          {tabs.length > 1 && (
+            <button
+              className="terminal-tab-close"
+              disabled={measuring}
+              tabIndex={measuring ? -1 : undefined}
+              onClick={measuring ? undefined : (e: ReactMouseEvent<HTMLButtonElement>) => {
+                e.stopPropagation();
+                closeTab(tab.id);
+              }}
+              title={t("terminal.closeTab", "Close tab")}
+            >
+              ×
+            </button>
+          )}
+        </div>
+      ))}
+      <button
+        className="terminal-tab terminal-tab--new"
+        disabled={measuring}
+        tabIndex={measuring ? -1 : undefined}
+        onClick={measuring ? undefined : () => void createTab()}
+        title={t("terminal.newTerminal", "New terminal")}
+        aria-label={t("terminal.newTerminal", "New terminal")}
+      >
+        +
+      </button>
+    </div>
+  );
+
+  const renderTerminalMobileTabs = () => (
+    <div className="terminal-mobile-tabs" data-testid="terminal-mobile-tabs">
+      <label className="terminal-mobile-tabs-label" htmlFor="terminal-mobile-tab-select">
+        {t("terminal.selectTab", "Terminal tab")}
+      </label>
+      <select
+        id="terminal-mobile-tab-select"
+        className="input terminal-mobile-tab-select"
+        data-testid="terminal-mobile-tab-select"
+        value={activeTab?.id ?? ""}
+        onChange={(event) => {
+          if (event.currentTarget.value) setActiveTab(event.currentTarget.value);
+        }}
+        disabled={tabs.length === 0}
+        aria-label={t("terminal.selectTab", "Terminal tab")}
+      >
+        {tabs.length === 0 && (
+          <option value="">{t("terminal.noTabs", "No terminal tabs")}</option>
+        )}
+        {tabs.map((tab) => (
+          <option key={tab.id} value={tab.id}>{tab.title}</option>
+        ))}
+      </select>
+      <button
+        type="button"
+        className="terminal-mobile-tab-action terminal-mobile-tab-action--new"
+        onClick={() => void createTab()}
+        aria-label={t("terminal.newTerminal", "New terminal")}
+        data-testid="terminal-mobile-new-tab"
+      >
+        <Plus size={14} />
+      </button>
+      {tabs.length > 1 && activeTab && (
+        <button
+          type="button"
+          className="terminal-mobile-tab-action terminal-mobile-tab-action--close"
+          onClick={() => closeTab(activeTab.id)}
+          title={t("terminal.closeCurrentTab", "Close current tab")}
+          aria-label={t("terminal.closeCurrentTab", "Close current tab")}
+          data-testid="terminal-mobile-close-tab"
+        >
+          <Trash2 size={14} />
+        </button>
+      )}
+    </div>
+  );
+
   const terminalPanel = (
     <div
       ref={modalRef}
@@ -2460,93 +2574,21 @@ export function TerminalModal({ isOpen, onClose, initialCommand, initialCommandG
             .terminal-title is hidden; action button labels are hidden (icons only) */}
         <div className={`terminal-header${isFloatingMode ? " terminal-header--draggable" : ""}`} onPointerDown={handleFloatingDragPointerDown}>
           {/* Tab Bar */}
-          {!isMobileTerminal && (
-            <div className="terminal-tabs" data-testid="terminal-tabs">
-              {tabs.map((tab) => (
-                <div
-                  key={tab.id}
-                  className={`terminal-tab ${tab.isActive ? "terminal-tab--active" : ""}`}
-                  onClick={() => setActiveTab(tab.id)}
-                  title={tab.title}
-                  role="tab"
-                  aria-selected={tab.isActive}
-                >
-                  <span className="terminal-tab-label">{tab.title}</span>
-                  {tabs.length > 1 && (
-                    <button
-                      className="terminal-tab-close"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        closeTab(tab.id);
-                      }}
-                      title={t("terminal.closeTab", "Close tab")}
-                    >
-                      ×
-                    </button>
-                  )}
-                </div>
-              ))}
-              <button
-                className="terminal-tab terminal-tab--new"
-                onClick={() => void createTab()}
-                title={t("terminal.newTerminal", "New terminal")}
-                aria-label={t("terminal.newTerminal", "New terminal")}
-              >
-                +
-              </button>
+          {isMobileTerminal ? renderTerminalMobileTabs() : (
+            <div className="terminal-tab-region" ref={terminalTabRegionRef}>
+              {tabsOverflow ? (
+                <>
+                  {renderTerminalMobileTabs()}
+                  {renderTerminalTabStrip(true)}
+                </>
+              ) : renderTerminalTabStrip()}
             </div>
           )}
 
           {/*
-          FNXC:TerminalTabs 2026-07-01-00:00:
-          Mobile terminal headers use a native tab dropdown because horizontal tab strips crowd worktree, session, and close controls on narrow screens. Desktop and floating layouts keep the existing tab buttons so fast tab switching, per-tab close, and the + action stay unchanged.
+          FNXC:TerminalTabs 2026-07-11-20:28:
+          FN-7829 keeps mobile on the existing native tab dropdown and also reuses that same `.terminal-mobile-tabs` affordance when a non-mobile terminal tab region is too narrow for the horizontal `.terminal-tabs` strip. The overflow decision comes from the tab container's ResizeObserver, not `isMobileTerminal`/viewport width, so narrow floated/docked desktop panels can collapse independently and expand back when room returns.
           */}
-          {isMobileTerminal && (
-            <div className="terminal-mobile-tabs" data-testid="terminal-mobile-tabs">
-              <label className="terminal-mobile-tabs-label" htmlFor="terminal-mobile-tab-select">
-                {t("terminal.selectTab", "Terminal tab")}
-              </label>
-              <select
-                id="terminal-mobile-tab-select"
-                className="input terminal-mobile-tab-select"
-                data-testid="terminal-mobile-tab-select"
-                value={activeTab?.id ?? ""}
-                onChange={(event) => {
-                  if (event.currentTarget.value) setActiveTab(event.currentTarget.value);
-                }}
-                disabled={tabs.length === 0}
-                aria-label={t("terminal.selectTab", "Terminal tab")}
-              >
-                {tabs.length === 0 && (
-                  <option value="">{t("terminal.noTabs", "No terminal tabs")}</option>
-                )}
-                {tabs.map((tab) => (
-                  <option key={tab.id} value={tab.id}>{tab.title}</option>
-                ))}
-              </select>
-              <button
-                type="button"
-                className="terminal-mobile-tab-action terminal-mobile-tab-action--new"
-                onClick={() => void createTab()}
-                aria-label={t("terminal.newTerminal", "New terminal")}
-                data-testid="terminal-mobile-new-tab"
-              >
-                <Plus size={14} />
-              </button>
-              {tabs.length > 1 && activeTab && (
-                <button
-                  type="button"
-                  className="terminal-mobile-tab-action terminal-mobile-tab-action--close"
-                  onClick={() => closeTab(activeTab.id)}
-                  title={t("terminal.closeCurrentTab", "Close current tab")}
-                  aria-label={t("terminal.closeCurrentTab", "Close current tab")}
-                  data-testid="terminal-mobile-close-tab"
-                >
-                  <Trash2 size={14} />
-                </button>
-              )}
-            </div>
-          )}
 
           {shouldShowTerminalWorkspacePicker && (
             <div
@@ -2660,19 +2702,8 @@ export function TerminalModal({ isOpen, onClose, initialCommand, initialCommandG
           )}
           
           {/*
-          FNXC:TerminalFooter 2026-07-08-15:00:
-          The header renders `.terminal-actions` (the shared `terminalActionControls`
-          fragment) ONLY on true desktop (!isMobileTerminal && !isTabletTerminal,
-          >1024px) — the FN-7502 shape. On mobile (isMobileTerminal) the header
-          renders ONLY the corner-pinned close button — no `.terminal-actions`
-          shell — because the mobile tab dropdown already occupies the header and
-          the action controls move into the `.terminal-status-bar` footer (FN-7560).
-          On tablet (isTabletTerminal, 769-1024px, FN-7684) the header keeps the
-          desktop tab strip + title + workspace picker but ALSO drops
-          `.terminal-actions` — it still overflows at that width — in favor of a
-          plain close button, with the same action controls relocating into the
-          footer alongside mobile. Both footer/header render sites use the SAME
-          fragment, never a duplicated copy, so handlers cannot drift.
+          FNXC:TerminalFooter 2026-07-11-20:20:
+          FN-7829 removes `.terminal-actions` from the header at every width. Mobile keeps the corner-pinned close button, while tablet/desktop/embedded headers keep the title/status, tab affordance, workspace picker, and a plain close button; the shared `terminalActionControls` fragment renders only in the bottom `.terminal-status-bar` footer so the control handlers cannot drift or leave an empty header shell.
 
           FNXC:TerminalHeader 2026-07-04-20:45:
           FN-7565: on mobile, being a direct child of `.terminal-header` (not
@@ -2705,33 +2736,16 @@ export function TerminalModal({ isOpen, onClose, initialCommand, initialCommandG
                 {getStatusIndicator()}
               </div>
 
-              {isTabletTerminal ? (
-                !embedded ? (
-                  <button
-                    className="terminal-close"
-                    onClick={onClose}
-                    data-testid="terminal-close-btn"
-                    title={t("terminal.closeTerminal", "Close terminal")}
-                  >
-                    <X size={20} />
-                  </button>
-                ) : null
-              ) : (
-                /* Actions — labels hidden on mobile via .terminal-action-label */
-                <div className="terminal-actions" data-testid="terminal-actions">
-                  {terminalActionControls}
-                  {!embedded && (
-                    <button
-                      className="terminal-close"
-                      onClick={onClose}
-                      data-testid="terminal-close-btn"
-                      title={t("terminal.closeTerminal", "Close terminal")}
-                    >
-                      <X size={20} />
-                    </button>
-                  )}
-                </div>
-              )}
+              {!embedded ? (
+                <button
+                  className="terminal-close"
+                  onClick={onClose}
+                  data-testid="terminal-close-btn"
+                  title={t("terminal.closeTerminal", "Close terminal")}
+                >
+                  <X size={20} />
+                </button>
+              ) : null}
             </>
           )}
         </div>
@@ -3004,24 +3018,12 @@ export function TerminalModal({ isOpen, onClose, initialCommand, initialCommandG
         )}
 
         {/*
-        FNXC:TerminalFooter 2026-07-08-15:00:
-        Mobile + tablet footer bar (FN-7560 mobile, FN-7684 tablet) restoring
-        the pre-FN-7502 footer ergonomics on both narrower tiers: the same
-        `terminalActionControls` fragment used by the true-desktop header
-        renders here instead so font-size/Clear/Shortcuts/Preferences/
-        connection-status/exit-code stay reachable without crowding the
-        header's tab strip/dropdown, workspace picker, and close button.
-        Scrolls horizontally (min-width: 0 + overflow-x: auto) if controls
-        exceed the viewport width, matching the .terminal-shortcut-panel
-        (FN-7550) pattern. Tablet keeps the desktop display modes (docked/
-        floating/pinned-below), so this footer also carries the !isMobileTerminal-
-        gated pin/pop-out toggles the fragment already renders for tablet.
+        FNXC:TerminalFooter 2026-07-11-20:20:
+        FN-7829 renders the shared `terminalActionControls` fragment in this bottom footer at every breakpoint, including true desktop and embedded terminals, so font-size/Clear/Shortcuts/Preferences/connection-status/exit-code plus the non-mobile pin/pop-out toggles stay reachable without crowding the header. This is the only render site for the cluster.
         */}
-        {(isMobileTerminal || isTabletTerminal) && (
-          <div className="terminal-status-bar" data-testid="terminal-footer-actions">
-            {terminalActionControls}
-          </div>
-        )}
+        <div className="terminal-status-bar" data-testid="terminal-footer-actions">
+          {terminalActionControls}
+        </div>
 
     </div>
   );
