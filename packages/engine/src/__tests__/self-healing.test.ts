@@ -112,7 +112,7 @@ vi.mock("../merger.js", () => ({
 }));
 
 import { SelfHealingManager, isBranchAheadOfBase, MAX_AUTO_MERGE_RETRIES } from "../self-healing.js";
-import { HEARTBEAT_ERROR_RECOVERY_METADATA_KEY, HEARTBEAT_ERROR_RETRY_EXHAUSTED_PAUSE_REASON } from "../agent-heartbeat.js";
+import { HEARTBEAT_ERROR_RECOVERY_METADATA_KEY, HEARTBEAT_ERROR_RETRY_EXHAUSTED_PAUSE_REASON, HEARTBEAT_ERROR_UNRECOVERABLE_PAUSE_REASON } from "../agent-heartbeat.js";
 import type { TaskStore, Settings, Task, AgentStore, Agent, NotificationProvider } from "@fusion/core";
 import { EventEmitter } from "node:events";
 import { execSync } from "node:child_process";
@@ -921,7 +921,7 @@ describe("SelfHealingManager", () => {
       expect(result).toBe(0);
     });
 
-    it("skips a manager-present error-state agent whose lastError is not transient (default permanent classification)", async () => {
+    it("parks a manager-present error-state agent whose lastError is absent/non-transient", async () => {
       vi.mocked(store.getSettings).mockResolvedValue({ taskStuckTimeoutMs: 60_000 } as unknown as Settings);
       const now = Date.now();
       const agentStore = createMockAgentStore([
@@ -932,13 +932,14 @@ describe("SelfHealingManager", () => {
 
       const result = await managerWithAgents.recoverOrphanedAgents();
 
-      // No lastError at all classifies as "permanent" (default), so this agent
-      // is correctly skipped — but via the transient-classification guard, not
-      // because its manager is present. See the "manager-present" tests below
-      // for FN-7672's actual invariant: manager presence alone must no longer
-      // exclude a durable error-state agent from the recovery sweep.
-      expect(result).toBe(0);
-      expect(agentStore.updateAgent).not.toHaveBeenCalled();
+      // No lastError at all classifies as "permanent" (default). FN-7859 parks
+      // this terminal non-recoverable shape instead of leaving it in bare error.
+      expect(result).toBe(1);
+      expect(agentStore.updateAgentState).toHaveBeenCalledWith("report-1", "paused");
+      expect(agentStore.updateAgent).toHaveBeenCalledWith(
+        "report-1",
+        expect.objectContaining({ pauseReason: HEARTBEAT_ERROR_UNRECOVERABLE_PAUSE_REASON }),
+      );
       managerWithAgents.stop();
     });
 
@@ -984,7 +985,7 @@ describe("SelfHealingManager", () => {
       managerWithAgents.stop();
     });
 
-    it("does NOT auto-recover a manager-present agent whose error is operator-actionable (FN-7672 auth-credential cluster shape)", async () => {
+    it("parks a manager-present agent whose error is operator-actionable (FN-7672/FN-7859 auth-credential cluster shape)", async () => {
       vi.mocked(store.getSettings).mockResolvedValue({ taskStuckTimeoutMs: 60_000 } as unknown as Settings);
       const now = Date.now();
       const agentStore = createMockAgentStore([
@@ -1002,8 +1003,22 @@ describe("SelfHealingManager", () => {
 
       const result = await managerWithAgents.recoverOrphanedAgents();
 
-      expect(result).toBe(0);
-      expect(agentStore.updateAgentState).not.toHaveBeenCalled();
+      expect(result).toBe(1);
+      expect(agentStore.updateAgentState).toHaveBeenCalledWith("report-auth", "paused");
+      expect(agentStore.updateAgent).toHaveBeenCalledWith(
+        "report-auth",
+        expect.objectContaining({
+          pauseReason: HEARTBEAT_ERROR_UNRECOVERABLE_PAUSE_REASON,
+          metadata: expect.objectContaining({
+            durableErrorRecovery: expect.objectContaining({ attempts: 0, lastReason: "non-recoverable-error" }),
+          }),
+        }),
+      );
+      expect(store.recordRunAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+        mutationType: "agent:error-parked-unrecoverable",
+        target: "report-auth",
+        metadata: expect.objectContaining({ agentId: "report-auth", attempts: 0, limit: 5, source: "self-healing" }),
+      }));
       managerWithAgents.stop();
     });
 
@@ -1039,12 +1054,12 @@ describe("SelfHealingManager", () => {
 
       const result = await managerWithAgents.recoverOrphanedAgents();
 
-      expect(result).toBe(1);
-      expect(agentStore.updateAgentState).toHaveBeenCalledTimes(1);
+      expect(result).toBe(2);
+      expect(agentStore.updateAgentState).toHaveBeenCalledTimes(2);
       expect(agentStore.updateAgentState).toHaveBeenCalledWith("report-transient", "active");
+      expect(agentStore.updateAgentState).toHaveBeenCalledWith("report-auth-1", "paused");
       expect(agentStore.updateAgentState).not.toHaveBeenCalledWith("sibling-healthy-1", expect.anything());
       expect(agentStore.updateAgentState).not.toHaveBeenCalledWith("sibling-healthy-2", expect.anything());
-      expect(agentStore.updateAgentState).not.toHaveBeenCalledWith("report-auth-1", expect.anything());
       managerWithAgents.stop();
     });
 
@@ -1125,7 +1140,29 @@ describe("SelfHealingManager", () => {
       managerWithAgents.stop();
     });
 
-    it("skips non-transient/operator-actionable durable errors", async () => {
+    it("does not park runtime-disabled unrecoverable durable errors", async () => {
+      vi.mocked(store.getSettings).mockResolvedValue({ taskStuckTimeoutMs: 60_000 } as unknown as Settings);
+      const now = Date.now();
+      const agentStore = createMockAgentStore([
+        {
+          id: "agent-disabled",
+          state: "error",
+          lastError: "invalid api key",
+          runtimeConfig: { enabled: false },
+          updatedAt: new Date(now - 120_000).toISOString(),
+        } as Agent,
+      ]);
+      const managerWithAgents = new SelfHealingManager(store, { rootDir: "/tmp/test-project", agentStore });
+
+      const result = await managerWithAgents.recoverOrphanedAgents();
+
+      expect(result).toBe(0);
+      expect(agentStore.updateAgentState).not.toHaveBeenCalled();
+      expect(agentStore.updateAgent).not.toHaveBeenCalled();
+      managerWithAgents.stop();
+    });
+
+    it("parks non-transient/operator-actionable durable errors", async () => {
       vi.mocked(store.getSettings).mockResolvedValue({ taskStuckTimeoutMs: 60_000 } as unknown as Settings);
       const now = Date.now();
       const agentStore = createMockAgentStore([
@@ -1135,8 +1172,12 @@ describe("SelfHealingManager", () => {
 
       const result = await managerWithAgents.recoverOrphanedAgents();
 
-      expect(result).toBe(0);
-      expect(agentStore.updateAgentState).not.toHaveBeenCalled();
+      expect(result).toBe(1);
+      expect(agentStore.updateAgentState).toHaveBeenCalledWith("agent-perm", "paused");
+      expect(agentStore.updateAgent).toHaveBeenCalledWith(
+        "agent-perm",
+        expect.objectContaining({ pauseReason: HEARTBEAT_ERROR_UNRECOVERABLE_PAUSE_REASON }),
+      );
       managerWithAgents.stop();
     });
 
@@ -1282,6 +1323,25 @@ describe("SelfHealingManager", () => {
 
       expect(result).toBe(0);
       expect(agentStore.updateAgent).not.toHaveBeenCalled();
+      managerWithAgents.stop();
+    });
+
+    it("does not park an unrecoverable error while active agent execution is present", async () => {
+      vi.mocked(store.getSettings).mockResolvedValue({ taskStuckTimeoutMs: 60_000 } as unknown as Settings);
+      const now = Date.now();
+      const agentStore = createMockAgentStore([
+        { id: "agent-active-auth", state: "error", lastError: "invalid api key", updatedAt: new Date(now - 120_000).toISOString() } as Agent,
+      ]);
+      const managerWithAgents = new SelfHealingManager(store, {
+        rootDir: "/tmp/test-project",
+        agentStore,
+        hasActiveAgentExecution: (agentId) => agentId === "agent-active-auth",
+      });
+
+      const result = await managerWithAgents.recoverOrphanedAgents();
+
+      expect(result).toBe(0);
+      expect(agentStore.updateAgentState).not.toHaveBeenCalled();
       managerWithAgents.stop();
     });
 

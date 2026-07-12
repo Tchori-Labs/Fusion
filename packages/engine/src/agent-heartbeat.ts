@@ -34,7 +34,7 @@ import { resolveHeartbeatPromptTemplate, resolveHeartbeatScopeDisciplineMode, se
 import { buildPromptLayers, collapsePromptLayers } from "./prompt-layers.js";
 import { resolveAndEmitGoalContext } from "./goal-injection-diagnostics.js";
 import { createLogger, heartbeatLog, formatError } from "./logger.js";
-import { classifyError, isOperatorActionableAgentError } from "./transient-error-detector.js";
+import { classifyError, isOperatorActionableAgentError, isStaleWorktreeModuleResolutionError } from "./transient-error-detector.js";
 
 /**
  * FNXC:WorktreeAcquisition 2026-07-09-00:00:
@@ -63,6 +63,7 @@ FN-7672 requires durable agent error recovery to stay classification-gated: only
 export const MAX_HEARTBEAT_ERROR_RECOVERY_ATTEMPTS = 5;
 export const HEARTBEAT_ERROR_RECOVERY_METADATA_KEY = "heartbeatErrorRecovery";
 export const HEARTBEAT_ERROR_RETRY_EXHAUSTED_PAUSE_REASON = "error-retry-exhausted";
+export const HEARTBEAT_ERROR_UNRECOVERABLE_PAUSE_REASON = "error-unrecoverable";
 import { acquireTaskWorktree } from "./worktree-acquisition.js";
 import { createRunAuditor, generateSyntheticRunId, type DatabaseMutationType, type EngineRunContext } from "./run-audit.js";
 import { promptWithFallback } from "./pi.js";
@@ -1743,7 +1744,9 @@ export class HeartbeatMonitor {
             }))
             : MAX_HEARTBEAT_ERROR_RECOVERY_ATTEMPTS;
           const retryCount = latestAgent ? readHeartbeatErrorRetryCount(latestAgent) : 0;
-          const failedWithRecoverableError = isHeartbeatErrorRecoverable({ lastError: completionResult.stderrExcerpt ?? "Run failed" });
+          const failedError = completionResult.stderrExcerpt ?? "Run failed";
+          const failedWithRecoverableError = isHeartbeatErrorRecoverable({ lastError: failedError });
+          const failedWithUnrecoverableError = !failedWithRecoverableError && !isStaleWorktreeModuleResolutionError(failedError);
           /*
           FNXC:HeartbeatRecovery 2026-07-11-19:57:
           FN-7835's primary timer path cannot rely on a future heartbeat to perform exhaustion bookkeeping: once retryCount reaches the limit, timer eligibility intentionally stops dispatching error-state agents. Park the agent paused on the failing boundary run so the bounded retry contract is reachable in production.
@@ -1781,9 +1784,44 @@ export class HeartbeatMonitor {
                 heartbeatLog.warn(`Agent ${agentId} error-retry exhaustion audit failed: ${auditErr instanceof Error ? auditErr.message : String(auditErr)} — continuing`);
               }
             }
+          } else if (
+            latestAgent
+            && isHeartbeatManaged(latestAgent)
+            && latestAgent.runtimeConfig?.enabled !== false
+            && failedWithUnrecoverableError
+          ) {
+            /*
+            FNXC:AgentHeartbeat 2026-07-12-18:34:
+            FN-7859 keeps non-recoverable durable heartbeat failures from restart-looping, but parks them paused with an operator-visible reason instead of leaving them indefinitely in bare error.
+            */
+            await this.store.updateAgentState(agentId, "paused");
+            await this.store.updateAgent(agentId, {
+              lastError: failedError,
+              pauseReason: HEARTBEAT_ERROR_UNRECOVERABLE_PAUSE_REASON,
+            });
+            heartbeatLog.warn(`Agent ${agentId} heartbeat failed with unrecoverable error — pausing for operator action`);
+            if (this.taskStore) {
+              try {
+                const runWithSource = run as unknown as { source?: unknown };
+                const runSource = typeof runWithSource.source === "string" ? runWithSource.source : undefined;
+                const audit = createRunAuditor(this.taskStore, {
+                  runId,
+                  agentId,
+                  phase: "heartbeat",
+                  source: runSource,
+                });
+                await audit.database({
+                  type: "agent:error-parked-unrecoverable",
+                  target: agentId,
+                  metadata: { agentId, source: runSource },
+                });
+              } catch (auditErr) {
+                heartbeatLog.warn(`Agent ${agentId} unrecoverable-error park audit failed: ${auditErr instanceof Error ? auditErr.message : String(auditErr)} — continuing`);
+              }
+            }
           } else {
             await this.store.updateAgentState(agentId, "error");
-            await this.store.updateAgent(agentId, { lastError: completionResult.stderrExcerpt ?? "Run failed" });
+            await this.store.updateAgent(agentId, { lastError: failedError });
           }
         } else if (completionResult.status === "terminated") {
           await this.store.updateAgentState(agentId, "paused");
@@ -2289,6 +2327,33 @@ export class HeartbeatMonitor {
             await this.completeRun(agentId, run.id, {
               status: "completed",
               resultJson: { reason: HEARTBEAT_ERROR_RETRY_EXHAUSTED_PAUSE_REASON, attempts: currentRetryCount, limit: errorRecoveryLimit },
+              skipStateTransition: true,
+            });
+            return (await this.store.getRunDetail(agentId, run.id))!;
+          } else if (
+            isHeartbeatManaged(agent)
+            && agent.runtimeConfig?.enabled !== false
+            && !isStaleWorktreeModuleResolutionError(agent.lastError ?? "")
+          ) {
+            /*
+            FNXC:AgentHeartbeat 2026-07-12-18:34:
+            FN-7859 treats a durable non-recoverable error as terminal-until-operator-action. The heartbeat run-entry path must park it before the timer unregisters so the agent is inspectable and not stranded in bare error.
+            */
+            try {
+              await this.store.updateAgentState(agentId, "paused");
+              await this.store.updateAgent(agentId, { pauseReason: HEARTBEAT_ERROR_UNRECOVERABLE_PAUSE_REASON });
+              heartbeatLog.warn(`Agent ${agentId} has unrecoverable heartbeat error — pausing for operator action`);
+              await audit.database({
+                type: "agent:error-parked-unrecoverable",
+                target: agentId,
+                metadata: { agentId, source },
+              });
+            } catch (parkErr) {
+              heartbeatLog.warn(`Agent ${agentId} unrecoverable error-state park failed: ${parkErr instanceof Error ? parkErr.message : String(parkErr)} — preserving run completion`);
+            }
+            await this.completeRun(agentId, run.id, {
+              status: "completed",
+              resultJson: { reason: HEARTBEAT_ERROR_UNRECOVERABLE_PAUSE_REASON, state: agent.state, recoveryEligible: false },
               skipStateTransition: true,
             });
             return (await this.store.getRunDetail(agentId, run.id))!;

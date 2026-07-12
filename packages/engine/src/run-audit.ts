@@ -436,6 +436,7 @@ export type DatabaseMutationType =
   | "task:checkout"
   | "agent:auto-recover-error-state"
   | "agent:error-retry-exhausted"
+  | "agent:error-parked-unrecoverable"
   | "task:release"
   | "task:pause"
   | "task:unpause"

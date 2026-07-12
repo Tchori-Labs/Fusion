@@ -38,6 +38,7 @@ import {
   buildHeartbeatErrorRecoveryMetadata,
   HEARTBEAT_ERROR_RECOVERY_METADATA_KEY,
   HEARTBEAT_ERROR_RETRY_EXHAUSTED_PAUSE_REASON,
+  HEARTBEAT_ERROR_UNRECOVERABLE_PAUSE_REASON,
   HeartbeatMonitor,
   HeartbeatTriggerScheduler,
   incrementHeartbeatErrorRecoveryMetadata,
@@ -211,7 +212,7 @@ describe("HeartbeatMonitor error-state recovery", () => {
     }));
   });
 
-  it("does not auto-recover operator-actionable error state", async () => {
+  it("parks an operator-actionable error state instead of auto-recovering or stranding it", async () => {
     const session = createSession(async () => undefined);
     mockedCreateFnAgent.mockResolvedValueOnce(session as never);
     const store = createAgentStore(baseAgent({ lastError: "invalid api key" }));
@@ -221,11 +222,53 @@ describe("HeartbeatMonitor error-state recovery", () => {
     await monitor.executeHeartbeat({ agentId: store.agent.id, source: "timer" });
 
     expect(session.prompt).not.toHaveBeenCalled();
-    expect(store.agent.state).toBe("error");
+    expect(store.agent.state).toBe("paused");
     expect(store.agent.lastError).toBe("invalid api key");
+    expect(store.agent.pauseReason).toBe(HEARTBEAT_ERROR_UNRECOVERABLE_PAUSE_REASON);
     expect(readHeartbeatErrorRetryCount(store.agent)).toBe(0);
+    expect(taskStore.recordRunAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+      mutationType: "agent:error-parked-unrecoverable",
+      target: store.agent.id,
+      metadata: expect.objectContaining({ agentId: store.agent.id, source: "timer" }),
+    }));
     expect(taskStore.recordRunAuditEvent).not.toHaveBeenCalledWith(expect.objectContaining({
       mutationType: "agent:auto-recover-error-state",
+    }));
+  });
+
+  it("parks a first-run operator-actionable failure immediately with an explicit reason", async () => {
+    mockedCreateFnAgent.mockResolvedValueOnce(createSession(async () => { throw new Error("Invalid authentication credentials"); }) as never);
+    const store = createAgentStore(baseAgent({ state: "active", lastError: undefined }));
+    const taskStore = createNoTaskStore();
+    const monitor = new HeartbeatMonitor({ store, taskStore, rootDir: process.cwd() });
+
+    await monitor.executeHeartbeat({ agentId: store.agent.id, source: "timer" });
+
+    expect(store.agent.state).toBe("paused");
+    expect(store.agent.lastError).toContain("Invalid authentication credentials");
+    expect(store.agent.pauseReason).toBe(HEARTBEAT_ERROR_UNRECOVERABLE_PAUSE_REASON);
+    expect(readHeartbeatErrorRetryCount(store.agent)).toBe(0);
+    expect(taskStore.recordRunAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+      mutationType: "agent:error-parked-unrecoverable",
+      target: store.agent.id,
+      metadata: expect.objectContaining({ agentId: store.agent.id, source: "timer" }),
+    }));
+  });
+
+  it("leaves runtime-disabled operator-actionable error agents excluded from timer recovery", async () => {
+    const session = createSession(async () => undefined);
+    mockedCreateFnAgent.mockResolvedValueOnce(session as never);
+    const store = createAgentStore(baseAgent({ runtimeConfig: { enabled: false }, lastError: "invalid api key" }));
+    const taskStore = createNoTaskStore();
+    const monitor = new HeartbeatMonitor({ store, taskStore, rootDir: process.cwd() });
+
+    await monitor.executeHeartbeat({ agentId: store.agent.id, source: "timer" });
+
+    expect(session.prompt).not.toHaveBeenCalled();
+    expect(store.agent.state).toBe("error");
+    expect(store.agent.pauseReason).toBeUndefined();
+    expect(taskStore.recordRunAuditEvent).not.toHaveBeenCalledWith(expect.objectContaining({
+      mutationType: "agent:error-parked-unrecoverable",
     }));
   });
 

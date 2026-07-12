@@ -48,6 +48,7 @@ import { extractMissingModulePath, isNonContinuableSessionError, isStaleWorktree
 import {
   buildHeartbeatErrorRecoveryMetadata,
   HEARTBEAT_ERROR_RETRY_EXHAUSTED_PAUSE_REASON,
+  HEARTBEAT_ERROR_UNRECOVERABLE_PAUSE_REASON,
   isHeartbeatErrorRecoverable,
   readHeartbeatErrorRetryCount,
   resolveErrorRecoveryLimit,
@@ -10263,7 +10264,7 @@ export class SelfHealingManager {
 
   private async emitDurableAgentErrorRecoveryAudit(options: {
     agentId: string;
-    type: "agent:auto-recover-error-state" | "agent:error-retry-exhausted";
+    type: "agent:auto-recover-error-state" | "agent:error-retry-exhausted" | "agent:error-parked-unrecoverable";
     attempt?: number;
     attempts?: number;
     limit: number;
@@ -10520,15 +10521,15 @@ export class SelfHealingManager {
           if (this.options.hasActiveAgentExecution?.(agent.id) === true) {
             return false;
           }
-          if (!isHeartbeatErrorRecoverable(agent) && !isStaleWorktreeModuleResolutionError(agent.lastError ?? "")) {
-            return false;
-          }
+          const isRecoverableHeartbeatError = isHeartbeatErrorRecoverable(agent);
+          const isStaleMissingModule = isStaleWorktreeModuleResolutionError(agent.lastError ?? "");
+          const isUnrecoverableHeartbeatError = !isRecoverableHeartbeatError && !isStaleMissingModule;
 
           const recoveryState = this.getDurableAgentRecoveryState(agent);
-          if (recoveryState.exhausted) {
+          if (!isUnrecoverableHeartbeatError && recoveryState.exhausted) {
             return false;
           }
-          if (recoveryState.nextRetryAt) {
+          if (!isUnrecoverableHeartbeatError && recoveryState.nextRetryAt) {
             const nextRetryMs = Date.parse(recoveryState.nextRetryAt);
             if (Number.isFinite(nextRetryMs) && nextRetryMs > now) {
               log.log(`Durable agent ${agent.id} transient recovery delayed until ${recoveryState.nextRetryAt}`);
@@ -10552,6 +10553,39 @@ export class SelfHealingManager {
           if (agent.state === "error") {
             const recoveryState = this.getDurableAgentRecoveryState(agent);
             const isStaleMissingModule = isStaleWorktreeModuleResolutionError(agent.lastError ?? "");
+            const isUnrecoverableHeartbeatError = !isHeartbeatErrorRecoverable(agent) && !isStaleMissingModule;
+            if (isUnrecoverableHeartbeatError) {
+              /*
+              FNXC:AgentHeartbeat 2026-07-12-18:34:
+              FN-7859 keeps self-healing from restart-looping non-recoverable durable agent errors, but still parks them paused with a clear operator-action reason instead of skipping them into indefinite bare error.
+              */
+              await agentStore.updateAgentState(agent.id, "paused");
+              await agentStore.updateAgent(agent.id, {
+                pauseReason: HEARTBEAT_ERROR_UNRECOVERABLE_PAUSE_REASON,
+                metadata: {
+                  ...(agent.metadata ?? {}),
+                  durableErrorRecovery: {
+                    ...((agent.metadata?.durableErrorRecovery && typeof agent.metadata.durableErrorRecovery === "object")
+                      ? agent.metadata.durableErrorRecovery as Record<string, unknown>
+                      : {}),
+                    attempts: recoveryState.attempts,
+                    exhausted: recoveryState.exhausted,
+                    lastReason: "non-recoverable-error",
+                    lastObservedAt: new Date().toISOString(),
+                  },
+                },
+              });
+              await this.emitDurableAgentErrorRecoveryAudit({
+                agentId: agent.id,
+                type: "agent:error-parked-unrecoverable",
+                attempts: recoveryState.attempts,
+                limit: errorRecoveryLimit,
+                source: "self-healing",
+              });
+              log.warn(`Suppressed durable-agent auto-restart for ${agent.id}: unrecoverable heartbeat error; paused for operator action`);
+              recovered++;
+              continue;
+            }
             if (isStaleMissingModule) {
               const missingModulePath = extractMissingModulePath(agent.lastError ?? "");
               const repeatedPath =
