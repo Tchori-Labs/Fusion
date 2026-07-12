@@ -458,6 +458,56 @@ The floating-mode header is the move grip. `touch-action: none` is required so a
   opacity: var(--opacity-disabled, 0.5);
 }
 
+.terminal-tab-region {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.terminal-tab-region .terminal-tabs,
+.terminal-tab-region .terminal-mobile-tabs {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.terminal-tab-region .terminal-mobile-tabs {
+  display: flex;
+}
+
+.terminal-tabs--measuring {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  visibility: hidden;
+  pointer-events: none;
+  overflow: hidden;
+  scrollbar-width: none;
+}
+
+.terminal-tabs--measuring::-webkit-scrollbar {
+  display: none;
+}
+
+/*
+FNXC:TerminalFooter 2026-07-11-20:36:
+FN-7829 makes the terminal status footer unconditional for mobile, tablet, desktop, and embedded terminals because the header no longer renders `.terminal-actions`. Keep the FN-7550/FN-7621 min-width, horizontal-scroll, nowrap, and touch-action safeguards here so the single shared action cluster remains reachable without clipping at every breakpoint.
+*/
+.terminal-status-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: var(--space-xs);
+  border-top: 1px solid var(--border);
+  padding: var(--space-xs);
+  padding-bottom: max(var(--space-xs), env(safe-area-inset-bottom, 0));
+  min-height: calc(var(--space-xl) + var(--space-sm));
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  touch-action: pan-x pan-y;
+}
+
 /*
 FNXC:TerminalWorkspaces 2026-06-29-00:00:
 Terminal worktree selection mirrors the file-browser workspace model while staying header-sized for docked, floating, and mobile terminals. Render the picker only when task workspace entries exist so failures or empty worktree lists never leave an inert button shell next to the always-fast + terminal affordance.
@@ -1757,80 +1807,9 @@ The Android keyboard-open recurrence can start with a touch-primary visualViewpo
     display: none;
   }
 
-  /*
-  FNXC:TerminalFooter 2026-07-04-20:00:
-  FN-7560: on mobile the terminal action controls (font-size, Clear, Shortcuts,
-  Preferences, connection status, exit code) render in this bottom footer bar
-  instead of the header, restoring pre-FN-7502 footer ergonomics so the narrow
-  header only has to fit the tab dropdown and close button. Reuses the same
-  min-width: 0 + overflow-x: auto flex-scroll pattern as .terminal-actions and
-  .terminal-shortcut-panel (FN-7550) so a crowded footer scrolls horizontally
-  instead of clipping/wrapping. padding-bottom composes with the iOS safe-area
-  inset so the bar clears the home indicator; it stays in-flow at the bottom of
-  the panel's flex column, so the .terminal-modal[style*="--keyboard-overlap"]
-  height clamp shrinks .terminal-container (flex: 1) rather than the footer.
-  */
-  .terminal-status-bar {
-    display: flex;
-    align-items: center;
-    flex-wrap: nowrap;
-    gap: var(--space-xs);
-    border-top: 1px solid var(--border);
-    padding: var(--space-xs);
-    padding-bottom: max(var(--space-xs), env(safe-area-inset-bottom, 0));
-    min-height: 36px;
-    min-width: 0;
-    overflow-x: auto;
-    scrollbar-width: thin;
-    /*
-    FNXC:Terminal 2026-07-06-19:45:
-    FN-7621: this footer shares .terminal-shortcut-panel's FN-7550 min-width/
-    overflow-x pattern but never had ITS OWN touch-action opt-in, so real
-    mobile swipes on it were also defeated by the ancestor-chain touch-action
-    intersection from styles.css's mobile lockdown (see the .modal.terminal-modal
-    and .modal-overlay.terminal-modal-overlay carve-outs above/elsewhere in
-    this file). Give it the same pan-x pan-y opt-in as .terminal-shortcut-panel.
-    */
-    touch-action: pan-x pan-y;
-  }
-
   .terminal-shortcuts--header,
   .terminal-connection-status {
     display: none;
-  }
-}
-
-/*
-FNXC:TerminalFooter 2026-07-08-15:00:
-FN-7684: extend the FN-7560 mobile footer relocation to the project's canonical
-tablet tier (769-1024px, `--tablet-breakpoint: 1024px`, matching the JS
-`isTabletTerminal` flag). A tablet keeps the desktop display modes (docked/
-floating/pinned-below, unlike mobile's fullscreen shell) but its header still
-overflows if it renders the full `.terminal-actions` cluster — the help text
-and zoom controls collide with the pin/pop-out/close icons. TerminalModal.tsx
-stops rendering `.terminal-actions` in the header at <=1024px and instead
-renders the SAME shared `terminalActionControls` fragment here, mirroring every
-mobile footer declaration (not just a display:flex override) so the tablet
-footer keeps the same min-width: 0 + overflow-x: auto horizontal-scroll safety
-net as mobile (FN-7550/FN-7560) plus the FN-7621 touch-action carve-out.
-Unlike mobile, the tablet footer has more room, so it intentionally does NOT
-reapply the mobile-only `.terminal-shortcuts--header, .terminal-connection-status
-{ display: none }` hide above — both stay visible on tablet.
-*/
-@media (min-width: 769px) and (max-width: 1024px) {
-  .terminal-status-bar {
-    display: flex;
-    align-items: center;
-    flex-wrap: nowrap;
-    gap: var(--space-xs);
-    border-top: 1px solid var(--border);
-    padding: var(--space-xs);
-    padding-bottom: max(var(--space-xs), env(safe-area-inset-bottom, 0));
-    min-height: 36px;
-    min-width: 0;
-    overflow-x: auto;
-    scrollbar-width: thin;
-    touch-action: pan-x pan-y;
   }
 }
 

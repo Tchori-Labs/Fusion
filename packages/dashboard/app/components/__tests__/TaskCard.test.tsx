@@ -20,7 +20,8 @@ vi.mock("../../hooks/useToast", () => ({
 import { NavigationHistoryProvider, useNavigationHistory } from "../../hooks/useNavigationHistory";
 import { useOverlayDismiss } from "../../hooks/useOverlayDismiss";
 import type { ConfirmOptions } from "../../hooks/useConfirm";
-import type { Task } from "@fusion/core";
+import { TASK_PRIORITIES, type Task, type TaskPriority } from "@fusion/core";
+import { getPriorityColorVar } from "../../utils/priorityIndicator";
 
 // Mock lucide-react to avoid SVG rendering issues in test env
 vi.mock("lucide-react", () => ({
@@ -41,6 +42,10 @@ vi.mock("lucide-react", () => ({
   RotateCw: () => null,
   Zap: () => <svg data-testid="icon-zap" />,
   AlertTriangle: () => null,
+  ArrowDown: ({ style }: { style?: React.CSSProperties }) => <svg data-testid="priority-icon-low" className="lucide-arrow-down" style={style} />,
+  Flag: ({ style }: { style?: React.CSSProperties }) => <svg data-testid="priority-icon-normal" className="lucide-flag" style={style} />,
+  ArrowUp: ({ style }: { style?: React.CSSProperties }) => <svg data-testid="priority-icon-high" className="lucide-arrow-up" style={style} />,
+  TriangleAlert: ({ style }: { style?: React.CSSProperties }) => <svg data-testid="priority-icon-urgent" className="lucide-triangle-alert" style={style} />,
   ArrowUpRight: () => null,
   // FN-7592: the overseer badge now renders an icon child instead of a text label,
   // so tests must see a real SVG (like Zap) rather than a no-op render.
@@ -1161,7 +1166,7 @@ describe("TaskCard", () => {
     });
   });
 
-  it("hides delete button for done tasks while keeping archive action", () => {
+  it("hides delete button for done tasks while keeping archive action in the actions dropdown", () => {
     const onDeleteTask = vi.fn(async () => makeTask());
     const onArchiveTask = vi.fn(async () => makeTask({ column: "archived" }));
 
@@ -1176,7 +1181,8 @@ describe("TaskCard", () => {
     );
 
     expect(screen.queryByLabelText("Delete task")).toBeNull();
-    expect(screen.getByLabelText("Archive task")).toBeDefined();
+    expect(screen.getByRole("button", { name: "Actions" })).toBeDefined();
+    expect(screen.queryByLabelText("Archive task")).toBeNull();
   });
 
   it.each(["triage", "todo", "in-progress", "in-review"] as const)(
@@ -1192,20 +1198,46 @@ describe("TaskCard", () => {
       );
 
       expect(screen.queryByLabelText("Archive task")).toBeNull();
+      expect(screen.queryByRole("button", { name: "Actions" })).toBeNull();
     },
   );
 
-  it("renders archive action for done tasks", () => {
+  it("renders archive action for done tasks inside the actions dropdown", async () => {
+    const onArchiveTask = vi.fn(async () => makeTask({ column: "archived" }));
+
     render(
       <TaskCard
         task={makeTask({ column: "done" })}
         onOpenDetail={noop}
         addToast={noop}
-        onArchiveTask={vi.fn(async () => makeTask({ column: "archived" }))}
+        onArchiveTask={onArchiveTask}
       />,
     );
 
-    expect(screen.getByLabelText("Archive task")).toBeDefined();
+    const actionsButton = screen.getByRole("button", { name: "Actions" });
+    expect(screen.queryByLabelText("Archive task")).toBeNull();
+
+    fireEvent.click(actionsButton);
+
+    const menu = screen.getByRole("menu");
+    expect(within(menu).getByRole("menuitem", { name: "Archive" })).toBeDefined();
+
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Archive" }));
+
+    await waitFor(() => expect(onArchiveTask).toHaveBeenCalledWith("FN-001"));
+  });
+
+  it("does not render an empty done actions dropdown when no done action is available", () => {
+    const { container } = render(
+      <TaskCard
+        task={makeTask({ column: "done", mergeDetails: undefined })}
+        onOpenDetail={noop}
+        addToast={noop}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "Actions" })).toBeNull();
+    expect(container.querySelector(".card-done-actions")).toBeNull();
   });
 
   it("does not render archive action for archived tasks", () => {
@@ -1220,28 +1252,34 @@ describe("TaskCard", () => {
     );
 
     expect(screen.queryByLabelText("Archive task")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Actions" })).toBeNull();
     expect(screen.getByLabelText("Unarchive task")).toBeDefined();
   });
 
   /*
   FNXC:TaskRevert 2026-07-05-00:00 (FN-7525):
   Coverage for the Revert affordance: presence/absence on done + archived
-  cards (inline row + context menu), the disabled/omitted no-commit-to-revert
-  guard, the auto→clean-success path, and the auto→conflict→confirm→AI-undo
-  fallback path.
+  cards (done-actions dropdown, archived inline row, and context menu), the
+  disabled/omitted no-commit-to-revert guard, the auto→clean-success path,
+  and the auto→conflict→confirm→AI-undo fallback path.
   */
   describe("Revert affordance", () => {
-    it("renders the inline Revert button for a done card with a landed commit", () => {
-      render(
+    it("renders Revert inside the done actions dropdown for a done card with a landed commit", () => {
+      const { container } = render(
         <TaskCard
           task={makeTask({ column: "done", mergeDetails: { commitSha: "abc123def456" } as any })}
           onOpenDetail={noop}
           addToast={noop}
+          onArchiveTask={vi.fn(async () => makeTask({ column: "archived" }))}
           onRevertTask={vi.fn(async () => ({ mode: "git", clean: true, revertCommitSha: "deadbeef" }) as any)}
         />,
       );
 
-      expect(screen.getByLabelText("Revert this task's changes")).toBeDefined();
+      expect(container.querySelector(".card-revert-btn")).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: "Actions" }));
+      const menu = screen.getByRole("menu");
+      expect(within(menu).getByRole("menuitem", { name: "Archive" })).toBeDefined();
+      expect(within(menu).getByRole("menuitem", { name: "Revert" })).toBeDefined();
     });
 
     it("renders the inline Revert button for an archived card with a landed commit", () => {
@@ -1269,17 +1307,22 @@ describe("TaskCard", () => {
       expect(screen.queryByLabelText("Revert this task's changes")).toBeNull();
     });
 
-    it("omits the inline Revert button when the task has no landed commit", () => {
-      render(
+    it("omits Revert from the done actions dropdown when the task has no landed commit", () => {
+      const { container } = render(
         <TaskCard
           task={makeTask({ column: "done", mergeDetails: undefined })}
           onOpenDetail={noop}
           addToast={noop}
+          onArchiveTask={vi.fn(async () => makeTask({ column: "archived" }))}
           onRevertTask={vi.fn(async () => ({ mode: "git", clean: true, revertCommitSha: "deadbeef" }) as any)}
         />,
       );
 
-      expect(screen.queryByLabelText("Revert this task's changes")).toBeNull();
+      expect(container.querySelector(".card-revert-btn")).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: "Actions" }));
+      const menu = screen.getByRole("menu");
+      expect(within(menu).getByRole("menuitem", { name: "Archive" })).toBeDefined();
+      expect(within(menu).queryByRole("menuitem", { name: "Revert" })).toBeNull();
     });
 
     it("shows a disabled Revert context-menu entry when the task has no landed commit", () => {
@@ -1324,8 +1367,10 @@ describe("TaskCard", () => {
         />,
       );
 
+      fireEvent.click(screen.getByRole("button", { name: "Actions" }));
+
       await act(async () => {
-        fireEvent.click(screen.getByLabelText("Revert this task's changes"));
+        fireEvent.click(screen.getByRole("menuitem", { name: "Revert" }));
       });
 
       await waitFor(() => {
@@ -1355,8 +1400,10 @@ describe("TaskCard", () => {
         />,
       );
 
+      fireEvent.click(screen.getByRole("button", { name: "Actions" }));
+
       await act(async () => {
-        fireEvent.click(screen.getByLabelText("Revert this task's changes"));
+        fireEvent.click(screen.getByRole("menuitem", { name: "Revert" }));
       });
 
       await waitFor(() => {
@@ -1986,6 +2033,37 @@ describe("TaskCard", () => {
     }
   });
 
+  it.each([
+    { name: "undefined results", workflowStepResults: undefined, shouldRender: false },
+    { name: "pending but not started", workflowStepResults: [{ workflowStepId: "plan-review", workflowStepName: "Plan Review", status: "pending" }], shouldRender: false },
+    { name: "running", workflowStepResults: [{ workflowStepId: "plan-review", workflowStepName: "Plan Review", status: "pending", startedAt: "2026-07-11T12:00:00.000Z" }], shouldRender: true },
+    { name: "passed", workflowStepResults: [{ workflowStepId: "plan-review", workflowStepName: "Plan Review", status: "passed", startedAt: "2026-07-11T12:00:00.000Z", completedAt: "2026-07-11T12:01:00.000Z" }], shouldRender: false },
+    { name: "failed", workflowStepResults: [{ workflowStepId: "plan-review", workflowStepName: "Plan Review", status: "failed", startedAt: "2026-07-11T12:00:00.000Z", completedAt: "2026-07-11T12:01:00.000Z" }], shouldRender: false },
+    { name: "skipped", workflowStepResults: [{ workflowStepId: "plan-review", workflowStepName: "Plan Review", status: "skipped", startedAt: "2026-07-11T12:00:00.000Z", completedAt: "2026-07-11T12:01:00.000Z" }], shouldRender: false },
+    { name: "advisory failure", workflowStepResults: [{ workflowStepId: "plan-review", workflowStepName: "Plan Review", status: "advisory_failure", startedAt: "2026-07-11T12:00:00.000Z", completedAt: "2026-07-11T12:01:00.000Z" }], shouldRender: false },
+  ])("renders the Reviewing badge only while Plan Review is actively running: $name", ({ workflowStepResults, shouldRender }) => {
+    const { container } = render(
+      <TaskCard
+        task={makeTask({
+          id: "FN-7831",
+          column: "triage",
+          status: "planning",
+          enabledWorkflowSteps: ["plan-review"],
+          workflowStepResults: workflowStepResults as Task["workflowStepResults"],
+        })}
+        onOpenDetail={noop}
+        addToast={noop}
+      />,
+    );
+
+    const badge = container.querySelector('[data-testid="card-reviewing-FN-7831"]');
+    expect(Boolean(badge)).toBe(shouldRender);
+    if (shouldRender) {
+      expect(badge).toHaveTextContent("Reviewing");
+      expect(screen.getByText("planning")).toBeDefined();
+    }
+  });
+
   it("renders the status badge after the card ID in DOM order", () => {
     const { container } = render(
       <TaskCard
@@ -1998,8 +2076,10 @@ describe("TaskCard", () => {
     const badge = container.querySelector(".card-status-badge")!;
     expect(cardId).toBeDefined();
     expect(badge).toBeDefined();
-    // Badge should be the next sibling of card-id
-    expect(cardId.nextElementSibling).toBe(badge);
+    const headerBadges = container.querySelector(".card-header-badges")!;
+    expect(headerBadges).toBeDefined();
+    expect(cardId.nextElementSibling).toBe(headerBadges);
+    expect(headerBadges.contains(badge)).toBe(true);
   });
 
   it("does not render a status badge when task.status is falsy", () => {
@@ -2710,6 +2790,32 @@ describe("TaskCard", () => {
     ]);
   });
 
+  it("renders shared urgency-colored glyphs for visible priority badges while normal stays hidden", () => {
+    for (const priority of TASK_PRIORITIES) {
+      const { container, unmount } = render(
+        <TaskCard
+          task={makeTask({ priority: priority as TaskPriority })}
+          onOpenDetail={noop}
+          addToast={noop}
+        />,
+      );
+
+      const badge = container.querySelector(".card-priority-badge");
+      if (priority === "normal") {
+        expect(badge).toBeNull();
+        unmount();
+        continue;
+      }
+
+      expect(badge).not.toBeNull();
+      expect(badge).toHaveTextContent(priority);
+      const icon = badge?.querySelector("svg");
+      expect(icon).not.toBeNull();
+      expect(icon?.getAttribute("style")).toContain(`color: ${getPriorityColorVar(priority)}`);
+      unmount();
+    }
+  });
+
   it("renders partial card meta groups without empty wrappers when time is absent", () => {
     const { container } = render(
       <TaskCard
@@ -3370,18 +3476,50 @@ describe("TaskCard", () => {
     expect(actionsContainer?.contains(sizeBadge)).toBe(true);
   });
 
-  it("places card-header-actions after card-id in DOM order", () => {
+  it("renders size badge as the right-most header action after trailing controls", () => {
     const { container } = render(
-      <TaskCard task={makeTask({ size: "S" })} onOpenDetail={noop} addToast={noop} />,
+      <TaskCard
+        task={makeTask({ column: "in-progress", status: "executing" as any, size: "M" })}
+        onOpenDetail={noop}
+        addToast={noop}
+        onPauseTask={async () => makeTask({ paused: true })}
+      />,
     );
-    const cardId = container.querySelector(".card-id")!;
-    const actionsContainer = container.querySelector(".card-header-actions")!;
-    
-    expect(cardId).not.toBeNull();
+    const actionsContainer = container.querySelector(".card-header-actions") as HTMLElement | null;
+    const menuButton = container.querySelector(".card-menu-btn");
+    const sizeBadge = container.querySelector(".card-size-badge");
+
     expect(actionsContainer).not.toBeNull();
-    // The actions container should come after card-id
+    expect(menuButton).not.toBeNull();
+    expect(sizeBadge).not.toBeNull();
+    expect(actionsContainer?.contains(menuButton)).toBe(true);
+    expect(actionsContainer?.lastElementChild).toBe(sizeBadge);
+    expect(sizeBadge?.nextElementSibling).toBeNull();
+  });
+
+  it("places card-header-actions as a direct header child after the wrapped badge group", () => {
+    const { container } = render(
+      <TaskCard
+        task={makeTask({ size: "S", priority: "urgent" as Task["priority"], executionMode: "fast" })}
+        onOpenDetail={noop}
+        addToast={noop}
+      />,
+    );
+    const header = container.querySelector(".card-header")!;
+    const cardId = container.querySelector(".card-id")!;
+    const headerBadges = container.querySelector(".card-header-badges")!;
+    const actionsContainer = container.querySelector(".card-header-actions")!;
+
+    expect(cardId).not.toBeNull();
+    expect(headerBadges).not.toBeNull();
+    expect(actionsContainer).not.toBeNull();
+    expect(actionsContainer.parentElement).toBe(header);
+    expect(headerBadges.parentElement).toBe(header);
     expect(
-      cardId.compareDocumentPosition(actionsContainer) & Node.DOCUMENT_POSITION_FOLLOWING
+      cardId.compareDocumentPosition(headerBadges) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+    expect(
+      headerBadges.compareDocumentPosition(actionsContainer) & Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy();
   });
 
@@ -3402,7 +3540,7 @@ describe("TaskCard", () => {
     expect(actionsContainer?.contains(editBtn)).toBe(true);
   });
 
-  it("renders archive button inside card-header-actions for done columns", () => {
+  it("renders done actions dropdown inside card-header-actions for done columns", () => {
     const { container } = render(
       <TaskCard 
         task={makeTask({ column: "done", size: "L" })} 
@@ -3412,11 +3550,11 @@ describe("TaskCard", () => {
       />,
     );
     const actionsContainer = container.querySelector(".card-header-actions");
-    const archiveBtn = container.querySelector(".card-archive-btn");
+    const actionsButton = screen.getByRole("button", { name: "Actions" });
     
     expect(actionsContainer).not.toBeNull();
-    expect(archiveBtn).not.toBeNull();
-    expect(actionsContainer?.contains(archiveBtn)).toBe(true);
+    expect(container.querySelector(".card-archive-btn")).toBeNull();
+    expect(actionsContainer?.contains(actionsButton)).toBe(true);
   });
 
   it("renders in-review Move control inline in card-meta for overlap-blocked tasks", () => {

@@ -5,7 +5,7 @@ FN-6441 rescued this orphaned component test after standalone dashboard-app exec
 import { readFileSync } from "node:fs";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
-import { TerminalModal, _resetInitialViewportHeight, ctrlChar, altChar } from "../TerminalModal";
+import { TerminalModal, _resetInitialViewportHeight, ctrlChar, altChar, evaluateTabsOverflow } from "../TerminalModal";
 import {
   DEFAULT_TERMINAL_PREFERENCES,
   LEGACY_TERMINAL_FONT_SIZE_KEY,
@@ -39,6 +39,10 @@ function expectTextSizeAdjustmentDisabledForExactXtermMetrics(cssSource: string)
   const match = cssSource.match(/\.terminal-xterm\s*,\s*\.terminal-xterm \*\s*\{([^}]*)\}/);
   expect(match?.[1] ?? "").toMatch(/-webkit-text-size-adjust\s*:\s*none\s*;/);
   expect(match?.[1] ?? "").toMatch(/text-size-adjust\s*:\s*none\s*;/);
+}
+
+function defineMetric(element: Element, property: "clientWidth" | "scrollWidth", value: number) {
+  Object.defineProperty(element, property, { configurable: true, value });
 }
 
 // Mock hooks and API
@@ -306,6 +310,17 @@ describe("ctrlChar/altChar helpers", () => {
   });
 });
 
+describe("evaluateTabsOverflow", () => {
+  it("collapses only after the tab content exceeds available width beyond hysteresis", () => {
+    expect(evaluateTabsOverflow({ scrollWidth: 201, clientWidth: 200 })).toBe(false);
+    expect(evaluateTabsOverflow({ scrollWidth: 202, clientWidth: 200 })).toBe(true);
+    expect(evaluateTabsOverflow({ scrollWidth: 200, clientWidth: 200 })).toBe(false);
+    expect(evaluateTabsOverflow({ scrollWidth: 201, clientWidth: 200, currentlyOverflowing: true })).toBe(true);
+    expect(evaluateTabsOverflow({ scrollWidth: 200, clientWidth: 200, currentlyOverflowing: true })).toBe(false);
+    expect(evaluateTabsOverflow({ scrollWidth: 300, clientWidth: 0 })).toBe(false);
+  });
+});
+
 // Default tab state
 const defaultTab = {
   id: "tab-1",
@@ -480,6 +495,70 @@ describe("TerminalModal", () => {
     expect(screen.queryByTestId("terminal-workspace-picker")).toBeNull();
     fireEvent.click(screen.getByLabelText("New terminal"));
     expect(defaultSessionState.createTab).toHaveBeenCalledWith();
+  });
+
+  it("defaults the embedded picker to the workspace matching defaultCwd", async () => {
+    mockUseWorkspaces.mockReturnValue({
+      projectName: "kb",
+      workspaces: [
+        { id: "FN-7832", label: "FN-7832", title: "Task terminal picker", worktree: "/repo/.worktrees/FN-7832", kind: "task" },
+      ],
+      loading: false,
+      error: null,
+    });
+
+    render(
+      <TerminalModal
+        isOpen={true}
+        onClose={mockOnClose}
+        embedded
+        defaultCwd="/repo/.worktrees/FN-7832"
+        scopeId="FN-7832"
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("Select terminal workspace: FN-7832")).toBeInTheDocument();
+    });
+    expect(screen.queryByLabelText("Select terminal workspace: Project Root")).toBeNull();
+  });
+
+  it("falls back to Project Root when embedded defaultCwd has no workspace match", async () => {
+    mockUseWorkspaces.mockReturnValue({
+      projectName: "kb",
+      workspaces: [
+        { id: "FN-0001", label: "FN-0001", title: "Different task", worktree: "/repo/.worktrees/FN-0001", kind: "task" },
+      ],
+      loading: false,
+      error: null,
+    });
+
+    render(
+      <TerminalModal
+        isOpen={true}
+        onClose={mockOnClose}
+        embedded
+        defaultCwd="/repo/.worktrees/FN-7832"
+        scopeId="FN-7832"
+      />,
+    );
+
+    expect(await screen.findByLabelText("Select terminal workspace: Project Root")).toBeInTheDocument();
+  });
+
+  it("keeps the footer picker defaulted to Project Root when defaultCwd is omitted", async () => {
+    mockUseWorkspaces.mockReturnValue({
+      projectName: "kb",
+      workspaces: [
+        { id: "FN-7832", label: "FN-7832", title: "Task terminal picker", worktree: "/repo/.worktrees/FN-7832", kind: "task" },
+      ],
+      loading: false,
+      error: null,
+    });
+
+    render(<TerminalModal isOpen={true} onClose={mockOnClose} />);
+
+    expect(await screen.findByLabelText("Select terminal workspace: Project Root")).toBeInTheDocument();
   });
 
   it("opens a new terminal in the selected task worktree", async () => {
@@ -836,26 +915,12 @@ describe("TerminalModal", () => {
     expect(belowRule).not.toContain("position: fixed;");
     expect(belowRule).toContain("height: var(--terminal-below-height);");
 
-    // FN-7560/FN-7684: the `.terminal-status-bar` footer is a MOBILE + TABLET-ONLY
-    // affordance (isMobileTerminal || isTabletTerminal, both of which exclude
-    // below mode's true-desktop display) — it must exist only scoped inside the
-    // mobile `@media (max-width: 768px)` block or the tablet
-    // `@media (min-width: 769px) and (max-width: 1024px)` block, never as a
-    // global/unscoped rule that could leak a footer shell into true-desktop
-    // (>1024px) docked/floating/pinned-below. Strip every mobile AND tablet
-    // media-query block out of the stylesheet and confirm no `.terminal-status-bar`
-    // rule remains outside them.
-    const cssWithoutMobileAndTabletMediaBlocks = terminalModalCss
-      .replace(/@media \(max-width: 768px\) \{(?:[^{}]*\{[^{}]*\})*[^{}]*\}/g, "")
-      .replace(/@media \(min-width: 769px\) and \(max-width: 1024px\) \{(?:[^{}]*\{[^{}]*\})*[^{}]*\}/g, "");
-    expect(cssWithoutMobileAndTabletMediaBlocks).not.toMatch(/\.terminal-status-bar\s*\{/);
-    const mobileFooterRule =
-      terminalModalCss.match(/@media \(max-width: 768px\) \{[\s\S]*?\.terminal-status-bar\s*\{/);
-    expect(mobileFooterRule).not.toBeNull();
-    const tabletFooterRule = terminalModalCss.match(
-      /@media \(min-width: 769px\) and \(max-width: 1024px\) \{[\s\S]*?\.terminal-status-bar\s*\{/,
-    );
-    expect(tabletFooterRule).not.toBeNull();
+    // FN-7829: the `.terminal-status-bar` footer is now the in-flow action-control location at every breakpoint, including below mode. It must remain an unconditional base rule with the horizontal-scroll safeguards that keep the single footer cluster reachable.
+    const footerRule = terminalModalCss.match(/\.terminal-status-bar\s*\{([^}]*)\}/)?.[1] ?? "";
+    expect(footerRule).toContain("display: flex;");
+    expect(footerRule).toContain("min-width: 0;");
+    expect(footerRule).toContain("overflow-x: auto;");
+    expect(footerRule).toContain("touch-action: pan-x pan-y;");
   });
 
   it("exposes floating drag and resize handles and refits after floating resize", async () => {
@@ -1265,6 +1330,64 @@ describe("TerminalModal", () => {
     expect(screen.queryByTestId("terminal-mobile-tabs")).toBeNull();
   });
 
+  it("collapses desktop tabs to the mobile dropdown on container overflow and expands when room returns", async () => {
+    const previousInnerWidth = window.innerWidth;
+    const mockSetActiveTab = vi.fn();
+    const mockCreateTab = vi.fn().mockResolvedValue(defaultTab);
+    const mockCloseTab = vi.fn();
+    mockUseTerminalSessions.mockReturnValue({
+      ...defaultSessionState,
+      tabs: [
+        { ...defaultTab, isActive: true },
+        { id: "tab-2", sessionId: "test-session-456", title: "zsh", isActive: false, createdAt: Date.now() },
+        { id: "tab-3", sessionId: "test-session-789", title: "make test", isActive: false, createdAt: Date.now() },
+      ],
+      setActiveTab: mockSetActiveTab,
+      createTab: mockCreateTab,
+      closeTab: mockCloseTab,
+    });
+    Object.defineProperty(window, "innerWidth", { value: 1280, configurable: true });
+
+    try {
+      render(<TerminalModal isOpen={true} onClose={mockOnClose} />);
+
+      const expandedTabs = await screen.findByTestId("terminal-tabs");
+      defineMetric(expandedTabs, "scrollWidth", 360);
+      defineMetric(expandedTabs, "clientWidth", 200);
+      act(() => {
+        fireEvent(window, new Event("resize"));
+      });
+
+      const collapsedTabs = await screen.findByTestId("terminal-mobile-tabs");
+      expect(screen.queryByTestId("terminal-tabs")).toBeNull();
+      const measuringTabs = screen.getByTestId("terminal-tabs-measuring");
+      expect(measuringTabs).toHaveAttribute("aria-hidden", "true");
+      expect(measuringTabs.querySelector(".terminal-tab-close")).toBeDisabled();
+
+      const select = screen.getByTestId("terminal-mobile-tab-select") as HTMLSelectElement;
+      expect(collapsedTabs.contains(select)).toBe(true);
+      fireEvent.change(select, { target: { value: "tab-2" } });
+      expect(mockSetActiveTab).toHaveBeenCalledWith("tab-2");
+      fireEvent.click(screen.getByTestId("terminal-mobile-new-tab"));
+      expect(mockCreateTab).toHaveBeenCalledWith();
+      fireEvent.click(screen.getByTestId("terminal-mobile-close-tab"));
+      expect(mockCloseTab).toHaveBeenCalledWith("tab-1");
+
+      defineMetric(measuringTabs, "scrollWidth", 199);
+      defineMetric(measuringTabs, "clientWidth", 200);
+      act(() => {
+        fireEvent(window, new Event("resize"));
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId("terminal-tabs")).toBeTruthy();
+        expect(screen.queryByTestId("terminal-mobile-tabs")).toBeNull();
+      });
+    } finally {
+      Object.defineProperty(window, "innerWidth", { value: previousInnerWidth, configurable: true });
+    }
+  });
+
   it("renders a mobile tab selector with every tab and switches by tab id", async () => {
     const previousInnerWidth = window.innerWidth;
     const previousInnerHeight = window.innerHeight;
@@ -1522,29 +1645,14 @@ describe("TerminalModal", () => {
       expect(mobilePanelRule).not.toContain("min-width");
     });
 
-    it("gives the mobile footer bar the same horizontal-scroll pattern (FN-7560)", () => {
-      // FN-7560: the mobile action-control footer must reuse the min-width: 0 +
-      // overflow-x: auto flex-scroll pattern so a crowded footer scrolls
-      // horizontally instead of clipping/wrapping.
-      const footerRule =
-        terminalModalCss.match(/@media \(max-width: 768px\) \{[\s\S]*?\.terminal-status-bar\s*\{([^}]*)\}/)?.[1] ?? "";
+    it("gives the unconditional footer bar the horizontal-scroll pattern (FN-7829)", () => {
+      // FN-7829: desktop, tablet, mobile, and embedded terminals share the same footer rule, so the scroll-safety declarations must live in the base stylesheet instead of media-query-only overrides.
+      const footerRule = terminalModalCss.match(/\.terminal-status-bar\s*\{([^}]*)\}/)?.[1] ?? "";
       expect(footerRule).toContain("overflow-x: auto;");
       expect(footerRule).toContain("min-width: 0;");
-    });
+      expect(footerRule).toContain("flex-wrap: nowrap;");
+      expect(footerRule).toContain("touch-action: pan-x pan-y;");
 
-    it("gives the tablet footer bar the same horizontal-scroll pattern (FN-7684)", () => {
-      // FN-7684: the tablet-tier action-control footer mirrors the FN-7560
-      // mobile footer's min-width: 0 + overflow-x: auto flex-scroll pattern.
-      const tabletFooterRule =
-        terminalModalCss.match(
-          /@media \(min-width: 769px\) and \(max-width: 1024px\) \{[\s\S]*?\.terminal-status-bar\s*\{([^}]*)\}/,
-        )?.[1] ?? "";
-      expect(tabletFooterRule).toContain("overflow-x: auto;");
-      expect(tabletFooterRule).toContain("min-width: 0;");
-      expect(tabletFooterRule).toContain("touch-action: pan-x pan-y;");
-
-      // Unlike mobile, the tablet-scoped mobile `display: none` hide for the
-      // help text and connection status must NOT apply at the tablet tier.
       const mobileHideBlock = terminalModalCss.match(
         /@media \(max-width: 768px\) \{[\s\S]*?\.terminal-shortcuts--header,\s*\n\s*\.terminal-connection-status \{[\s\S]*?\}\s*\n\}/,
       );
@@ -1554,6 +1662,7 @@ describe("TerminalModal", () => {
       )?.[1] ?? "";
       expect(tabletBlock).not.toMatch(/\.terminal-shortcuts--header/);
       expect(tabletBlock).not.toMatch(/\.terminal-connection-status/);
+      expect(tabletBlock).not.toMatch(/\.terminal-status-bar/);
     });
 
     it("keeps the desktop terminal header controls on one scrollable row when narrow (FN-7823)", () => {
@@ -3543,14 +3652,14 @@ describe("TerminalModal — mobile layout contract", () => {
     });
   });
 
-  it("preserves header structure: tabs, title, and actions are present", async () => {
+  it("preserves header/footer structure: tabs and title in header, actions in footer", async () => {
     render(<TerminalModal isOpen={true} onClose={mockOnClose} />);
 
     await waitFor(() => {
-      // Verify the three structural sections of the header exist
       expect(screen.getByTestId("terminal-tabs")).toBeTruthy();
       expect(screen.getByTestId("terminal-title")).toBeTruthy();
-      expect(screen.getByTestId("terminal-actions")).toBeTruthy();
+      expect(screen.getByTestId("terminal-footer-actions")).toBeTruthy();
+      expect(screen.queryByTestId("terminal-actions")).toBeNull();
     });
   });
 
@@ -3632,24 +3741,34 @@ describe("TerminalModal — mobile layout contract", () => {
     });
   });
 
-  it("header actions show connection state without a footer status-bar shell (desktop, FN-7502)", async () => {
-    // FN-7560/FN-7684: explicitly TRUE-desktop-width (>1024px) — the footer
-    // only exists on the mobile (isMobileTerminal) and tablet (isTabletTerminal)
-    // paths; true desktop/floating/pinned-below keep the FN-7502 header-actions
-    // contract with NO footer shell rendered.
+  it("footer actions show connection state on true desktop with no header actions shell", async () => {
     const previousInnerWidth = window.innerWidth;
     Object.defineProperty(window, "innerWidth", { value: 1280, configurable: true });
 
     try {
-    render(<TerminalModal isOpen={true} onClose={mockOnClose} />);
+      render(<TerminalModal isOpen={true} onClose={mockOnClose} />);
 
-    await waitFor(() => {
-      expect(screen.queryByTestId("terminal-status-bar")).toBeNull();
-      expect(screen.queryByTestId("terminal-footer-actions")).toBeNull();
-      const actions = screen.getByTestId("terminal-actions");
-      const connectionStatus = actions.querySelector(".terminal-connection-status");
-      expect(connectionStatus?.textContent).toBe("Disconnected");
-    });
+      await waitFor(() => {
+        const footer = screen.getByTestId("terminal-footer-actions");
+        expect(footer.className).toContain("terminal-status-bar");
+        const header = document.querySelector(".terminal-header");
+        const clearBtn = screen.getByTestId("terminal-clear-btn");
+        const shortcutToggle = screen.getByTestId("terminal-shortcut-toggle");
+        const preferencesToggle = screen.getByTestId("terminal-preferences-toggle");
+        const fontSizeValue = screen.getByTestId("terminal-font-size-value");
+        const pinToggle = screen.getByTestId("terminal-pin-toggle");
+        const popoutToggle = screen.getByTestId("terminal-popout-toggle");
+        const connectionStatus = footer.querySelector(".terminal-connection-status");
+
+        expect(connectionStatus?.textContent).toBe("Disconnected");
+        for (const control of [clearBtn, shortcutToggle, preferencesToggle, fontSizeValue, pinToggle, popoutToggle]) {
+          expect(footer.contains(control)).toBe(true);
+          expect(header?.contains(control)).toBe(false);
+        }
+        expect(screen.queryByTestId("terminal-actions")).toBeNull();
+        expect(header?.contains(screen.getByTestId("terminal-close-btn"))).toBe(true);
+        expect(header?.contains(screen.getByTestId("terminal-tabs"))).toBe(true);
+      });
     } finally {
       Object.defineProperty(window, "innerWidth", { value: previousInnerWidth, configurable: true });
     }
@@ -3685,8 +3804,10 @@ describe("TerminalModal — mobile layout contract", () => {
         expect(header?.contains(preferencesToggle)).toBe(false);
         expect(header?.contains(fontSizeValue)).toBe(false);
 
-        // No empty .terminal-actions shell renders in the mobile header.
+        // No empty .terminal-actions shell renders in the mobile header, and non-mobile display toggles stay omitted.
         expect(header?.querySelector(".terminal-actions")).toBeNull();
+        expect(screen.queryByTestId("terminal-pin-toggle")).toBeNull();
+        expect(screen.queryByTestId("terminal-popout-toggle")).toBeNull();
 
         // The close button and mobile tab dropdown remain in the header.
         const closeBtn = screen.getByTestId("terminal-close-btn");
@@ -3848,7 +3969,7 @@ describe("TerminalModal — mobile layout contract", () => {
     }
   });
 
-  it("keeps the desktop close button in .terminal-actions with no mobile-only corner slot (FN-7565)", async () => {
+  it("keeps the desktop close button as a plain header control with no actions shell (FN-7565)", async () => {
     const previousInnerWidth = window.innerWidth;
     Object.defineProperty(window, "innerWidth", { value: 1280, configurable: true });
 
@@ -3859,14 +3980,10 @@ describe("TerminalModal — mobile layout contract", () => {
         const closeButtons = screen.getAllByTestId("terminal-close-btn");
         expect(closeButtons).toHaveLength(1);
         const closeBtn = closeButtons[0];
-        const actions = screen.getByTestId("terminal-actions");
+        const header = document.querySelector(".terminal-header");
 
-        // Desktop/floating/pinned-below keep the FN-7502 placement: close stays
-        // the rightmost child of .terminal-actions.
-        expect(actions.contains(closeBtn)).toBe(true);
-        expect(actions.lastElementChild).toBe(closeBtn);
-
-        // No mobile-only corner class/slot renders on desktop.
+        expect(header?.contains(closeBtn)).toBe(true);
+        expect(screen.queryByTestId("terminal-actions")).toBeNull();
         expect(closeBtn.className).not.toContain("terminal-close--corner");
       });
     } finally {
