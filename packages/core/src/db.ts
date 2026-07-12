@@ -184,7 +184,7 @@ export function isFts5CorruptionError(error: unknown): boolean {
 
 // ── Schema Definition ────────────────────────────────────────────────
 
-const SCHEMA_VERSION = 141;
+const SCHEMA_VERSION = 142;
 
 const TASKS_FTS_AUTOMERGE = 8;
 const TASKS_FTS_CRISISMERGE = 16;
@@ -285,9 +285,11 @@ CREATE TABLE IF NOT EXISTS tasks (
   mergeRetries INTEGER,
   workflowStepRetries INTEGER,
   resumeLimboCount INTEGER DEFAULT 0,
+  executeRequeueLoopCount INTEGER DEFAULT 0,
   graphResumeRetryCount INTEGER DEFAULT 0,
   resumeLimboTipSha TEXT,
   resumeLimboStepSignature TEXT,
+  executeRequeueLoopSignature TEXT,
   recoveryRetryCount INTEGER,
   taskDoneRetryCount INTEGER DEFAULT 0,
   worktreeSessionRetryCount INTEGER DEFAULT 0,
@@ -5670,6 +5672,19 @@ export class Database {
         if (this.hasTable("chat_sessions")) {
           this.addColumnIfMissing("chat_sessions", "thinkingLevel", "TEXT");
         }
+      });
+    }
+
+    if (version < 142) {
+      /*
+       * FNXC:WorkflowLifecycle 2026-07-12-00:00:
+       * FN-7863 stores the progress-anchored execute self-requeue streak so slow
+       * execute→pause-abort→todo loops survive scheduler cadence gaps and terminalize
+       * visibly instead of burning executor slots indefinitely.
+       */
+      this.applyMigration(142, () => {
+        this.addColumnIfMissing("tasks", "executeRequeueLoopCount", "INTEGER DEFAULT 0");
+        this.addColumnIfMissing("tasks", "executeRequeueLoopSignature", "TEXT");
       });
     }
 

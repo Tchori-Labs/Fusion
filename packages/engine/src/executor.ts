@@ -490,6 +490,10 @@ const MAX_WORKFLOW_STEP_RETRIES = 3;
 const MAX_TASK_DONE_SESSION_RETRIES = 3;
 /** Maximum todo requeues after exhausting in-session fn_task_done retries. */
 const MAX_TASK_DONE_REQUEUE_RETRIES = 3;
+/** Maximum no-progress execute-node self-requeues before terminalizing the loop. */
+export const MAX_EXECUTE_REQUEUE_LOOP_CYCLES = 6;
+/** Low-water mark for surfacing a visible warning before loop terminalization. */
+export const EXECUTE_REQUEUE_LOOP_VISIBLE_THRESHOLD = 3;
 /**
  * Maximum bounded retries for the narrow resume-after-restart graph transient.
  * Budget exhaustion falls through to terminal status:"failed" so FN-5704's
@@ -505,6 +509,13 @@ const WORKFLOW_RERUN_WATCHDOG_MS = 15_000;
 const LOOP_COMPACTION_TIMEOUT_MS = 60_000;
 
 const TASK_DONE_REFUSAL_SUFFIX = "Either finish the work and resubmit, or do not call fn_task_done — exit the session and the engine will requeue.";
+
+export function buildExecuteRequeueLoopSignature(live: TaskDetail): string {
+  return JSON.stringify({
+    currentStep: live.currentStep ?? null,
+    steps: live.steps?.map((step) => step.status) ?? [],
+  });
+}
 
 const TRANSIENT_WORKTREE_TASK_JSON_ENOENT_PATTERN = /ENOENT:\s+no such file or directory,\s+open\s+'([^']+\/\.fusion\/tasks\/([^/]+)\/task\.json)'/;
 
@@ -8935,7 +8946,57 @@ export class TaskExecutor {
 
         FNXC:WorkflowLifecycle 2026-06-23-21:19:
         Also honor the in-process self-requeue marker. Upgrade/restart races and minimal stores can return a stale `in-progress` live row even after the inner executor already moved the task to `todo`; stale reads must not strand progressing tasks in review.
+
+        FNXC:WorkflowLifecycle 2026-07-12-00:00:
+        FN-7863: the scheduler's wall-clock dispatchStormCount guard only increments when re-dispatches happen inside its short window; slow execute→pause-abort→todo loops reset that counter every cycle. Count this funnel by execution-progress signature instead, warn early for board-visible monitoring, and terminalize only non-paused live tasks after the bounded no-progress cap while preserving worktree/branch/step progress.
         */
+        const signature = buildExecuteRequeueLoopSignature(live);
+        const nextCount = live.executeRequeueLoopSignature === signature
+          ? (live.executeRequeueLoopCount ?? 0) + 1
+          : 1;
+        if (live.executeRequeueLoopCount !== nextCount || live.executeRequeueLoopSignature !== signature) {
+          await this.store.updateTask(task.id, {
+            executeRequeueLoopCount: nextCount,
+            executeRequeueLoopSignature: signature,
+          }, this.getRunContextFor(task.id));
+        }
+        if (nextCount === EXECUTE_REQUEUE_LOOP_VISIBLE_THRESHOLD) {
+          const warningMessage = `Execution dispatch loop building: ${nextCount}/${MAX_EXECUTE_REQUEUE_LOOP_CYCLES} no-progress execute re-queues`;
+          executorLog.warn(`${task.id}: ${warningMessage}`);
+          await this.store.logEntry(task.id, warningMessage, undefined, this.getRunContextFor(task.id));
+        }
+        const canTerminalizeExecuteLoop = live.userPaused !== true
+          && live.paused !== true
+          && live.column !== "done"
+          && live.column !== "archived";
+        if (nextCount >= MAX_EXECUTE_REQUEUE_LOOP_CYCLES && canTerminalizeExecuteLoop) {
+          const terminalError = `EXECUTION_DISPATCH_LOOP_EXHAUSTED: execute node re-queued task to todo ${nextCount} times with no forward progress (last value=${failureValue ?? "no-value"}). No further automatic retries will run. Manually retry, decompose, or rescope the task.`;
+          await this.store.updateTask(task.id, {
+            status: "failed",
+            error: terminalError,
+            executeRequeueLoopCount: nextCount,
+            executeRequeueLoopSignature: signature,
+          }, this.getRunContextFor(task.id));
+          await this.store.recordRunAuditEvent?.({
+            taskId: task.id,
+            agentId: "executor",
+            runId: generateSyntheticRunId("execution-dispatch-loop", task.id),
+            domain: "database",
+            mutationType: "task:execution-dispatch-loop-terminalized",
+            target: task.id,
+            metadata: {
+              taskId: task.id,
+              cycleCount: nextCount,
+              maxCycles: MAX_EXECUTE_REQUEUE_LOOP_CYCLES,
+              progressSignature: signature,
+              failureValue: failureValue ?? null,
+            },
+          });
+          executorLog.warn(`${task.id}: ${terminalError}`);
+          await this.store.logEntry(task.id, terminalError, undefined, this.getRunContextFor(task.id));
+          await this.persistTokenUsage(task.id);
+          return;
+        }
         const benignMessage = `Workflow graph execute node ended after executor re-queued task to todo (${failureValue ?? "no-value"}) — executor recovery preserved`;
         executorLog.log(`${task.id}: ${benignMessage}`);
         await this.store.logEntry(task.id, benignMessage, undefined, this.getRunContextFor(task.id));
@@ -10253,7 +10314,7 @@ export class TaskExecutor {
             }
 
             // Reset retry counters on success
-            await this.store.updateTask(task.id, { workflowStepRetries: undefined, taskDoneRetryCount: null });
+            await this.store.updateTask(task.id, { workflowStepRetries: undefined, taskDoneRetryCount: null, executeRequeueLoopCount: null, executeRequeueLoopSignature: null });
             if (await this.shouldDeferCompletionForGlobalPause(task.id, "before in-review transition after step-session completion")) {
               return;
             }
@@ -11085,7 +11146,7 @@ export class TaskExecutor {
             }
 
             // Reset retry counters on success
-            await this.store.updateTask(task.id, { workflowStepRetries: undefined, taskDoneRetryCount: null });
+            await this.store.updateTask(task.id, { workflowStepRetries: undefined, taskDoneRetryCount: null, executeRequeueLoopCount: null, executeRequeueLoopSignature: null });
             if (await this.shouldDeferCompletionForGlobalPause(task.id, "before in-review transition after task completion (post-reset)")) {
               return;
             }
@@ -11369,7 +11430,7 @@ export class TaskExecutor {
                 await this.store.logEntry(task.id, "Fast mode — pre-merge workflow steps skipped", undefined, this.getRunContextFor(task.id));
               }
 
-              await this.store.updateTask(task.id, { workflowStepRetries: undefined, taskDoneRetryCount: null });
+              await this.store.updateTask(task.id, { workflowStepRetries: undefined, taskDoneRetryCount: null, executeRequeueLoopCount: null, executeRequeueLoopSignature: null });
               if (await this.shouldDeferCompletionForGlobalPause(task.id, "before in-review transition after task completion retry")) {
                 return;
               }
