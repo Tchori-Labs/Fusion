@@ -211,6 +211,7 @@ export async function searchArchivedTasksLike(
   db: AsyncDataLayer["db"] | DbTransaction,
   query: string,
   limit: number,
+  projectId?: string,
 ): Promise<Record<string, unknown>[]> {
   const tokens = sanitizeSearchTokens(query);
   if (tokens.length === 0) return [];
@@ -230,10 +231,15 @@ export async function searchArchivedTasksLike(
 
   const textPredicate = or(...perTokenClauses) as SQL;
 
+  // FNXC:MultiProjectIsolation 2026-07-12: scope archived search to the bound
+  // project (shared cold-storage table; see async-archive-db.ts).
   const rows = await db
     .select()
     .from(schema.archive.archivedTasks)
-    .where(textPredicate)
+    .where(and(
+      textPredicate,
+      projectId ? eq(schema.archive.archivedTasks.projectId, projectId) : undefined,
+    ))
     .orderBy(asc(schema.archive.archivedTasks.archivedAt))
     .limit(limit);
   return rows as unknown as Record<string, unknown>[];
@@ -408,6 +414,7 @@ export async function searchArchivedTasksTsvector(
   db: AsyncDataLayer["db"] | DbTransaction,
   query: string,
   limit: number,
+  projectId?: string,
 ): Promise<Record<string, unknown>[]> {
   const tokens = sanitizeSearchTokens(query);
   if (tokens.length === 0) return [];
@@ -416,10 +423,15 @@ export async function searchArchivedTasksTsvector(
   const tsquery = buildTsqueryFragment(cleanQuery);
   if (!tsquery) return [];
 
+  // FNXC:MultiProjectIsolation 2026-07-12: scope archived search to the bound
+  // project (shared cold-storage table; see async-archive-db.ts).
   const rows = await db
     .select()
     .from(schema.archive.archivedTasks)
-    .where(sql`${schema.archive.archivedTasks.searchVector} @@ ${tsquery}`)
+    .where(and(
+      sql`${schema.archive.archivedTasks.searchVector} @@ ${tsquery}`,
+      projectId ? eq(schema.archive.archivedTasks.projectId, projectId) : undefined,
+    ))
     .orderBy(
       sql`ts_rank(${schema.archive.archivedTasks.searchVector}, ${tsquery}) DESC`,
       asc(schema.archive.archivedTasks.archivedAt),

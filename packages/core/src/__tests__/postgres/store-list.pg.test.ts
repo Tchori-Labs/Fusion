@@ -89,6 +89,48 @@ pgTest("TaskStore.listTasks facade (PostgreSQL)", () => {
     expect((await store.listTasks({ column: "todo", offset: 2, limit: 2 })).map((t) => t.id)).toEqual(["FN-010", "FN-030"]);
   });
 
+  it("archived cold-storage reads are scoped per project (shared archive table)", async () => {
+    /*
+    FNXC:MultiProjectIsolation 2026-07-12 (PR #2007 review P1):
+    archive.archived_tasks is ONE shared table across every project on the
+    embedded cluster. Writers stamp project_id; page/count/membership/search
+    readers filter to the caller's project — otherwise project A's archived
+    board lists project B's rows. Unbound (undefined) readers keep the
+    pre-isolation whole-table behavior.
+    */
+    const db = h.layer().db;
+    const now = new Date().toISOString();
+    const makeEntry = (id: string): import("../../types.js").ArchivedTaskEntry => ({
+      id,
+      lineageId: id,
+      description: `${id} archived body`,
+      column: "archived",
+      dependencies: [],
+      steps: [],
+      currentStep: 0,
+      log: [],
+      createdAt: now,
+      updatedAt: now,
+      archivedAt: now,
+    } as unknown as import("../../types.js").ArchivedTaskEntry);
+
+    const { upsertArchivedTaskEntry } = await import("../../task-store/async-archive-lineage.js");
+    const { listArchivedTaskEntriesPage, getArchivedRowCount, filterArchived, searchArchivedTasks } = await import("../../async-archive-db.js");
+
+    await upsertArchivedTaskEntry(db, makeEntry("FN-901"), "proj-a");
+    await upsertArchivedTaskEntry(db, makeEntry("FN-902"), "proj-b");
+
+    // Page + count are scoped to the owner…
+    expect((await listArchivedTaskEntriesPage(db, 10, 0, "proj-a")).map((e) => e.id)).toEqual(["FN-901"]);
+    expect(await getArchivedRowCount(db, "proj-a")).toBe(1);
+    expect(await getArchivedRowCount(db, "proj-b")).toBe(1);
+    // …unbound readers still see the whole table (pre-isolation behavior).
+    expect(await getArchivedRowCount(db)).toBe(2);
+    // Membership and search respect the scope too.
+    expect(await filterArchived(db, ["FN-901", "FN-902"], "proj-a")).toEqual(new Set(["FN-901"]));
+    expect((await searchArchivedTasks(db, "archived body", 10, "proj-b")).map((e) => e.id)).toEqual(["FN-902"]);
+  });
+
   it("column filter returns only tasks in that column", async () => {
     const store = h.store();
     await store.createTask({ description: "in todo", column: "todo" });

@@ -29,7 +29,7 @@
 
 import { sql } from "drizzle-orm";
 import type { AsyncDataLayer, DrizzleDb } from "./data-layer.js";
-import { PROJECT_SCHEMA } from "./schema/_shared.js";
+import { ARCHIVE_SCHEMA, PROJECT_SCHEMA } from "./schema/_shared.js";
 import { projectTableNames } from "./schema/project.js";
 
 /**
@@ -65,12 +65,18 @@ export interface PostgresHealthSnapshot {
  * definition but is absent from the live database (VAL-HEALTH-004).
  */
 export interface SchemaDriftFinding {
-  /** The affected table name (unqualified, within the project schema). */
+  /** The affected table name (unqualified). */
   table: string;
   /** The missing column name. */
   column: string;
   /** The expected PostgreSQL data type (e.g. "text", "jsonb", "integer"). */
   expectedType: string;
+  /**
+   * FNXC:MultiProjectIsolation 2026-07-12: owning schema; defaults to the
+   * project schema. Lets the drift self-heal also cover archive-schema
+   * columns (archive.archived_tasks.project_id).
+   */
+  schema?: string;
 }
 
 /**
@@ -143,7 +149,7 @@ export interface VacuumAnalyzeResult {
  * New columns added to the Drizzle schema should be added here so drift
  * detection covers them.
  */
-export const EXPECTED_PROJECT_COLUMNS: ReadonlyArray<{ table: string; column: string; type: string }> = [
+export const EXPECTED_PROJECT_COLUMNS: ReadonlyArray<{ schema?: string; table: string; column: string; type: string }> = [
   // tasks — the core table; key columns the store reads/writes.
   { table: "tasks", column: "id", type: "text" },
   { table: "tasks", column: "description", type: "text" },
@@ -170,6 +176,11 @@ export const EXPECTED_PROJECT_COLUMNS: ReadonlyArray<{ table: string; column: st
   { table: "archived_tasks", column: "archived_at", type: "text" },
   // FNXC:MultiProjectIsolation 2026-07-11: see tasks.project_id above.
   { table: "archived_tasks", column: "project_id", type: "text" },
+  // FNXC:MultiProjectIsolation 2026-07-12: the COLD-STORAGE archive table
+  // (async-archive-db reads/writes archive.archived_tasks, not the
+  // project-schema table above) — the archived board/count/search scope
+  // column must self-heal on existing databases too.
+  { schema: ARCHIVE_SCHEMA, table: "archived_tasks", column: "project_id", type: "text" },
   // chat_sessions — FN-7775 per-chat thinking level (added 2026-07-10); listed
   // so existing embedded-PG databases self-heal the column via ALTER TABLE
   // ADD COLUMN IF NOT EXISTS on boot (CREATE TABLE IF NOT EXISTS alone never
@@ -263,43 +274,50 @@ export async function checkPostgresHealth(layer: AsyncDataLayer): Promise<string
  */
 export async function detectSchemaDrift(
   db: DrizzleDb,
-  expected: ReadonlyArray<{ table: string; column: string; type: string }> = EXPECTED_PROJECT_COLUMNS,
+  expected: ReadonlyArray<{ schema?: string; table: string; column: string; type: string }> = EXPECTED_PROJECT_COLUMNS,
 ): Promise<SchemaDriftFinding[]> {
-  // Gather the live columns for all expected tables in one query.
-  const tableNames = [...new Set(expected.map((e) => e.table))];
-  if (tableNames.length === 0) {
+  // Gather the live columns for all expected (schema, table) pairs in one
+  // query. Entries default to the project schema; archive-schema entries carry
+  // an explicit `schema` (FNXC:MultiProjectIsolation 2026-07-12).
+  const pairs = [...new Set(expected.map((e) => `${e.schema ?? PROJECT_SCHEMA}|${e.table}`))];
+  if (pairs.length === 0) {
     return [];
   }
 
   // Query information_schema for the live columns of all expected tables.
-  // Table names are from our own curated registry (not user input), so raw
-  // interpolation is safe here. The schema name is a compile-time constant.
-  const tableList = tableNames.map((t) => `'${t}'`).join(", ");
+  // Schema/table names are from our own curated registry (not user input), so
+  // raw interpolation is safe here.
+  const pairList = pairs
+    .map((pair) => {
+      const [schemaName, tableName] = pair.split("|");
+      return `('${schemaName}', '${tableName}')`;
+    })
+    .join(", ");
   const liveRows = (await db.execute(
     sql.raw(`
-      SELECT table_name, column_name
+      SELECT table_schema, table_name, column_name
       FROM information_schema.columns
-      WHERE table_schema = '${PROJECT_SCHEMA}'
-        AND table_name IN (${tableList})
-      ORDER BY table_name, column_name
+      WHERE (table_schema, table_name) IN (${pairList})
+      ORDER BY table_schema, table_name, column_name
     `),
-  )) as unknown as Array<{ table_name: string; column_name: string }>;
+  )) as unknown as Array<{ table_schema: string; table_name: string; column_name: string }>;
 
   const liveColumns = new Set<string>();
   for (const row of liveRows) {
-    liveColumns.add(`${row.table_name}:${row.column_name}`);
+    liveColumns.add(`${row.table_schema}:${row.table_name}:${row.column_name}`);
   }
 
   const findings: SchemaDriftFinding[] = [];
   for (const entry of expected) {
     // The expected registry stores the actual database column name (snake_case,
     // as it appears in DDL and information_schema). A direct match check suffices.
-    const key = `${entry.table}:${entry.column}`;
+    const key = `${entry.schema ?? PROJECT_SCHEMA}:${entry.table}:${entry.column}`;
     if (!liveColumns.has(key)) {
       findings.push({
         table: entry.table,
         column: entry.column,
         expectedType: entry.type,
+        ...(entry.schema ? { schema: entry.schema } : {}),
       });
     }
   }
@@ -334,7 +352,7 @@ export async function healSchemaDrift(
     try {
       await db.execute(
         sql.raw(
-          `ALTER TABLE ${PROJECT_SCHEMA}.${finding.table} ADD COLUMN IF NOT EXISTS "${finding.column}" ${ddlType}`,
+          `ALTER TABLE ${finding.schema ?? PROJECT_SCHEMA}.${finding.table} ADD COLUMN IF NOT EXISTS "${finding.column}" ${ddlType}`,
         ),
       );
       healed.push(finding);

@@ -23,6 +23,16 @@ export const archiveSchema = pgSchema(ARCHIVE_SCHEMA);
 
 export const archivedTasks = archiveSchema.table("archived_tasks", {
   id: text("id").primaryKey(),
+  /*
+  FNXC:MultiProjectIsolation 2026-07-12:
+  Per-project partition key (see project.tasks.projectId). The cold-storage
+  archive is one shared table across every project on the embedded cluster,
+  so archived-board listings, counts, and searches must be scoped to the
+  owning project — otherwise project A's archived list shows project B's
+  rows. Stamped from the bound layer projectId on archive; NULL for
+  legacy/unbound rows (project-agnostic layers skip the filter).
+  */
+  projectId: text("project_id"),
   taskJson: text("task_json").notNull(),
   prompt: text("prompt"),
   archivedAt: text("archived_at").notNull(),
@@ -46,6 +56,8 @@ export const archivedTasks = archiveSchema.table("archived_tasks", {
   ),
 }, (t) => [
   index("idxArchivedTasksArchivedAt").on(t.archivedAt),
+  // FNXC:MultiProjectIsolation 2026-07-12: per-project archived-board scans.
+  index("idxArchiveArchivedTasksProjectId").on(t.projectId),
   index("idxArchivedTasksCreatedAt").on(t.createdAt),
   /*
   FNXC:TaskStoreSearch 2026-06-24-12:25:

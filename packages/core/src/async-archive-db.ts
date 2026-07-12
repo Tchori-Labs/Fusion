@@ -39,7 +39,7 @@
  *   PostgreSQL integration tests consume. They target the stable
  *   `AsyncDataLayer` interface (U4), not the underlying driver.
  */
-import { desc, eq, ilike, inArray, or, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, or, sql, type SQL } from "drizzle-orm";
 import * as schema from "./postgres/schema/index.js";
 import type { AsyncDataLayer, DbTransaction } from "./postgres/data-layer.js";
 import type { ArchivedTaskEntry } from "./types.js";
@@ -81,14 +81,30 @@ const archivedTaskColumns = {
  * @param handle The runtime db or a transaction handle.
  * @param entry The archived task snapshot to persist.
  */
+/*
+FNXC:MultiProjectIsolation 2026-07-12 (PR #2007 review):
+The cold-storage archive is ONE shared table across every project on the
+embedded cluster. Writers stamp the owning project's id; list/count/search/
+membership readers take an optional projectId and filter to it (strict
+equality, same convention as taskProjectScope). Undefined projectId preserves
+the pre-isolation behavior for project-agnostic layers; id-keyed get/delete
+stay unscoped (task ids are globally unique via the distributed allocator).
+*/
+function archiveProjectScope(projectId?: string): SQL | undefined {
+  return projectId ? eq(schema.archive.archivedTasks.projectId, projectId) : undefined;
+}
+
 export async function upsertArchivedTask(
   handle: QueryHandle,
   entry: ArchivedTaskEntry,
+  projectId?: string,
 ): Promise<void> {
   await handle
     .insert(schema.archive.archivedTasks)
     .values({
       id: entry.id,
+      // Stable partition key — never rewritten by the conflict update below.
+      projectId: projectId ?? null,
       taskJson: JSON.stringify(entry),
       prompt: entry.prompt ?? null,
       archivedAt: entry.archivedAt,
@@ -125,10 +141,12 @@ export async function upsertArchivedTask(
  */
 export async function listArchivedTasks(
   handle: QueryHandle,
+  projectId?: string,
 ): Promise<ArchivedTaskEntry[]> {
   const rows = await handle
     .select({ taskJson: archivedTaskColumns.taskJson })
     .from(schema.archive.archivedTasks)
+    .where(archiveProjectScope(projectId))
     .orderBy(desc(archivedTaskColumns.archivedAt));
   return rows.map((row) => JSON.parse((row as { taskJson: string }).taskJson) as ArchivedTaskEntry);
 }
@@ -144,10 +162,12 @@ export async function listArchivedTaskEntriesPage(
   handle: QueryHandle,
   limit: number,
   offset: number,
+  projectId?: string,
 ): Promise<ArchivedTaskEntry[]> {
   const rows = await handle
     .select({ taskJson: archivedTaskColumns.taskJson })
     .from(schema.archive.archivedTasks)
+    .where(archiveProjectScope(projectId))
     .orderBy(desc(archivedTaskColumns.archivedAt), desc(archivedTaskColumns.id))
     .limit(limit)
     .offset(offset);
@@ -189,6 +209,7 @@ export async function getArchivedTask(
 export async function filterArchived(
   handle: QueryHandle,
   ids: readonly string[],
+  projectId?: string,
 ): Promise<Set<string>> {
   if (ids.length === 0) return new Set();
   const result = new Set<string>();
@@ -201,7 +222,7 @@ export async function filterArchived(
     const rows = await handle
       .select({ id: archivedTaskColumns.id })
       .from(schema.archive.archivedTasks)
-      .where(inArray(archivedTaskColumns.id, chunk));
+      .where(and(inArray(archivedTaskColumns.id, chunk), archiveProjectScope(projectId)));
     for (const row of rows) result.add(String((row as { id: string }).id));
   }
   return result;
@@ -228,10 +249,11 @@ export async function deleteArchivedTask(
  *
  * @param handle The runtime db or a transaction handle.
  */
-export async function getArchivedRowCount(handle: QueryHandle): Promise<number> {
+export async function getArchivedRowCount(handle: QueryHandle, projectId?: string): Promise<number> {
   const rows = await handle
     .select({ count: sql<number>`count(*)::int` })
-    .from(schema.archive.archivedTasks);
+    .from(schema.archive.archivedTasks)
+    .where(archiveProjectScope(projectId));
   const count = (rows[0] as { count?: number } | undefined)?.count;
   return typeof count === "number" ? count : 0;
 }
@@ -257,6 +279,7 @@ export async function searchArchivedTasks(
   handle: QueryHandle,
   query: string,
   limit: number,
+  projectId?: string,
 ): Promise<ArchivedTaskEntry[]> {
   const trimmed = query?.trim();
   if (!trimmed) return [];
@@ -292,7 +315,7 @@ export async function searchArchivedTasks(
   const rows = await handle
     .select({ taskJson: archivedTaskColumns.taskJson })
     .from(schema.archive.archivedTasks)
-    .where(where)
+    .where(and(where, archiveProjectScope(projectId)))
     .orderBy(desc(archivedTaskColumns.archivedAt))
     .limit(limit);
   return rows.map((row) => JSON.parse((row as { taskJson: string }).taskJson) as ArchivedTaskEntry);

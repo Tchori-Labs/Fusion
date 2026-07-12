@@ -82,11 +82,16 @@ export function liveParentFilter(taskIdColumn: ReturnType<typeof eq>) {
 export async function upsertArchivedTaskEntry(
   db: AsyncDataLayer["db"] | DbTransaction,
   entry: ArchivedTaskEntry,
+  projectId?: string,
 ): Promise<void> {
   await db
     .insert(schema.archive.archivedTasks)
     .values({
       id: entry.id,
+      // FNXC:MultiProjectIsolation 2026-07-12: stamp the owning project so the
+      // shared cold-storage archive can be scoped per project on reads. Stable
+      // for the row's lifetime — the conflict-update below never rewrites it.
+      projectId: projectId ?? null,
       taskJson: JSON.stringify(entry),
       prompt: entry.prompt ?? null,
       archivedAt: entry.archivedAt,
@@ -254,7 +259,8 @@ export async function archiveParentTaskWithLineageGate(
     }
 
     // 3. Archive snapshot to cold storage (VAL-CROSS-015 — preserves for restore).
-    await upsertArchivedTaskEntry(tx, entry);
+    // FNXC:MultiProjectIsolation 2026-07-12: stamped with the bound project.
+    await upsertArchivedTaskEntry(tx, entry, layer.projectId);
 
     // 4. Soft-delete the project row. Documents/artifacts are retained because
     //    this is an UPDATE, not a DELETE — the ON DELETE CASCADE FK does not

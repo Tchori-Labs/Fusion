@@ -1884,6 +1884,11 @@ CREATE TABLE IF NOT EXISTS central.__meta (
 
 CREATE TABLE IF NOT EXISTS archive.archived_tasks (
   id text PRIMARY KEY,
+  -- FNXC:MultiProjectIsolation 2026-07-12: per-project partition key (see
+  -- project.tasks.project_id). The cold-storage archive is shared across
+  -- projects on the embedded cluster, so archived-board reads/counts must be
+  -- scoped by owner; NULL = legacy/unbound rows.
+  project_id text,
   task_json text NOT NULL,
   prompt text,
   archived_at text NOT NULL,
@@ -1902,6 +1907,8 @@ CREATE TABLE IF NOT EXISTS archive.archived_tasks (
 );
 CREATE INDEX IF NOT EXISTS "idxArchivedTasksArchivedAt"
   ON archive.archived_tasks(archived_at);
+CREATE INDEX IF NOT EXISTS "idxArchiveArchivedTasksProjectId"
+  ON archive.archived_tasks(project_id);
 CREATE INDEX IF NOT EXISTS "idxArchivedTasksCreatedAt"
   ON archive.archived_tasks(created_at);
 -- FNXC:TaskStoreSearch 2026-06-24-12:45:

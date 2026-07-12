@@ -233,8 +233,12 @@ export async function listArchivedTasksImpl(store: TaskStore, options?: {
 
     if (store.backendMode) {
       const layer = store.asyncLayer!;
-      const total = await getArchivedRowCount(layer.db);
-      const entries = await listArchivedTaskEntriesPage(layer.db, limit, offset);
+      // FNXC:MultiProjectIsolation 2026-07-12 (PR #2007 review): the archived
+      // board and its count are scoped to the bound project — the shared
+      // cold-storage table would otherwise surface every project's archived
+      // tasks in every project's dashboard.
+      const total = await getArchivedRowCount(layer.db, layer.projectId);
+      const entries = await listArchivedTaskEntriesPage(layer.db, limit, offset, layer.projectId);
       const tasks = entries.map((entry) => store.archiveEntryToTask(entry, slim));
       return { tasks, total, hasMore: offset + tasks.length < total };
     }
