@@ -52,6 +52,7 @@ vi.mock("../../hooks/useToast", () => ({
 
 const noop = () => {};
 const resolvedChipHeightPattern = /^(var\(--card-chip-height\)|22px)$/;
+const centeredIdNudgePattern = /^translateY\(calc\(var\(--space-xs\) \/ 4\)\)$/;
 
 function expectSharedHeaderBaseline(container: HTMLElement) {
   const header = container.querySelector(".card-header") as HTMLElement;
@@ -72,6 +73,7 @@ function expectSharedHeaderBaseline(container: HTMLElement) {
   expect(idStyles.alignItems).toBe("center");
   expect(idStyles.lineHeight).toBe("1");
   expect(idStyles.minHeight).toMatch(resolvedChipHeightPattern);
+  expect(idStyles.transform).toMatch(centeredIdNudgePattern);
   expect(actionsStyles.display).toBe("flex");
   expect(actionsStyles.alignItems).toBe("center");
   expect(actionsStyles.minHeight).toMatch(resolvedChipHeightPattern);
@@ -267,7 +269,12 @@ describe("TaskCard badge wrapping (FN-5162)", () => {
     expectSharedHeaderBaseline(triageContainer);
   });
 
-  it("keeps the mobile header rhythm override tokenized with the badge-wrap contract", () => {
+  it("keeps the centered-id nudge and mobile header rhythm tokenized with the badge-wrap contract", () => {
+    const cardIdRule = loadedCss.match(/\.card-id\s*\{(?<body>[^}]*)\}/)?.groups?.body ?? "";
+    expect(cardIdRule).toContain("min-height: var(--card-chip-height);");
+    expect(cardIdRule).toContain("line-height: 1;");
+    expect(cardIdRule).toContain("transform: translateY(calc(var(--space-xs) / 4));");
+    expect(cardIdRule).not.toMatch(/translateY\(\d/);
     expect(loadedCss).toContain(".card-id,\n  .card-header-badges,\n  .card-header-actions");
     expect(loadedCss).toContain("min-height: var(--card-chip-height-mobile);");
   });

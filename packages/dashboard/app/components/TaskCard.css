@@ -131,12 +131,17 @@ FN-7862 requires the task id, the first badge row, and the right-side controls t
   min-width: 0;
 }
 
+/*
+FNXC:TaskCardLayout 2026-07-12-00:00:
+FN-7871 requires the mono task id to read optically centered with the first-row header badges and right-side icons/chips. Keep the outer FN-7862 flex-start first-row anchor and FN-7837 middle-badge wrapping intact; use a token-derived visual nudge on the id itself because its line-height: 1 glyph box sits slightly high inside the shared chip-height row.
+*/
 .card-id {
   display: inline-flex;
   align-items: center;
   flex-shrink: 0;
   min-height: var(--card-chip-height);
   line-height: 1;
+  transform: translateY(calc(var(--space-xs) / 4));
   font-size: 0.6875rem;
   font-weight: 600;
   color: var(--text-muted);
