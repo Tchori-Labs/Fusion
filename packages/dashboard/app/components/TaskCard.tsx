@@ -2763,6 +2763,133 @@ function TaskCardComponent({
     && filesChangedButton == null
     && showTrackingIndicator
     && Boolean(githubTrackedIssue);
+  const footerHasLeadingContent = Boolean(filesChangedButton)
+    || (isGitHubImportedTask && !showLinkedIssueChipForImport);
+  const footerRightHasContent = Boolean(cardCostLabel
+    || timeIndicator
+    || showNearDuplicateChip
+    || showUndoOfChip
+    || ((showTrackingIndicator || showLinkedIssueChipForImport) && githubTrackedIssue)
+    || (task.retrySummary?.total ?? 0) > 0);
+  /*
+   * FNXC:TaskCardCostBadge 2026-07-12-00:00:
+   * The footer-right badge cluster (cost, timing, retry, duplicate, and tracking chips) should render inline at the bottom-right of `.card-meta` when the footer has no leading content. Cards with files-changed or GitHub source-provenance leading content keep the existing `.card-footer-row` layout so in-progress and tracked-card footer behavior remains stable.
+   */
+  const placeFooterRightInMeta = footerRightHasContent
+    && !footerHasLeadingContent
+    && !chipFarRight
+    && metaRowVisible;
+  const footerRightCluster = footerRightHasContent ? (
+    <div className="card-footer-row-right">
+      {showUndoOfChip && (
+        <span
+          className="card-undo-chip"
+          title={t("tasks.undoOfTitle", "Created to undo {{id}}", { id: String(revertOfId) })}
+          aria-label={t("tasks.undoOfTitle", "Created to undo {{id}}", { id: String(revertOfId) })}
+        >
+          <span>{t("tasks.undoOf", "Undo of {{id}}", { id: String(revertOfId) })}</span>
+        </span>
+      )}
+      {showNearDuplicateChip && (
+        <>
+          <span
+            className="card-duplicate-chip"
+            title={t("tasks.nearDuplicateTitle", "Potential near-duplicate of {{id}}", { id: String(task.sourceMetadata?.nearDuplicateOf) })}
+            aria-label={t("tasks.nearDuplicateTitle", "Potential near-duplicate of {{id}}", { id: String(task.sourceMetadata?.nearDuplicateOf) })}
+          >
+            <span>{t("tasks.duplicateOf", "Duplicate of {{id}}", { id: String(task.sourceMetadata?.nearDuplicateOf) })}</span>
+          </span>
+          {onUpdateTask && (
+            <button
+              type="button"
+              className="card-duplicate-keep"
+              onClick={(e) => void handleDismissNearDuplicate(e)}
+              title={t("tasks.keepTaskTitle", "Keep this task and dismiss duplicate warning")}
+              aria-label={t("tasks.keepTaskTitle", "Keep this task and dismiss duplicate warning")}
+            >
+              {t("tasks.keep", "Keep")}
+            </button>
+          )}
+        </>
+      )}
+      {chipFarRight && (showTrackingIndicator || showLinkedIssueChipForImport) && githubTrackedIssue && (
+        <a
+          className="card-github-tracking-chip card-github-tracking-link"
+          href={githubTrackedIssue.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          title={t("tasks.linkedIssueChipTitle", "Linked GitHub issue: {{owner}}/{{repo}}#{{number}}", { owner: githubTrackedIssue.owner, repo: githubTrackedIssue.repo, number: githubTrackedIssue.number })}
+          aria-label={t("tasks.linkedIssueChipAriaLabel", "Linked GitHub issue #{{number}}", { number: githubTrackedIssue.number })}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <ProviderIcon provider="github" size="sm" />
+          <span>{`#${githubTrackedIssue.number}`}</span>
+        </a>
+      )}
+      {(task.retrySummary?.total ?? 0) > 0 && (
+        <span
+          className={`card-retry-badge${(retryWarningThreshold != null && (task.retrySummary?.total ?? 0) >= retryWarningThreshold) ? " card-retry-badge--error" : " card-retry-badge--warning"}`}
+          onClick={handleOpenRetries}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              event.stopPropagation();
+              onOpenDetailWithTab?.(task, "retries");
+            }
+          }}
+          aria-label={t("tasks.retriesAriaLabel", "{{count}} retries", { count: task.retrySummary?.total ?? 0 })}
+          title={t("tasks.openRetryBreakdown", "Open retry breakdown")}
+        >
+          <RotateCw size={11} />
+          <span>{task.retrySummary?.total ?? 0}</span>
+        </span>
+      )}
+      {(!chipFarRight || !((showTrackingIndicator || showLinkedIssueChipForImport) && githubTrackedIssue))
+        && (showTrackingIndicator || showLinkedIssueChipForImport) && githubTrackedIssue && (
+          <a
+            className="card-github-tracking-chip card-github-tracking-link"
+            href={githubTrackedIssue.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            title={t("tasks.linkedIssueChipTitle", "Linked GitHub issue: {{owner}}/{{repo}}#{{number}}", { owner: githubTrackedIssue.owner, repo: githubTrackedIssue.repo, number: githubTrackedIssue.number })}
+            aria-label={t("tasks.linkedIssueChipAriaLabel", "Linked GitHub issue #{{number}}", { number: githubTrackedIssue.number })}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <ProviderIcon provider="github" size="sm" />
+            <span>{`#${githubTrackedIssue.number}`}</span>
+          </a>
+        )}
+      {/*
+      FNXC:TaskCardTimingBadge 2026-06-13-17:20:
+      The execution-time badge belongs in the bottom-right footer cluster and must match sibling footer badge sizing while preserving its existing label, title, aria text, and live-update data.
+      */}
+      {cardCostLabel && (
+        <span
+          className="card-cost-indicator"
+          title={t("tasks.costBadgeTitle", "Estimated cost {{amount}}", { amount: cardCostLabel })}
+          aria-label={t("tasks.costBadgeAriaLabel", "Estimated cost {{amount}}", { amount: cardCostLabel })}
+        >
+          {/*
+          FNXC:TaskCardCostBadge 2026-07-12-00:00:
+          The cost chip must show only the formatted amount because formatCost already includes the currency symbol; do not render a leading dollar-sign icon that duplicates the label.
+          */}
+          <span>{cardCostLabel}</span>
+        </span>
+      )}
+      {timeIndicator && (
+        <span
+          className="card-time-indicator"
+          title={timeIndicator.title}
+          aria-label={timeIndicator.ariaLabel}
+        >
+          <Clock size={12} />
+          <span>{timeIndicator.label}</span>
+        </span>
+      )}
+    </div>
+  ) : null;
   const hasWorkflowBadge = typeof workflowBadge?.workflowId === "string"
     && workflowBadge.workflowId.trim().length > 0
     && typeof workflowBadge.workflowName === "string"
@@ -3490,7 +3617,7 @@ function TaskCardComponent({
           </>
         );
       })()}
-      {(filesChangedButton || isGitHubImportedTask || cardCostLabel || timeIndicator || showNearDuplicateChip || showUndoOfChip || ((showTrackingIndicator || showLinkedIssueChipForImport) && githubTrackedIssue) || (task.retrySummary?.total ?? 0) > 0) && (
+      {(footerHasLeadingContent || (footerRightHasContent && !placeFooterRightInMeta)) && (
         <div className={`card-footer-row${chipFarRight ? " card-footer-row--chip-far-right" : ""}`}>
           {filesChangedButton}
           {isGitHubImportedTask && !showLinkedIssueChipForImport && (
@@ -3502,117 +3629,7 @@ function TaskCardComponent({
               <ProviderIcon provider="github" size="sm" />
             </span>
           )}
-          {(cardCostLabel || timeIndicator || showNearDuplicateChip || showUndoOfChip || ((showTrackingIndicator || showLinkedIssueChipForImport) && githubTrackedIssue) || (task.retrySummary?.total ?? 0) > 0) && (
-            <div className="card-footer-row-right">
-              {showUndoOfChip && (
-                <span
-                  className="card-undo-chip"
-                  title={t("tasks.undoOfTitle", "Created to undo {{id}}", { id: String(revertOfId) })}
-                  aria-label={t("tasks.undoOfTitle", "Created to undo {{id}}", { id: String(revertOfId) })}
-                >
-                  <span>{t("tasks.undoOf", "Undo of {{id}}", { id: String(revertOfId) })}</span>
-                </span>
-              )}
-              {showNearDuplicateChip && (
-                <>
-                  <span
-                    className="card-duplicate-chip"
-                    title={t("tasks.nearDuplicateTitle", "Potential near-duplicate of {{id}}", { id: String(task.sourceMetadata?.nearDuplicateOf) })}
-                    aria-label={t("tasks.nearDuplicateTitle", "Potential near-duplicate of {{id}}", { id: String(task.sourceMetadata?.nearDuplicateOf) })}
-                  >
-                    <span>{t("tasks.duplicateOf", "Duplicate of {{id}}", { id: String(task.sourceMetadata?.nearDuplicateOf) })}</span>
-                  </span>
-                  {onUpdateTask && (
-                    <button
-                      type="button"
-                      className="card-duplicate-keep"
-                      onClick={(e) => void handleDismissNearDuplicate(e)}
-                      title={t("tasks.keepTaskTitle", "Keep this task and dismiss duplicate warning")}
-                      aria-label={t("tasks.keepTaskTitle", "Keep this task and dismiss duplicate warning")}
-                    >
-                      {t("tasks.keep", "Keep")}
-                    </button>
-                  )}
-                </>
-              )}
-              {chipFarRight && (showTrackingIndicator || showLinkedIssueChipForImport) && githubTrackedIssue && (
-                <a
-                  className="card-github-tracking-chip card-github-tracking-link"
-                  href={githubTrackedIssue.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  title={t("tasks.linkedIssueChipTitle", "Linked GitHub issue: {{owner}}/{{repo}}#{{number}}", { owner: githubTrackedIssue.owner, repo: githubTrackedIssue.repo, number: githubTrackedIssue.number })}
-                  aria-label={t("tasks.linkedIssueChipAriaLabel", "Linked GitHub issue #{{number}}", { number: githubTrackedIssue.number })}
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <ProviderIcon provider="github" size="sm" />
-                  <span>{`#${githubTrackedIssue.number}`}</span>
-                </a>
-              )}
-              {(task.retrySummary?.total ?? 0) > 0 && (
-                <span
-                  className={`card-retry-badge${(retryWarningThreshold != null && (task.retrySummary?.total ?? 0) >= retryWarningThreshold) ? " card-retry-badge--error" : " card-retry-badge--warning"}`}
-                  onClick={handleOpenRetries}
-                  role="button"
-                  tabIndex={0}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      onOpenDetailWithTab?.(task, "retries");
-                    }
-                  }}
-                  aria-label={t("tasks.retriesAriaLabel", "{{count}} retries", { count: task.retrySummary?.total ?? 0 })}
-                  title={t("tasks.openRetryBreakdown", "Open retry breakdown")}
-                >
-                  <RotateCw size={11} />
-                  <span>{task.retrySummary?.total ?? 0}</span>
-                </span>
-              )}
-              {(!chipFarRight || !((showTrackingIndicator || showLinkedIssueChipForImport) && githubTrackedIssue))
-                && (showTrackingIndicator || showLinkedIssueChipForImport) && githubTrackedIssue && (
-                  <a
-                    className="card-github-tracking-chip card-github-tracking-link"
-                    href={githubTrackedIssue.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    title={t("tasks.linkedIssueChipTitle", "Linked GitHub issue: {{owner}}/{{repo}}#{{number}}", { owner: githubTrackedIssue.owner, repo: githubTrackedIssue.repo, number: githubTrackedIssue.number })}
-                    aria-label={t("tasks.linkedIssueChipAriaLabel", "Linked GitHub issue #{{number}}", { number: githubTrackedIssue.number })}
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <ProviderIcon provider="github" size="sm" />
-                    <span>{`#${githubTrackedIssue.number}`}</span>
-                  </a>
-                )}
-              {/*
-              FNXC:TaskCardTimingBadge 2026-06-13-17:20:
-              The execution-time badge belongs in the bottom-right footer cluster and must match sibling footer badge sizing while preserving its existing label, title, aria text, and live-update data.
-              */}
-              {cardCostLabel && (
-                <span
-                  className="card-cost-indicator"
-                  title={t("tasks.costBadgeTitle", "Estimated cost {{amount}}", { amount: cardCostLabel })}
-                  aria-label={t("tasks.costBadgeAriaLabel", "Estimated cost {{amount}}", { amount: cardCostLabel })}
-                >
-                  {/*
-                  FNXC:TaskCardCostBadge 2026-07-12-00:00:
-                  The cost chip must show only the formatted amount because formatCost already includes the currency symbol; do not render a leading dollar-sign icon that duplicates the label.
-                  */}
-                  <span>{cardCostLabel}</span>
-                </span>
-              )}
-              {timeIndicator && (
-                <span
-                  className="card-time-indicator"
-                  title={timeIndicator.title}
-                  aria-label={timeIndicator.ariaLabel}
-                >
-                  <Clock size={12} />
-                  <span>{timeIndicator.label}</span>
-                </span>
-              )}
-            </div>
-          )}
+          {!placeFooterRightInMeta && footerRightCluster}
         </div>
       )}
       {metaRowVisible && (
@@ -3651,6 +3668,7 @@ function TaskCardComponent({
           )}
           {(queued || task.status === "queued") && task.column !== "in-progress" && <span className="queued-badge"><Clock size={12} style={{ verticalAlign: "middle" }} /> {t("tasks.queued", "Queued")}</span>}
           {showInReviewMoveControl && renderInReviewMoveControl()}
+          {placeFooterRightInMeta && footerRightCluster}
         </div>
       )}
       {(task.assignedAgentId || taskProviders.length > 0) && (
