@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { THINKING_LEVELS } from "@fusion/core";
@@ -27,6 +29,13 @@ const agents = [
   { id: "agent-001", name: "Alpha", role: "executor" },
   { id: "agent-002", name: "Beta", role: "reviewer" },
 ];
+
+const chatViewCss = () => readFileSync(resolve(__dirname, "../ChatView.css"), "utf-8");
+
+function cssRule(css: string, selector: string) {
+  const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+");
+  return css.match(new RegExp(`${escapedSelector}\\s*\\{([^}]*)\\}`))?.[1] ?? "";
+}
 
 describe("ChatThinkingLevelControl", () => {
   beforeEach(() => {
@@ -220,5 +229,28 @@ describe("ChatThinkingLevelControl", () => {
 
     fireEvent.click(trigger);
     expect(screen.queryByRole("listbox")).toBeNull();
+  });
+});
+
+describe("ChatThinkingLevelControl CSS contract", () => {
+  it("keeps the popover fit keyed to narrow chat surfaces while preserving desktop sizing", () => {
+    const css = chatViewCss();
+    const desktopPopoverRule = cssRule(css, ".chat-thinking-popover");
+    const narrowRootRule = cssRule(css, ".chat-view--narrow .chat-thinking-level-root");
+    const narrowPopoverRule = cssRule(css, ".chat-view--narrow .chat-thinking-popover");
+    const narrowListRule = cssRule(css, ".chat-view--narrow .chat-thinking-agent-list,\n.chat-view--narrow .chat-thinking-popover-list");
+
+    expect(desktopPopoverRule).toContain("left: 0;");
+    expect(desktopPopoverRule).toContain("width: min(calc(var(--space-xl) * 15), calc(100vw - (var(--space-lg) * 2)));");
+    expect(desktopPopoverRule).toContain("max-width: calc(100vw - (var(--space-lg) * 2));");
+
+    expect(narrowRootRule).toContain("position: static;");
+    expect(narrowPopoverRule).toContain("left: var(--space-md);");
+    expect(narrowPopoverRule).toContain("right: var(--space-md);");
+    expect(narrowPopoverRule).toContain("width: auto;");
+    expect(narrowPopoverRule).toContain("max-width: none;");
+    expect(narrowPopoverRule).toContain("max-inline-size: none;");
+    expect(narrowPopoverRule).toContain("max-height: min(calc(var(--space-xl) * 20), calc(100vh - (var(--space-xl) * 5)));");
+    expect(narrowListRule).toContain("max-height: calc(var(--space-xl) * 7);");
   });
 });

@@ -2046,6 +2046,28 @@ FN-7908 keeps model/agent retargeting inside the same brain popup. The widened p
   z-index: 50;
 }
 
+/*
+FNXC:Chat-ModelSwitch 2026-07-13-00:00:
+FN-7934: The brain popup must fit the containing chat surface, not only the browser viewport. Key the inset layout on .chat-view--narrow because it reflects surface width for floating Chat windows and compact docks; otherwise a narrow floating Chat window on a wide viewport clips the Model / Agent picker on the right.
+*/
+.chat-view--narrow .chat-thinking-level-root {
+  position: static;
+}
+
+.chat-view--narrow .chat-thinking-popover {
+  left: var(--space-md);
+  right: var(--space-md);
+  width: auto;
+  max-width: none;
+  max-inline-size: none;
+  max-height: min(calc(var(--space-xl) * 20), calc(100vh - (var(--space-xl) * 5)));
+}
+
+.chat-view--narrow .chat-thinking-agent-list,
+.chat-view--narrow .chat-thinking-popover-list {
+  max-height: calc(var(--space-xl) * 7);
+}
+
 .chat-thinking-target-section,
 .chat-thinking-level-section {
   padding: var(--space-sm);
