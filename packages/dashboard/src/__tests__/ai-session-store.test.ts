@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { Database } from "@fusion/core";
 import {
   AiSessionStore,
+  DELETE_TOMBSTONE_TTL_MS,
   SESSION_CLEANUP_DEFAULT_MAX_AGE_MS,
   type AiSessionRow,
   type AiSessionStatus,
@@ -579,6 +580,150 @@ describe("AiSessionStore", () => {
       projectId: "project-a",
       createdAt: expect.any(String),
       updatedAt: expect.any(String),
+    });
+  });
+
+  // ── FN-7949: delete tombstone guard ────────────────────────────────────
+
+  describe("delete tombstone guard (FN-7949)", () => {
+    it("upsert() does not resurrect a session id deleted via delete()", () => {
+      const row = makeRow("S-tomb", "awaiting_input");
+      store.upsert(row);
+      expect(store.get("S-tomb")).not.toBeNull();
+
+      store.delete("S-tomb");
+      expect(store.get("S-tomb")).toBeNull();
+
+      // Simulate a straggling persistSession() write landing after delete —
+      // this is the exact FN-7949 race: an abandoned generation resolves and
+      // calls upsert() with the same id after the user already deleted it.
+      store.upsert(makeRow("S-tomb", "complete"));
+
+      expect(store.get("S-tomb")).toBeNull();
+    });
+
+    it("upsert() does not emit ai_session:updated for a tombstoned id", () => {
+      const row = makeRow("S-tomb-evt", "awaiting_input");
+      store.upsert(row);
+      store.delete("S-tomb-evt");
+
+      const onUpdated = vi.fn();
+      store.on("ai_session:updated", onUpdated);
+
+      store.upsert(makeRow("S-tomb-evt", "complete"));
+
+      expect(onUpdated).not.toHaveBeenCalled();
+    });
+
+    it("upsert() logs a diagnostics warning when dropping a tombstoned write", () => {
+      const diagnostics = captureDiagnostics();
+      store.upsert(makeRow("S-tomb-log", "awaiting_input"));
+      store.delete("S-tomb-log");
+
+      store.upsert(makeRow("S-tomb-log", "complete"));
+
+      expect(diagnostics).toContainEqual(
+        expect.objectContaining({
+          level: "warn",
+          scope: "ai-session-store",
+          message: "Dropped upsert for tombstoned (deleted) session",
+          context: expect.objectContaining({
+            sessionId: "S-tomb-log",
+            operation: "upsert-tombstoned",
+          }),
+        }),
+      );
+    });
+
+    it("delete-then-brand-new-session-with-a-different-id is entirely unaffected", () => {
+      store.upsert(makeRow("S-old", "complete"));
+      store.delete("S-old");
+
+      store.upsert(makeRow("S-new", "awaiting_input"));
+
+      expect(store.get("S-old")).toBeNull();
+      expect(store.get("S-new")).not.toBeNull();
+      expect(store.get("S-new")?.status).toBe("awaiting_input");
+    });
+
+    it("double-delete of the same id is idempotent and does not throw", () => {
+      store.upsert(makeRow("S-double", "complete"));
+
+      expect(() => store.delete("S-double")).not.toThrow();
+      expect(() => store.delete("S-double")).not.toThrow();
+
+      store.upsert(makeRow("S-double", "complete"));
+      expect(store.get("S-double")).toBeNull();
+    });
+
+    it("deleteByIdAndType() also tombstones and blocks resurrection", () => {
+      store.upsert(makeRow("S-typed", "awaiting_input"));
+
+      const removed = store.deleteByIdAndType("S-typed", "planning");
+      expect(removed).toBe(true);
+      expect(store.get("S-typed")).toBeNull();
+
+      store.upsert(makeRow("S-typed", "complete"));
+      expect(store.get("S-typed")).toBeNull();
+    });
+
+    it("deleteByIdAndType() double-delete is idempotent (second call returns false, no throw)", () => {
+      store.upsert(makeRow("S-typed-2", "awaiting_input"));
+
+      expect(store.deleteByIdAndType("S-typed-2", "planning")).toBe(true);
+      expect(() => store.deleteByIdAndType("S-typed-2", "planning")).not.toThrow();
+      expect(store.deleteByIdAndType("S-typed-2", "planning")).toBe(false);
+    });
+
+    it("tombstone expires after DELETE_TOMBSTONE_TTL_MS, allowing a later upsert for the same id", () => {
+      vi.useFakeTimers();
+      try {
+        store.upsert(makeRow("S-ttl", "awaiting_input"));
+        store.delete("S-ttl");
+        expect(store.get("S-ttl")).toBeNull();
+
+        // Still within the TTL window — dropped.
+        store.upsert(makeRow("S-ttl", "complete"));
+        expect(store.get("S-ttl")).toBeNull();
+
+        // Advance past the TTL window — the tombstone must expire so a
+        // legitimate (if practically unexpected) id-reuse upsert lands.
+        vi.advanceTimersByTime(DELETE_TOMBSTONE_TTL_MS + 1_000);
+
+        store.upsert(makeRow("S-ttl", "complete"));
+        expect(store.get("S-ttl")).not.toBeNull();
+        expect(store.get("S-ttl")?.status).toBe("complete");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("cleanupOld()-deleted ids are protected by the same tombstone guard", () => {
+      seedSession({ id: "S-bulk-old", status: "complete", ageMs: 2 * 60 * 60 * 1000 });
+
+      const removed = store.cleanupOld(60 * 60 * 1000);
+      expect(removed).toBe(1);
+      expect(store.get("S-bulk-old")).toBeNull();
+
+      // A straggling write for the bulk-cleaned-up id must still be dropped.
+      store.upsert(makeRow("S-bulk-old", "complete"));
+      expect(store.get("S-bulk-old")).toBeNull();
+    });
+
+    it("cleanupStaleSessions()-deleted ids (terminal and orphaned) are protected by the tombstone guard", () => {
+      seedSession({ id: "S-bulk-terminal", status: "complete", ageMs: 8 * 24 * 60 * 60 * 1000 });
+      seedSession({ id: "S-bulk-orphaned", status: "awaiting_input", ageMs: 8 * 24 * 60 * 60 * 1000 });
+
+      const summary = store.cleanupStaleSessions();
+      expect(summary.totalDeleted).toBe(2);
+      expect(store.get("S-bulk-terminal")).toBeNull();
+      expect(store.get("S-bulk-orphaned")).toBeNull();
+
+      store.upsert(makeRow("S-bulk-terminal", "complete"));
+      store.upsert(makeRow("S-bulk-orphaned", "awaiting_input"));
+
+      expect(store.get("S-bulk-terminal")).toBeNull();
+      expect(store.get("S-bulk-orphaned")).toBeNull();
     });
   });
 });
