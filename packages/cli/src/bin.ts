@@ -127,6 +127,7 @@ async function loadCommandHandlers() {
   const { runSettingsExport } = await import("./commands/settings-export.js");
   const { runSettingsImport } = await import("./commands/settings-import.js");
   const { runMcpList, runMcpAdd, runMcpEdit, runMcpRemove, runMcpEnable, runMcpDisable, runMcpImport, runMcpExport, runMcpValidate } = await import("./commands/mcp.js");
+  const { runWorkflowValidate } = await import("./commands/workflow.js");
   const { runGitStatus, runGitFetch, runGitPull, runGitPush } = await import("./commands/git.js");
   const { runBranchGroupList, runBranchGroupShow, runBranchGroupPromote, runBranchGroupAbandon } = await import("./commands/branch-group.js");
   const { runBackupCreate, runBackupList, runBackupRestore, runBackupCleanup } = await import("./commands/backup.js");
@@ -205,6 +206,7 @@ async function loadCommandHandlers() {
     runMcpImport,
     runMcpExport,
     runMcpValidate,
+    runWorkflowValidate,
     runGitStatus,
     runGitFetch,
     runGitPull,
@@ -413,6 +415,8 @@ PR:
                                       Export Fusion MCP JSON with secret references only
   fn mcp validate [--scope <global|project|effective>] [--json]
                                       Validate MCP definitions without revealing secrets
+  fn workflow validate <id> | --file <path> [--json]
+                                      Dry-run validate a workflow IR without creating or mutating it
 
   fn git status              Show current branch, commit, dirty state, ahead/behind
   fn git push                Push current branch
@@ -719,6 +723,7 @@ async function main() {
     runMcpImport,
     runMcpExport,
     runMcpValidate,
+    runWorkflowValidate,
     runGitStatus,
     runGitFetch,
     runGitPull,
@@ -1798,6 +1803,23 @@ async function main() {
           default:
             console.error(`Unknown subcommand: mcp ${subcommand || ""}`);
             console.log("Try: fn mcp list | add | edit | remove | enable | disable | import | export | validate");
+            process.exit(1);
+        }
+        break;
+      }
+
+      case "workflow": {
+        const subcommand = args[1];
+        switch (subcommand) {
+          case "validate": {
+            const file = getFlagValue(args, "--file");
+            const workflowId = file ? undefined : args[2];
+            await runWorkflowValidate({ workflowId, file, projectName, json: args.includes("--json") });
+            break;
+          }
+          default:
+            console.error(`Unknown subcommand: workflow ${subcommand || ""}`);
+            console.log("Try: fn workflow validate <id> | --file <path> [--json]");
             process.exit(1);
         }
         break;

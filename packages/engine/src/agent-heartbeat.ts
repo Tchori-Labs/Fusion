@@ -23,7 +23,7 @@ import { ApprovalRequestStore, buildExecutionMemoryInstructions, isEphemeralAgen
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type, type Static } from "@earendil-works/pi-ai";
 import { createHash } from "node:crypto";
-import { createTaskCreateTool, createTaskLogToolWithContext, createTaskDocumentWriteTool, createTaskDocumentReadTool, createTaskReadTools, createArtifactRegisterTool, createArtifactListTool, createArtifactViewTool, createListAgentsTool, createDelegateTaskTool, createGetAgentConfigTool, createUpdateAgentConfigTool, createAgentCreateTool, createAgentDeleteTool, createSendMessageTool, createReadMessagesTool, createPostRoomMessageTool, createMemoryTools, createGoalRetrievalTools, createReadEvaluationsTool, createUpdateIdentityTool, createReflectOnPerformanceTool, createWebFetchTool, createWorkflowListTool, createWorkflowGetTool, createWorkflowSelectTool, createTaskPromoteTool, createWorkflowCreateTool, createWorkflowUpdateTool, createWorkflowDeleteTool, createWorkflowSettingsTool, createTraitListTool, createAskQuestionTool, createResearchTools, readAgentMemoryWorkspaceLongTerm, taskCreateParams } from "./agent-tools.js";
+import { createTaskCreateTool, createTaskLogToolWithContext, createTaskDocumentWriteTool, createTaskDocumentReadTool, createTaskReadTools, createArtifactRegisterTool, createArtifactListTool, createArtifactViewTool, createListAgentsTool, createDelegateTaskTool, createGetAgentConfigTool, createUpdateAgentConfigTool, createAgentCreateTool, createAgentDeleteTool, createSendMessageTool, createReadMessagesTool, createPostRoomMessageTool, createMemoryTools, createGoalRetrievalTools, createReadEvaluationsTool, createUpdateIdentityTool, createReflectOnPerformanceTool, createWebFetchTool, createWorkflowListTool, createWorkflowGetTool, createWorkflowValidateTool, createWorkflowSelectTool, createTaskPromoteTool, createWorkflowCreateTool, createWorkflowUpdateTool, createWorkflowDeleteTool, createWorkflowSettingsTool, createTraitListTool, createAskQuestionTool, createResearchTools, readAgentMemoryWorkspaceLongTerm, taskCreateParams } from "./agent-tools.js";
 import { AgentLogger } from "./agent-logger.js";
 import {
   resolveAgentInstructionsWithRatings,
@@ -561,7 +561,7 @@ You have coding-capable workspace tools (read/write/edit/bash within worktree bo
 - fn_artifact_register, fn_artifact_list, and fn_artifact_view (register visual/media outputs so they appear in the dashboard Artifacts gallery: screenshots/wireframes/mockups/diagrams as type="image" via \`path\`; screen recordings as type="video" via \`path\`; HTML mockups as type="document" with mimeType="text/html" — rendered as live previews; PDFs as type="document" with mimeType="application/pdf" via \`path\`. No-task runs have no session workspace directory, so save files under the OS temp directory and pass an absolute \`path\` — relative paths are rejected in this mode)
 - fn_read_evaluations and fn_update_identity (available in no-task runs)
 - fn_reflect_on_performance when reflection is enabled for this run
-- fn_workflow_list, fn_workflow_get, fn_workflow_create, fn_workflow_update, fn_workflow_delete, fn_workflow_settings, and fn_trait_list for workflow discovery/authoring
+- fn_workflow_list, fn_workflow_get, fn_workflow_validate, fn_workflow_create, fn_workflow_update, fn_workflow_delete, fn_workflow_settings, and fn_trait_list for workflow discovery/authoring
 - fn_research_run, fn_research_list, fn_research_get, and fn_research_cancel for bounded research when configured
 - fn_ask_question to ask the dashboard user for structured clarification
 - fn_web_fetch
@@ -3780,6 +3780,7 @@ export class HeartbeatMonitor {
       ...createTaskReadTools(taskStore),
       createWorkflowListTool(taskStore),
       createWorkflowGetTool(taskStore),
+      createWorkflowValidateTool(taskStore),
       createWorkflowCreateTool(taskStore, { stripApprovalFlags: true }),
       createWorkflowUpdateTool(taskStore, { stripApprovalFlags: true }),
       createWorkflowDeleteTool(taskStore),

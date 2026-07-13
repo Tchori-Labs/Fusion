@@ -222,6 +222,7 @@ import {
   createTaskLogTool as sharedCreateTaskLogTool,
   createWorkflowListTool as sharedCreateWorkflowListTool,
   createWorkflowGetTool as sharedCreateWorkflowGetTool,
+  createWorkflowValidateTool as sharedCreateWorkflowValidateTool,
   createWorkflowSelectTool as sharedCreateWorkflowSelectTool,
   createTaskPromoteTool as sharedCreateTaskPromoteTool,
   createWorkflowCreateTool as sharedCreateWorkflowCreateTool,
@@ -10709,6 +10710,7 @@ export class TaskExecutor {
         this.createArtifactRegisterTool(assignedAgentId ?? "executor", task.id, worktreePath),
         this.createWorkflowListTool(),
         this.createWorkflowGetTool(),
+        this.createWorkflowValidateTool(),
         this.createWorkflowSelectTool(task.id),
         this.createTaskPromoteTool(task.id),
         this.createWorkflowCreateTool(),
@@ -12785,6 +12787,10 @@ export class TaskExecutor {
 
   private createWorkflowGetTool(): ToolDefinition {
     return sharedCreateWorkflowGetTool(this.store);
+  }
+
+  private createWorkflowValidateTool(): ToolDefinition {
+    return sharedCreateWorkflowValidateTool(this.store);
   }
 
   private createWorkflowSelectTool(taskId: string): ToolDefinition {

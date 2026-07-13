@@ -179,6 +179,7 @@ describe("Chat orchestration — rooms (FN-3805..FN-3811 contract)", () => {
         "fn_workflow_settings",
         "fn_workflow_list",
         "fn_workflow_get",
+        "fn_workflow_validate",
         "fn_workflow_select",
         "fn_trait_list",
       ]));
