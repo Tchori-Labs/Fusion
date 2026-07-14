@@ -149,6 +149,20 @@ CREATE TABLE IF NOT EXISTS researchRuns (
 );
 `;
 
+/** Legacy workflow rows could persist an empty IR before write validation tightened. */
+const WORKFLOWS_SQLITE_DDL = `
+CREATE TABLE IF NOT EXISTS workflows (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  ir TEXT NOT NULL,
+  layout TEXT NOT NULL DEFAULT '{}',
+  kind TEXT NOT NULL DEFAULT 'workflow',
+  createdAt TEXT NOT NULL,
+  updatedAt TEXT NOT NULL
+);
+`;
+
 /**
  * A minimal agents table so agent_heartbeats has a parent row to satisfy the
  * FK constraint that is re-enabled after the migration completes. Includes
@@ -183,6 +197,7 @@ function buildPopulatedSqliteProject(fusionDir: string): void {
     db.exec(AGENTS_SQLITE_DDL);
     db.exec(ACTIVITY_LOG_SQLITE_DDL);
     db.exec(RESEARCH_RUNS_SQLITE_DDL);
+    db.exec(WORKFLOWS_SQLITE_DDL);
 
     // Legacy camelCase table rows — must land in project.activity_log.
     const insertActivity = db.prepare(
@@ -204,6 +219,29 @@ function buildPopulatedSqliteProject(fusionDir: string): void {
       "2026-06-01T00:00:00Z",
       "2026-06-01T00:01:00Z",
     );
+
+    const insertWorkflow = db.prepare(
+      `INSERT INTO workflows (id, name, description, ir, layout, kind, createdAt, updatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    const workflowRows = [
+      ["WF-legacy-empty-ir", "Legacy empty IR", ""],
+      ["WF-legacy-whitespace-ir", "Legacy whitespace IR", " \t "],
+      ["WF-legacy-malformed-ir", "Legacy malformed IR", "not-json"],
+      ["WF-legacy-scalar-ir", "Legacy scalar IR", "42"],
+    ] as const;
+    for (const [id, name, ir] of workflowRows) {
+      insertWorkflow.run(
+        id,
+        name,
+        "",
+        ir,
+        "{}",
+        "workflow",
+        "2026-06-01T00:00:00Z",
+        "2026-06-01T00:01:00Z",
+      );
+    }
 
     // Insert agents so agent_heartbeats FK is satisfiable post-migration.
     const insertAgent = db.prepare(`INSERT INTO agents (id, name, role, state, createdAt, updatedAt) VALUES (?, ?, ?, ?, ?, ?)`);
@@ -1043,6 +1081,7 @@ pgDescribe("SQLite-to-PostgreSQL migrator", () => {
     expect(rows.map((r) => r.id)).toEqual(["act-1", "act-2"]);
     expect(rows[0].task_id).toBe("FN-100");
     expect(rows[0].metadata).toEqual({ source: "test" });
+    expect(rows[1].metadata).toBeNull();
   });
 
   // FNXC:PostgresMigration 2026-06-26-16:00 (fix migration-review P1 #14):
@@ -1142,6 +1181,41 @@ pgDescribe("SQLite-to-PostgreSQL migrator", () => {
       FROM project.research_runs WHERE id = 'RR-legacy-null-json'
     `)) as unknown as Array<{ sources: unknown; events: unknown; tags: unknown }>;
     expect(rows[0]).toEqual({ sources: [], events: [], tags: [] });
+  });
+
+  it("preserves empty, whitespace, malformed, and scalar values in required jsonb without a default", async () => {
+    const report = await migrateTest(ctx!.db, [
+      { sqlitePath: join(ctx!.fusionDir, "fusion.db"), pgSchema: "project" as const },
+    ]);
+
+    expect(report.tables.find((table) => table.table === "workflows")?.verified).toBe(true);
+    const rows = (await ctx!.db.execute(sql`
+      SELECT id, ir FROM project.workflows WHERE id LIKE 'WF-legacy-%' ORDER BY id
+    `)) as unknown as Array<{ id: string; ir: unknown }>;
+    expect(Object.fromEntries(rows.map(({ id, ir }) => [id, ir]))).toEqual({
+      "WF-legacy-empty-ir": "",
+      "WF-legacy-malformed-ir": "not-json",
+      "WF-legacy-scalar-ir": 42,
+      "WF-legacy-whitespace-ir": " \t ",
+    });
+  });
+
+  it("fails closed when a required jsonb default is declared but cannot be validated", async () => {
+    /*
+    FNXC:PostgresMigration 2026-07-14-10:43:
+    Function-style jsonb defaults are valid PostgreSQL expressions but are intentionally outside the migrator's literal fallback parser. Empty legacy text must not be stored as data when such a default exists.
+    */
+    await applySchemaBaseline(ctx!.db);
+    await ctx!.db.execute(sql`
+      ALTER TABLE project.workflows
+      ALTER COLUMN ir SET DEFAULT jsonb_build_object()
+    `);
+
+    await expect(migrateTest(
+      ctx!.db,
+      [{ sqlitePath: join(ctx!.fusionDir, "fusion.db"), pgSchema: "project" as const }],
+      { skipBaseline: true },
+    )).rejects.toThrow(/declared default could not be validated/);
   });
 
   // VAL-MIGRATE-003 — bytea fidelity
