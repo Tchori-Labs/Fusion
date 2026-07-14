@@ -43,7 +43,19 @@ import {listGoalCitations as listGoalCitationsAsync} from "../task-store/async-e
 import type {GoalCitationRow, RunAuditEventRow} from "../task-store/row-types.js";
 
 export async function getOrCreateForProjectImpl(store: typeof TaskStore, projectId?: string, centralCore?: CentralCore, globalSettingsDir?: string, asyncLayer?: AsyncDataLayer,): Promise<TaskStore> {
-    const central = centralCore ?? new CentralCore();
+    /*
+    FNXC:PostgresCutover 2026-07-13-20:05:
+    The fallback CentralCore must be bound to the caller's AsyncDataLayer.
+    Post-cutover, a layer-less CentralCore has no database at all (legacy
+    SQLite CentralDatabase is deleted; init() is a graceful no-op with
+    db=null), so project lookups return empty and resolveProjectContext
+    throws ProjectRequiredError — surfaced as `Project "<id>" not found`
+    even though central.projects in PostgreSQL has the row. This broke every
+    projectId-only boot through the startup factory (engine InProcessRuntime,
+    dashboard project-store-resolver): dashboard UI came up but the engine
+    never connected.
+    */
+    const central = centralCore ?? new CentralCore(undefined, asyncLayer ? { asyncLayer } : {});
     let initializedHere = false;
 
     if (!centralCore) {
