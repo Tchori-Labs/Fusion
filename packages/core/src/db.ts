@@ -184,7 +184,7 @@ export function isFts5CorruptionError(error: unknown): boolean {
 
 // ── Schema Definition ────────────────────────────────────────────────
 
-const SCHEMA_VERSION = 145;
+const SCHEMA_VERSION = 146;
 
 const TASKS_FTS_AUTOMERGE = 8;
 const TASKS_FTS_CRISISMERGE = 16;
@@ -5724,6 +5724,19 @@ export class Database {
       this.applyMigration(145, () => {
         this.addColumnIfMissing("tasks", "validatorThinkingLevel", "TEXT");
         this.addColumnIfMissing("tasks", "planningThinkingLevel", "TEXT");
+      });
+    }
+
+    if (version < 146) {
+      /*
+       * FNXC:PlanReviewReplanCap 2026-07-13-00:00:
+       * Triage pre-execution Plan Review REVISE replans are now bounded by a consecutive-replan
+       * counter (planReviewReplanCount) so a persistent planner/reviewer disagreement escalates to
+       * awaiting-approval instead of looping forever. Additive task column, defaulting to 0 like the
+       * other *Count retry counters.
+       */
+      this.applyMigration(146, () => {
+        this.addColumnIfMissing("tasks", "planReviewReplanCount", "INTEGER DEFAULT 0");
       });
     }
 
