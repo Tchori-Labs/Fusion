@@ -1,8 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   __clearExtensionStoreBootStateForTesting,
+  clampImportBrowseLimit,
+  clearHostTaskStores,
   raceWithTimeoutAndAbort,
   resolveExtensionToolTimeoutMs,
+  setHostTaskStore,
   wrapExtensionToolExecute,
 } from "../extension.js";
 
@@ -16,6 +19,7 @@ Host extension research tools are off; budgets cover remaining long host tools o
 
 afterEach(() => {
   __clearExtensionStoreBootStateForTesting();
+  clearHostTaskStores();
   vi.restoreAllMocks();
 });
 
@@ -25,11 +29,34 @@ describe("resolveExtensionToolTimeoutMs", () => {
     expect(resolveExtensionToolTimeoutMs("fn_task_list")).toBe(60_000);
   });
 
-  it("gives multi-minute budgets to skills install and import/browse tools", () => {
+  it("gives multi-minute budgets to long host tools", () => {
     expect(resolveExtensionToolTimeoutMs("fn_skills_install")).toBe(300_000);
+    expect(resolveExtensionToolTimeoutMs("fn_task_plan")).toBe(300_000);
+    expect(resolveExtensionToolTimeoutMs("fn_experiment_finalize")).toBe(180_000);
+    expect(resolveExtensionToolTimeoutMs("fn_mission_backfill_assertions")).toBe(180_000);
     expect(resolveExtensionToolTimeoutMs("fn_task_import_github")).toBe(180_000);
     expect(resolveExtensionToolTimeoutMs("fn_task_browse_github_issues")).toBe(180_000);
     expect(resolveExtensionToolTimeoutMs("fn_web_fetch")).toBe(90_000);
+  });
+});
+
+describe("clampImportBrowseLimit", () => {
+  it("defaults to 30 and hard-caps at 50", () => {
+    expect(clampImportBrowseLimit(undefined)).toBe(30);
+    expect(clampImportBrowseLimit(100)).toBe(50);
+    expect(clampImportBrowseLimit(0)).toBe(1);
+    expect(clampImportBrowseLimit(12)).toBe(12);
+  });
+});
+
+describe("setHostTaskStore", () => {
+  it("is available as a production injection seam for dashboard/serve/daemon", () => {
+    /*
+    FNXC:MergeQueue 2026-07-15-11:40:
+    Host injection must be a real export so dashboard/serve can share the engine TaskStore without dual-boot.
+    */
+    expect(typeof setHostTaskStore).toBe("function");
+    expect(typeof clearHostTaskStores).toBe("function");
   });
 });
 

@@ -37,6 +37,7 @@ import {
   setHostExtensionPaths,
   createFusionAuthStorage,
 } from "@fusion/engine";
+import { setHostTaskStore, clearHostTaskStores } from "../extension.js";
 import {
   DefaultPackageManager,
   ModelRegistry,
@@ -462,6 +463,11 @@ export async function runDaemon(opts: DaemonOptions = {}) {
   );
 
   const store = primaryEngine.getTaskStore();
+  /*
+  FNXC:MergeQueue 2026-07-15-11:40:
+  Share the daemon primary TaskStore with the host pi extension so agent fn_* tools reuse the engine pool (no dual-boot).
+  */
+  setHostTaskStore(primaryCwd, store);
 
   const getGlobalSettingsStore = () => {
     const candidate = store as { getGlobalSettingsStore?: () => { getSettings: () => Promise<unknown> } };
@@ -1002,6 +1008,7 @@ export async function runDaemon(opts: DaemonOptions = {}) {
     FNXC:PostgresResourceLifecycle 2026-07-14-22:07:
     Preserve the command-level TaskStore close barrier before CentralCore releases its retained backend. Runtime shutdown normally closes this store first; the idempotent explicit close also covers partial-start and test-owned runtimes.
     */
+    clearHostTaskStores();
     await store.close();
 
     // Stop peer exchange service

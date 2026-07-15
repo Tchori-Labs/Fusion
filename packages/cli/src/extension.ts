@@ -257,6 +257,14 @@ const EXTENSION_TOOL_TIMEOUT_MS = 60_000;
 const SKILLS_INSTALL_TIMEOUT_MS = 300_000;
 const IMPORT_BROWSE_TIMEOUT_MS = 180_000;
 const WEB_FETCH_TIMEOUT_MS = 90_000;
+const TASK_PLAN_TIMEOUT_MS = 300_000;
+const EXPERIMENT_FINALIZE_TIMEOUT_MS = 180_000;
+const MISSION_BACKFILL_TIMEOUT_MS = 180_000;
+/*
+FNXC:MergeQueue 2026-07-15-11:40:
+Hard ceiling for import/browse batch size so agents cannot request unbounded GitHub/GitLab fan-out under the host extension.
+*/
+export const MAX_IMPORT_BROWSE_ITEMS = 50;
 
 function isAbortError(error: unknown): boolean {
   return (
@@ -276,9 +284,18 @@ function isAbortError(error: unknown): boolean {
 export function resolveExtensionToolTimeoutMs(toolName: string, _params?: unknown): number {
   const name = toolName.trim();
   if (name === "fn_skills_install") return SKILLS_INSTALL_TIMEOUT_MS;
+  if (name === "fn_task_plan") return TASK_PLAN_TIMEOUT_MS;
+  if (name === "fn_experiment_finalize") return EXPERIMENT_FINALIZE_TIMEOUT_MS;
+  if (name === "fn_mission_backfill_assertions") return MISSION_BACKFILL_TIMEOUT_MS;
   if (name.startsWith("fn_task_import_") || name.startsWith("fn_task_browse_")) return IMPORT_BROWSE_TIMEOUT_MS;
   if (name === "fn_web_fetch") return WEB_FETCH_TIMEOUT_MS;
   return EXTENSION_TOOL_TIMEOUT_MS;
+}
+
+/** Clamp import/browse limits so host tools cannot request unbounded remote fan-out. */
+export function clampImportBrowseLimit(limit: number | undefined, defaultLimit = 30): number {
+  const raw = typeof limit === "number" && Number.isFinite(limit) ? Math.floor(limit) : defaultLimit;
+  return Math.min(MAX_IMPORT_BROWSE_ITEMS, Math.max(1, raw));
 }
 
 /**
@@ -391,6 +408,10 @@ export function wrapExtensionToolExecute<TArgs extends unknown[], TResult>(
   };
 }
 
+/*
+FNXC:MergeQueue 2026-07-15-11:40:
+When dashboard/serve/daemon injects the live engine TaskStore via setHostTaskStore, getStore must never call createTaskStoreForBackend for that project root — dual-boot was the FN-7956 hang class (second pool + schema advisory lock). CLI one-shot sessions without a host store still boot a short-lived cache entry.
+*/
 async function getStore(cwd: string, signal?: AbortSignal): Promise<TaskStore> {
   const projectRoot = resolveProjectRoot(cwd);
   const existing = storeCache.get(projectRoot);
@@ -412,7 +433,7 @@ async function getStore(cwd: string, signal?: AbortSignal): Promise<TaskStore> {
     PostgreSQL factory result; the removed SQLite opt-out is an explicit error.
 
     FNXC:MergeQueue 2026-07-15-11:08:
-    First extension tool call in a dashboard/engine process boots a second TaskStore.
+    First extension tool call without a host-injected store boots a TaskStore (CLI path).
     Bound that boot and coalesce concurrent callers so a wedged boot cannot park every fn_* tool forever.
 
     FNXC:MergeQueue 2026-07-15-11:20:
@@ -422,6 +443,12 @@ async function getStore(cwd: string, signal?: AbortSignal): Promise<TaskStore> {
       try {
         const boot = await createTaskStoreForBackend({ rootDir: projectRoot });
         storeBootFailureCooldown.delete(projectRoot);
+        // Do not overwrite a host-injected external store that landed while we were booting.
+        const raced = storeCache.get(projectRoot);
+        if (raced?.external) {
+          await boot.shutdown().catch(() => undefined);
+          return raced.store;
+        }
         storeCache.set(projectRoot, { store: boot.taskStore, shutdown: boot.shutdown });
         return boot.taskStore;
       } catch (error) {
@@ -461,6 +488,38 @@ async function getStore(cwd: string, signal?: AbortSignal): Promise<TaskStore> {
     }
     throw error;
   }
+}
+
+/**
+ * FNXC:MergeQueue 2026-07-15-11:40:
+ * Publish the live engine/dashboard TaskStore into the host extension cache so in-process agent tools share one pool and never dual-boot embedded PostgreSQL.
+ * The entry is external: closeCachedStores / clearHostTaskStores will not shut it down — the host owns lifecycle.
+ */
+export function setHostTaskStore(projectRoot: string, store: TaskStore): void {
+  const canonical = resolveProjectRoot(projectRoot);
+  storeCache.set(canonical, { store, external: true });
+  storeBootInflight.delete(canonical);
+  storeBootFailureCooldown.delete(canonical);
+}
+
+/**
+ * Remove host-injected store entries without closing them (host owns lifecycle).
+ * Pass projectRoot to clear one project; omit to clear all external entries.
+ */
+export function clearHostTaskStores(projectRoot?: string): void {
+  if (projectRoot) {
+    const canonical = resolveProjectRoot(projectRoot);
+    const entry = storeCache.get(canonical);
+    if (entry?.external) storeCache.delete(canonical);
+    storeBootInflight.delete(canonical);
+    storeBootFailureCooldown.delete(canonical);
+    return;
+  }
+  for (const [key, entry] of [...storeCache.entries()]) {
+    if (entry.external) storeCache.delete(key);
+  }
+  storeBootInflight.clear();
+  storeBootFailureCooldown.clear();
 }
 
 /**
@@ -2053,7 +2112,7 @@ export default function kbExtension(pi: ExtensionAPI) {
 
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       const [owner, repo] = params.ownerRepo.split("/");
-      const limit = params.limit ?? 30;
+      const limit = clampImportBrowseLimit(params.limit, 30);
       const labels = params.labels;
 
       const issues = await fetchGitHubIssuesViaGh(owner, repo, { limit, labels, signal });
@@ -2244,7 +2303,8 @@ export default function kbExtension(pi: ExtensionAPI) {
     }),
 
     async execute(_toolCallId, params, signal, _onUpdate, ctx) {
-      const { owner, repo, limit = 30, labels } = params;
+      const { owner, repo, labels } = params;
+      const limit = clampImportBrowseLimit(params.limit, 30);
       const issues = await fetchGitHubIssuesViaGh(owner, repo, { limit, labels, signal });
 
       if (issues.length === 0) {
@@ -2329,7 +2389,7 @@ export default function kbExtension(pi: ExtensionAPI) {
     parameters: Type.Object({ project: Type.String({ description: "GitLab project path or numeric ID" }), limit: Type.Optional(Type.Number({ minimum: 1, maximum: 100 })), labels: Type.Optional(Type.Array(Type.String())) }),
     async execute(_id, params, _signal, _onUpdate, ctx) {
       const { client } = await createGitLabClient(ctx);
-      const issues = await client.listProjectIssues(params.project, { limit: params.limit, labels: params.labels });
+      const issues = await client.listProjectIssues(params.project, { limit: clampImportBrowseLimit(params.limit, 30), labels: params.labels });
       return { content: [{ type: "text", text: issues.map((issue) => `#${issue.iid}: ${issue.title}\n${issue.webUrl}`).join("\n") || `No GitLab project issues found in ${params.project}.` }], details: { count: issues.length, issues } };
     },
   });
@@ -2342,7 +2402,7 @@ export default function kbExtension(pi: ExtensionAPI) {
     parameters: Type.Object({ project: Type.String({ description: "GitLab project path or numeric ID" }), limit: Type.Optional(Type.Number({ minimum: 1, maximum: 100 })), labels: Type.Optional(Type.Array(Type.String())) }),
     async execute(_id, params, _signal, _onUpdate, ctx) {
       const { client } = await createGitLabClient(ctx);
-      const issues = await client.listProjectIssues(params.project, { limit: params.limit, labels: params.labels });
+      const issues = await client.listProjectIssues(params.project, { limit: clampImportBrowseLimit(params.limit, 30), labels: params.labels });
       const createdTasks = await importGitLabItems(ctx, "project_issue", params.project, issues);
       return { content: [{ type: "text", text: `Imported ${createdTasks.length} GitLab project issue tasks.` }], details: { createdTasks } };
     },
@@ -2356,7 +2416,7 @@ export default function kbExtension(pi: ExtensionAPI) {
     parameters: Type.Object({ group: Type.String({ description: "GitLab group path or numeric ID" }), limit: Type.Optional(Type.Number({ minimum: 1, maximum: 100 })), labels: Type.Optional(Type.Array(Type.String())) }),
     async execute(_id, params, _signal, _onUpdate, ctx) {
       const { client } = await createGitLabClient(ctx);
-      const issues = await client.listGroupIssues(params.group, { limit: params.limit, labels: params.labels });
+      const issues = await client.listGroupIssues(params.group, { limit: clampImportBrowseLimit(params.limit, 30), labels: params.labels });
       return { content: [{ type: "text", text: issues.map((issue) => `#${issue.iid}: ${issue.projectPath ?? issue.projectId} — ${issue.title}\n${issue.webUrl}`).join("\n") || `No GitLab group issues found in ${params.group}.` }], details: { count: issues.length, issues } };
     },
   });
@@ -2369,7 +2429,7 @@ export default function kbExtension(pi: ExtensionAPI) {
     parameters: Type.Object({ group: Type.String({ description: "GitLab group path or numeric ID" }), limit: Type.Optional(Type.Number({ minimum: 1, maximum: 100 })), labels: Type.Optional(Type.Array(Type.String())) }),
     async execute(_id, params, _signal, _onUpdate, ctx) {
       const { client } = await createGitLabClient(ctx);
-      const issues = await client.listGroupIssues(params.group, { limit: params.limit, labels: params.labels });
+      const issues = await client.listGroupIssues(params.group, { limit: clampImportBrowseLimit(params.limit, 30), labels: params.labels });
       const createdTasks = await importGitLabItems(ctx, "group_issue", params.group, issues);
       return { content: [{ type: "text", text: `Imported ${createdTasks.length} GitLab group issue tasks.` }], details: { createdTasks } };
     },
@@ -2383,7 +2443,7 @@ export default function kbExtension(pi: ExtensionAPI) {
     parameters: Type.Object({ project: Type.String({ description: "GitLab project path or numeric ID" }), limit: Type.Optional(Type.Number({ minimum: 1, maximum: 100 })), labels: Type.Optional(Type.Array(Type.String())) }),
     async execute(_id, params, _signal, _onUpdate, ctx) {
       const { client } = await createGitLabClient(ctx);
-      const mergeRequests = await client.listMergeRequests(params.project, { limit: params.limit, labels: params.labels });
+      const mergeRequests = await client.listMergeRequests(params.project, { limit: clampImportBrowseLimit(params.limit, 30), labels: params.labels });
       return { content: [{ type: "text", text: mergeRequests.map((mr) => `!${mr.iid}: ${mr.title}\n${mr.webUrl}`).join("\n") || `No GitLab merge requests found in ${params.project}.` }], details: { count: mergeRequests.length, mergeRequests } };
     },
   });
@@ -2396,7 +2456,7 @@ export default function kbExtension(pi: ExtensionAPI) {
     parameters: Type.Object({ project: Type.String({ description: "GitLab project path or numeric ID" }), limit: Type.Optional(Type.Number({ minimum: 1, maximum: 100 })), labels: Type.Optional(Type.Array(Type.String())) }),
     async execute(_id, params, _signal, _onUpdate, ctx) {
       const { client } = await createGitLabClient(ctx);
-      const mergeRequests = await client.listMergeRequests(params.project, { limit: params.limit, labels: params.labels });
+      const mergeRequests = await client.listMergeRequests(params.project, { limit: clampImportBrowseLimit(params.limit, 30), labels: params.labels });
       const createdTasks = await importGitLabItems(ctx, "merge_request", params.project, mergeRequests);
       return { content: [{ type: "text", text: `Imported ${createdTasks.length} GitLab merge request tasks.` }], details: { createdTasks } };
     },
@@ -5296,7 +5356,11 @@ export default function kbExtension(pi: ExtensionAPI) {
       ),
     }),
 
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+    /*
+    FNXC:MergeQueue 2026-07-15-11:40:
+    Kill npx on abort/timeout so outer tool budgets cannot leave orphan install processes after the agent turn fails closed.
+    */
+    async execute(_toolCallId, params, signal, _onUpdate, ctx) {
       // Validate source format
       if (!/^[^/]+\/[^/]+$/.test(params.source)) {
         return {
@@ -5321,7 +5385,14 @@ export default function kbExtension(pi: ExtensionAPI) {
       // Non-interactive mode (-y) targeting pi agent (-a pi)
       npxArgs.push("-y", "-a", "pi");
 
-      // Execute via spawn
+      if (signal?.aborted) {
+        return {
+          content: [{ type: "text", text: "fn_skills_install aborted." }],
+          isError: true,
+          details: { error: "aborted" },
+        };
+      }
+
       const child = spawn("npx", npxArgs, {
         cwd: resolveProjectRoot(ctx.cwd),
         stdio: "pipe",
@@ -5329,27 +5400,48 @@ export default function kbExtension(pi: ExtensionAPI) {
       });
 
       let stderr = "";
-
       child.stdout?.on("data", () => {});
-
       child.stderr?.on("data", (data) => {
         stderr += data.toString();
       });
 
-      const exitCode = await new Promise<number>((resolve) => {
-        child.on("exit", (code) => {
-          resolve(code ?? 1);
-        });
-        child.on("error", () => {
-          resolve(1);
-        });
-      });
+      const killChild = () => {
+        try {
+          child.kill("SIGTERM");
+        } catch {
+          /* ignore */
+        }
+        try {
+          child.kill("SIGKILL");
+        } catch {
+          /* ignore */
+        }
+      };
 
+      const onAbort = () => killChild();
+      signal?.addEventListener("abort", onAbort, { once: true });
+
+      let exitCode: number;
       try {
-        // Always dispose the child process
-        child.kill();
-      } catch {
-        // Ignore errors during cleanup
+        exitCode = await new Promise<number>((resolve) => {
+          child.on("exit", (code) => {
+            resolve(code ?? 1);
+          });
+          child.on("error", () => {
+            resolve(1);
+          });
+        });
+      } finally {
+        signal?.removeEventListener("abort", onAbort);
+        killChild();
+      }
+
+      if (signal?.aborted) {
+        return {
+          content: [{ type: "text", text: "fn_skills_install aborted." }],
+          isError: true,
+          details: { error: "aborted", stderr },
+        };
       }
 
       if (exitCode !== 0) {

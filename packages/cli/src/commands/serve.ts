@@ -37,6 +37,7 @@ import {
   setHostExtensionPaths,
   createFusionAuthStorage,
 } from "@fusion/engine";
+import { setHostTaskStore, clearHostTaskStores } from "../extension.js";
 import {
   DefaultPackageManager,
   ModelRegistry,
@@ -293,6 +294,11 @@ export async function runServe(
    * Serve must share one successfully booted PostgreSQL layer between CentralCore and the cwd engine. A backend boot error is fatal; constructing a layerless CentralCore would make project discovery appear empty and split control-plane state.
    */
   const centralBootResult = await createTaskStoreForBackend({ rootDir: cwd });
+  /*
+  FNXC:MergeQueue 2026-07-15-11:40:
+  Share the serve TaskStore with the host pi extension so agent fn_* tools reuse the engine pool (no dual-boot).
+  */
+  setHostTaskStore(cwd, centralBootResult.taskStore);
   let centralBackendShutdownPromise: Promise<void> | undefined;
   const shutdownCentralBackendOnce = (): Promise<void> => {
     centralBackendShutdownPromise ??= centralBootResult.shutdown();
@@ -1185,6 +1191,7 @@ export async function runServe(
      * process because its runtime receives that store externally. Release the
      * complete boot result after every engine and CentralCore user has stopped.
      */
+    clearHostTaskStores();
     await shutdownCentralBackendOnce().catch((error) => {
       console.warn(`[serve] PostgreSQL shutdown failed: ${error instanceof Error ? error.message : String(error)}`);
     });

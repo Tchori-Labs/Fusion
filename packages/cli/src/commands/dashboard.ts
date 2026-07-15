@@ -65,6 +65,7 @@ import {
   setHostExtensionPaths,
   createFusionAuthStorage,
 } from "@fusion/engine";
+import { setHostTaskStore, clearHostTaskStores } from "../extension.js";
 import { DefaultPackageManager, ModelRegistry, SettingsManager, discoverAndLoadExtensions, createExtensionRuntime } from "@earendil-works/pi-coding-agent";
 import {
   getMergeStrategy,
@@ -889,6 +890,11 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
   // PostgreSQL-only; factory failure is surfaced instead of creating a dead store.
   store = dashboardBackendBoot.taskStore;
   const dashboardBackendShutdown = dashboardBackendBoot.shutdown;
+  /*
+  FNXC:MergeQueue 2026-07-15-11:40:
+  Share the dashboard TaskStore with the host pi extension so in-process agent fn_* tools never dual-boot a second createTaskStoreForBackend (FN-7956 hang class).
+  */
+  setHostTaskStore(cwd, store);
   const dashboardLayer = store.getAsyncLayer();
   if (!dashboardLayer) throw new Error("Dashboard runtime requires the project PostgreSQL AsyncDataLayer");
   // FNXC:PhysicalDeleteSqliteClass 2026-06-26-14:05:
@@ -1000,6 +1006,7 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
       const boot = await createTaskStoreForBackend({ rootDir: projectPath });
       projectStore = boot.taskStore;
       projectStoreShutdowns.set(projectPath, boot.shutdown);
+      setHostTaskStore(projectPath, projectStore);
     }
     projectStores.set(projectPath, projectStore);
     return projectStore;
@@ -1940,6 +1947,7 @@ export async function runDashboard(port: number, opts: { paused?: boolean; dev?:
   Dispose secondary stores first, explicitly close the cwd TaskStore so its watcher and timers stop, then invoke the startup factory shutdown that releases the remaining backend resources. The exported dispose path must await every stage.
   */
   disposeCallbacks.push(async () => {
+    clearHostTaskStores();
     await closeProjectStores();
     await store?.close();
     if (dashboardBackendShutdown) {
