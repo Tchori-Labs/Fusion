@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, act, within } from "@testing-library/react";
 import type { NodeConfig, Settings } from "@fusion/core";
-import type { ProjectInfo } from "../../api";
+import type { AiSessionSummary, ProjectInfo } from "../../api";
 import { scopedKey } from "../../utils/projectStorage";
 import { useFileBrowser } from "../../context/FileBrowserContext";
 
@@ -175,14 +175,16 @@ vi.mock("../../hooks/useRemoteNodeEvents", () => ({
   })),
 }));
 
+const mockUseBackgroundSessions = vi.fn(() => ({
+  sessions: [],
+  generating: false,
+  needsInput: false,
+  planningSessions: [],
+  dismissSession: vi.fn(),
+}));
+
 vi.mock("../../hooks/useBackgroundSessions", () => ({
-  useBackgroundSessions: vi.fn(() => ({
-    sessions: [],
-    generating: false,
-    needsInput: false,
-    planningSessions: [],
-    dismissSession: vi.fn(),
-  })),
+  useBackgroundSessions: () => mockUseBackgroundSessions(),
 }));
 
 // Mock NodeContext - default to local mode
@@ -325,9 +327,9 @@ vi.mock("../../components/GitHubImportModal", () => ({
 }));
 
 vi.mock("../../components/PlanningModeModal", () => ({
-  PlanningModeModal: ({ isOpen, onClose, presentation = "modal" }: { isOpen: boolean; onClose: () => void; presentation?: "modal" | "embedded" }) =>
+  PlanningModeModal: ({ isOpen, onClose, presentation = "modal", resumeSessionId }: { isOpen: boolean; onClose: () => void; presentation?: "modal" | "embedded"; resumeSessionId?: string }) =>
     isOpen ? (
-      <div className={presentation === "embedded" ? "planning-view open" : "modal-overlay open"} data-testid={presentation === "embedded" ? "planning-view" : undefined}>
+      <div className={presentation === "embedded" ? "planning-view open" : "modal-overlay open"} data-testid={presentation === "embedded" ? "planning-view" : undefined} data-resume-session-id={resumeSessionId ?? ""}>
         <button type="button" aria-label="Close" onClick={onClose}>
           Close
         </button>
@@ -694,6 +696,14 @@ beforeEach(() => {
   localStorage.setItem("kb-dashboard-view-mode", "project");
   mockSubscribeSse.mockReset();
   mockSubscribeSse.mockReturnValue(vi.fn());
+  mockUseBackgroundSessions.mockReset();
+  mockUseBackgroundSessions.mockReturnValue({
+    sessions: [],
+    generating: false,
+    needsInput: false,
+    planningSessions: [],
+    dismissSession: vi.fn(),
+  });
   mockCreateTask.mockReset();
   mockUseTasks.mockReset();
   mockUseTasks.mockImplementation(() => ({
@@ -3107,6 +3117,70 @@ describe("App Planning Mode", () => {
     });
 
     localStorage.removeItem(taskViewStorageKey());
+  });
+
+  it("opens a footer planning session in the embedded Planning view with its resume session", async () => {
+    const session: AiSessionSummary = {
+      id: "planning-session-needs-input",
+      type: "planning",
+      status: "awaiting_input",
+      title: "Planning — needs input",
+      projectId: "proj_123",
+      updatedAt: "2026-07-15T00:00:00.000Z",
+    };
+    mockUseBackgroundSessions.mockReturnValue({
+      sessions: [session],
+      generating: false,
+      needsInput: true,
+      planningSessions: [session],
+      dismissSession: vi.fn(),
+    });
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /AI 1/i }));
+    fireEvent.click(document.querySelector(".background-tasks-indicator__session-title")!);
+
+    await waitFor(() => {
+      const planningView = screen.getByTestId("planning-view");
+      expect(planningView).toBeInTheDocument();
+      expect(planningView).toHaveAttribute("data-resume-session-id", session.id);
+    });
+  });
+
+  it.each([
+    { type: "subtask" as const, expectedView: "board", opensSubtaskOverlay: true },
+    { type: "mission_interview" as const, expectedView: "missions", opensSubtaskOverlay: false },
+    { type: "milestone_interview" as const, expectedView: "missions", opensSubtaskOverlay: false },
+    { type: "slice_interview" as const, expectedView: "missions", opensSubtaskOverlay: false },
+  ])("keeps the $type background-session route unchanged", async ({ type, expectedView, opensSubtaskOverlay }) => {
+    const session: AiSessionSummary = {
+      id: `${type}-session`,
+      type,
+      status: "awaiting_input",
+      title: `${type} session`,
+      projectId: "proj_123",
+      updatedAt: "2026-07-15T00:00:00.000Z",
+    };
+    mockUseBackgroundSessions.mockReturnValue({
+      sessions: [session],
+      generating: false,
+      needsInput: true,
+      planningSessions: [],
+      dismissSession: vi.fn(),
+    });
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /AI 1/i }));
+    fireEvent.click(document.querySelector(".background-tasks-indicator__session-title")!);
+
+    await waitFor(() => {
+      expect(screen.getByTestId(`sidebar-nav-${expectedView}`)).toHaveAttribute("aria-current", "page");
+      if (opensSubtaskOverlay) {
+        expect(screen.getByRole("dialog")).toBeInTheDocument();
+      }
+    });
   });
 });
 

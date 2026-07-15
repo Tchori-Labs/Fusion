@@ -1213,7 +1213,12 @@ function AppInner() {
 
   const handleOpenBackgroundSession = useCallback((session: AiSessionSummary) => {
     if (session.type === "planning") {
+      /*
+      FNXC:Navigation 2026-07-15-00:00:
+      Background planning sessions must navigate to the embedded `taskView === "planning"` surface as well as setting resume state. This mirrors the mission interview branches below and the openPlanning*WithNav helpers, so footer and needs-input resume entry points actually render the reconnected session.
+      */
       modalManager.openPlanningWithSession(session.id);
+      handleChangeTaskView("planning");
     } else if (session.type === "subtask") {
       modalManager.openSubtaskWithSession(session.id);
     } else if (session.type === "mission_interview") {
