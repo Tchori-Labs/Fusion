@@ -20,6 +20,8 @@ import {
   resolveAgentPrompt,
   builtinSeamPrompt,
   renderTriagePolicyPlaceholders,
+  resolveEffectiveSettings,
+  resolveEffectivePlannerHeartbeatPatrolEnabled,
   resolveTaskPlanningPrompt,
   resolveTaskSeamPrompt,
   resolvePersistAgentThinkingLog,
@@ -1142,11 +1144,13 @@ export class TriageProcessor {
         const workflowFastPlanningPrompt = leanPlanning
           ? await resolveTaskSeamPrompt(this.store, task.id, "planning-fast").catch(() => undefined)
           : undefined;
+        const effectiveWorkflowSettings = await resolveEffectiveSettings(this.store, task).catch(() => ({}));
+        const plannerHeartbeatPatrolEnabled = resolveEffectivePlannerHeartbeatPatrolEnabled(effectiveWorkflowSettings);
         // FN-6232: standard-mode built-in triage policy is sourced from the workflow IR planning node; the former engine duplicate was removed.
         const userTriagePrompt = settings.agentPrompts?.roleAssignments?.triage
-          ? resolveAgentPrompt("triage", settings.agentPrompts)
+          ? resolveAgentPrompt("triage", settings.agentPrompts, { plannerHeartbeatPatrolEnabled })
           : "";
-        const defaultTriagePrompt = resolveAgentPrompt("triage");
+        const defaultTriagePrompt = resolveAgentPrompt("triage", undefined, { plannerHeartbeatPatrolEnabled });
         const resolvedBasePrompt = userTriagePrompt
           || (leanPlanning
             ? (workflowFastPlanningPrompt || builtinSeamPrompt("planning-fast") || defaultTriagePrompt)

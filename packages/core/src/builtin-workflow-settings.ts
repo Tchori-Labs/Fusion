@@ -503,6 +503,8 @@ export const BUILTIN_REVIEW_REVISION_SETTINGS: WorkflowSettingDefinition[] = [
  */
 export const DEFAULT_PLANNER_OVERSEER_EXECUTOR_STUCK_AFTER_MS = 2 * 60 * 60 * 1000;
 
+export const PLANNER_HEARTBEAT_PATROL_ENABLED_SETTING_ID = "plannerHeartbeatPatrolEnabled";
+
 export const BUILTIN_OVERSIGHT_SETTINGS: WorkflowSettingDefinition[] = [
   {
     id: "plannerOversightLevel",
@@ -574,6 +576,18 @@ export const BUILTIN_OVERSIGHT_SETTINGS: WorkflowSettingDefinition[] = [
     default: "",
     description:
       "Model id for the planner overseer session advisor. Used only when Session advisor (LLM) is enabled. Must be set together with Session advisor model provider.",
+  },
+  /*
+   * FNXC:HeartbeatPatrol 2026-07-14-23:35:
+   * Idle no-task heartbeat patrol creates net-new work while plannerOversightLevel recovers tasks already in flight. Keep patrol as its own workflow setting so operators can reduce autonomous task creation volume without disabling stuck-task observation, steering, or recovery.
+   */
+  {
+    id: PLANNER_HEARTBEAT_PATROL_ENABLED_SETTING_ID,
+    name: "Planner heartbeat patrol enabled",
+    type: "boolean",
+    default: true,
+    description:
+      "Enable idle/no-task heartbeat proactive patrol guidance that encourages agents to create or delegate new follow-up tasks. Disable to keep idle agents to assigned work, direct messages, explicit operator requests, and safe read-only/logging coordination without disabling planner overseer stuck-task recovery.",
   },
 ];
 

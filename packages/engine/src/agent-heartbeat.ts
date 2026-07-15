@@ -33,6 +33,9 @@ import {
   AWAITING_APPROVAL_PAUSE_REASON,
   rankAssignedTasksForWakeDelta,
   formatAssignedTasksWakeDeltaSection,
+  resolveEffectiveSettingsById,
+  resolveEffectivePlannerHeartbeatPatrolEnabled,
+  TRIAGE_HEARTBEAT_PATROL_DISABLED_INSTRUCTION,
 } from "@fusion/core";
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type, type Static } from "@earendil-works/pi-ai";
@@ -107,6 +110,27 @@ function adjustHeartbeatMemoryPrimer(basePrompt: string, mode: AgentMemoryInclus
     memoryPrimer,
     "\nWhen an Agent Memory Index is provided instead of full memory, call fn_memory_search first for task-relevant context. Use fn_memory_get to open only relevant snippets.\n",
   );
+}
+
+async function resolveNoTaskHeartbeatPatrolEnabled(
+  taskStore: TaskStore,
+  settings: Settings | undefined,
+): Promise<boolean> {
+  try {
+    const projectId = typeof taskStore.getWorkflowSettingsProjectId === "function"
+      ? taskStore.getWorkflowSettingsProjectId()
+      : "default";
+    const workflowId = settings?.defaultWorkflowId || "builtin:coding";
+    /*
+    FNXC:HeartbeatPatrol 2026-07-15-00:10:
+    No-task heartbeats have no task-selected workflow, so idle patrol policy resolves through the project default workflow. If a project has not selected one, built-in coding supplies the compatibility default (`plannerHeartbeatPatrolEnabled: true`). This keeps idle-agent patrol separate from per-task planner oversight recovery.
+    */
+    const effective = await resolveEffectiveSettingsById(taskStore, workflowId, projectId);
+    return resolveEffectivePlannerHeartbeatPatrolEnabled(effective);
+  } catch (error: unknown) {
+    heartbeatLog.warn(`Failed to resolve no-task heartbeat patrol setting: ${error instanceof Error ? error.message : String(error)} — defaulting enabled`);
+    return true;
+  }
 }
 
 interface SelfImproveServiceLike {
@@ -662,6 +686,45 @@ When sending messages:
 - Include relevant context (task IDs, file paths) in metadata when applicable.
 - Use agent-to-agent for inter-agent communication.`;
 
+/*
+FNXC:HeartbeatPatrol 2026-07-15-00:09:
+Operators need to disable idle/no-task proactive task creation without disabling planner oversight for tasks already in flight. Keep the exported legacy constants as the default patrol-on prompt, and render patrol-off variants only when the workflow setting is explicitly false so existing callers remain compatible.
+*/
+export function renderHeartbeatNoTaskSystemPrompt(options: { plannerHeartbeatPatrolEnabled?: boolean } = {}): string {
+  if (options.plannerHeartbeatPatrolEnabled !== false) {
+    return HEARTBEAT_NO_TASK_SYSTEM_PROMPT;
+  }
+  return HEARTBEAT_NO_TASK_SYSTEM_PROMPT
+    .replace(
+      "2. Do ONE useful action: analyze, create follow-up tasks, delegate work, or update memory.",
+      "2. Do ONE useful action: analyze, respond to direct messages or explicit operator requests, delegate already-requested work, or update memory.",
+    )
+    .replace(
+      "4. Use fn_task_create to spawn follow-up work — but first scan the board/context for an existing open task covering the same work; do not duplicate.",
+      `4. ${TRIAGE_HEARTBEAT_PATROL_DISABLED_INSTRUCTION}`,
+    )
+    .replace(
+      "- DO: create a clearly scoped task for a newly discovered reliability issue.\n",
+      "",
+    )
+    .replace(
+      "- **fn_task_create:** create executable work when ownership is not predetermined.",
+      `- **Idle patrol disabled:** ${TRIAGE_HEARTBEAT_PATROL_DISABLED_INSTRUCTION}`,
+    )
+    .replace(
+      "If unsure who should do the work, prefer fn_task_create and let scheduler routing happen naturally.",
+      "If unsure who should do the work, do not create a patrol task; no-op with reason, handle an explicit request, or ask for clarification when available.",
+    )
+    .replace(
+      "- **Unowned risk discovered:** create one focused task with concrete acceptance language.",
+      "- **Unowned risk discovered:** do not create a patrol task; record durable context only when it is safe and useful, or wait for explicit operator direction.",
+    )
+    .replace(
+      "- **Message requests action:** reply first, then create/delegate follow-up work when execution is required.",
+      "- **Message requests action:** reply first, then delegate only when ownership is clear or create follow-up work only when the message/operator explicitly requests it.",
+    );
+}
+
 // Backward-compatible alias; prefer HEARTBEAT_NO_TASK_SYSTEM_PROMPT.
 export const HEARTBEAT_SYSTEM_PROMPT_NO_TASK = HEARTBEAT_NO_TASK_SYSTEM_PROMPT;
 
@@ -880,6 +943,36 @@ export const HEARTBEAT_NO_TASK_PROCEDURE_OFF = `## Heartbeat Procedure (run ever
 6. **Disposition + exit** — acted / no-op with reason, then fn_heartbeat_done with a one-line summary.
 
 Critical: a heartbeat without observable progress (or an explicit no-op reason) is a bug.`;
+
+export function renderHeartbeatNoTaskProcedure(
+  procedure: string,
+  options: { plannerHeartbeatPatrolEnabled?: boolean } = {},
+): string {
+  if (options.plannerHeartbeatPatrolEnabled !== false) {
+    return procedure;
+  }
+  return procedure
+    .replace(
+      "   - **Implementation-scope discovery:** code/product work that needs a task;\n     create a focused task instead of attempting unscheduled implementation.",
+      `   - **Implementation-scope discovery:** code/product work that needs a task;\n     ${TRIAGE_HEARTBEAT_PATROL_DISABLED_INSTRUCTION}`,
+    )
+    .replace(
+      "6. **Pick the next concrete action** — exactly ONE useful action this heartbeat:\n   create a focused task, delegate work, send/reply to a message, or append\n   durable memory. Never retry checkout/claim conflicts.",
+      "6. **Pick the next concrete action** — exactly ONE useful action this heartbeat:\n   respond to direct messages, delegate explicitly requested work, append durable\n   memory, or no-op with reason. Never retry checkout/claim conflicts.",
+    )
+    .replace(
+      "7. **Persist progress** — use available ambient tools only:\n   fn_task_create, fn_delegate_task, fn_send_message, fn_memory_append.",
+      "7. **Persist progress** — use available ambient tools only for non-patrol work:\n   fn_delegate_task, fn_send_message, fn_memory_append, or an explicit no-op reason.\n   Do not call fn_task_create for idle patrol task creation.",
+    )
+    .replace(
+      "8. **Final disposition checklist** — acted with evidence / follow-up created or\n   delegated / explicit no-op with reason.",
+      "8. **Final disposition checklist** — acted with evidence / delegated explicit\n   requested work / explicit no-op with reason.",
+    )
+    .replace(
+      "Critical: a heartbeat without observable progress (a created task, delegation,\nmessage reply, memory append, or explicit \"no-op with reason\") is a bug.",
+      "Critical: a heartbeat without observable progress (delegation for explicit work,\nmessage reply, memory append, or explicit \"no-op with reason\") is a bug.",
+    );
+}
 
 // Backward-compatible alias; prefer HEARTBEAT_NO_TASK_PROCEDURE_STRICT.
 export const HEARTBEAT_NO_TASK_PROCEDURE = HEARTBEAT_NO_TASK_PROCEDURE_STRICT;
@@ -2851,8 +2944,13 @@ export class HeartbeatMonitor {
           globalSettings: memorySettings,
         });
         const priorMemoryMode = agent.runtimeConfig?.lastAgentMemoryInclusionMode;
+        const plannerHeartbeatPatrolEnabled = isNoTaskRun
+          ? await resolveNoTaskHeartbeatPatrolEnabled(taskStore, heartbeatModelSettings)
+          : true;
         const baseHeartbeatSystemPrompt = adjustHeartbeatMemoryPrimer(
-          isNoTaskRun ? HEARTBEAT_NO_TASK_SYSTEM_PROMPT : HEARTBEAT_SYSTEM_PROMPT,
+          isNoTaskRun
+            ? renderHeartbeatNoTaskSystemPrompt({ plannerHeartbeatPatrolEnabled })
+            : HEARTBEAT_SYSTEM_PROMPT,
           resolvedMemoryMode.mode,
         );
         let resolvedInstructionsText = "";
@@ -3326,9 +3424,12 @@ export class HeartbeatMonitor {
               off: HEARTBEAT_NO_TASK_PROCEDURE_OFF,
             },
           });
-          const heartbeatProcedureText = shouldOverrideCustomProcedureForNoTaskRun
+          const rawHeartbeatProcedureText = shouldOverrideCustomProcedureForNoTaskRun
             ? resolvedProcedureTemplate
             : (customProcedure ?? resolvedProcedureTemplate);
+          const heartbeatProcedureText = isNoTaskRun
+            ? renderHeartbeatNoTaskProcedure(rawHeartbeatProcedureText, { plannerHeartbeatPatrolEnabled })
+            : rawHeartbeatProcedureText;
           // Precedence: heartbeatProcedurePath (custom file) > resolved heartbeatScopeDiscipline template > strict default.
           const heartbeatProcedureSource = shouldOverrideCustomProcedureForNoTaskRun
             ? "default-no-task-override"
@@ -3390,6 +3491,28 @@ export class HeartbeatMonitor {
                 ),
               ]
               : [];
+            const noTaskActionGuidanceLines = plannerHeartbeatPatrolEnabled
+              ? [
+                "2. **Create new tasks** — Use fn_task_create for net-new executable work.",
+                "   Prefer concrete tasks with clear outcomes; avoid vague placeholders.",
+                "",
+              ]
+              : [
+                "2. **Idle patrol disabled** — Do not create new tasks during idle/no-task heartbeats.",
+                "   Only handle assigned work, direct messages, explicit operator requests, and safe read-only/logging coordination.",
+                "",
+              ];
+            const noTaskFlowGuidanceLines = plannerHeartbeatPatrolEnabled
+              ? [
+                "5. **Monitor project flow** — Review board/project signals and surface issues",
+                "   by creating or delegating follow-up work as appropriate.",
+                "",
+              ]
+              : [
+                "5. **Monitor project flow** — Review board/project signals only for safe coordination.",
+                "   Do not spawn patrol tasks from idle observations; no-op with reason when no explicit action is needed.",
+                "",
+              ];
 
             executionPrompt = [
               `Heartbeat execution for agent "${agent.name}" (ID: ${agent.id})`,
@@ -3424,18 +3547,14 @@ export class HeartbeatMonitor {
               "1. **Check your messages** — Use fn_read_messages to review pending messages.",
               "   If replying, use fn_send_message and include reply_to_message_id so threads stay linked.",
               "",
-              "2. **Create new tasks** — Use fn_task_create for net-new executable work.",
-              "   Prefer concrete tasks with clear outcomes; avoid vague placeholders.",
-              "",
+              ...noTaskActionGuidanceLines,
               "3. **Delegate work** — Use fn_list_agents to find available specialists, then",
               "   fn_delegate_task when immediate ownership by a specific agent is beneficial.",
               "",
               "4. **Update memory** — Use fn_memory_append for durable, reusable learnings",
               "   (conventions, pitfalls, architecture constraints), not transient chatter.",
               "",
-              "5. **Monitor project flow** — Review board/project signals and surface issues",
-              "   by creating or delegating follow-up work as appropriate.",
-              "",
+              ...noTaskFlowGuidanceLines,
               "When auto-claim relevant tasks is enabled, review Open Task Candidates above and",
               "prioritize tasks that align with your role and soul before creating net-new tasks.",
               ...candidateLines,

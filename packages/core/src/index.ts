@@ -161,6 +161,9 @@ export * from "./shared-mesh-state.js";
 export {
   BUILTIN_AGENT_PROMPTS,
   resolveAgentPrompt,
+  buildTriageHeartbeatGuidance,
+  buildConciseTriageHeartbeatGuidance,
+  TRIAGE_HEARTBEAT_PATROL_DISABLED_INSTRUCTION,
   getAvailableTemplates,
   getTemplatesForRole,
   FUSION_RUNTIME_SELF_AWARENESS,
@@ -256,6 +259,7 @@ export {
   BUILTIN_TRIAGE_POLICY_SETTINGS,
   BUILTIN_OVERSIGHT_SETTINGS,
   DEFAULT_PLANNER_OVERSEER_EXECUTOR_STUCK_AFTER_MS,
+  PLANNER_HEARTBEAT_PATROL_ENABLED_SETTING_ID,
   renderTriagePolicyPlaceholders,
 } from "./builtin-workflow-settings.js";
 export {
@@ -486,6 +490,7 @@ export {
   resolveEffectiveSettingsById,
   resolveOptionalReviewRevisionBudget,
   resolveEffectivePlannerOversightLevel,
+  resolveEffectivePlannerHeartbeatPatrolEnabled,
   PLAN_REVIEW_MAX_REVISIONS_SETTING_ID,
   CODE_REVIEW_MAX_REVISIONS_SETTING_ID,
   type WorkflowSettingsResolverStore,

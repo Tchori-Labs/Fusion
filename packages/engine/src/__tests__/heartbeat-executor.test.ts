@@ -13,7 +13,16 @@ import {
 } from "../agent-heartbeat.js";
 import { AgentLogger } from "../agent-logger.js";
 import { expectAppendAgentLog } from "./agent-log-assertions.js";
-import type { AgentStore, AgentHeartbeatRun, TaskStore, TaskDetail, Agent, MessageStore, Message } from "@fusion/core";
+import {
+  TRIAGE_HEARTBEAT_PATROL_DISABLED_INSTRUCTION,
+  type AgentStore,
+  type AgentHeartbeatRun,
+  type TaskStore,
+  type TaskDetail,
+  type Agent,
+  type MessageStore,
+  type Message,
+} from "@fusion/core";
 import { createMessage, createBudgetStatus } from "./heartbeat-test-helpers.js";
 vi.mock("../logger.js", async () => {
   const { createMockLogger, formatMockError } = await import("./heartbeat-test-helpers.js");
@@ -1590,6 +1599,48 @@ describe("executeHeartbeat", () => {
       expect(systemPrompt).toContain('scope="agent"');
       expect(systemPrompt).toContain('scope="project"');
       expect(systemPrompt).toContain("fn_heartbeat_done");
+    });
+
+    it("no-task run gates proactive patrol prompts from workflow setting", async () => {
+      for (const [storedValue, shouldPatrol] of [[undefined, true], [true, true], [false, false]] as const) {
+        vi.clearAllMocks();
+        const store = createStoreWithAgentForExec({ taskId: undefined, soul: "I am a coordinator" });
+        const mockSession = createMockAgentSession();
+        mockedCreateFnAgent.mockResolvedValue({ session: mockSession as any });
+        const taskStore = createMockTaskStore({
+          getSettings: vi.fn().mockResolvedValue({ defaultWorkflowId: "builtin:coding" }),
+          getWorkflowSettingsProjectId: vi.fn().mockReturnValue("test-project"),
+          getWorkflowSettingValues: vi.fn().mockReturnValue(
+            storedValue === undefined ? {} : { plannerHeartbeatPatrolEnabled: storedValue },
+          ),
+        } as Partial<TaskStore>);
+
+        const monitor = new HeartbeatMonitor({ store, taskStore, rootDir: "/tmp" });
+
+        const result = await monitor.executeHeartbeat({ agentId: "agent-001", source: "timer" });
+
+        expect(result.status).toBe("completed");
+        expect(mockedCreateFnAgent).toHaveBeenCalledOnce();
+        const callArgs = mockedCreateFnAgent.mock.calls[0]![0]!;
+        const systemPrompt = callArgs.systemPrompt;
+        const executionPrompt = mockSession.prompt.mock.calls.at(-1)?.[0] ?? "";
+        const savedRun = await store.getRunDetail("agent-001", result.id);
+
+        if (shouldPatrol) {
+          expect(systemPrompt).toContain("Use fn_task_create to spawn follow-up work");
+          expect(executionPrompt).toContain("create a focused task instead of attempting unscheduled implementation");
+          expect(savedRun?.systemPrompt).toContain("Use fn_task_create to spawn follow-up work");
+          expect(savedRun?.executionPrompt).toContain("create a focused task instead of attempting unscheduled implementation");
+          expect(systemPrompt).not.toContain(TRIAGE_HEARTBEAT_PATROL_DISABLED_INSTRUCTION);
+        } else {
+          expect(systemPrompt).toContain(TRIAGE_HEARTBEAT_PATROL_DISABLED_INSTRUCTION);
+          expect(executionPrompt).toContain(TRIAGE_HEARTBEAT_PATROL_DISABLED_INSTRUCTION);
+          expect(savedRun?.systemPrompt).toContain(TRIAGE_HEARTBEAT_PATROL_DISABLED_INSTRUCTION);
+          expect(savedRun?.executionPrompt).toContain(TRIAGE_HEARTBEAT_PATROL_DISABLED_INSTRUCTION);
+          expect(systemPrompt).not.toContain("Use fn_task_create to spawn follow-up work");
+          expect(executionPrompt).not.toContain("create a focused task instead of attempting unscheduled implementation");
+        }
+      }
     });
 
     it("identity agent without task receives no-task execution prompt mentioning 'no assigned task'", async () => {
@@ -3524,7 +3575,7 @@ describe("executeHeartbeat", () => {
       expect(taskLogTool.name).toBe("fn_task_log");
     });
 
-    it("passes execution settings model ahead of stale runtime model", async () => {
+    it("uses complete assigned runtime model ahead of shared execution settings", async () => {
       const store = createStoreWithAgentForExec({
         runtimeConfig: { model: "anthropic/claude-sonnet-4-5" },
       });
@@ -3545,8 +3596,8 @@ describe("executeHeartbeat", () => {
 
       expect(mockedCreateFnAgent).toHaveBeenCalledOnce();
       const callArgs = mockedCreateFnAgent.mock.calls[0]![0];
-      expect(callArgs.defaultProvider).toBe("openai");
-      expect(callArgs.defaultModelId).toBe("gpt-4.1");
+      expect(callArgs.defaultProvider).toBe("anthropic");
+      expect(callArgs.defaultModelId).toBe("claude-sonnet-4-5");
       expect(callArgs.fallbackProvider).toBeUndefined();
       expect(callArgs.fallbackModelId).toBeUndefined();
     });

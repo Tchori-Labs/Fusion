@@ -93,6 +93,7 @@ describe("workflow-native built-in workflow settings", () => {
       "plannerOverseerAdvisorEnabled",
       "plannerOverseerAdvisorProvider",
       "plannerOverseerAdvisorModelId",
+      "plannerHeartbeatPatrolEnabled",
     ]);
     // FNXC:PlannerOversight 2026-07-14-12:00: LLM session advisor must default OFF.
     expect(BUILTIN_OVERSIGHT_SETTINGS.find((s) => s.id === "plannerOverseerAdvisorEnabled")).toMatchObject({
@@ -173,6 +174,26 @@ describe("workflow-native built-in workflow settings", () => {
     expect(
       movedKeyIds.has("plannerOverseerExecutorStuckAfterMs"),
       "plannerOverseerExecutorStuckAfterMs should not be in MOVED_SETTINGS_KEYS",
+    ).toBe(false);
+
+    const heartbeatPatrol = BUILTIN_OVERSIGHT_SETTINGS[6];
+    expect(heartbeatPatrol).toMatchObject({
+      id: "plannerHeartbeatPatrolEnabled",
+      type: "boolean",
+      default: true,
+    });
+    expect(heartbeatPatrol.description).toMatch(/idle\/no-task heartbeat proactive patrol/i);
+    expect(
+      fullIds.has("plannerHeartbeatPatrolEnabled"),
+      "plannerHeartbeatPatrolEnabled should be in the full built-in catalog",
+    ).toBe(true);
+    expect(
+      movedIds.has("plannerHeartbeatPatrolEnabled"),
+      "plannerHeartbeatPatrolEnabled should not be in the moved-key catalog",
+    ).toBe(false);
+    expect(
+      movedKeyIds.has("plannerHeartbeatPatrolEnabled"),
+      "plannerHeartbeatPatrolEnabled should not be in MOVED_SETTINGS_KEYS",
     ).toBe(false);
   });
 

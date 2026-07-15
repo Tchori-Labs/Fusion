@@ -295,8 +295,9 @@ Actions. It has two tabs:
   automatic revisions, enter a non-negative integer to cap attempts, or enter `0`
   to disable automatic revision for that path. `plannerOversightLevel` is the
   workflow-native planner oversight mode and accepts `off`, `observe`, `steer`,
-  or `autonomous` (default). Edits batch and commit through a single **Save** in
-  the Values tab.
+  or `autonomous` (default). `plannerHeartbeatPatrolEnabled` controls idle/no-task
+  heartbeat patrol task creation separately and defaults to `true`. Edits batch
+  and commit through a single **Save** in the Values tab.
 
 **How values resolve.** The engine resolves *effective settings* per task as
 `stored value ?? declaration default`. The task-detail Workflow, Chat, and Agent
@@ -335,7 +336,7 @@ These groups moved out of project settings and into workflow settings (built-in
 |---|---|
 | **Step execution** | `workflowStepTimeoutMs`, `runStepsInNewSessions`, `maxParallelSteps`, `workflowStepScopeEnforcement`, `strictScopeEnforcement`, `verificationFixRetries`, `maxPostReviewFixes`, `buildRetryCount` |
 | **Review / approval** | Workflow values: `requirePrApproval`, `requirePlanApproval`, `reviewHandoffPolicy`, `maxReviewerContextRetries`, `maxReviewerFallbackRetries`, `planReviewMaxRevisions`, `codeReviewMaxRevisions`; project override: `planApprovalMode` |
-| **Planner oversight** | `plannerOversightLevel` (workflow-native; values: `off`, `observe`, `steer`, `autonomous`); `plannerOversightNotificationLevel` (workflow-native; values: `silent`, `errors`, `important`, `all`); `plannerOverseerExecutorStuckAfterMs` (workflow-native; number, default `7200000` = 2h); `plannerOverseerAdvisorEnabled` (boolean, **default false**); `plannerOverseerAdvisorProvider` / `plannerOverseerAdvisorModelId` (session-advisor model; both required when enabled) |
+| **Planner oversight** | `plannerOversightLevel` (workflow-native; values: `off`, `observe`, `steer`, `autonomous`); `plannerOversightNotificationLevel` (workflow-native; values: `silent`, `errors`, `important`, `all`); `plannerOverseerExecutorStuckAfterMs` (workflow-native; number, default `7200000` = 2h); `plannerOverseerAdvisorEnabled` (boolean, **default false**); `plannerOverseerAdvisorProvider` / `plannerOverseerAdvisorModelId` (session-advisor model; both required when enabled); `plannerHeartbeatPatrolEnabled` (workflow-native; boolean, default `true`, gates idle/no-task heartbeat patrol task creation) |
 | **Per-phase model lanes** | `executionProvider`/`executionModelId` + `executionThinkingLevel`, `planningProvider`/`planningModelId` + `planningThinkingLevel` (+ fallbacks), `validatorProvider`/`validatorModelId` + `validatorThinkingLevel` (+ fallbacks). Thinking values accept `off`, `minimal`, `low`, `medium`, `high`, or `xhigh`; unset inherits. |
 
 ### Workflow-native triage policy settings
@@ -346,6 +347,9 @@ Triage workflow defaults are policy inputs, not permission to reroute tasks auto
 
 FNXC:TriagePolicy 2026-07-04-00:00:
 `triageProactiveSubtaskSplittingEnabled` is workflow/project-scoped so operators can disable automatic oversized-task splitting without disabling explicit per-task `breakIntoSubtasks: true` requests.
+
+FNXC:HeartbeatPatrol 2026-07-15-03:05:
+`plannerHeartbeatPatrolEnabled` is documented beside planner oversight because operators need a separate workflow-native switch for idle/no-task task-creation patrol. It must not be described as disabling stuck-task observation, steering, or recovery for tasks already in flight.
 -->
 
 The built-in workflows also declare triage/spec policy settings that were **not** moved from project settings. They are workflow-native declarations: they never lived in `DEFAULT_PROJECT_SETTINGS`, are not `MOVED_SETTINGS_KEYS`, and resolve only through the workflow effective-settings path.
@@ -375,6 +379,7 @@ The built-in workflows also declare triage/spec policy settings that were **not*
 | `plannerOverseerAdvisorProvider` | `""` | Session-advisor model provider (OMP advisor parity). Used only when `plannerOverseerAdvisorEnabled` is true. Must be set together with `plannerOverseerAdvisorModelId`. |
 | `plannerOverseerAdvisorModelId` | `""` | Session-advisor model id. Used only when `plannerOverseerAdvisorEnabled` is true. When enabled and both model fields are set, the advisor reviews executor agent-log deltas and may inject `[session-advisor]` steering comments at `steer`/`autonomous` (observe = log only). Discover project review priorities via `OVERSEER.md` / `WATCHDOG.md`. See `docs/architecture.md` → "Planner overseer session advisor". |
 | `plannerOverseerExecutorStuckAfterMs` | `7200000` (2h) | Workflow-native executor-stage stall threshold (FN-7743). Milliseconds of executor-stage inactivity — no execution activity since the task's last column move/update (`columnMovedAt ?? updatedAt`) — before a non-paused `in-progress` task is reported `signal: "stuck"` instead of `"progressing"`, feeding the existing `decidePlannerRecovery` → bounded `inject_guidance` recovery path at the `autonomous` oversight level (no effect at `off`/`observe`/`steer`). Fixes the class of bug where a genuinely hung/idle executor (dead session, silent agent) was indistinguishable from a healthy one and was never nudged, retried, or escalated. A missing/malformed activity timestamp degrades to `"progressing"` (fail-safe — never fabricates a stall), and a user-paused/approval-blocked/`autoMerge:false` task is still fully withheld from any autonomous action regardless of this threshold. Resolves through the generic `resolveEffectiveSettings` default path alongside `plannerOversightLevel`. See `docs/architecture.md` → "Executor-stage stall detection (FN-7743)". |
+| `plannerHeartbeatPatrolEnabled` | `true` | Workflow-native idle-heartbeat patrol switch (FN-7963). `true` preserves the existing no-task heartbeat/triage guidance that lets idle agents scan for gaps and create focused follow-up tasks. Set to `false` to remove proactive patrol task-creation guidance from idle/no-task heartbeat prompts; agents should then handle assigned work, direct messages, explicit operator requests, and safe read-only/logging coordination instead of opening new patrol tasks. This is separate from `plannerOversightLevel`: disabling heartbeat patrol does **not** disable stuck-task observation, steering, retry, or targeted-fix recovery for tasks already in flight. No-task heartbeats resolve this value from the project default workflow, falling back to `builtin:coding` when no default workflow is set. |
 
 When `triageProactiveSubtaskSplittingEnabled` is `true` (the default), triage may proactively replace a large task with 2-5 child tasks when the size, step-count, package breadth, file-scope, or remediation-batch signals justify the coordination overhead. When it is `false`, those automatic oversized-task signals are advisory only for writing a realistic single-task spec; triage must not split solely because the task is large. The per-task `breakIntoSubtasks: true` flag is separate and remains mandatory: if a user explicitly asks for subtask breakdown, triage still evaluates and creates child tasks when the work is meaningfully decomposable.
 

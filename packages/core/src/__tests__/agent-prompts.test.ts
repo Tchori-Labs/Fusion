@@ -8,6 +8,7 @@ import {
   getAvailableTemplates,
   getTemplatesForRole,
   FUSION_RUNTIME_SELF_AWARENESS,
+  TRIAGE_HEARTBEAT_PATROL_DISABLED_INSTRUCTION,
 } from "../agent-prompts.js";
 import { BUILTIN_CODING_WORKFLOW_IR } from "../builtin-coding-workflow-ir.js";
 import { BUILTIN_SEAM_PROMPTS, builtinSeamPrompt } from "../builtin-workflow-prompts.js";
@@ -31,6 +32,34 @@ describe("resolveAgentPrompt", () => {
     const result = resolveAgentPrompt("triage");
     expect(result).toBeTruthy();
     expect(result).toContain("task specification agent");
+  });
+
+  it("renders triage heartbeat patrol guidance by default and when explicitly enabled", () => {
+    const defaultPrompt = resolveAgentPrompt("triage");
+    const enabledPrompt = resolveAgentPrompt("triage", undefined, { plannerHeartbeatPatrolEnabled: true });
+
+    for (const prompt of [defaultPrompt, enabledPrompt]) {
+      expect(prompt).toContain("Patrol for vague requests");
+      expect(prompt).toContain("review follow-ups that should become new tasks");
+      expect(prompt).not.toContain(TRIAGE_HEARTBEAT_PATROL_DISABLED_INSTRUCTION);
+    }
+  });
+
+  it("renders no-patrol triage heartbeat instructions when disabled", () => {
+    const result = resolveAgentPrompt("triage", undefined, { plannerHeartbeatPatrolEnabled: false });
+
+    expect(result).toContain(TRIAGE_HEARTBEAT_PATROL_DISABLED_INSTRUCTION);
+    expect(result).not.toContain("Patrol for vague requests");
+    expect(result).not.toContain("review follow-ups that should become new tasks");
+  });
+
+  it("renders no-patrol concise triage heartbeat instructions when disabled", () => {
+    const result = resolveAgentPrompt("triage", {
+      roleAssignments: { triage: "concise-triage" },
+    }, { plannerHeartbeatPatrolEnabled: false });
+
+    expect(result).toContain(TRIAGE_HEARTBEAT_PATROL_DISABLED_INSTRUCTION);
+    expect(result).not.toContain("turn it into short, actionable task specs or follow-up tickets");
   });
 
   it("returns the correct built-in prompt for reviewer when no config provided", () => {
