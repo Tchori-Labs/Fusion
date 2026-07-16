@@ -45,6 +45,7 @@
  */
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import * as schema from "./postgres/schema/index.js";
+import { projectPartitionId, projectScopeFor } from "./postgres/data-layer.js";
 import type { AsyncDataLayer, DbTransaction } from "./postgres/data-layer.js";
 import type {
   Agent,
@@ -374,6 +375,19 @@ export async function saveRun(handle: QueryHandle, projectId: string, run: Agent
     });
 }
 
+/*
+FNXC:MultiProjectIsolation 2026-07-15-22:05:
+Agent-run reads scope through projectScopeFor: a bound project filters, an unbound one reads
+across projects. Callers reach here as `layer.projectId ?? ""`, and a literal '' scope matched
+nothing — the fusion_assign_project_id trigger (migration 0006) rewrites the '' saveRun writes,
+so every unbound read missed the runs it had just saved.
+
+Runs are data, not migration guards: unbound means project-agnostic (single-project / analytics),
+which reads everything, exactly as taskProjectScope already does for tasks. Contrast the
+__meta helpers below, which resolve an unbound id to one partition via projectPartitionId — for
+those, reading across projects would let one project's marker suppress another's migration.
+*/
+
 /**
  * Get a specific run by id, or null if not found.
  */
@@ -388,7 +402,7 @@ export async function getRunDetail(
     .from(schema.project.agentRuns)
     .where(
       and(
-        eq(schema.project.agentRuns.projectId, projectId),
+        projectScopeFor(schema.project.agentRuns.projectId, projectId),
         eq(schema.project.agentRuns.agentId, agentId),
         eq(schema.project.agentRuns.id, runId),
       ),
@@ -412,7 +426,7 @@ export async function getRunById(
       data: schema.project.agentRuns.data,
     })
     .from(schema.project.agentRuns)
-    .where(and(eq(schema.project.agentRuns.projectId, projectId), eq(schema.project.agentRuns.id, runId)));
+    .where(and(projectScopeFor(schema.project.agentRuns.projectId, projectId), eq(schema.project.agentRuns.id, runId)));
   const row = rows[0] as { agentId: string; data: Record<string, unknown> | null } | undefined;
   if (!row) return null;
   return { agentId: row.agentId, run: (row.data as AgentHeartbeatRun | null) ?? null };
@@ -430,7 +444,7 @@ export async function getRecentRuns(
   const rows = await handle
     .select({ data: schema.project.agentRuns.data })
     .from(schema.project.agentRuns)
-    .where(and(eq(schema.project.agentRuns.projectId, projectId), eq(schema.project.agentRuns.agentId, agentId)))
+    .where(and(projectScopeFor(schema.project.agentRuns.projectId, projectId), eq(schema.project.agentRuns.agentId, agentId)))
     .orderBy(desc(schema.project.agentRuns.startedAt))
     .limit(limit);
   return rows
@@ -447,7 +461,7 @@ export async function listActiveHeartbeatRuns(handle: QueryHandle, projectId: st
   const rows = await handle
     .select({ data: schema.project.agentRuns.data })
     .from(schema.project.agentRuns)
-    .where(and(eq(schema.project.agentRuns.projectId, projectId), eq(schema.project.agentRuns.status, "active")))
+    .where(and(projectScopeFor(schema.project.agentRuns.projectId, projectId), eq(schema.project.agentRuns.status, "active")))
     .orderBy(asc(schema.project.agentRuns.startedAt));
   return rows
     .map((row) => (row.data as AgentHeartbeatRun | null) ?? null)
@@ -472,13 +486,13 @@ export async function listAllAgentRuns(
     ? await handle
         .select({ data: schema.project.agentRuns.data })
         .from(schema.project.agentRuns)
-        .where(eq(schema.project.agentRuns.projectId, projectId))
+        .where(projectScopeFor(schema.project.agentRuns.projectId, projectId))
         .orderBy(desc(schema.project.agentRuns.startedAt), desc(schema.project.agentRuns.id))
         .limit(normalizedLimit)
     : await handle
         .select({ data: schema.project.agentRuns.data })
         .from(schema.project.agentRuns)
-        .where(eq(schema.project.agentRuns.projectId, projectId))
+        .where(projectScopeFor(schema.project.agentRuns.projectId, projectId))
         .orderBy(asc(schema.project.agentRuns.startedAt), asc(schema.project.agentRuns.id));
   return rows
     .map((row) => (row.data as AgentHeartbeatRun | null) ?? null)
@@ -503,7 +517,7 @@ export async function getRunStatusCounts(
         count: sql<number>`count(*)::int`,
       })
       .from(schema.project.agentRuns)
-      .where(and(eq(schema.project.agentRuns.projectId, projectId), inArray(schema.project.agentRuns.agentId, [...agentIds])))
+      .where(and(projectScopeFor(schema.project.agentRuns.projectId, projectId), inArray(schema.project.agentRuns.agentId, [...agentIds])))
       .groupBy(schema.project.agentRuns.status);
   } else {
     rows = await handle
@@ -512,7 +526,7 @@ export async function getRunStatusCounts(
         count: sql<number>`count(*)::int`,
       })
       .from(schema.project.agentRuns)
-      .where(eq(schema.project.agentRuns.projectId, projectId))
+      .where(projectScopeFor(schema.project.agentRuns.projectId, projectId))
       .groupBy(schema.project.agentRuns.status);
   }
 
@@ -899,11 +913,18 @@ export async function getMetaValue(
   key: string,
   projectId = "",
 ): Promise<string | undefined> {
+  /*
+  FNXC:MultiProjectIsolation 2026-07-15-22:05:
+  Resolve the unscoped default to the shared partition. A literal '' scope matched nothing —
+  the fusion_assign_project_id trigger (migration 0006) rewrites the '' this module writes to
+  the sentinel — so these migration guards read back undefined for markers they had just
+  written, and re-ran migrations they had already completed. Must match upsertMetaValue.
+  */
   const rows = await handle
     .select({ value: schema.project.projectMeta.value })
     .from(schema.project.projectMeta)
     .where(and(
-      eq(schema.project.projectMeta.projectId, projectId),
+      eq(schema.project.projectMeta.projectId, projectPartitionId(projectId)),
       eq(schema.project.projectMeta.key, key),
     ));
   return rows[0]?.value ?? undefined;
@@ -921,10 +942,16 @@ export async function upsertMetaValue(
   /*
   FNXC:PostgresMultiProjectCutover 2026-07-14-11:18:
   Agent-store migration markers share the project schema but not project ownership. Include the bound project in their composite key; the empty binding remains the explicit project-agnostic compatibility partition.
+
+  FNXC:MultiProjectIsolation 2026-07-15-22:05:
+  Resolve that "explicit compatibility partition" to a value the database actually stores. Writing
+  a blank left the partition at the trigger's mercy — it becomes the session's `fusion.project_id`
+  when one is set, so the marker lands in an arbitrary project's partition instead of the shared
+  one. Must match getMetaValue.
   */
   await handle
     .insert(schema.project.projectMeta)
-    .values({ projectId, key, value })
+    .values({ projectId: projectPartitionId(projectId), key, value })
     .onConflictDoUpdate({
       target: [schema.project.projectMeta.projectId, schema.project.projectMeta.key],
       set: { value },
