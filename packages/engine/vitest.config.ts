@@ -381,8 +381,10 @@ export default defineConfig({
             // FNXC:PgMigrationQuarantine 2026-07-16-10:45:
             // FN-8047 restored multi-node claim and owning-node handoff coverage with shared PG-backed
             // AgentStores and AsyncCentralClaimStore; their paired ledger entries are intentionally live.
+            // FNXC:PgMigrationQuarantine 2026-07-16-11:25:
+            // FN-8117 restored explicit-marker coverage by configuring its PG fixture with taskPrefix: FN.
+            // The strict marker parser now receives valid FN ids, so this file is intentionally unquarantined.
             "src/__tests__/reliability-interactions/integration-worktree-state.test.ts",
-            "src/__tests__/reliability-interactions/explicit-duplicate-marker-sweep.test.ts",
             "src/__tests__/reliability-interactions/merge-runner-spawn-enoent-prevention.test.ts",
             "src/__tests__/reliability-interactions/meta-archive-guard-composition.test.ts",
             "src/__tests__/reliability-interactions/meta-chain-auto-close.test.ts",
