@@ -48,6 +48,7 @@ import { useAuthOnboarding } from "./hooks/useAuthOnboarding";
 import { useMobileKeyboard } from "./hooks/useMobileKeyboard";
 import { isIOS, useMobileKeyboardViewportLock, useMobileViewportRestoreReset } from "./hooks/useMobileScrollLock";
 import { computeMobileBarKeyboardFlags } from "./utils/mobileBarKeyboardFlags";
+import { closeViewShortcut, retainViewNavRevert } from "./utils/dashboardShortcutToggles";
 import { useSetupReadiness } from "./hooks/useSetupReadiness";
 import { useGithubSetupWarningDelay } from "./hooks/useGithubSetupWarningDelay";
 import { useUpdateCheck } from "./hooks/useUpdateCheck";
@@ -410,6 +411,7 @@ function AppInner() {
 
   // Navigation history for browser back button (desktop + mobile).
   const { pushNav, replaceCurrent, removeNav } = useNavigationHistory({ enabled: true });
+  const viewNavRevertRef = useRef(new Map<TaskView, (() => void)[]>());
 
   // View state must be defined before useTasks since useTasks depends on taskView for SSE gating
   const { viewMode, setViewMode, taskView, setTaskView, handleChangeTaskView } = useViewState({
@@ -439,7 +441,10 @@ function AppInner() {
     return null;
   }, [rawPluginDashboardViews]);
 
-  // History-aware view change handler — pushes nav entry on back-navigation stack.
+  /*
+  FNXC:DashboardShortcuts 2026-07-16-00:00:
+  FN-8069 makes Settings and Command Center shortcuts true toggles. Retain the exact view-revert callback pushed to navigation history so a shortcut can remove that identity-matched entry and restore the captured prior view for shortcut and Header/MobileNavBar opens alike; the callback deletes itself for shortcut close and Browser Back paths (Runfusion/Fusion#2118).
+  */
   const handleTaskViewChange = useCallback((newView: TaskView) => {
     if (newView === "missions") {
       setMissionResumeSessionId(undefined);
@@ -452,7 +457,13 @@ function AppInner() {
     const previousView = taskView;
     handleChangeTaskView(newView);
     if (previousView !== newView) {
-      pushNav({ type: "view", revert: () => handleChangeTaskView(previousView) });
+      const revert = retainViewNavRevert(
+        newView,
+        previousView,
+        viewNavRevertRef.current,
+        handleChangeTaskView,
+      );
+      pushNav({ type: "view", revert });
     }
   }, [handleChangeTaskView, taskView, pushNav]);
 
@@ -1033,6 +1044,16 @@ function AppInner() {
     pushNav({ type: "modal", close: modalManager.closeNewTask });
   }, [modalManager, pushNav]);
 
+  const closeFilesWithNav = useCallback(() => {
+    removeNav(modalManager.closeFiles);
+    modalManager.closeFiles();
+  }, [modalManager, removeNav]);
+
+  const closeNewTaskWithNav = useCallback(() => {
+    removeNav(modalManager.closeNewTask);
+    modalManager.closeNewTask();
+  }, [modalManager, removeNav]);
+
   /*
   FNXC:Navigation 2026-06-21-00:00:
   FN-6886 keeps the existing planning payload setters but routes every programmatic Planning Mode entry point to the docked `planning` view instead of pushing a modal overlay history entry.
@@ -1127,19 +1148,28 @@ function AppInner() {
     pushNav({ type: "modal", close: modalManager.closeFiles });
   }, [modalManager, pushNav]);
 
+  const closeViewShortcutWithNav = useCallback((view: TaskView) => {
+    closeViewShortcut(
+      view,
+      viewNavRevertRef.current,
+      removeNav,
+      () => handleChangeTaskView("board"),
+    );
+  }, [handleChangeTaskView, removeNav]);
+
   /*
-  FNXC:DashboardShortcuts 2026-07-04-00:00:
-  FN-7553 wires openFiles/openSettings/openCommandCenter/newTask into the same global listener as the base quickChat/terminal actions (FN-7494/FN-7507), reusing openFilesWithNav, openSettingsWithNav, openCommandCenterWithNav, and openNewTaskWithNav so no second nav destination is introduced.
+  FNXC:DashboardShortcuts 2026-07-16-00:00:
+  All six configurable shortcuts toggle. Modal toggles retain their existing nav-aware closer; Settings and Command Center remove and invoke the exact retained history revert, restoring the captured prior view rather than Board. This applies equally to shortcut and existing Header/MobileNavBar opens without duplicate destinations or replayable history entries (Runfusion/Fusion#2118).
   */
   useDashboardKeyboardShortcuts({
     shortcuts: dashboardKeyboardShortcuts,
-    openQuickChat: () => setQuickChatOpen(true),
+    toggleQuickChat: () => setQuickChatOpen((open) => !open),
     toggleTerminal: toggleTerminalWithNav,
     closeTopmostPopup: closeTopmostPopupForShortcut,
-    openFiles: () => openFilesWithNav(),
-    openSettings: () => openSettingsWithNav(),
-    openCommandCenter: openCommandCenterWithNav,
-    openNewTask: openNewTaskWithNav,
+    toggleFiles: () => modalManager.filesOpen ? closeFilesWithNav() : openFilesWithNav(),
+    toggleSettings: () => taskView === "settings" ? closeViewShortcutWithNav("settings") : openSettingsWithNav(),
+    toggleCommandCenter: () => taskView === "command-center" ? closeViewShortcutWithNav("command-center") : openCommandCenterWithNav(),
+    toggleNewTask: () => modalManager.newTaskModalOpen ? closeNewTaskWithNav() : openNewTaskWithNav(),
   });
 
   const openFileInBrowser = useCallback((path: string, opts?: { workspace?: string; line?: number; col?: number }) => {

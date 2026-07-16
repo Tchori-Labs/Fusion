@@ -58,6 +58,9 @@ Leave a shortcut field blank to disable that action. Settings validates each sho
 
 Shortcut handling is intentionally guarded. Fusion ignores global shortcuts while focus is inside inputs, textareas, selects, contenteditable editors, chat composers, task fields, Settings fields, search boxes, and terminal input, so typing Space or shortcut letters never opens another surface unexpectedly. Hardware keyboards on desktop, tablet, and mobile use the same bindings when focus is on the page/body. Open Files, Open Settings, Open Command Center, and New Task each reuse the dashboard's existing navigation entry points (the same handlers as their header/sidebar buttons), so no shortcut opens a second/duplicate destination.
 
+<!-- FNXC:DashboardShortcuts 2026-07-16-00:00: FN-8069 requires every configured dashboard shortcut to toggle its interface; a re-press dismisses modal surfaces or restores the active view that preceded Settings or Command Center (Runfusion/Fusion#2118). -->
+Every configured action toggles its interface: press once to open Quick Chat, Terminal, Files, Settings, Command Center, or New Task, then press the same binding again to close it. For Settings and Command Center, the second press returns to the view that was active before the surface opened.
+
 Press `Escape` to close the current/topmost dashboard popup. Popped-out task windows and floating Quick Chat close before fixed app modals such as Terminal, Settings, Files, or Task Detail, and only one surface closes per key press. Nested editors and menus that already handle Escape keep first ownership by preventing the global handler.
 
 <!-- FNXC:ModalGeometryPersistenceDocs 2026-07-16-00:40: Full-screen mobile FloatingWindow sheets must preserve, rather than overwrite, the movable desktop geometry record so a later desktop reopen restores the user's chosen location and size. -->
