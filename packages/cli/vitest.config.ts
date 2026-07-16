@@ -93,10 +93,9 @@ const quarantinedCliTests: string[] = [
   */
   "src/__tests__/extension-dist-barrel.test.ts",
   /*
-  FNXC:CliTests 2026-07-14-23:05:
-  project-context.test.ts lost its embedded PostgreSQL postmaster and timed out only in a combined focused lane, then passed 12/12 in isolation. Quarantine the loaded-lane cluster interference on sight instead of widening hooks, retrying, or weakening lifecycle assertions; mirrored in scripts/lib/test-quarantine.json.
+  FNXC:CliTests 2026-07-16-09:00:
+  FN-8077 removed project-context.test.ts from this list and the ledger in lockstep. Its CentralCore coverage now uses the external PostgreSQL test harness under pgDescribe rather than launching an embedded postmaster for each test in forked loaded lanes; pure formatting coverage remains ungated.
   */
-  "src/__tests__/project-context.test.ts",
 ];
 
 export default defineConfig({
