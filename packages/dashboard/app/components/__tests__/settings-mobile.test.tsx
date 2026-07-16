@@ -768,9 +768,12 @@ describe("SettingsModal mobile adaptations", () => {
     expectMobileRule(css, ".settings-modal .settings-modal-version", "white-space: nowrap;");
     expect(css).toContain(".settings-modal .modal-header {\n    padding-block: var(--space-sm);");
     expectMobileRule(css, ".auth-provider-row", "padding: var(--space-sm);");
-    expectMobileRule(css, ".auth-section-hint", "margin: 0 var(--space-sm) var(--space-sm);");
+    expectMobileRule(css, ".auth-panel-body", "padding-inline: 0;");
+    expectMobileRule(css, ".auth-panel-body .auth-section-hint", "margin: 0 0 var(--space-sm);");
     expectMobileRule(css, ".auth-section-hint", "padding: var(--space-sm);");
-    expectMobileRule(css, ".auth-group-label", "padding: 0 var(--space-sm);");
+    expectMobileRule(css, ".auth-panel-body .auth-group-label", "padding: 0;");
+    expectMobileRule(css, ".auth-panel-body .auth-provider-card", "margin: 0 0 var(--space-sm);");
+    // Custom Provider cards render outside .auth-panel-body and retain their mobile gutter.
     expectMobileRule(css, ".auth-provider-card", "margin: 0 var(--space-sm) var(--space-sm);");
     expectMobileRule(css, ".auth-provider-header", "padding: var(--space-sm);");
     expectMobileRule(css, ".auth-provider-header > div:not(.auth-provider-info):not(.auth-apikey-section)", "margin-left: auto;");
