@@ -38,6 +38,7 @@ import type { TFunction } from "i18next";
 import { useModalResizePersist } from "../hooks/useModalResizePersist";
 import { useMobileScrollLock } from "../hooks/useMobileScrollLock";
 import { useOverlayDismiss } from "../hooks/useOverlayDismiss";
+import { useConfirm } from "../hooks/useConfirm";
 import { useEmbeddedPresentation, type ModalPresentation } from "../hooks/useEmbeddedPresentation";
 import { getGitHubImportState, saveGitHubImportState } from "../hooks/modalPersistence";
 import { FloatingWindow } from "./FloatingWindow";
@@ -335,6 +336,7 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId,
   const { isEmbedded, scrollLockEnabled, resizePersistEnabled, escapeEnabled } = useEmbeddedPresentation(presentation);
   useMobileScrollLock(isOpen && scrollLockEnabled);
   const { t, i18n } = useTranslation("app");
+  const { confirm } = useConfirm();
   /*
   FNXC:GitHubImportTranslate 2026-07-14-12:00:
   Translation target is the active dashboard locale (i18n.resolvedLanguage). When content is another language, the preview offers Translate / Show original / Dismiss.
@@ -1157,17 +1159,27 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId,
   }, []);
 
   /*
-  FNXC:GitHubImport 2026-07-15-17:10:
-  Closing an issue keeps its FloatingWindow open through the success toast so the confirmation is visible and the locally closed state can replace the Close action. The full-width list remains behind the draggable/resizable detail window.
+  FNXC:GitHubImport 2026-07-16-20:00:
+  Closing permanently mutates the upstream GitHub issue, so its danger styling and confirmation gate must precede every local state mutation and API call. Keep the detail FloatingWindow open through the success toast so local closed state can replace the action.
   */
   const handleCloseIssue = useCallback(async () => {
     if (selectedIssueNumber === null || !owner.trim() || !repo.trim()) return;
     const issueNumber = selectedIssueNumber;
+    const repository = `${owner.trim()}/${repo.trim()}`;
+    const shouldClose = await confirm({
+      danger: true,
+      title: t("git.closeIssueConfirmTitle", "Close issue #{{number}}?", { number: issueNumber }),
+      message: t("git.closeIssueConfirmMessage", "This closes {{repo}}#{{number}} on GitHub. This cannot be undone from here.", { repo: repository, number: issueNumber }),
+      confirmLabel: t("git.closeIssue", "Close issue"),
+      cancelLabel: t("common.cancel", "Cancel"),
+    });
+    if (!shouldClose) return;
+
     setClosingIssue(true);
     if (closeToastTimerRef.current) clearTimeout(closeToastTimerRef.current);
     setCloseToast(null);
     try {
-      await apiCloseGitHubIssue(`${owner.trim()}/${repo.trim()}`, issueNumber);
+      await apiCloseGitHubIssue(repository, issueNumber);
       setClosedIssueNumbers((prev) => {
         const next = new Set(prev);
         next.add(issueNumber);
@@ -1180,7 +1192,7 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId,
       setClosingIssue(false);
       closeToastTimerRef.current = setTimeout(() => setCloseToast(null), 4000);
     }
-  }, [selectedIssueNumber, owner, repo, t]);
+  }, [selectedIssueNumber, owner, repo, t, confirm]);
 
   const selectedIssue = issues.find((i) => i.number === selectedIssueNumber);
   const selectedPull = pulls.find((p) => p.number === selectedPullNumber);
@@ -2021,7 +2033,7 @@ export function GitHubImportModal({ isOpen, onClose, onImport, tasks, projectId,
               <div className="github-import-detail-actions" data-testid="github-import-detail-actions">
                 {activeTab === "issues" && selectedIssue && !selectedIssueClosed && (
                   <button
-                    className="btn github-import-issue-close"
+                    className="btn btn-danger github-import-issue-close"
                     data-testid="github-import-issue-close"
                     onClick={handleCloseIssue}
                     disabled={closingIssue}

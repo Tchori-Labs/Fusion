@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { GitHubImportModal } from "../GitHubImportModal";
+import { ConfirmDialogProvider } from "../../hooks/useConfirm";
 import {
   apiFetchGitHubIssues,
   apiImportGitHubIssue,
@@ -1453,9 +1454,54 @@ describe("GitHubImportModal", () => {
       });
     });
 
+    /*
+    FNXC:GitHubImport 2026-07-16-20:00:
+    Closing an upstream issue is irreversible from the import view. The real provider test proves the destructive API is unreachable until confirmation and that cancellation leaves the preview unchanged.
+    */
+    it("requires confirmation before closing an issue and preserves it on cancellation", async () => {
+      Object.defineProperty(window, "innerWidth", { writable: true, configurable: true, value: 1200 });
+      const issues = [
+        { number: 8, title: "Close Confirmation Issue", body: "Confirm close body", html_url: "https://github.com/owner/repo/issues/8", labels: [], state: "open" as const, author: "dave" },
+      ];
+      vi.mocked(fetchGitRemotes).mockResolvedValueOnce(singleRemote);
+      vi.mocked(apiFetchGitHubIssues).mockResolvedValueOnce(issues);
+
+      render(
+        <ConfirmDialogProvider>
+          <GitHubImportModal isOpen={true} onClose={onClose} onImport={onImport} tasks={[]} />
+        </ConfirmDialogProvider>,
+      );
+
+      await screen.findByText("Close Confirmation Issue");
+      fireEvent.click(screen.getByRole("button", { name: /Select issue #8/i }));
+      const closeButton = await screen.findByTestId("github-import-issue-close");
+      expect(closeButton).toHaveClass("btn-danger");
+
+      fireEvent.click(closeButton);
+      const dialog = await screen.findByRole("dialog", { name: "Close issue #8?" });
+      expect(dialog).toHaveTextContent("This closes dustinbyrne/kb#8 on GitHub. This cannot be undone from here.");
+      expect(within(dialog).getByRole("button", { name: "Close issue" })).toHaveClass("btn-danger");
+      expect(apiCloseGitHubIssue).not.toHaveBeenCalled();
+
+      fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+      await waitFor(() => expect(screen.queryByRole("dialog", { name: "Close issue #8?" })).toBeNull());
+      expect(apiCloseGitHubIssue).not.toHaveBeenCalled();
+      expect(screen.getByTestId("github-import-preview-card")).toHaveTextContent("Close Confirmation Issue");
+      expect(screen.getByTestId("github-import-issue-close")).toBeTruthy();
+      expect(screen.queryByTestId("github-import-issue-close-toast")).toBeNull();
+
+      fireEvent.click(screen.getByTestId("github-import-issue-close"));
+      const confirmDialog = await screen.findByRole("dialog", { name: "Close issue #8?" });
+      fireEvent.click(within(confirmDialog).getByRole("button", { name: "Close issue" }));
+      await waitFor(() => {
+        expect(apiCloseGitHubIssue).toHaveBeenCalledTimes(1);
+        expect(apiCloseGitHubIssue).toHaveBeenCalledWith("dustinbyrne/kb", 8);
+        expect(screen.getByTestId("github-import-issue-close-toast")).toHaveTextContent("Issue #8 closed");
+        expect(screen.queryByTestId("github-import-issue-close")).toBeNull();
+      });
+    });
+
     // FNXC:GitHubImport 2026-07-02-00:00: Successful Close issue returns to the issue list/no-selection state; failure stays on the preview so the user can retry.
-
-
     it("keeps the selected issue preview open when close fails", async () => {
       Object.defineProperty(window, "innerWidth", { writable: true, configurable: true, value: 1200 });
 
@@ -1466,7 +1512,11 @@ describe("GitHubImportModal", () => {
       vi.mocked(apiFetchGitHubIssues).mockResolvedValueOnce(issues);
       vi.mocked(apiCloseGitHubIssue).mockRejectedValueOnce(new Error("close failed"));
 
-      render(<GitHubImportModal isOpen={true} onClose={onClose} onImport={onImport} tasks={[]} />);
+      render(
+        <ConfirmDialogProvider>
+          <GitHubImportModal isOpen={true} onClose={onClose} onImport={onImport} tasks={[]} />
+        </ConfirmDialogProvider>,
+      );
 
       await waitFor(() => expect(screen.getByText("Close Retry Issue")).toBeTruthy());
       const row = screen.getByRole("button", { name: /Select issue #8/i });
@@ -1474,6 +1524,8 @@ describe("GitHubImportModal", () => {
       expect(await screen.findByTestId("github-import-preview-card")).toHaveTextContent("Close Retry Issue");
 
       fireEvent.click(await screen.findByTestId("github-import-issue-close"));
+      const dialog = await screen.findByRole("dialog", { name: "Close issue #8?" });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Close issue" }));
 
       await waitFor(() => {
         expect(apiCloseGitHubIssue).toHaveBeenCalledWith("dustinbyrne/kb", 8);
@@ -2370,6 +2422,41 @@ describe("GitHubImportModal — compact mobile layout (operator report)", () => 
     // The popover is the innermost layer: Escape dismisses IT, and must not also close the modal.
     expect(screen.queryByTestId("github-import-filter-panel")).toBeNull();
     expect(onClose).not.toHaveBeenCalled();
+  });
+
+  /*
+  FNXC:GitHubImport 2026-07-16-20:00:
+  The compact breakpoint uses the same detail action bar, so its destructive action must retain danger styling and the cancellation gate instead of becoming a tap-through path on mobile.
+  */
+  it("keeps Close issue danger-styled and confirmation-gated on mobile", async () => {
+    const originalInnerWidth = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", { writable: true, configurable: true, value: 412 });
+    window.dispatchEvent(new Event("resize"));
+    vi.mocked(apiFetchGitHubIssues).mockResolvedValueOnce([
+      { number: 9, title: "Mobile Close Issue", body: "Mobile body", html_url: "https://github.com/dustinbyrne/kb/issues/9", labels: [], state: "open" },
+    ]);
+
+    try {
+      render(
+        <ConfirmDialogProvider>
+          <GitHubImportModal isOpen={true} onClose={onClose} onImport={onImport} tasks={[]} />
+        </ConfirmDialogProvider>,
+      );
+      await screen.findByText("Mobile Close Issue");
+      fireEvent.click(screen.getByRole("button", { name: /Select issue #9/i }));
+      const closeButton = await screen.findByTestId("github-import-issue-close");
+      expect(closeButton).toHaveClass("btn-danger");
+
+      fireEvent.click(closeButton);
+      const dialog = await screen.findByRole("dialog", { name: "Close issue #9?" });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+      await waitFor(() => expect(screen.queryByRole("dialog", { name: "Close issue #9?" })).toBeNull());
+      expect(apiCloseGitHubIssue).not.toHaveBeenCalled();
+      expect(screen.getByTestId("github-import-issue-close")).toBeTruthy();
+    } finally {
+      Object.defineProperty(window, "innerWidth", { writable: true, configurable: true, value: originalInnerWidth });
+      window.dispatchEvent(new Event("resize"));
+    }
   });
 
   it("offers Import ONLY in the detail preview, never in the list footer", async () => {
