@@ -1,4 +1,4 @@
-import { beforeEach, describe, it, expect, vi } from "vitest";
+import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent, waitFor, within, cleanup } from "@testing-library/react";
 import path from "path";
 import { SettingsModal } from "../SettingsModal";
@@ -42,6 +42,8 @@ import {
   mockFetchDashboardHealth,
   mockCheckForUpdates,
   mockInstallUpdate,
+  mockFetchSystemInfo,
+  mockRequestSystemRestart,
   mockFetchRemoteSettings,
   mockUpdateRemoteSettings,
   mockFetchRemoteStatus,
@@ -117,6 +119,8 @@ vi.mock("../../api", async (importOriginal) => {
     fetchDashboardHealth: (...args: unknown[]) => mockFetchDashboardHealth(...args),
     checkForUpdates: (...args: unknown[]) => mockCheckForUpdates(...args),
     installUpdate: (...args: unknown[]) => mockInstallUpdate(...args),
+    fetchSystemInfo: (...args: unknown[]) => mockFetchSystemInfo(...args),
+    requestSystemRestart: (...args: unknown[]) => mockRequestSystemRestart(...args),
     fetchRemoteSettings: (...args: unknown[]) => mockFetchRemoteSettings(...args),
     updateRemoteSettings: (...args: unknown[]) => mockUpdateRemoteSettings(...args),
     fetchRemoteStatus: (...args: unknown[]) => mockFetchRemoteStatus(...args),
@@ -151,11 +155,13 @@ vi.mock("../../hooks/useConfirm", () => ({
   useConfirm: () => ({ confirm: (...args: unknown[]) => mockConfirm(...args) }),
 }));
 
+let viewportMode: "mobile" | "desktop" = "mobile";
+
 vi.mock("../../hooks/useViewportMode", () => ({
   MOBILE_MEDIA_QUERY: "(max-width: 768px), (max-height: 480px)",
-  getViewportMode: () => "mobile",
-  isMobileViewport: () => true,
-  useViewportMode: () => "mobile",
+  getViewportMode: () => viewportMode,
+  isMobileViewport: () => viewportMode === "mobile",
+  useViewportMode: () => viewportMode,
 }));
 vi.mock("lucide-react", async (importOriginal) => {
   const actual = await importOriginal<typeof import("lucide-react")>();
@@ -197,6 +203,131 @@ vi.mock("../FileBrowser", () => ({
 
 describe("SettingsModal", () => {
   installSettingsModalEnv();
+
+  afterEach(() => {
+    viewportMode = "mobile";
+  });
+
+  const availableUpdate = {
+    currentVersion: "1.2.3",
+    latestVersion: "2.0.0",
+    updateAvailable: true,
+  };
+
+  async function renderUpdatedSettings() {
+    mockCheckForUpdates.mockResolvedValue(availableUpdate);
+    renderModal();
+    await waitForSettingsModalReady();
+    await settingsModalUser.click(screen.getByRole("button", { name: "Check for updates" }));
+    await screen.findByRole("button", { name: "Update now" });
+    await settingsModalUser.click(screen.getByRole("button", { name: "Update now" }));
+    return screen.findByRole("button", { name: "Restart Fusion" });
+  }
+
+  describe("update restart affordance", () => {
+    it("renders an enabled restart button after a successful update on desktop", async () => {
+      viewportMode = "desktop";
+
+      const restartButton = await renderUpdatedSettings();
+
+      expect(restartButton).toBeEnabled();
+      expect(restartButton).toHaveAccessibleName("Restart Fusion");
+    });
+
+    it("renders a wrapping, enabled restart control after a successful update on mobile", async () => {
+      const restartButton = await renderUpdatedSettings();
+
+      expect(restartButton).toBeEnabled();
+      expect(restartButton).toHaveAccessibleName("Restart Fusion");
+      expect(restartButton.closest(".settings-update-install-succeeded")).toBeInTheDocument();
+      expect(settingsModalCss).toMatch(/\.settings-modal \.settings-update-check\s*\{[^}]*flex-wrap: wrap;/s);
+    });
+
+    it("requests the supervised restart with the Settings update reason", async () => {
+      const restartButton = await renderUpdatedSettings();
+
+      await settingsModalUser.click(restartButton);
+
+      expect(mockRequestSystemRestart).toHaveBeenCalledTimes(1);
+      expect(mockRequestSystemRestart).toHaveBeenCalledWith("settings-update");
+      expect(await screen.findByText(/Restarting… Your connection will close shortly/)).toBeInTheDocument();
+    });
+
+    it("keeps the restart button disabled with manual guidance when unsupported", async () => {
+      mockFetchSystemInfo.mockResolvedValue({ supervised: false, restartSupported: false });
+
+      const restartButton = await renderUpdatedSettings();
+
+      expect(restartButton).toBeDisabled();
+      expect(screen.getByText(/Needs a supervising parent/)).toBeInTheDocument();
+    });
+
+    it("keeps the restart button disabled while system information is loading", async () => {
+      mockFetchSystemInfo.mockReturnValue(new Promise(() => {}));
+
+      const restartButton = await renderUpdatedSettings();
+
+      expect(restartButton).toBeDisabled();
+    });
+
+    it("fails closed with manual guidance when system information cannot load", async () => {
+      mockFetchSystemInfo.mockRejectedValue(new Error("unavailable"));
+
+      const restartButton = await renderUpdatedSettings();
+
+      await waitFor(() => expect(restartButton).toBeDisabled());
+      expect(screen.getByText(/Needs a supervising parent/)).toBeInTheDocument();
+    });
+
+    it("disables the restart button and shows a spinner while scheduling", async () => {
+      mockRequestSystemRestart.mockReturnValue(new Promise(() => {}));
+      const restartButton = await renderUpdatedSettings();
+
+      await settingsModalUser.click(restartButton);
+
+      expect(restartButton).toBeDisabled();
+      expect(within(restartButton).getByTestId("icon-refresh")).toHaveClass("spinning");
+    });
+
+    it("shows an inline error and allows retry when restart scheduling rejects", async () => {
+      mockRequestSystemRestart.mockRejectedValue(new Error("Restart unavailable"));
+      const restartButton = await renderUpdatedSettings();
+
+      await settingsModalUser.click(restartButton);
+
+      expect(await screen.findByText("Restart unavailable")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Restart Fusion" })).toBeEnabled();
+    });
+
+    it("shows an inline error and allows retry when restart scheduling returns false", async () => {
+      mockRequestSystemRestart.mockResolvedValue({ scheduled: false });
+      const restartButton = await renderUpdatedSettings();
+
+      await settingsModalUser.click(restartButton);
+
+      expect(await screen.findByText(/Restart could not be scheduled/)).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Restart Fusion" })).toBeEnabled();
+    });
+
+    it("keeps the retry path and hides restart when update installation fails", async () => {
+      mockInstallUpdate.mockResolvedValue({
+        currentVersion: "1.2.3",
+        latestVersion: "2.0.0",
+        updated: false,
+        error: "Install failed",
+      });
+      mockCheckForUpdates.mockResolvedValue(availableUpdate);
+      renderModal();
+      await waitForSettingsModalReady();
+      await settingsModalUser.click(screen.getByRole("button", { name: "Check for updates" }));
+      await screen.findByRole("button", { name: "Update now" });
+      await settingsModalUser.click(screen.getByRole("button", { name: "Update now" }));
+
+      expect(await screen.findByText(/Update failed: Install failed/)).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Update now" })).toBeEnabled();
+      expect(screen.queryByRole("button", { name: "Restart Fusion" })).not.toBeInTheDocument();
+    });
+  });
 
   const deepwikiServer = {
     name: "deepwiki",

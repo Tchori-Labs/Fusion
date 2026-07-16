@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef, type CSSProperties, type Dispatch, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent, type PointerEvent as ReactPointerEvent, type SetStateAction } from "react";
-import { Globe, Folder, GitBranch, RefreshCw, Star, Settings as SettingsIcon, Search, X as SearchToggleCloseIcon } from "lucide-react";
+import { Globe, Folder, GitBranch, Power, RefreshCw, Star, Settings as SettingsIcon, Search, X as SearchToggleCloseIcon } from "lucide-react";
 import {
   getErrorMessage,
   resolveGitlabConfig,
@@ -8,7 +8,7 @@ import {
 } from "@fusion/core";
 import type { Settings, GlobalSettings, ThemeMode, ColorTheme, ModelPreset } from "@fusion/core";
 import { DEFAULT_GLOBAL_SETTINGS } from "@fusion/core";
-import { fetchSettings, fetchSettingsByScope, updateSettings, updateGlobalSettings, fetchAuthStatus, loginProvider, logoutProvider, cancelProviderLogin, saveApiKey, clearApiKey, fetchModels, testNotification, fetchBackups, createBackup, exportSettings, importSettings, fetchMemoryFile, fetchMemoryFiles, saveMemoryFile, compactMemory, fetchGlobalConcurrency, updateGlobalConcurrency, installQmd, testMemoryRetrieval, triggerMemoryDreams, fetchGitRemotes, fetchGitRemotesDetailed, fetchGitBranches, fetchProjects, fetchDashboardHealth, checkForUpdates, installUpdate, fetchRemoteSettings, fetchRemoteStatus, installCloudflared, fetchRemoteQr, fetchRemoteUrl, submitProviderManualCode } from "../api";
+import { fetchSettings, fetchSettingsByScope, updateSettings, updateGlobalSettings, fetchAuthStatus, loginProvider, logoutProvider, cancelProviderLogin, saveApiKey, clearApiKey, fetchModels, testNotification, fetchBackups, createBackup, exportSettings, importSettings, fetchMemoryFile, fetchMemoryFiles, saveMemoryFile, compactMemory, fetchGlobalConcurrency, updateGlobalConcurrency, installQmd, testMemoryRetrieval, triggerMemoryDreams, fetchGitRemotes, fetchGitRemotesDetailed, fetchGitBranches, fetchProjects, fetchDashboardHealth, checkForUpdates, installUpdate, fetchSystemInfo, requestSystemRestart, fetchRemoteSettings, fetchRemoteStatus, installCloudflared, fetchRemoteQr, fetchRemoteUrl, submitProviderManualCode } from "../api";
 import type { AuthProvider, ManualOAuthCodeInfo, ModelInfo, BackupListResponse, SettingsExportData, MemoryFileInfo, MemoryRetrievalTestResult, GitRemote, GitRemoteDetailed, ProjectInfo, RemoteStatus, UpdateCheckResponse, UpdateInstallResponse, OAuthDeviceCodeInfo } from "../api";
 import { resolveScopedMcpSettings, splitSettingsSave, type McpSettingsScope } from "./settings/save-split";
 import {
@@ -1307,6 +1307,10 @@ export function SettingsModal({
   const [updateCheckResult, setUpdateCheckResult] = useState<UpdateCheckResponse | null>(null);
   const [updateInstallLoading, setUpdateInstallLoading] = useState(false);
   const [updateInstallResult, setUpdateInstallResult] = useState<UpdateInstallResponse | null>(null);
+  const [restartSupported, setRestartSupported] = useState<boolean | undefined>();
+  const [restartLoading, setRestartLoading] = useState(false);
+  const [restartScheduled, setRestartScheduled] = useState(false);
+  const [restartError, setRestartError] = useState<string | null>(null);
   const gitHubStarCount = useGitHubStarCount();
   const [starClicked, markStarClicked] = useStarClickedFlag();
   const [prefixError, setPrefixError] = useState<string | null>(null);
@@ -1830,6 +1834,10 @@ export function SettingsModal({
   const handleCheckForUpdates = useCallback(async () => {
     setUpdateCheckLoading(true);
     setUpdateInstallResult(null);
+    setRestartSupported(undefined);
+    setRestartLoading(false);
+    setRestartScheduled(false);
+    setRestartError(null);
 
     try {
       const result = await checkForUpdates();
@@ -1855,6 +1863,9 @@ export function SettingsModal({
   const handleInstallUpdate = useCallback(async () => {
     setUpdateInstallLoading(true);
     setUpdateInstallResult(null);
+    setRestartLoading(false);
+    setRestartScheduled(false);
+    setRestartError(null);
 
     try {
       const result = await installUpdate(projectId);
@@ -1881,6 +1892,53 @@ export function SettingsModal({
       setUpdateInstallLoading(false);
     }
   }, [addToast, appVersion, projectId, t, updateCheckResult]);
+
+  useEffect(() => {
+    if (!updateCheckResult?.updateAvailable && updateInstallResult?.updated !== true) {
+      return;
+    }
+
+    let cancelled = false;
+    setRestartSupported(undefined);
+
+    void fetchSystemInfo()
+      .then((info) => {
+        if (!cancelled) setRestartSupported(info.restartSupported);
+      })
+      .catch(() => {
+        // Fail closed: system capability fetch errors must not expose an unavailable restart action.
+        if (!cancelled) setRestartSupported(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [updateCheckResult?.updateAvailable, updateInstallResult?.updated]);
+
+  /*
+  FNXC:SettingsUpdate 2026-07-16-00:00:
+  After a successful in-app update, the Settings footer must offer the same supervised
+  one-click restart as SystemControlsArea. The FN-8134-deferred Settings surface keeps
+  the control disabled with manual-restart guidance unless restartSupported is true.
+  */
+  const handleRestart = useCallback(async () => {
+    if (restartLoading || restartSupported !== true) return;
+
+    setRestartLoading(true);
+    setRestartError(null);
+    try {
+      const result = await requestSystemRestart("settings-update");
+      if (result.scheduled) {
+        setRestartScheduled(true);
+      } else {
+        setRestartError(t("settings.general.restartFailed", "Restart could not be scheduled. Try restarting Fusion manually."));
+      }
+    } catch (error) {
+      setRestartError(getErrorMessage(error) || t("settings.general.restartFailed", "Restart could not be scheduled. Try restarting Fusion manually."));
+    } finally {
+      setRestartLoading(false);
+    }
+  }, [restartLoading, restartSupported, t]);
 
   const renderUpdateCheckResultContent = useCallback(() => {
     if (!updateCheckResult) {
@@ -1909,10 +1967,48 @@ export function SettingsModal({
             </a>
           </span>
           {installSucceeded ? (
-            <span className="settings-update-install-status settings-update-install-status--success" aria-live="polite">
-              {t("settings.general.updateSuccess", "Updated to v{{version}} — restart Fusion to apply", {
-                version: updateInstallResult.latestVersion ?? updateCheckResult.latestVersion,
-              })}
+            <span className="settings-update-install-succeeded">
+              <span className="settings-update-install-status settings-update-install-status--success" aria-live="polite">
+                {t("settings.general.updateSuccess", "Updated to v{{version}} — restart Fusion to apply", {
+                  version: updateInstallResult.latestVersion ?? updateCheckResult.latestVersion,
+                })}
+              </span>
+              {restartScheduled ? (
+                <span className="settings-update-install-status" aria-live="polite">
+                  {t("settings.general.restarting", "Restarting… Your connection will close shortly.")}
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  className="btn btn-sm settings-update-now-btn"
+                  onClick={() => {
+                    void handleRestart();
+                  }}
+                  disabled={restartSupported !== true || restartLoading}
+                >
+                  {restartLoading ? (
+                    <>
+                      <RefreshCw size={12} className="spinning" aria-hidden="true" />
+                      {t("settings.general.restarting", "Restarting…")}
+                    </>
+                  ) : (
+                    <>
+                      <Power size={12} aria-hidden="true" />
+                      {t("settings.general.restartNow", "Restart Fusion")}
+                    </>
+                  )}
+                </button>
+              )}
+              {restartSupported !== true && (
+                <span className="settings-update-install-status" aria-live="polite">
+                  {t("settings.general.restartUnavailable", "Needs a supervising parent — restart Fusion manually without --no-supervise.")}
+                </span>
+              )}
+              {restartError && (
+                <span className="settings-update-install-status settings-update-install-status--error" aria-live="polite">
+                  {restartError}
+                </span>
+              )}
             </span>
           ) : (
             <button
@@ -1943,7 +2039,7 @@ export function SettingsModal({
     }
 
     return t("settings.general.upToDate", "You're up to date ✓");
-  }, [handleInstallUpdate, t, updateCheckResult, updateInstallLoading, updateInstallResult]);
+  }, [handleInstallUpdate, handleRestart, restartError, restartLoading, restartScheduled, restartSupported, t, updateCheckResult, updateInstallLoading, updateInstallResult]);
 
   // Load auth status when the authentication section is active
   const loadAuthStatus = useCallback(async () => {

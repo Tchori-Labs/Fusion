@@ -375,17 +375,23 @@ Fix the invariant for BOTH presentations (standalone modal + embedded SettingsVi
     min-width: max-content;
   }
 
+  /*
+  FNXC:SettingsUpdate 2026-07-16-00:00:
+  FN-8138 adds a restart control and manual-restart explanation after an update.
+  Let this inner result flow wrap on narrow screens while the existing footer rail
+  remains horizontally scrollable, so the new controls never create a clipped shell.
+  */
   .settings-modal .settings-update-check {
     align-items: center;
-    flex-wrap: nowrap;
-    row-gap: 0;
+    flex-wrap: wrap;
+    row-gap: var(--space-xs);
   }
 
   .settings-modal .settings-update-result {
     align-self: center;
     flex: 0 1 auto;
-    line-height: 1;
-    white-space: nowrap;
+    line-height: normal;
+    white-space: normal;
   }
 
   .settings-modal .settings-footer-help-btn {
@@ -515,6 +521,13 @@ Fix the invariant for BOTH presentations (standalone modal + embedded SettingsVi
 
 .settings-update-now-btn svg.spinning {
   animation: settings-update-spin 1s linear infinite;
+}
+
+.settings-update-install-succeeded {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
 }
 
 .settings-update-install-status {

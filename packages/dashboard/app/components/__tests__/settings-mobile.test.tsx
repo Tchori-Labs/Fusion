@@ -114,6 +114,8 @@ vi.mock("../../api", () => ({
   fetchDashboardHealth: vi.fn(() => Promise.resolve({ status: "ok", version: "1.2.3", uptime: 120 })),
   checkForUpdates: vi.fn(() => Promise.resolve({ currentVersion: "1.0.0", latestVersion: "2.0.0", updateAvailable: true })),
   installUpdate: vi.fn(() => Promise.resolve({ currentVersion: "1.0.0", latestVersion: "2.0.0", updated: true })),
+  fetchSystemInfo: vi.fn(() => Promise.resolve({ supervised: true, restartSupported: true })),
+  requestSystemRestart: vi.fn(() => Promise.resolve({ scheduled: true })),
   fetchGlobalSettings: vi.fn(() => Promise.resolve({ ...defaultSettings })),
   // SettingsModal renders ProjectDefaultWorkflowField → WorkflowSelector, which loads these on mount.
   fetchWorkflows: vi.fn(() => Promise.resolve([])),
@@ -788,7 +790,7 @@ describe("SettingsModal mobile adaptations", () => {
     expectMobileRule(css, ".settings-modal .settings-modal-footer-version", "flex: 0 0 auto;");
     expectMobileRule(css, ".settings-modal .settings-modal-footer-version", "min-width: max-content;");
     expectMobileRule(css, ".settings-modal .settings-update-check", "align-items: center;");
-    expectMobileRule(css, ".settings-modal .settings-update-check", "flex-wrap: nowrap;");
+    expectMobileRule(css, ".settings-modal .settings-update-check", "flex-wrap: wrap;");
     expectMobileRule(css, ".settings-modal .settings-version-check-btn", "line-height: 1;");
     expectMobileRule(css, ".settings-modal .settings-version-check-btn", "white-space: nowrap;");
     expectMobileRule(css, ".settings-modal .settings-modal-version", "display: inline-flex;");
