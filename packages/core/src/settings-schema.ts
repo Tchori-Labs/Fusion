@@ -417,10 +417,10 @@ export const DEFAULT_PROJECT_SETTINGS = {
   */
   openMobileTasksInPopup: false,
   /*
-  FNXC:TaskPopupViewGating 2026-07-13-00:00:
-  Default off preserves current always-visible task-detail popup behavior. When true, the dashboard render gate shows each open task-detail FloatingWindow only on the Board/List view where it was opened without clearing popup snapshots or their shared persisted geometry.
+  FNXC:TaskPopupViewGating 2026-07-15-15:20:
+  FN-8016 defaults task-detail popups to their opening view on every dashboard surface. Explicit false retains globally shared popup behavior for operators who need it; hidden popups preserve snapshots and shared persisted geometry.
   */
-  taskPopupsBoardListOnly: false,
+  taskPopupsBoardListOnly: true,
   /*
   FNXC:TaskCardCostBadge 2026-07-11-12:15:
   Default off preserves existing board-card density. When true, the dashboard may render a read-time derived cost badge only for tasks with positive token usage; unavailable pricing remains the guess-free “—” sentinel.

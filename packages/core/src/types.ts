@@ -3359,10 +3359,10 @@ export interface ProjectSettings {
    */
   openMobileTasksInPopup?: boolean;
   /**
-   * When true, open task-detail popups render only on the Board/List view where they were opened. Default: false.
+   * When true, open task-detail popups render only on the view where they were opened. Default: true.
    *
-   * FNXC:TaskPopupViewGating 2026-07-13-00:00:
-   * This project-scoped setting is default-off so currently opened task-detail FloatingWindows remain visible across all main-content views unless operators opt in. When true, open task-detail popups attach to the Board/List view where they were opened; popup state is preserved across view switches and never cleared, so returning to that view restores the same popups and persisted position.
+   * FNXC:TaskPopupViewGating 2026-07-15-15:20:
+   * FN-8016 removed the Board/List restriction so every dashboard view can own task-detail FloatingWindows. This project-scoped setting defaults on; explicit false retains legacy globally shared popups. Scoped popup state is preserved across view switches and returning restores the same persisted position.
    */
   taskPopupsBoardListOnly?: boolean;
   /**

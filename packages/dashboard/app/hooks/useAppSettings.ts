@@ -83,7 +83,11 @@ export function useAppSettings(projectId?: string): UseAppSettingsResult {
   const [capacityRiskTodoThreshold, setCapacityRiskTodoThreshold] = useState(20);
   const [openTasksInRightSidebar, setOpenTasksInRightSidebar] = useState(false);
   const [openMobileTasksInPopup, setOpenMobileTasksInPopup] = useState(false);
-  const [taskPopupsBoardListOnly, setTaskPopupsBoardListOnly] = useState(false);
+  /*
+  FNXC:TaskPopupViewGating 2026-07-15-15:20:
+  FN-8016 makes per-view popup scoping the default. Explicit persisted false remains the compatibility opt-out for globally shared popups; only an absent field falls back to true.
+  */
+  const [taskPopupsBoardListOnly, setTaskPopupsBoardListOnly] = useState(true);
   const [showCostBadgeOnCards, setShowCostBadgeOnCards] = useState(false);
   const [modelPricingOverrides, setModelPricingOverrides] = useState<ModelPricingOverrides | undefined>(undefined);
   const [taskDetailChatFirst, setTaskDetailChatFirst] = useState(false);
@@ -164,7 +168,7 @@ export function useAppSettings(projectId?: string): UseAppSettingsResult {
       setCapacityRiskTodoThreshold(settings.capacityRiskTodoThreshold ?? 20);
       setOpenTasksInRightSidebar(settings.openTasksInRightSidebar === true);
       setOpenMobileTasksInPopup(settings.openMobileTasksInPopup === true);
-      setTaskPopupsBoardListOnly(settings.taskPopupsBoardListOnly === true);
+      setTaskPopupsBoardListOnly(settings.taskPopupsBoardListOnly !== false);
       /*
       FNXC:TaskCardCostBadge 2026-07-11-12:15:
       The app shell exposes the default-off card cost badge setting to the board context only after settings hydration, preserving the no-badge default for upgraded projects.

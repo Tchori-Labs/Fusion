@@ -21,7 +21,7 @@ function renderAppearanceSection(formOverrides: Partial<Settings> = {}) {
     autoMerge: true,
     openTasksInRightSidebar: false,
     openMobileTasksInPopup: false,
-    taskPopupsBoardListOnly: false,
+    taskPopupsBoardListOnly: true,
     showCostBadgeOnCards: false,
     taskDetailChatFirst: false,
     ...formOverrides,
@@ -70,8 +70,6 @@ describe("AppearanceSection", () => {
 
     const checkbox = screen.getByLabelText("Open tasks as popups");
     expect(checkbox).not.toBeChecked();
-    expect(screen.getByText(/ordinary board task-card and right-dock Tasks-list clicks open the existing task popup/)).toBeInTheDocument();
-    expect(screen.getByText(/Deep-tab and other task opens keep their current behavior/)).toBeInTheDocument();
 
     fireEvent.click(checkbox);
 
@@ -88,21 +86,21 @@ describe("AppearanceSection", () => {
   it("renders and updates the task popup view attachment checkbox", () => {
     const { setForm, getForm } = renderAppearanceSection();
 
-    const checkbox = screen.getByLabelText("Keep task popups on their Board/List view");
-    expect(checkbox).not.toBeChecked();
-    expect(screen.getByText(/appears only on the Board or List view where it was opened/)).toBeInTheDocument();
-    expect(screen.getByText(/returning to that view restores it in the same position\. Default: disabled/)).toBeInTheDocument();
+    const checkbox = screen.getByLabelText("Keep task popups on the view where they were opened");
+    expect(checkbox).toBeChecked();
+    expect(screen.getByText(/appears only on the view where it was opened/)).toBeInTheDocument();
+    expect(screen.getByText(/returning restores it in the same position\. Default: enabled/)).toBeInTheDocument();
 
     fireEvent.click(checkbox);
 
     expect(setForm).toHaveBeenCalledTimes(1);
-    expect(getForm().taskPopupsBoardListOnly).toBe(true);
+    expect(getForm().taskPopupsBoardListOnly).toBe(false);
   });
 
-  it("reflects a persisted enabled task popup view attachment value", () => {
+  it("reflects the default enabled task popup view scoping value", () => {
     renderAppearanceSection({ taskPopupsBoardListOnly: true });
 
-    expect(screen.getByLabelText("Keep task popups on their Board/List view")).toBeChecked();
+    expect(screen.getByLabelText("Keep task popups on the view where they were opened")).toBeChecked();
   });
 
   it("renders and updates the cost badge checkbox", () => {

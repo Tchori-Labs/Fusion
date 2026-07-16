@@ -178,8 +178,8 @@ describe("settings defaults invariants", () => {
   });
 
   describe("taskPopupsBoardListOnly default", () => {
-    it("keeps taskPopupsBoardListOnly explicitly false in project defaults", () => {
-      expect(DEFAULT_PROJECT_SETTINGS.taskPopupsBoardListOnly).toBe(false);
+    it("keeps taskPopupsBoardListOnly explicitly true in project defaults", () => {
+      expect(DEFAULT_PROJECT_SETTINGS.taskPopupsBoardListOnly).toBe(true);
       expect("taskPopupsBoardListOnly" in DEFAULT_PROJECT_SETTINGS).toBe(true);
       expect(PROJECT_SETTINGS_KEYS).toContain("taskPopupsBoardListOnly");
     });

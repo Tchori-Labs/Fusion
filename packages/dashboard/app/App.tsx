@@ -79,7 +79,7 @@ import { useScopedDismissFlag } from "./hooks/useScopedDismissFlag";
 import { useCapacityRiskBanner } from "./hooks/useCapacityRiskBanner";
 import { useMainPanelTaskDetail } from "./hooks/useMainPanelTaskDetail";
 import { useBoardScrollRestore } from "./hooks/useBoardScrollRestore";
-import { usePoppedOutTasks } from "./hooks/usePoppedOutTasks";
+import { usePoppedOutTasks, type PoppedOutTaskEntry } from "./hooks/usePoppedOutTasks";
 import { NativeShellOnboardingModal } from "./components/NativeShellOnboardingModal";
 import { NativeShellConnectionManager } from "./components/NativeShellConnectionManager";
 import { ShellConnectionStatus } from "./components/ShellConnectionStatus";
@@ -212,30 +212,33 @@ export function getBoardTaskOpenRoute(options: {
 }
 
 export interface DashboardShortcutPopupState {
-  poppedOutTaskIds: string[];
+  poppedOutTaskEntries: Array<Pick<PoppedOutTaskEntry, "task" | "originTaskView">>;
   quickChatOpen: boolean;
   terminalOpen: boolean;
   modalClosers: Array<[boolean, () => void]>;
 }
 
 export interface DashboardShortcutPopupHandlers {
-  closePoppedOutTask: (taskId: string) => void;
+  closePoppedOutTask: (taskId: string, originTaskView?: TaskView) => void;
   closeQuickChat: () => void;
   closeTerminal: () => void;
 }
 
 /*
-FNXC:TaskPopupViewGating 2026-07-15-14:55:
-The board/list-only preference attaches only popups opened from Board or List. Mailbox and Documents have no board/list origin, so their explicit View task actions must remain visible on every surface rather than creating an invisible FloatingWindow.
+FNXC:TaskPopupViewGating 2026-07-15-15:20:
+FN-8016 scopes every newly opened task popup to its exact dashboard origin, not only Board/List. Legacy entries without an origin predate this contract and deliberately remain visible on every view for backwards compatibility.
 */
 export function isTaskPopupVisibleForView(options: {
   taskPopupsBoardListOnly: boolean;
   taskView: TaskView;
   originTaskView?: TaskView;
 }): boolean {
-  if (!options.taskPopupsBoardListOnly) return true;
-  if (options.originTaskView !== "board" && options.originTaskView !== "list") return true;
+  if (!options.taskPopupsBoardListOnly || options.originTaskView === undefined) return true;
   return options.originTaskView === options.taskView;
+}
+
+export function taskPopupIdentityKey(taskId: string, originTaskView?: TaskView): string {
+  return `${taskId}:${originTaskView ?? "global"}`;
 }
 
 /*
@@ -246,9 +249,9 @@ export function closeTopmostDashboardPopupForShortcut(
   state: DashboardShortcutPopupState,
   handlers: DashboardShortcutPopupHandlers,
 ): boolean {
-  const lastPoppedOutTaskId = state.poppedOutTaskIds[state.poppedOutTaskIds.length - 1];
-  if (lastPoppedOutTaskId) {
-    handlers.closePoppedOutTask(lastPoppedOutTaskId);
+  const lastPoppedOutTask = state.poppedOutTaskEntries[state.poppedOutTaskEntries.length - 1];
+  if (lastPoppedOutTask) {
+    handlers.closePoppedOutTask(lastPoppedOutTask.task.id, lastPoppedOutTask.originTaskView);
     return true;
   }
   if (state.quickChatOpen) {
@@ -475,8 +478,8 @@ function AppInner() {
   const { capture: captureCurrentBoardScrollSnapshot, requestRestore } = useBoardScrollRestore(taskView);
   const mainPanelDetailNavRevertRef = useRef<(() => void) | null>(null);
   /*
-  FNXC:FloatingWindow 2026-06-22-20:45:
-  Open popped-out task-detail windows. Each entry is a task snapshot rendered inside its own movable, resizable, non-blocking FloatingWindow. Several can be open at once and coexist with the right-dock pop-out and terminal (all click-through overlays). Snapshots survive a tasks revalidation; rendering prefers the live row by id and falls back to the snapshot. Pop-out dedupes by task id — re-popping an already-open task is a no-op (its window stays; focus-to-front in FloatingWindow handles re-raising on click).
+  FNXC:FloatingWindow 2026-07-15-15:20:
+  FN-8016 identifies a popped-out task detail by task id plus origin view. The same task can therefore coexist in separate view-scoped FloatingWindows while re-opening it on one view refreshes only that entry.
   */
   const { entries: poppedOutTaskEntries, popOut: popOutTaskDetail, close: closePoppedOutTask } = usePoppedOutTasks();
   const popupNavCloseRef = useRef(new Map<string, () => void>());
@@ -488,23 +491,25 @@ function AppInner() {
   iOS swipe, and Android Back dismiss only that popup rather than leaving the
   Fusion stack empty and allowing Back to skip past the originating task view.
   */
-  const closePoppedOutTaskWithNav = useCallback((taskId: string) => {
-    const closeFromHistory = popupNavCloseRef.current.get(taskId);
+  const closePoppedOutTaskWithNav = useCallback((taskId: string, originTaskView?: TaskView) => {
+    const identityKey = taskPopupIdentityKey(taskId, originTaskView);
+    const closeFromHistory = popupNavCloseRef.current.get(identityKey);
     if (closeFromHistory) {
-      popupNavCloseRef.current.delete(taskId);
+      popupNavCloseRef.current.delete(identityKey);
       removeNav(closeFromHistory);
     }
-    closePoppedOutTask(taskId);
+    closePoppedOutTask(taskId, originTaskView);
   }, [closePoppedOutTask, removeNav]);
 
   const popOutTaskDetailForCurrentView = useCallback((task: Task | TaskDetail) => {
-    const alreadyOpen = poppedOutTaskEntries.some((entry) => entry.task.id === task.id);
+    const identityKey = taskPopupIdentityKey(task.id, taskView);
+    const alreadyOpen = poppedOutTaskEntries.some((entry) => entry.task.id === task.id && entry.originTaskView === taskView);
     if (isMobile && !alreadyOpen) {
       const closeFromHistory = () => {
-        popupNavCloseRef.current.delete(task.id);
-        closePoppedOutTask(task.id);
+        popupNavCloseRef.current.delete(identityKey);
+        closePoppedOutTask(task.id, taskView);
       };
-      popupNavCloseRef.current.set(task.id, closeFromHistory);
+      popupNavCloseRef.current.set(identityKey, closeFromHistory);
       pushNav({ type: "modal", close: closeFromHistory });
     }
     popOutTaskDetail(task, taskView);
@@ -693,14 +698,13 @@ function AppInner() {
     originTaskView,
   }), [taskPopupsBoardListOnly, taskView]);
   /*
-  FNXC:TaskPopupViewGating 2026-07-15-14:55:
-  Default-off preserves globally visible task popups. When enabled, only Board/List-origin popups are render-attached to their originating view; Mailbox, Documents, and other non-task-view opens remain visible so their View task actions always open a usable window.
+  FNXC:TaskPopupViewGating 2026-07-15-15:20:
+  FN-8016 defaults popup rendering to the originating view for every dashboard surface. Entries without an origin are legacy snapshots and intentionally remain globally visible; navigating away unmounts scoped FloatingWindow shells without deleting their state.
   */
   const visiblePoppedOutTaskEntries = useMemo(
     () => poppedOutTaskEntries.filter((entry) => taskPopupsVisibleOnCurrentView(entry.originTaskView)),
     [poppedOutTaskEntries, taskPopupsVisibleOnCurrentView],
   );
-  const visiblePoppedOutTasks = useMemo(() => visiblePoppedOutTaskEntries.map((entry) => entry.task), [visiblePoppedOutTaskEntries]);
 
   const pluginDashboardViews = useMemo<PluginDashboardViewEntry[]>(() => {
     /*
@@ -1087,7 +1091,7 @@ function AppInner() {
     */
     return closeTopmostDashboardPopupForShortcut(
       {
-        poppedOutTaskIds: visiblePoppedOutTasks.map((task) => task.id),
+        poppedOutTaskEntries: visiblePoppedOutTaskEntries,
         quickChatOpen,
         terminalOpen: modalManager.terminalOpen,
         modalClosers: [
@@ -1116,7 +1120,7 @@ function AppInner() {
         closeTerminal: closeTerminalWithNav,
       },
     );
-  }, [closePoppedOutTaskWithNav, closeTerminalWithNav, modalManager, quickChatOpen, visiblePoppedOutTasks]);
+  }, [closePoppedOutTaskWithNav, closeTerminalWithNav, modalManager, quickChatOpen, visiblePoppedOutTaskEntries]);
 
   const openFilesWithNav = useCallback((workspace?: string, initialFile?: string | null) => {
     modalManager.openFiles(workspace, initialFile);
@@ -1845,16 +1849,17 @@ function AppInner() {
       FNXC:TaskPopupLayer 2026-07-04-18:36:
       Ordinary task-detail popups belong to the board/task-detail layer, not the global floating-utility stack. Pass the task-detail layer so board/right-dock task opens preserve the visible board context while utility windows keep the higher app-wide raise/focus contract.
 
-      FNXC:TaskPopupViewGating 2026-07-15-14:55:
-      Rendering uses visible entries only; the source hook keeps Board/List-hidden snapshots in React state rather than clearing them on view change. Non-board/list opens stay visible even with the opt-in setting, preserving Mailbox and Documents View task behavior.
+      FNXC:TaskPopupViewGating 2026-07-15-15:20:
+      Rendering uses only the active view's scoped entries; state keeps hidden snapshots so returning remounts them with shared geometry. Each FloatingWindow key includes its origin so identical task ids never collide across views.
       */}
-      {visiblePoppedOutTaskEntries.map(({ task: snapshot }) => {
+      {visiblePoppedOutTaskEntries.map(({ task: snapshot, originTaskView }) => {
         const liveTask = tasks.find((candidate) => candidate.id === snapshot.id) ?? snapshot;
-        const close = () => closePoppedOutTaskWithNav(snapshot.id);
+        const popupKey = taskPopupIdentityKey(snapshot.id, originTaskView);
+        const close = () => closePoppedOutTaskWithNav(snapshot.id, originTaskView);
         return (
           <FloatingWindow
-            key={snapshot.id}
-            windowKey={`task-detail-${snapshot.id}`}
+            key={popupKey}
+            windowKey={`task-detail-${snapshot.id}-${originTaskView ?? "global"}`}
             title={liveTask.id}
             onClose={close}
             hideHeader

@@ -53,12 +53,12 @@ export function AppearanceSection({ scopeBanner, form, setForm, themeMode, color
         <small className="form-text text-muted">{t("settings.appearance.openMobileTasksInPopupHelp", "When enabled, ordinary board task-card, List row/card, and right-dock Tasks-list clicks open the existing movable task popup so the board or list remains visible. Deep-tab and other task opens keep their current behavior. Default: disabled.")}</small>
       </div>
       <div className="form-group">
-        {/* FNXC:TaskPopupViewGating 2026-07-13-00:00: This project-scoped setting is opt-in because existing task popups float globally by default. When enabled, each popup stays attached to the Board/List view where it was opened, hiding on other views without closing or clearing geometry. */}
+        {/* FNXC:TaskPopupViewGating 2026-07-15-15:20: FN-8016 scopes task popups to their opening dashboard view by default. Operators may explicitly disable it for legacy globally shared popups; hidden scoped entries retain geometry and reopen on return. */}
         <label className="checkbox-label">
           <input type="checkbox" checked={form.taskPopupsBoardListOnly === true} onChange={(e) => setForm((f) => ({ ...f, taskPopupsBoardListOnly: e.target.checked }))}/>
-          <span>{t("settings.appearance.taskPopupsBoardListOnly", "Keep task popups on their Board/List view")}</span>
+          <span>{t("settings.appearance.taskPopupsBoardListOnly", "Keep task popups on the view where they were opened")}</span>
         </label>
-        <small className="form-text text-muted">{t("settings.appearance.taskPopupsBoardListOnlyHelp", "When enabled, each open task-detail popup appears only on the Board or List view where it was opened. Switching to another view hides it without closing; returning to that view restores it in the same position. Default: disabled.")}</small>
+        <small className="form-text text-muted">{t("settings.appearance.taskPopupsBoardListOnlyHelp", "When enabled, each open task-detail popup appears only on the view where it was opened. Switching views hides it without closing; returning restores it in the same position. Default: enabled.")}</small>
       </div>
       <div className="form-group">
         {/* FNXC:TaskCardCostBadge 2026-07-11-12:15: This project setting is opt-in because board cards are already dense; when enabled, only tasks with recorded positive token usage render a read-time derived spend badge. */}

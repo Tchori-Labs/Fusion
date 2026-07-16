@@ -1057,7 +1057,7 @@ export function SettingsModal({
     showWorktreeGrouping: false,
     openTasksInRightSidebar: false,
     openMobileTasksInPopup: false,
-    taskPopupsBoardListOnly: false,
+    taskPopupsBoardListOnly: true,
     showCostBadgeOnCards: false,
     taskDetailChatFirst: false,
     executorAllowSiblingBranchRename: false,

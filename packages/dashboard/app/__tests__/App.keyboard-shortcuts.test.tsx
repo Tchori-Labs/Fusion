@@ -111,41 +111,43 @@ describe("App dashboard keyboard shortcuts", () => {
 
     expect(closeTopmostDashboardPopupForShortcut(
       {
-        poppedOutTaskIds: ["FN-1", "FN-2"],
+        // FN-8016: explicit globally-visible opt-out can expose both same-id entries;
+        // Escape must preserve origin identity and close only the topmost one.
+        poppedOutTaskEntries: [{ task: { id: "FN-1" }, originTaskView: "board" }, { task: { id: "FN-1" }, originTaskView: "planning" }],
         quickChatOpen: true,
         terminalOpen: true,
         modalClosers: [[true, closeSettings], [true, closeTaskDetail]],
       },
       { closePoppedOutTask, closeQuickChat, closeTerminal },
     )).toBe(true);
-    expect(closePoppedOutTask).toHaveBeenCalledWith("FN-2");
+    expect(closePoppedOutTask).toHaveBeenCalledWith("FN-1", "planning");
     expect(closeQuickChat).not.toHaveBeenCalled();
     expect(closeTerminal).not.toHaveBeenCalled();
     expect(closeSettings).not.toHaveBeenCalled();
 
     expect(closeTopmostDashboardPopupForShortcut(
-      { poppedOutTaskIds: [], quickChatOpen: true, terminalOpen: true, modalClosers: [[true, closeSettings]] },
+      { poppedOutTaskEntries: [], quickChatOpen: true, terminalOpen: true, modalClosers: [[true, closeSettings]] },
       { closePoppedOutTask, closeQuickChat, closeTerminal },
     )).toBe(true);
     expect(closeQuickChat).toHaveBeenCalledTimes(1);
     expect(closeTerminal).not.toHaveBeenCalled();
 
     expect(closeTopmostDashboardPopupForShortcut(
-      { poppedOutTaskIds: [], quickChatOpen: false, terminalOpen: true, modalClosers: [[true, closeSettings]] },
+      { poppedOutTaskEntries: [], quickChatOpen: false, terminalOpen: true, modalClosers: [[true, closeSettings]] },
       { closePoppedOutTask, closeQuickChat, closeTerminal },
     )).toBe(true);
     expect(closeTerminal).toHaveBeenCalledTimes(1);
     expect(closeSettings).not.toHaveBeenCalled();
 
     expect(closeTopmostDashboardPopupForShortcut(
-      { poppedOutTaskIds: [], quickChatOpen: false, terminalOpen: false, modalClosers: [[false, closeSettings], [true, closeTaskDetail]] },
+      { poppedOutTaskEntries: [], quickChatOpen: false, terminalOpen: false, modalClosers: [[false, closeSettings], [true, closeTaskDetail]] },
       { closePoppedOutTask, closeQuickChat, closeTerminal },
     )).toBe(true);
     expect(closeTaskDetail).toHaveBeenCalledTimes(1);
     expect(closeSettings).not.toHaveBeenCalled();
 
     expect(closeTopmostDashboardPopupForShortcut(
-      { poppedOutTaskIds: [], quickChatOpen: false, terminalOpen: false, modalClosers: [[false, closeSettings]] },
+      { poppedOutTaskEntries: [], quickChatOpen: false, terminalOpen: false, modalClosers: [[false, closeSettings]] },
       { closePoppedOutTask, closeQuickChat, closeTerminal },
     )).toBe(false);
   });
