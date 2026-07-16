@@ -2101,10 +2101,14 @@ async function resolveImportedIssueTranslation(
   owner: string,
   repo: string,
   issue: { number: number; title: string; body: string | null; state: "open" | "closed" },
+  projectSettings: Awaited<ReturnType<TaskStore["getSettings"]>>,
 ): Promise<{ title: string; body: string } | null> {
   try {
-    const settings = await store.getSettings();
-    if (settings.githubImportAutoTranslate !== true) return null;
+    /*
+    FNXC:GitHubImportTranslate 2026-07-16-11:22:
+    FN-8115 passes request-scoped project settings from both import routes so translation and tracking share one project-settings read. FN-8112 first made the prior two-read test setup stable; this consolidation preserves its behavior without a second store lookup.
+    */
+    if (projectSettings.githubImportAutoTranslate !== true) return null;
 
     const { getCachedImportTranslation, resolveTargetLocale } = await import(
       "../import-translate-service.js"
@@ -2115,10 +2119,10 @@ async function resolveImportedIssueTranslation(
     Resolution therefore falls through to the global `language` setting server-side, which also fixes direct API callers and stale clients; the request locale stays as the last tier because `language` is itself unset when a surface browser-detects its locale.
     */
     const targetLocale = resolveTargetLocale(
-      settings.importTranslateTargetLocale,
+      projectSettings.importTranslateTargetLocale,
       // The panel forwards its active locale; a direct API caller may not.
       (req.body as { targetLocale?: unknown } | undefined)?.targetLocale,
-      settings.language,
+      projectSettings.language,
     );
     if (!targetLocale) return null;
 
@@ -2132,8 +2136,14 @@ async function resolveImportedIssueTranslation(
   }
 }
 
-async function resolveImportedIssueGithubTracking(store: TaskStore): Promise<{ enabled: true } | undefined> {
-  const projectSettings = await store.getSettings();
+async function resolveImportedIssueGithubTracking(
+  store: TaskStore,
+  projectSettings: Awaited<ReturnType<TaskStore["getSettings"]>>,
+): Promise<{ enabled: true } | undefined> {
+  /*
+  FNXC:GithubImportTracking 2026-07-16-11:22:
+  FN-8115 shares the import request's project settings with translation and tracking, removing duplicate project-store reads after FN-8112 stabilized the prior test setup. The global settings read remains distinct because tracking precedence still requires it.
+  */
   if (projectSettings.githubLinkImportedIssuesToTracking === true) {
     /*
     FNXC:GithubImportTracking 2026-07-01-00:00:
@@ -4086,12 +4096,20 @@ export function registerGitGitHubRoutes(ctx: ApiRoutesContext): void {
       Cache-read only: a miss imports the original rather than blocking the import on a fresh model call, because import must stay fast and must never fail because translation failed.
       The `Source: <url>` suffix is appended AFTER translation so the URL is never rewritten by the model.
       */
-      const translatedIssue = await resolveImportedIssueTranslation(req, scopedStore, owner, repo, issue);
+      const projectSettings = await scopedStore.getSettings();
+      const translatedIssue = await resolveImportedIssueTranslation(
+        req,
+        scopedStore,
+        owner,
+        repo,
+        issue,
+        projectSettings,
+      );
       const title = (translatedIssue?.title || issue.title).slice(0, 200);
       const body = (translatedIssue?.body ?? issue.body)?.trim() || "(no description)";
       const description = `${body}\n\nSource: ${sourceUrl}`;
 
-      const importedIssueGithubTracking = await resolveImportedIssueGithubTracking(scopedStore);
+      const importedIssueGithubTracking = await resolveImportedIssueGithubTracking(scopedStore, projectSettings);
       const source = buildGitHubIssueSource(owner, repo, issue);
       /*
       FNXC:Workflows 2026-07-05-00:00:
@@ -4313,7 +4331,8 @@ export function registerGitGitHubRoutes(ctx: ApiRoutesContext): void {
 
       // Get existing tasks to check for duplicates
       const existingTasks = await scopedStore.listTasks({ slim: false, includeArchived: false });
-      const importedIssueGithubTracking = await resolveImportedIssueGithubTracking(scopedStore);
+      const projectSettings = await scopedStore.getSettings();
+      const importedIssueGithubTracking = await resolveImportedIssueGithubTracking(scopedStore, projectSettings);
 
       // Process issues sequentially with throttling
       const results: Array<{
@@ -4386,12 +4405,19 @@ export function registerGitGitHubRoutes(ctx: ApiRoutesContext): void {
         FNXC:GitHubImportTranslate 2026-07-15-09:30:
         Batch import carries translations exactly like single import (shared helper) — the requirement is about imported issues, not about which import button was used.
         */
-        const batchTranslation = await resolveImportedIssueTranslation(req, scopedStore, owner, repo, {
-          number: issue.number,
-          title: issue.title,
-          body: issue.body,
-          state: issue.state === "closed" ? "closed" : "open",
-        });
+        const batchTranslation = await resolveImportedIssueTranslation(
+          req,
+          scopedStore,
+          owner,
+          repo,
+          {
+            number: issue.number,
+            title: issue.title,
+            body: issue.body,
+            state: issue.state === "closed" ? "closed" : "open",
+          },
+          projectSettings,
+        );
         const title = (batchTranslation?.title || issue.title).slice(0, 200);
         const body = (batchTranslation?.body ?? issue.body)?.trim() || "(no description)";
         const description = `${body}\n\nSource: ${sourceUrl}`;

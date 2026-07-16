@@ -44,11 +44,20 @@ const mockCentralListProjects = vi.fn().mockResolvedValue([]);
 const mockCentralInit = vi.fn().mockResolvedValue(undefined);
 const mockCentralClose = vi.fn().mockResolvedValue(undefined);
 const mockCentralReconcileProjectStatuses = vi.fn().mockResolvedValue(undefined);
-const { mockPerformUpdateCheck, mockClearUpdateCheckCache, mockExecSync, mockExecFile } = vi.hoisted(() => ({
+const {
+  mockPerformUpdateCheck,
+  mockClearUpdateCheckCache,
+  mockExecSync,
+  mockExecFile,
+  mockGetCachedImportTranslation,
+  mockResolveTargetLocale,
+} = vi.hoisted(() => ({
   mockPerformUpdateCheck: vi.fn(),
   mockClearUpdateCheckCache: vi.fn(),
   mockExecSync: vi.fn(),
   mockExecFile: vi.fn(),
+  mockGetCachedImportTranslation: vi.fn(),
+  mockResolveTargetLocale: vi.fn(),
 }));
 
 vi.mock("../update-check.js", async () => {
@@ -57,6 +66,19 @@ vi.mock("../update-check.js", async () => {
     ...actual,
     performUpdateCheck: mockPerformUpdateCheck,
     clearUpdateCheckCache: mockClearUpdateCheckCache,
+  };
+});
+
+vi.mock("../import-translate-service.js", async () => {
+  const actual = await vi.importActual<typeof import("../import-translate-service.js")>(
+    "../import-translate-service.js",
+  );
+  mockGetCachedImportTranslation.mockImplementation(actual.getCachedImportTranslation);
+  mockResolveTargetLocale.mockImplementation(actual.resolveTargetLocale);
+  return {
+    ...actual,
+    getCachedImportTranslation: mockGetCachedImportTranslation,
+    resolveTargetLocale: mockResolveTargetLocale,
   };
 });
 
@@ -565,6 +587,8 @@ describe("POST /github/issues/import", () => {
   let getIssueDetailSpy: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
+    mockGetCachedImportTranslation.mockClear();
+    mockResolveTargetLocale.mockClear();
     mockIsGhAuthenticated.mockReturnValue(true);
     getIssueSpy = vi.fn();
     vi.spyOn(GitHubClient.prototype, "getIssue").mockImplementation(getIssueSpy);
@@ -633,6 +657,38 @@ describe("POST /github/issues/import", () => {
         },
       },
     });
+  });
+
+  /*
+  FNXC:GitHubImportTranslate 2026-07-16-11:22:
+  FN-8115 requires a single project-settings read per single import even though translation and tracking both depend on it. The route test protects the request-scoped sharing invariant rather than the resolver internals.
+  */
+  it("reads project settings once for a single issue import", async () => {
+    getIssueSpy.mockResolvedValueOnce(mockGitHubIssue);
+
+    const res = await REQUEST(buildApp(), "POST", "/api/github/issues/import", JSON.stringify({ owner: "owner", repo: "repo", issueNumber: 1 }), {
+      "Content-Type": "application/json",
+    });
+
+    expect(res.status).toBe(201);
+    expect(store.getSettings).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses cached translated prose for an open single issue", async () => {
+    (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({ githubImportAutoTranslate: true });
+    mockResolveTargetLocale.mockReturnValueOnce("en");
+    mockGetCachedImportTranslation.mockResolvedValueOnce({ title: "Translated title", body: "Translated body" });
+    getIssueSpy.mockResolvedValueOnce({ ...mockGitHubIssue, title: "Original title", body: "Original body" });
+
+    const res = await REQUEST(buildApp(), "POST", "/api/github/issues/import", JSON.stringify({ owner: "owner", repo: "repo", issueNumber: 1 }), {
+      "Content-Type": "application/json",
+    });
+
+    expect(res.status).toBe(201);
+    expect(store.createTask).toHaveBeenCalledWith(expect.objectContaining({
+      title: "Translated title",
+      description: "Translated body\n\nSource: https://github.com/owner/repo/issues/1",
+    }));
   });
 
   /*
@@ -946,6 +1002,8 @@ describe("POST /github/issues/batch-import", () => {
 
   beforeEach(() => {
     __resetBatchImportRateLimiter();
+    mockGetCachedImportTranslation.mockClear();
+    mockResolveTargetLocale.mockClear();
 
     fetchSpy = vi.fn();
     globalThis.fetch = fetchSpy as any;
@@ -1112,6 +1170,7 @@ describe("POST /github/issues/batch-import", () => {
     expect(res.body.results.every((r: { success: boolean }) => r.success)).toBe(true);
     expect(throttledSpy).toHaveBeenCalledTimes(3);
     expect(store.createTask).toHaveBeenCalledTimes(3);
+    expect(store.getSettings).toHaveBeenCalledTimes(1);
     expect(store.createTask).toHaveBeenNthCalledWith(1, expect.objectContaining({
       sourceIssue: {
         provider: "github",
@@ -1139,6 +1198,50 @@ describe("POST /github/issues/batch-import", () => {
         url: "https://github.com/owner/repo/issues/3",
       },
     }));
+  });
+
+  /*
+  FNXC:GitHubImportTranslate 2026-07-16-11:22:
+  Batch imports reuse one request-scoped settings object for every item. Cached translations still apply to open issues, while closed issues always retain original prose even when the cache has a hit.
+  */
+  it("preserves open translations and closed original prose in a batch", async () => {
+    (store.getSettings as ReturnType<typeof vi.fn>).mockResolvedValue({ githubImportAutoTranslate: true });
+    mockResolveTargetLocale.mockReturnValueOnce("en").mockReturnValueOnce("en");
+    mockGetCachedImportTranslation.mockResolvedValueOnce({ title: "Translated batch title", body: "Translated batch body" });
+    vi.spyOn(GitHubClient.prototype, "fetchThrottled")
+      .mockResolvedValueOnce({
+        success: true,
+        data: { ...mockGitHubIssue(1, "Original open title"), body: "Original open body", state: "open" },
+      } as Awaited<ReturnType<GitHubClient["fetchThrottled"]>>)
+      .mockResolvedValueOnce({
+        success: true,
+        data: { ...mockGitHubIssue(2, "Original closed title"), body: "Original closed body", state: "closed" },
+      } as Awaited<ReturnType<GitHubClient["fetchThrottled"]>>);
+
+    const res = await REQUEST(
+      buildApp(),
+      "POST",
+      "/api/github/issues/batch-import",
+      JSON.stringify({ owner: "owner", repo: "repo", issueNumbers: [1, 2], delayMs: 1 }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(200);
+    expect(store.getSettings).toHaveBeenCalledTimes(1);
+    expect(store.createTask).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      title: "Translated batch title",
+      description: "Translated batch body\n\nSource: https://github.com/owner/repo/issues/1",
+    }));
+    expect(store.createTask).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      title: "Original closed title",
+      description: "Original closed body\n\nSource: https://github.com/owner/repo/issues/2",
+    }));
+    expect(mockGetCachedImportTranslation).toHaveBeenCalledTimes(2);
+    expect(mockGetCachedImportTranslation).toHaveBeenNthCalledWith(
+      2,
+      expect.anything(),
+      expect.objectContaining({ state: "closed" }),
+    );
   });
 
   it("marks batch imported issues as tracked when global tracking defaults are on", async () => {
