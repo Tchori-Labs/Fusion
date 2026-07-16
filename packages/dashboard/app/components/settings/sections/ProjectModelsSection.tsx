@@ -312,6 +312,55 @@ export function ProjectModelsSection({ form, setForm, models, projectId, onOpenW
         }
         return lane.helperText;
     };
+    /*
+     * FNXC:SettingsModels 2026-07-16-00:00:
+     * The merger fallback is project-scoped and must sit directly after Project Merger
+     * in Model Lanes so operators configure the primary and retry models together.
+     */
+    const mergerFallbackValue = form.mergerFallbackProvider && form.mergerFallbackModelId
+        ? `${form.mergerFallbackProvider}/${form.mergerFallbackModelId}`
+        : "";
+    const mergerFallbackThinkingValue = typeof form.mergerFallbackThinkingLevel === "string"
+        ? form.mergerFallbackThinkingLevel
+        : "";
+    const mergerFallbackCustomized = Boolean(mergerFallbackValue || mergerFallbackThinkingValue);
+    const setMergerFallbackValue = (value: string) => {
+        if (!value) {
+            setForm((f) => ({ ...f, mergerFallbackProvider: undefined, mergerFallbackModelId: undefined, mergerFallbackThinkingLevel: undefined } as SettingsFormState));
+            return;
+        }
+        const slashIdx = value.indexOf("/");
+        setForm((f) => ({
+            ...f,
+            mergerFallbackProvider: value.slice(0, slashIdx),
+            mergerFallbackModelId: value.slice(slashIdx + 1),
+        } as SettingsFormState));
+    };
+    const setMergerFallbackThinkingValue = (value: string) => {
+        setForm((f) => ({ ...f, mergerFallbackThinkingLevel: value || undefined } as SettingsFormState));
+    };
+    const resetMergerFallbackValue = () => {
+        setForm((f) => ({ ...f, mergerFallbackProvider: undefined, mergerFallbackModelId: undefined, mergerFallbackThinkingLevel: undefined } as SettingsFormState));
+    };
+    const renderMergerFallbackLane = () => (
+      <div className="form-group" data-testid="project-model-lane-merger-fallback">
+        <div className="settings-model-lane-label-row">
+          <label htmlFor="mergerFallbackModel">{t("settings.projectModels.mergerFallbackModel", "Merger Fallback Model")}</label>
+          <span className={`settings-lane-badge ${mergerFallbackCustomized ? "settings-lane-badge--override" : "settings-lane-badge--inherited"}`} title={mergerFallbackCustomized ? "Explicitly set for this project" : "Inherited from global settings"}>
+            {mergerFallbackCustomized ? "Override (Project)" : "Inherited (Global)"}
+          </span>
+          <SettingsHelpTip settingKey="mergerFallbackModel">
+            {t("settings.projectModels.mergerFallbackHelp", "Fallback provider and model used when a merger session retries. Leave unset to use the shared global fallback model pair.")}
+          </SettingsHelpTip>
+        </div>
+        <div className="settings-model-lane-control-row">
+          <div className="settings-model-lane-control-main">
+            <CustomModelDropdown id="mergerFallbackModel" label="Merger Fallback Model" models={availableModels} value={mergerFallbackValue} onChange={setMergerFallbackValue} placeholder={t("settings.projectModels.useGlobal", "Use global")} favoriteProviders={favoriteProviders} onToggleFavorite={onToggleFavorite} favoriteModels={favoriteModels} onToggleModelFavorite={onToggleModelFavorite} menuWidth="readable" showThinkingLevel={true} thinkingLevel={mergerFallbackThinkingValue} onThinkingLevelChange={setMergerFallbackThinkingValue} defaultThinkingLevel={form.defaultThinkingLevel}/>
+          </div>
+          {mergerFallbackCustomized && (<button type="button" className="btn btn-ghost btn-sm" title={t("settings.projectModels.resetToInheritFromGlobal", "Reset to inherit from global")} onClick={resetMergerFallbackValue}>{t("settings.projectModels.reset", " Reset ")}</button>)}
+        </div>
+      </div>
+    );
     const titleSummarizerFallbackValue = form.titleSummarizerFallbackProvider && form.titleSummarizerFallbackModelId
         ? `${form.titleSummarizerFallbackProvider}/${form.titleSummarizerFallbackModelId}`
         : "";
@@ -431,7 +480,9 @@ export function ProjectModelsSection({ form, setForm, models, projectId, onOpenW
         <SettingsHelpTip settingKey="project-model-lanes">{t("settings.projectModels.overrideGlobalModelSettingsAtTheProjectLevel", " Override global model settings at the project level. Each lane controls a specific AI usage context. Unset lanes inherit from the corresponding global lane. The Project Default Model is the fallback for this project when a more specific lane is unset. ")}</SettingsHelpTip>
       </div>
       {modelsLoading ? (<div className="settings-empty-state"><LoadingSpinner label={t("settings.projectModels.loadingAvailableModels", "Loading available models\u2026")} /></div>) : availableModels.length === 0 ? (<div className="settings-empty-state settings-muted">{t("settings.projectModels.noModelsAvailableConfigureAuthenticationFirst", " No models available. Configure authentication first. ")}</div>) : (<>
-          {projectModelLanes.map(renderProjectLane)}
+          {projectModelLanes.filter((lane) => lane.laneId === "default" || lane.laneId === "merger").map(renderProjectLane)}
+          {renderMergerFallbackLane()}
+          {projectModelLanes.filter((lane) => lane.laneId === "import-translate").map(renderProjectLane)}
         </>)}
 
       {/* FNXC:ChatModels 2026-07-12-20:45: Project Models owns the Direct-chat default because New Chat needs a project-scoped model-or-agent target plus prompt-vs-direct creation mode without changing workflow or in-chat switcher settings. */}

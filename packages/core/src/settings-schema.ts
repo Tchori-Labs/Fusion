@@ -641,6 +641,10 @@ export const DEFAULT_PROJECT_SETTINGS = {
   mergerProvider: undefined,
   mergerModelId: undefined,
   mergerThinkingLevel: undefined,
+  // FNXC:Settings-MergerModel 2026-07-16-00:00: project merger fallback overrides shared global fallback only when its provider/model pair is complete.
+  mergerFallbackProvider: undefined,
+  mergerFallbackModelId: undefined,
+  mergerFallbackThinkingLevel: undefined,
   prTitlePromptInstructions: undefined,
   prDescriptionPromptInstructions: undefined,
   scripts: undefined,

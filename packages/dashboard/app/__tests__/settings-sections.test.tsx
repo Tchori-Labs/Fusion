@@ -596,6 +596,42 @@ describe("ProjectModelsSection", () => {
     expect(screen.getByTestId("mock-model-dropdown-titleSummarizerFallbackModel")).toHaveAttribute("data-thinking-value", "");
   });
 
+  it("renders merger fallback directly after merger and resets its complete lane", () => {
+    function ProjectMergerFallbackHost() {
+      const [form, setForm] = useState<SettingsFormState>({
+        mergerFallbackProvider: "anthropic",
+        mergerFallbackModelId: "claude-sonnet-4-5",
+        mergerFallbackThinkingLevel: "high",
+      } as SettingsFormState);
+      return <ProjectModelsSection
+        form={form}
+        setForm={setForm}
+        models={{
+          ...models,
+          modelLanes: [
+            { laneId: "default", label: "Default", helperText: "Default", fallbackOrder: "global" },
+            { laneId: "merger", label: "Merger", helperText: "Merger", fallbackOrder: "global" },
+            { laneId: "import-translate", label: "Translate", helperText: "Translate", fallbackOrder: "global" },
+          ] as never,
+          availableModels: [{ provider: "anthropic", id: "claude-sonnet-4-5", name: "Claude Sonnet 4.5" }],
+        }}
+        addToast={vi.fn()}
+      />;
+    }
+    render(<ProjectMergerFallbackHost />);
+
+    const dropdown = screen.getByTestId("mock-model-dropdown-mergerFallbackModel");
+    expect(dropdown).toHaveAttribute("data-value", "anthropic/claude-sonnet-4-5");
+    expect(dropdown).toHaveAttribute("data-thinking-value", "high");
+    const dropdowns = Array.from(document.querySelectorAll("[data-testid^='mock-model-dropdown-']"));
+    const mergerIndex = dropdowns.indexOf(screen.getByTestId("mock-model-dropdown-mergerModel"));
+    expect(dropdowns[mergerIndex + 1]).toBe(dropdown);
+
+    fireEvent.click(screen.getByRole("button", { name: "Reset" }));
+    expect(dropdown).toHaveAttribute("data-value", "");
+    expect(dropdown).toHaveAttribute("data-thinking-value", "");
+  });
+
   it("wires workflow fallback lane thinking render, persist, and reset", async () => {
     let saver: (() => Promise<void>) | null = null;
     vi.mocked(fetchWorkflow).mockResolvedValue({

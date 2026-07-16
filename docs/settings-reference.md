@@ -1090,7 +1090,9 @@ Dedicated model lane for merger agent sessions (conflict resolution, clean-room 
 
 Thinking level for merger sessions: project `mergerThinkingLevel` → global `mergerGlobalThinkingLevel` → project `defaultThinkingLevelOverride` → global `defaultThinkingLevel`.
 
-Session-level model fallback on retryable failures still uses the shared global `fallbackProvider` + `fallbackModelId` pair (not a merger-specific fallback lane).
+Session-level fallback on retryable failures resolves project `mergerFallbackProvider` + `mergerFallbackModelId` first, then the shared global `fallbackProvider` + `fallbackModelId` pair. Partial project fallback pairs are ignored. This lane applies to every merger session, including merger-ai mutating and review agents and the PR-response runner.
+
+Fallback thinking level resolves project `mergerFallbackThinkingLevel` → global `fallbackThinkingLevel` → the merger thinking chain above.
 
 For post-merge prompt workflow steps, explicit step-level `modelProvider` + `modelId` overrides take precedence over the merger lane above.
 

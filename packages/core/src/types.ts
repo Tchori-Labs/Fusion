@@ -3921,6 +3921,19 @@ export interface ProjectSettings {
   /** Optional project merger-lane thinking override. Inherits through global merger thinking then default thinking when unset. */
   mergerThinkingLevel?: ThinkingLevel;
   /*
+  FNXC:Settings-MergerModel 2026-07-16-00:00:
+  Merger session retries need a project-scoped fallback lane so operators can pin a merge-capable recovery model without changing the shared global fallback. Both provider and model id must be set; partial pairs fall through to the shared global fallback pair.
+  */
+  /** Project fallback AI model provider for merger agent sessions.
+   *  Must be set together with `mergerFallbackModelId`. Resolves before the global
+   *  `fallbackProvider`/`fallbackModelId` pair. */
+  mergerFallbackProvider?: string;
+  /** Project fallback AI model ID for merger agent sessions.
+   *  Must be set together with `mergerFallbackProvider`. */
+  mergerFallbackModelId?: string;
+  /** Optional project merger-fallback thinking override. Falls through to global fallback thinking, then merger thinking. */
+  mergerFallbackThinkingLevel?: ThinkingLevel;
+  /*
   FNXC:GitHubImportTranslate 2026-07-15-09:30:
   Import Tasks auto-translation is a dedicated one-off AI helper lane, kept separate from the summarization lane so operators can pin a cheap/fast translation model without dragging title summarization onto it.
   Both provider and model id must be set together; partial pairs are ignored and fall through to global translate lane, then summarization, then project/global default.
