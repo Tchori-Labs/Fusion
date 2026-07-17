@@ -45,6 +45,7 @@ import {
   isWorkflowColumnsEnabled,
   resolveWorkflowIrForTask,
   workflowHasColumn,
+  resolveColumnFlags,
   TransitionRejectionError,
   getPlannerInterventionTimeline,
   isBuiltinWorkflowId,
@@ -4260,44 +4261,39 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
       // Get current task state
       const task = await scopedStore.getTask(req.params.id);
 
-      // If task is already in triage, skip the transition check and moveTask.
-      // Just reset for replanning in place.
-      if (task.column === "triage") {
-        // Log the rebuild request
-        await scopedStore.logEntry(task.id, "Specification rebuild requested by user");
-        clearRebuiltSpecWorkflowPins(scopedStore, task.id);
-
-        // Remove the existing spec so rebuilds produce a fresh PROMPT.md instead
-        // of asking triage to revise whatever was already on disk.
-        const { rm } = await import("node:fs/promises");
-        const { join } = await import("node:path");
-        const promptPath = join(scopedStore.getRootDir(), ".fusion", "tasks", task.id, "PROMPT.md");
-        await rm(promptPath, { force: true });
-
-        // Update status to indicate needs replanning
-        await scopedStore.updateTask(task.id, { status: "needs-replan" });
-
-        const updated = await scopedStore.getTask(task.id);
-        res.json(updated);
-        return;
+      const workflowIr = await resolveWorkflowIrForTask(scopedStore, task.id);
+      const currentColumn = "columns" in workflowIr
+        ? workflowIr.columns.find((column) => column.id === task.column)
+        : undefined;
+      const isArchived = task.column === "archived" || (currentColumn != null && resolveColumnFlags(currentColumn).archived);
+      if (isArchived) {
+        throw badRequest("Respecify is not available for archived tasks; unarchive first.");
       }
 
-      // Check if task can transition to triage
-      // #1403: task.column is ColumnId; VALID_TRANSITIONS is keyed by the legacy
-      // closed union. A non-legacy custom column id has no legacy transition row,
-      // so it correctly resolves to "cannot transition" here.
-      const canTransition =
-        isColumn(task.column) && VALID_TRANSITIONS[task.column].includes("triage");
-      if (!canTransition) {
-        throw badRequest(`Cannot rebuild spec for tasks in '${task.column}' column. Move task to a valid column first.`);
-      }
+      /*
+      FNXC:WorkflowReplan 2026-07-16-12:00:
+      Respecify must park work in a planner lane belonging to the task's own workflow:
+      triage when declared, otherwise plan-in-place todo, then legacy triage for workflows
+      with neither. The legacy fallback is intentionally recovery-rehomed: plain moves reject
+      an undeclared triage target as unknown-column (and reject non-adjacent sources), which
+      previously stranded no-triage workflows before their needs-replan status was written.
+      Archived cards are rejected above rather than resurrected into a planner lane.
+      */
+      const replanColumn = workflowHasColumn(workflowIr, "triage")
+        ? "triage"
+        : workflowHasColumn(workflowIr, "todo")
+          ? "todo"
+          : "triage";
 
-      // Log the rebuild request
       await scopedStore.logEntry(task.id, "Specification rebuild requested by user");
       clearRebuiltSpecWorkflowPins(scopedStore, task.id);
 
-      // Move to triage for replanning
-      const updated = await scopedStore.moveTask(task.id, "triage");
+      if (task.column !== replanColumn) {
+        await scopedStore.moveTask(task.id, replanColumn, {
+          moveSource: "user",
+          recoveryRehome: true,
+        });
+      }
 
       // Remove the existing spec so rebuilds produce a fresh PROMPT.md instead
       // of asking triage to revise whatever was already on disk.
@@ -4309,6 +4305,12 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
       // Update status to indicate needs replanning
       await scopedStore.updateTask(task.id, { status: "needs-replan" });
 
+      /*
+      FNXC:WorkflowReplan 2026-07-16-12:00:
+      Respecify responses must re-read the persisted task after setting needs-replan so
+      planner-lane-in-place requests, including legacy triage, never return stale status.
+      */
+      const updated = await scopedStore.getTask(task.id);
       res.json(updated);
     } catch (err: unknown) {
       if (err instanceof ApiError) {

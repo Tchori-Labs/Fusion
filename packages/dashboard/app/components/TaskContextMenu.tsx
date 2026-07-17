@@ -264,7 +264,15 @@ export function buildTaskActionMenuModel(options: BuildTaskActionMenuModelOption
     actions.push({ id: "refine", label: t("taskDetail.refine.btn", "Refine"), onSelect: options.onOpenRefine });
   }
 
-  actions.push({ id: "respecify", label: t("taskDetail.respecify.btn", "Respecify"), onSelect: options.onRespecify });
+  /*
+  FNXC:TaskContextMenu 2026-07-16-12:00:
+  Archived is an unsupported Respecify source: the rebuild route rejects it rather than
+  resurrecting intentionally archived work into a planner lane. Check both the semantic
+  workflow trait and legacy id so every menu host omits this dead affordance.
+  */
+  if (task.column !== "archived" && currentColumnFlags?.archived !== true) {
+    actions.push({ id: "respecify", label: t("taskDetail.respecify.btn", "Respecify"), onSelect: options.onRespecify });
+  }
 
   if (canRetryTask && hasRetryHandler) {
     actions.push({ id: "retry", label: t("taskDetail.retry.btn", "Retry"), onSelect: options.onRetry });
