@@ -4490,6 +4490,19 @@ export function TaskDetailContent({
                     <Zap size={14} aria-hidden="true" />
                   </button>
                 </div>
+                {/*
+                FNXC:TaskDetailAttachments 2026-07-17-12:30:
+                FN-8232: keep the hidden file input mounted independently of activeTab.
+                The paperclip renders on every non-editing tab while task details default
+                to Activity or Summary; a Definition-only input made that control a no-op.
+                */}
+                <input
+                  className="detail-hidden-file-input"
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={handleUpload}
+                />
                 {overseerExplainOpen && (
                   <div className="detail-overseer-explain-panel" data-testid="detail-overseer-explain-panel" role="region" aria-live="polite">
                     {isLoadingOverseerExplain ? (
@@ -5892,13 +5905,6 @@ export function TaskDetailContent({
             ) : (
               <div className="detail-empty-inline">{t("taskDetail.attachments.none", "(no attachments)")}</div>
             )}
-            <input
-              className="detail-hidden-file-input"
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              onChange={handleUpload}
-            />
             <button
               className="btn btn-sm"
               onClick={() => fileInputRef.current?.click()}
