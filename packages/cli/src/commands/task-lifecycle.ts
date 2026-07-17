@@ -256,12 +256,24 @@ function toBranchGroupPrState(prInfo: PrInfo | null): BranchGroupPrState {
  * Idempotency: reuses an existing PR for the group head branch on GitHub. The
  * coordinator additionally skips this call when a `prNumber` is already persisted,
  * so a re-promotion never opens a second PR.
+ *
+ * Repo identity is resolved from the per-project cwd in the callback input, mirroring
+ * syncGroupPrCallback.
  */
 export function createGroupPrCallback(
   github: Pick<GitHubOperations, "findPrForBranch" | "createPr">,
 ): CreateGroupPrFn {
   return async ({ cwd, group, members, headBranch, baseBranch }) => {
-    const existing = await github.findPrForBranch({ head: headBranch, state: "open" });
+    // FNXC:PrMergeAutoMerge 2026-07-17-16:50 (gh-4):
+    // Resolve the repo from the PROJECT cwd, not the process cwd (same T4
+    // requirement as syncGroupPrCallback below) — in a centrally-installed
+    // multi-project daemon process.cwd() is not the project repo, so the
+    // client's fallback would throw or target the wrong repository.
+    const repo = getCurrentRepo(cwd);
+    if (!repo) {
+      throw new Error("createGroupPr: could not determine repository");
+    }
+    const existing = await github.findPrForBranch({ owner: repo.owner, repo: repo.repo, head: headBranch, state: "open" });
     if (existing) {
       return { prNumber: existing.number, prUrl: existing.url, prState: toBranchGroupPrState(existing) };
     }
@@ -273,6 +285,8 @@ export function createGroupPrCallback(
       branchName: getTaskBranchName(member.id),
     }));
     const created = await github.createPr({
+      owner: repo.owner,
+      repo: repo.repo,
       title: buildGroupPullRequestTitle(group, members),
       body: buildGroupPullRequestBody(group, membersWithBranch),
       head: headBranch,

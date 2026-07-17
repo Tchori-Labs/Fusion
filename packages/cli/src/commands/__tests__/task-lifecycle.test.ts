@@ -1788,7 +1788,12 @@ describe("createGroupPrCallback", () => {
       baseBranch: "main",
     });
 
-    expect(github.findPrForBranch).toHaveBeenCalledWith({ head: group.branchName, state: "open" });
+    expect(github.findPrForBranch).toHaveBeenCalledWith({
+      owner: "owner",
+      repo: "repo",
+      head: group.branchName,
+      state: "open",
+    });
   });
 
   it("does not reuse a closed PR from a prior group — creates a fresh one", async () => {
@@ -1813,13 +1818,51 @@ describe("createGroupPrCallback", () => {
       baseBranch: "main",
     });
 
-    expect(github.findPrForBranch).toHaveBeenCalledWith({ head: group.branchName, state: "open" });
+    expect(github.findPrForBranch).toHaveBeenCalledWith({
+      owner: "owner",
+      repo: "repo",
+      head: group.branchName,
+      state: "open",
+    });
     expect(github.createPr).toHaveBeenCalledTimes(1);
     expect(result).toEqual({
       prNumber: 123,
       prUrl: "https://github.com/owner/repo/pull/123",
       prState: "open",
     });
+  });
+
+  it("resolves the repo from the callback cwd and threads owner/repo into findPrForBranch/createPr (gh-4)", async () => {
+    vi.mocked(getCurrentRepo).mockImplementation(((cwd?: string) =>
+      cwd ? { owner: "central-owner", repo: "central-repo" } : null) as never);
+    execMock.mockReturnValue("");
+
+    const github = {
+      findPrForBranch: vi.fn(async () => null),
+      createPr: vi.fn(async () => ({
+        number: 5,
+        url: "https://github.com/central-owner/central-repo/pull/5",
+        status: "open" as const,
+      })),
+    };
+
+    const callback = createGroupPrCallback(github as never);
+    const result = await callback({
+      cwd: "/projects/repo-a",
+      group: { id: "BG-9", branchName: "fusion/groups/g9" } as never,
+      members: [{ id: "FN-9501", title: "m1" }] as never,
+      headBranch: "fusion/groups/g9",
+      baseBranch: "main",
+    });
+
+    expect(vi.mocked(getCurrentRepo)).toHaveBeenCalledWith("/projects/repo-a");
+    expect(github.findPrForBranch).toHaveBeenCalledWith(
+      expect.objectContaining({ owner: "central-owner", repo: "central-repo", head: "fusion/groups/g9" }),
+    );
+    expect(github.createPr).toHaveBeenCalledWith(
+      expect.objectContaining({ owner: "central-owner", repo: "central-repo", head: "fusion/groups/g9" }),
+    );
+    expect(result.prNumber).toBe(5);
   });
 });
 
