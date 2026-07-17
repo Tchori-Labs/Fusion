@@ -490,9 +490,9 @@ Use **Show worktree grouping on the board** in **Settings → Worktrees** when y
 
 Planning is a desktop/tablet left-sidebar main-content destination after **Command Center**. It opens the planning-session list and composer in the main content region; mobile continues to use the compact planning entry points. Planning Mode now includes branch controls on the summary screen before you create a task.
 
-<!-- FNXC:SessionBanner 2026-07-15-00:00: FN-8001 requires every planning-session resume entry point to navigate to the embedded Planning view before reconnecting the session. The footer Background Tasks row and any needs-input Resume banner share this behavior on desktop and mobile. -->
+<!-- FNXC:SessionBanner 2026-07-16-20:55: FN-8229 removes the redundant footer AI pill. The session notification banner preserves non-planning in-progress, needs-input, and error visibility while Planning sessions remain on their dedicated docked surface and navigation badge. -->
 
-When a Planning session is awaiting your input, use its **Background Tasks** footer row or **Resume** banner action to open the docked Planning view and reconnect to that session. The Planning navigation item also opens the docked Planning view; its yellow needs-input dot is visible on the desktop left sidebar and mobile More controls.
+When a Planning session needs your input or needs attention, open the docked Planning view from the **Planning** navigation item. Its yellow needs-input dot is visible on the desktop left sidebar and mobile More controls. Non-planning in-progress, needs-input, and error sessions appear in the session notification banner, where available Resume actions reconnect to their matching surface.
 
 <!-- FNXC:PlanningRetry 2026-07-13-00:00: If Planning AI generation stalls and the server persists a terminal generation error, Planning Mode should auto-retry the same session up to three times before showing the permanent Retry/Dismiss error panel; any question or summary progress resets that budget. -->
 When Planning AI generation appears stuck, Planning Mode automatically retries the same session up to three times and shows **Retrying… (attempt N of 3)** before falling back to the permanent **Retry**/**Dismiss** error panel. Any successful question or summary progress resets the automatic retry budget.

@@ -1166,29 +1166,6 @@
     "retryConnection": "Reintentar conexión",
     "retrying": "Reintentando…"
   },
-  "backgroundTasks": {
-    "dismissButton": "Descartar",
-    "pillLabel_one": "",
-    "pillLabel_other": "",
-    "pillTitle_one": "",
-    "pillTitle_other": "",
-    "pillTitleWithInput_one": "",
-    "pillTitleWithInput_other": "",
-    "popoverHeader": "Tareas de fondo",
-    "status": {
-      "failed": "Fallido",
-      "generating": "generando...",
-      "needsInput": "necesita entrada"
-    },
-    "typeLabel": {
-      "cliAgent": "",
-      "milestoneInterview": "Entrevista de hito",
-      "missionInterview": "Entrevista de misión",
-      "planning": "Planificación",
-      "sliceInterview": "Entrevista de segmento",
-      "subtask": "Desglose de subtareas"
-    }
-  },
   "board": {
     "archived": "Archivado",
     "done": "Hecho",
@@ -3322,7 +3299,8 @@
     "unpauseUnavailable": "La acción de reanudar no está disponible",
     "useProjectDefault": "Usar predeterminado del proyecto",
     "viewOptions": "Opciones de vista",
-    "workflowLabel": ""
+    "workflowLabel": "",
+    "statusReplan": ""
   },
   "mailbox": {
     "agent": "Agente",
@@ -5656,7 +5634,11 @@
     "headerErrorSingular_other": "",
     "regionLabel": "Sesiones de IA que necesitan entrada o han fallado",
     "resume": "Reanudar",
-    "retry": "Reintentar"
+    "retry": "Reintentar",
+    "headerGeneratingSingular": "",
+    "headerGeneratingPlural": "",
+    "headerMixed": "",
+    "inProgress": ""
   },
   "settings": {
     "actions": {
@@ -5906,7 +5888,14 @@
       "restartFailed": "",
       "restartNow": "",
       "restartUnavailable": "",
-      "restarting": ""
+      "restarting": "",
+      "mobileNavPrimaryItems": "",
+      "mobileNavPrimaryItemsHint": "",
+      "addNavItem": "",
+      "selectNavItem": "",
+      "removeNavItem": "",
+      "moveNavItemEarlier": "",
+      "moveNavItemLater": ""
     },
     "globalGeneral": {
       "andShowsUpdateNoticesInTheCLIAnd": "",
@@ -8381,7 +8370,8 @@
     "costBadgeAriaLabel": "",
     "awaitingApprovalPlanReviewReplanCapTitle": "",
     "reviewBudgetExhausted": "",
-    "awaitingApprovalTitle": ""
+    "awaitingApprovalTitle": "",
+    "statusReplan": ""
   },
   "terminal": {
     "arrowKeysLabel": "",

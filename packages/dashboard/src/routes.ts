@@ -4152,7 +4152,7 @@ export function createApiRoutes(store: TaskStore, options?: ServerOptions): Rout
     res.status(204).send();
   });
 
-  // ── AI Session Routes (Background Tasks) ─────────────────────────────────
+  // ── AI Session Routes ─────────────────────────────────────────────────────
 
   /**
    * GET /api/ai-sessions

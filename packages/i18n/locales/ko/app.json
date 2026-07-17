@@ -1166,29 +1166,6 @@
     "retryConnection": "연결 재시도",
     "retrying": "재시도 중…"
   },
-  "backgroundTasks": {
-    "dismissButton": "닫기",
-    "pillLabel_one": "",
-    "pillLabel_other": "",
-    "pillTitle_one": "",
-    "pillTitle_other": "",
-    "pillTitleWithInput_one": "",
-    "pillTitleWithInput_other": "",
-    "popoverHeader": "백그라운드 작업",
-    "status": {
-      "failed": "실패",
-      "generating": "생성 중...",
-      "needsInput": "입력 필요"
-    },
-    "typeLabel": {
-      "cliAgent": "",
-      "milestoneInterview": "마일스톤 인터뷰",
-      "missionInterview": "미션 인터뷰",
-      "planning": "계획",
-      "sliceInterview": "슬라이스 인터뷰",
-      "subtask": "하위 작업 분류"
-    }
-  },
   "board": {
     "archived": "보관됨",
     "done": "완료",
@@ -3322,7 +3299,8 @@
     "unpauseUnavailable": "재개 작업을 사용할 수 없습니다",
     "useProjectDefault": "프로젝트 기본값 사용",
     "viewOptions": "보기 옵션",
-    "workflowLabel": ""
+    "workflowLabel": "",
+    "statusReplan": ""
   },
   "mailbox": {
     "agent": "에이전트",
@@ -5656,7 +5634,11 @@
     "headerErrorSingular_other": "",
     "regionLabel": "입력 대기 중이거나 실패한 AI 세션",
     "resume": "재개",
-    "retry": "재시도"
+    "retry": "재시도",
+    "headerGeneratingSingular": "",
+    "headerGeneratingPlural": "",
+    "headerMixed": "",
+    "inProgress": ""
   },
   "settings": {
     "actions": {
@@ -5906,7 +5888,14 @@
       "restartFailed": "",
       "restartNow": "",
       "restartUnavailable": "",
-      "restarting": ""
+      "restarting": "",
+      "mobileNavPrimaryItems": "",
+      "mobileNavPrimaryItemsHint": "",
+      "addNavItem": "",
+      "selectNavItem": "",
+      "removeNavItem": "",
+      "moveNavItemEarlier": "",
+      "moveNavItemLater": ""
     },
     "globalGeneral": {
       "andShowsUpdateNoticesInTheCLIAnd": "",
@@ -8381,7 +8370,8 @@
     "costBadgeAriaLabel": "",
     "awaitingApprovalPlanReviewReplanCapTitle": "",
     "reviewBudgetExhausted": "",
-    "awaitingApprovalTitle": ""
+    "awaitingApprovalTitle": "",
+    "statusReplan": ""
   },
   "terminal": {
     "arrowKeysLabel": "",
