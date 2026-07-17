@@ -1177,8 +1177,13 @@ export function isRetryableModelSelectionError(message: string): boolean {
   if (isProviderModelNotFoundError(message)) {
     return true;
   }
+  /*
+   * FNXC:ModelFallback 2026-07-16-11:00:
+   * A provider whose credential fails to resolve at prompt time surfaces from pi-ai as `Provider is not configured: <provider>` (ModelsError code "auth"). This is a provider/credential-availability problem a configured fallback model on a DIFFERENT provider can recover from, so treat it as retryable and enter the single-swap fallback path. Previously this string matched none of the substrings below, so a mis-resolved primary provider hard-failed the task instead of falling back. The `usingFallback` guard upstream keeps it to one swap.
+   */
   const normalized = message.toLowerCase();
-  return normalized.includes("rate limit")
+  return normalized.includes("not configured")
+    || normalized.includes("rate limit")
     || normalized.includes("too many requests")
     || normalized.includes("429")
     || normalized.includes("401")

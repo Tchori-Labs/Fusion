@@ -1483,6 +1483,12 @@ describe("isRetryableModelSelectionError", () => {
     expect(isRetryableModelSelectionError("model is overloaded")).toBe(true);
   });
 
+  it("treats a provider-not-configured failure as model-selection retryable so the fallback model is tried", () => {
+    // pi-ai surfaces an unresolved provider credential as this exact string (ModelsError code "auth").
+    // A configured fallback on a different provider can recover, so it must enter the single-swap path.
+    expect(isRetryableModelSelectionError("Provider is not configured: anthropic")).toBe(true);
+  });
+
   it("does not match unrelated errors", () => {
     expect(isRetryableModelSelectionError("ENOENT: no such file or directory")).toBe(false);
     expect(isRetryableModelSelectionError("syntax error near unexpected token")).toBe(false);

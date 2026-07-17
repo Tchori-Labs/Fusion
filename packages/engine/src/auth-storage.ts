@@ -144,9 +144,19 @@ class FusionFileAuthStorage implements FusionAuthStorage {
   }
 }
 
-function createFusionCredentialStore(authStorage: FusionAuthStorage): CredentialStore {
+export function createFusionCredentialStore(authStorage: FusionAuthStorage): CredentialStore {
   return {
-    read: async (providerId) => authStorage.get(providerId) as Credential | undefined,
+    /*
+    FNXC:ProviderAuth 2026-07-16-11:00:
+    pi-ai >=0.80 resolves provider auth by reading the credential store directly (`resolveProviderAuth` -> `credentials.read(provider.id)`) and performs OAuth refresh + auth derivation itself, instead of calling fusion's `getApiKey(provider)`. Fusion persists an Anthropic subscription login under `anthropic-subscription`, but Anthropic model execution requests provider `anthropic`, so the subscription->anthropic aliasing that lived only in `resolveAnthropicRuntimeApiKey` (the getApiKey path) is now bypassed. Without aliasing at the read() layer a subscription-only login surfaces at prompt time as `Provider is not configured: anthropic` even though the status card shows "connected" (status uses hasVisibleAnthropicCredential, a different path). When no raw/legacy `anthropic` credential exists, alias the separated `anthropic-subscription` OAuth credential into read("anthropic") so pi-ai runs it on the built-in provider (/v1 Claude Code impersonation). A raw `anthropic` api_key or legacy oauth row still wins. See resolveAnthropicRuntimeApiKey for the mirror precedence.
+    */
+    read: async (providerId) => {
+      const credential = authStorage.get(providerId) as Credential | undefined;
+      if (!credential && providerId === ANTHROPIC_PROVIDER_ID) {
+        return authStorage.get(ANTHROPIC_SUBSCRIPTION_PROVIDER_ID) as Credential | undefined;
+      }
+      return credential;
+    },
     list: async () => authStorage.list().flatMap((providerId): CredentialInfo[] => {
       const credential = authStorage.get(providerId);
       return credential?.type === "api_key" || credential?.type === "oauth"

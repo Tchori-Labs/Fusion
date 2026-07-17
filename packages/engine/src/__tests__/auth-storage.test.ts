@@ -3,7 +3,7 @@ import { mkdirSync, writeFileSync, existsSync, readFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createFusionAuthStorage, getFusionAuthPath } from "../auth-storage.js";
+import { createFusionAuthStorage, createFusionCredentialStore, getFusionAuthPath } from "../auth-storage.js";
 
 function encodeBase64Url(value: string): string {
   return Buffer.from(value, "utf-8").toString("base64url");
@@ -216,6 +216,65 @@ describe("createFusionAuthStorage", () => {
       expect(await authStorage.getApiKey("anthropic")).toBe("sk-ant-api03-runtime-key");
       expect(authStorage.get("anthropic")).toEqual({ type: "api_key", key: "sk-ant-api03-runtime-key" });
       expect(authStorage.hasAuth("anthropic")).toBe(true);
+    });
+
+    // FNXC:ProviderAuth 2026-07-16-11:00 — Symptom Verification for the pi-ai >=0.80 read()-based
+    // auth-resolution regression. Original symptom: a subscription-only Anthropic login (stored only
+    // under `anthropic-subscription`) failed every task with "Provider is not configured: anthropic"
+    // because pi-ai's resolveProviderAuth calls credentials.read("anthropic") directly instead of
+    // fusion's getApiKey("anthropic"), so the subscription->anthropic alias was bypassed. Assert the
+    // credential store's read() path (the exact surface pi-ai uses) resolves the subscription credential.
+    it("aliases Anthropic subscription OAuth through the pi-ai credential-store read('anthropic') path", async () => {
+      writeFusionAuth(homeDir, {
+        "anthropic-subscription": {
+          type: "oauth",
+          access: "subscription-access-token",
+          refresh: "subscription-refresh-token",
+          expires: Date.now() + 3_600_000,
+        },
+      });
+
+      const authStorage = createFusionAuthStorage();
+      const credentialStore = createFusionCredentialStore(authStorage);
+
+      // pi-ai reads the credential for provider `anthropic` directly; it must see the subscription OAuth.
+      expect(await credentialStore.read("anthropic")).toMatchObject({
+        type: "oauth",
+        access: "subscription-access-token",
+      });
+      // `anthropic-subscription` still reads its own credential unchanged.
+      expect(await credentialStore.read("anthropic-subscription")).toMatchObject({
+        type: "oauth",
+        access: "subscription-access-token",
+      });
+    });
+
+    it("prefers a raw Anthropic credential over the subscription alias in read('anthropic')", async () => {
+      writeFusionAuth(homeDir, {
+        anthropic: { type: "api_key", key: "sk-ant-api03-runtime-key" },
+        "anthropic-subscription": {
+          type: "oauth",
+          access: "subscription-access-token",
+          refresh: "subscription-refresh-token",
+          expires: Date.now() + 3_600_000,
+        },
+      });
+
+      const authStorage = createFusionAuthStorage();
+      const credentialStore = createFusionCredentialStore(authStorage);
+
+      // Raw api_key wins; the subscription alias only fills the gap when no raw/legacy row exists.
+      expect(await credentialStore.read("anthropic")).toEqual({
+        type: "api_key",
+        key: "sk-ant-api03-runtime-key",
+      });
+    });
+
+    it("read('anthropic') is undefined when no Anthropic credential of any kind exists", async () => {
+      const authStorage = createFusionAuthStorage();
+      const credentialStore = createFusionCredentialStore(authStorage);
+
+      expect(await credentialStore.read("anthropic")).toBeUndefined();
     });
 
     it("uses Anthropic subscription OAuth for direct model runtime auth when no raw API key exists", async () => {
