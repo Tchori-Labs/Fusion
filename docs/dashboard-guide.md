@@ -1370,6 +1370,8 @@ The global AI engine stop/start control and triage pause/resume control live in 
 <!-- FNXC:ExecutorStatusBar 2026-06-27-00:00: FN-7163 makes footer stats loading initial-only so routine heartbeat refreshes keep the populated footer and open concurrency popover mounted instead of blinking to the loading branch. -->
 Brief, single-poll executor stats fetch blips keep showing the last good footer stats instead of flashing **Connecting…**. Routine executor stats heartbeats also keep the populated footer mounted after initial load, so an open engine/concurrency popover stays open while counts refresh. The footer only switches to **Connecting…** for sustained suspension-like stats failures, or to an explicit error state for non-transient failures.
 
+On mobile, the compact footer hides stat names to preserve space. Tap a colored stat dot and count to show its name; tap it again, tap elsewhere, press Escape, or scroll to dismiss the tooltip. Desktop and tablet continue to show stat names inline.
+
 ### Engine status banner
 
 When a project dashboard is open but no project engine is connected, Fusion shows a sticky **Engine disconnected** banner above the project content. This covers paused projects, failed or still-starting project engines, delayed reconciliation, and dashboard-only/dev launches where the UI is available before an engine manager is attached.

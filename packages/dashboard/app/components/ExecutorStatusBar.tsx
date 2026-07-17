@@ -1,5 +1,6 @@
 import "./ExecutorStatusBar.css";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import {
@@ -17,6 +18,44 @@ import { BackgroundTasksIndicator } from "./BackgroundTasksIndicator";
 import { EngineControlMenu, type EngineControlMenuHandle } from "./EngineControlMenu";
 import { TerminalLauncher } from "./TerminalLauncher";
 import { useViewportMode } from "../hooks/useViewportMode";
+
+type FooterStatId = "queued" | "running" | "stuck" | "blocked" | "review" | "fanout";
+
+interface OpenStatTooltip {
+  id: FooterStatId;
+  label: string;
+  rect: DOMRect;
+}
+
+interface MobileStatSegmentProps {
+  className?: string;
+  id: FooterStatId;
+  isMobile: boolean;
+  isOpen: boolean;
+  label: string;
+  onToggle: (id: FooterStatId, label: string, rect: DOMRect) => void;
+  children: ReactNode;
+}
+
+function MobileStatSegment({ className = "", id, isMobile, isOpen, label, onToggle, children }: MobileStatSegmentProps) {
+  const segmentClassName = `executor-status-bar__segment executor-status-bar__segment--stat ${className}`.trim();
+  if (!isMobile) return <div className={segmentClassName}>{children}</div>;
+
+  const tooltipId = `executor-status-bar-tooltip-${id}`;
+  return (
+    <button
+      type="button"
+      className={segmentClassName}
+      onClick={(event) => onToggle(id, label, event.currentTarget.getBoundingClientRect())}
+      aria-label={label}
+      aria-expanded={isOpen}
+      aria-describedby={isOpen ? tooltipId : undefined}
+      data-testid={`executor-stat-${id}`}
+    >
+      {children}
+    </button>
+  );
+}
 
 interface ExecutorStatusBarProps {
   /** Task list (shared with the board to keep counts in sync) */
@@ -112,14 +151,16 @@ function getStateDisplay(state: ExecutorState, t: TFunction<"app">): { label: st
 export function ExecutorStatusBar({ tasks, projectId, taskStuckTimeoutMs, staleHighFanoutBlockerAgeThresholdMs, backgroundSessions, backgroundGenerating, backgroundNeedsInput, onOpenBackgroundSession, onDismissBackgroundSession, lastFetchTimeMs, currentProjectPath, onOpenProjectDirectory, keyboardOpen, hideWhenKeyboardOpen, onToggleTerminal, onOpenScripts, onRunScript, quickChatButtonMode = "off", onOpenQuickChat }: ExecutorStatusBarProps) {
   const { t } = useTranslation("app");
   const viewportMode = useViewportMode();
-  const showTerminalLauncher = viewportMode !== "mobile" && Boolean(onToggleTerminal);
+  const isMobile = viewportMode === "mobile";
+  const showTerminalLauncher = !isMobile && Boolean(onToggleTerminal);
   /*
    * FNXC:ChatLauncher 2026-06-22-15:18:
    * Settings can route Quick Chat to a footer launcher beside Terminal, keep the draggable floating FAB, or hide the launcher entirely. Footer launch stays desktop/tablet-only like Terminal while mobile opens from the floating path as a full-screen modal.
    */
-  const showQuickChatFooterLauncher = viewportMode !== "mobile" && quickChatButtonMode === "footer" && Boolean(onOpenQuickChat);
+  const showQuickChatFooterLauncher = !isMobile && quickChatButtonMode === "footer" && Boolean(onOpenQuickChat);
   const { stats, loading, error } = useExecutorStats(tasks, projectId, taskStuckTimeoutMs, lastFetchTimeMs);
   const [isProjectPathVisible, setIsProjectPathVisible] = useState(false);
+  const [openStatTooltip, setOpenStatTooltip] = useState<OpenStatTooltip | null>(null);
   const engineControlMenuRef = useRef<EngineControlMenuHandle>(null);
   const hasRenderedPopulatedStatsRef = useRef(false);
 
@@ -128,6 +169,49 @@ export function ExecutorStatusBar({ tasks, projectId, taskStuckTimeoutMs, staleH
       hasRenderedPopulatedStatsRef.current = true;
     }
   }, [error, loading]);
+
+  /*
+   * FNXC:MobileFooter 2026-07-16-00:00:
+   * Mobile hides footer stat labels, so tapping a stat must reveal its name. The
+   * executor-status-bar--mobile class and this interaction share isMobile so
+   * short-landscape phones cannot expose both labels and tap controls. The
+   * popover is portaled below to escape the footer's overflow clipping.
+   */
+  useEffect(() => {
+    if (!isMobile || !openStatTooltip) return;
+
+    const dismissTooltip = () => setOpenStatTooltip(null);
+    const dismissOnPointerDown = (event: PointerEvent) => {
+      if (event.target instanceof Element && event.target.closest(".executor-status-bar__segment--stat")) return;
+      dismissTooltip();
+    };
+    const dismissOnFocus = (event: FocusEvent) => {
+      if (event.target instanceof Element && event.target.closest(".executor-status-bar__segment--stat")) return;
+      dismissTooltip();
+    };
+    const dismissOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") dismissTooltip();
+    };
+
+    document.addEventListener("pointerdown", dismissOnPointerDown);
+    document.addEventListener("focusin", dismissOnFocus);
+    document.addEventListener("keydown", dismissOnEscape);
+    window.addEventListener("scroll", dismissTooltip, true);
+    return () => {
+      document.removeEventListener("pointerdown", dismissOnPointerDown);
+      document.removeEventListener("focusin", dismissOnFocus);
+      document.removeEventListener("keydown", dismissOnEscape);
+      window.removeEventListener("scroll", dismissTooltip, true);
+    };
+  }, [isMobile, openStatTooltip]);
+
+  useEffect(() => {
+    if (!isMobile) setOpenStatTooltip(null);
+  }, [isMobile]);
+
+  const toggleStatTooltip = (id: FooterStatId, label: string, rect: DOMRect) => {
+    setOpenStatTooltip((current) => current?.id === id ? null : { id, label, rect });
+  };
 
   const stateDisplay = useMemo(() => getStateDisplay(stats.executorState, t), [stats.executorState, t]);
 
@@ -194,7 +278,7 @@ export function ExecutorStatusBar({ tasks, projectId, taskStuckTimeoutMs, staleH
 
   return (
     <div
-      className={`executor-status-bar ${stats.executorState === "running" ? "executor-status-bar--running" : ""}${keyboardOpen ? " executor-status-bar--keyboard-open" : ""}`}
+      className={`executor-status-bar${isMobile ? " executor-status-bar--mobile" : ""}${stats.executorState === "running" ? " executor-status-bar--running" : ""}${keyboardOpen ? " executor-status-bar--keyboard-open" : ""}`}
       role="status"
       aria-label={t("executor.status", "Executor status")}
     >
@@ -213,17 +297,29 @@ export function ExecutorStatusBar({ tasks, projectId, taskStuckTimeoutMs, staleH
       )}
 
       {/* Queued tasks */}
-      <div className="executor-status-bar__segment">
+      <MobileStatSegment
+        id="queued"
+        isMobile={isMobile}
+        isOpen={openStatTooltip?.id === "queued"}
+        label={t("executor.queued", "Queued")}
+        onToggle={toggleStatTooltip}
+      >
         <span className="executor-status-bar__indicator executor-status-bar__indicator--queued" aria-hidden="true" />
         <span className="executor-status-bar__label">{t("executor.queued", "Queued")}</span>
         <span className="executor-status-bar__count">{stats.queuedTaskCount}</span>
-      </div>
+      </MobileStatSegment>
 
       {/* Separator */}
       <span className="executor-status-bar__divider" aria-hidden="true" />
 
       {/* Running tasks */}
-      <div className="executor-status-bar__segment">
+      <MobileStatSegment
+        id="running"
+        isMobile={isMobile}
+        isOpen={openStatTooltip?.id === "running"}
+        label={t("executor.running", "Running")}
+        onToggle={toggleStatTooltip}
+      >
         <span
           className={`executor-status-bar__indicator executor-status-bar__indicator--running ${stats.runningTaskCount > 0 ? "executor-status-bar__indicator--active" : ""}`}
           aria-hidden="true"
@@ -232,7 +328,7 @@ export function ExecutorStatusBar({ tasks, projectId, taskStuckTimeoutMs, staleH
         <span className="executor-status-bar__count">{stats.runningTaskCount}</span>
         <span className="executor-status-bar__separator" aria-hidden="true">/</span>
         <span className="executor-status-bar__max">{stats.maxConcurrent}</span>
-      </div>
+      </MobileStatSegment>
 
       {/* Separator */}
       <span className="executor-status-bar__divider" aria-hidden="true" />
@@ -240,17 +336,30 @@ export function ExecutorStatusBar({ tasks, projectId, taskStuckTimeoutMs, staleH
       {/* Stuck tasks */}
       {stats.stuckTaskCount > 0 && (
         <>
-          <div className="executor-status-bar__segment executor-status-bar__segment--stuck">
+          <MobileStatSegment
+            className="executor-status-bar__segment--stuck"
+            id="stuck"
+            isMobile={isMobile}
+            isOpen={openStatTooltip?.id === "stuck"}
+            label={t("executor.stuck", "Stuck")}
+            onToggle={toggleStatTooltip}
+          >
             <span className="executor-status-bar__indicator executor-status-bar__indicator--stuck executor-status-bar__indicator--active" aria-hidden="true" />
             <span className="executor-status-bar__label">{t("executor.stuck", "Stuck")}</span>
             <span className="executor-status-bar__count executor-status-bar__count--error">{stats.stuckTaskCount}</span>
-          </div>
+          </MobileStatSegment>
           <span className="executor-status-bar__divider" aria-hidden="true" />
         </>
       )}
 
       {/* Blocked tasks */}
-      <div className="executor-status-bar__segment">
+      <MobileStatSegment
+        id="blocked"
+        isMobile={isMobile}
+        isOpen={openStatTooltip?.id === "blocked"}
+        label={t("executor.blocked", "Blocked")}
+        onToggle={toggleStatTooltip}
+      >
         <span
           className={`executor-status-bar__indicator executor-status-bar__indicator--blocked ${stats.blockedTaskCount > 0 ? "executor-status-bar__indicator--active" : ""}`}
           aria-hidden="true"
@@ -259,22 +368,35 @@ export function ExecutorStatusBar({ tasks, projectId, taskStuckTimeoutMs, staleH
         <span className={`executor-status-bar__count ${stats.blockedTaskCount > 0 ? "executor-status-bar__count--warning" : ""}`}>
           {stats.blockedTaskCount}
         </span>
-      </div>
+      </MobileStatSegment>
 
       {/* Separator */}
       <span className="executor-status-bar__divider" aria-hidden="true" />
 
       {/* In review count */}
-      <div className="executor-status-bar__segment">
+      <MobileStatSegment
+        id="review"
+        isMobile={isMobile}
+        isOpen={openStatTooltip?.id === "review"}
+        label={t("executor.inReview", "In Review")}
+        onToggle={toggleStatTooltip}
+      >
         <span className="executor-status-bar__indicator executor-status-bar__indicator--review" aria-hidden="true" />
         <span className="executor-status-bar__label">{t("executor.inReview", "In Review")}</span>
         <span className="executor-status-bar__count">{stats.inReviewCount}</span>
-      </div>
+      </MobileStatSegment>
 
       {highestOverlapBlocker && (
         <>
           <span className="executor-status-bar__divider" aria-hidden="true" />
-          <div className="executor-status-bar__segment executor-status-bar__segment--fanout">
+          <MobileStatSegment
+            className="executor-status-bar__segment--fanout"
+            id="fanout"
+            isMobile={isMobile}
+            isOpen={openStatTooltip?.id === "fanout"}
+            label={t("executor.overlapQueue", "Overlap queue")}
+            onToggle={toggleStatTooltip}
+          >
             <span className="executor-status-bar__indicator executor-status-bar__indicator--fanout executor-status-bar__indicator--active" aria-hidden="true" />
             <span className="executor-status-bar__label">{t("executor.overlapQueue", "Overlap queue")}</span>
             <span
@@ -289,7 +411,7 @@ export function ExecutorStatusBar({ tasks, projectId, taskStuckTimeoutMs, staleH
             >
               {t("executor.overlapSummary", "{{blockerId}} · {{count}} todo", { blockerId: highestOverlapBlocker.blockerId, count: highestOverlapBlocker.entry.overlapBlockedTodoCount })}{highestOverlapBlocker.entry.escalation ? t("executor.escalatedSuffix", " (escalated)") : ""}
             </span>
-          </div>
+          </MobileStatSegment>
         </>
       )}
 
@@ -319,6 +441,18 @@ export function ExecutorStatusBar({ tasks, projectId, taskStuckTimeoutMs, staleH
             )}
           </div>
         </>
+      )}
+
+      {openStatTooltip && typeof document !== "undefined" && createPortal(
+        <div
+          id={`executor-status-bar-tooltip-${openStatTooltip.id}`}
+          className="executor-status-bar__stat-tooltip"
+          role="tooltip"
+          style={{ left: openStatTooltip.rect.left + openStatTooltip.rect.width / 2, top: openStatTooltip.rect.top }}
+        >
+          {openStatTooltip.label}
+        </div>,
+        document.body,
       )}
 
       {/* Spacer */}
