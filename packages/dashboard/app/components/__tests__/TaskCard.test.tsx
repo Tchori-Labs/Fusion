@@ -292,8 +292,9 @@ describe("TaskCard", () => {
   });
 
   it("repaints the memoized card when plannerOverseerState changes, and renders nothing when absent", () => {
-    const idleTask = makeTask({ plannerOverseerState: undefined });
+    const idleTask = makeTask({ plannerOversightLevel: "autonomous", plannerOverseerState: undefined });
     const watchingTask = makeTask({
+      plannerOversightLevel: "autonomous",
       plannerOverseerState: {
         state: "watching",
         oversightLevel: "autonomous",
@@ -370,6 +371,7 @@ describe("TaskCard", () => {
   it("explains an in-review awaiting-confirmation badge with a readable label and a reason-bearing tooltip", () => {
     const task = makeTask({
       column: "in-review",
+      plannerOversightLevel: "autonomous",
       plannerOverseerState: {
         state: "awaiting-confirmation",
         oversightLevel: "autonomous",
@@ -403,6 +405,7 @@ describe("TaskCard", () => {
   it("renders readable labels for in-progress watching and recovering overseer states", () => {
     const watchingTask = makeTask({
       column: "in-progress",
+      plannerOversightLevel: "autonomous",
       plannerOverseerState: {
         state: "watching",
         oversightLevel: "autonomous",
@@ -426,6 +429,7 @@ describe("TaskCard", () => {
 
     const recoveringTask = makeTask({
       column: "in-progress",
+      plannerOversightLevel: "autonomous",
       plannerOverseerState: {
         state: "recovering",
         oversightLevel: "autonomous",
