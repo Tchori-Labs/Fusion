@@ -2283,6 +2283,79 @@ describe("MailboxView", () => {
   });
 
   describe("mobile layout CSS regressions", () => {
+    it("adds the runtime mobile layout gate only in mobile mode", async () => {
+      mockFetchInbox.mockResolvedValue(makeInboxResponse([], 0));
+      mockUseViewportMode.mockReturnValue("mobile");
+
+      const { unmount } = render(<MailboxView {...defaultProps} />);
+      expect(await screen.findByTestId("mailbox-view")).toHaveClass("mailbox-view--mobile");
+      unmount();
+
+      mockUseViewportMode.mockReturnValue("desktop");
+      render(<MailboxView {...defaultProps} />);
+      expect(await screen.findByTestId("mailbox-view")).not.toHaveClass("mailbox-view--mobile");
+    });
+
+    it("defines class-gated, compact single-row mailbox mobile layout rules", () => {
+      const css = loadAllAppCss();
+
+      expect(css).toMatch(/\.mailbox-view--mobile\s+\.view-header\s*\{[^}]*flex-wrap:\s*wrap;[^}]*\}/);
+      expect(css).toMatch(/\.mailbox-view--mobile\s+\.view-header__actions\s*\{[^}]*flex:\s*1\s+1\s+100%;[^}]*min-width:\s*0;[^}]*flex-wrap:\s*nowrap;[^}]*margin-left:\s*0;[^}]*\}/);
+      expect(css).toMatch(/\.mailbox-view--mobile\s+\.mailbox-tabs\s*\{[^}]*flex-wrap:\s*nowrap;[^}]*overflow-x:\s*auto;[^}]*\}/);
+      expect(css).toMatch(/\.mailbox-view--mobile\s+\.mailbox-tab\s*\{[^}]*min-width:\s*0;[^}]*flex:\s*1\s+1\s+0;[^}]*flex-shrink:\s*1;[^}]*\}/);
+      expect(css).toMatch(/\.mailbox-view--mobile\s+\.mailbox-message-detail-header\s*\{[^}]*flex-direction:\s*row;[^}]*flex-wrap:\s*nowrap;[^}]*\}/);
+      expect(css).toMatch(/\.mailbox-view--mobile\s+\.mailbox-message-detail-actions\s*\{[^}]*flex-wrap:\s*nowrap;[^}]*\}/);
+      // The later width-query block must not override the runtime compact tab/detail rules on phones.
+      expect(css).toMatch(/\.mailbox-view:not\(\.mailbox-view--mobile\)\s+\.mailbox-tab\s*\{[^}]*flex-shrink:\s*0;[^}]*\}/);
+      expect(css).toMatch(/\.mailbox-view:not\(\.mailbox-view--mobile\)\s+\.mailbox-message-detail-header\s*\{[^}]*flex-direction:\s*column;[^}]*\}/);
+      expect(css).toMatch(/\.mailbox-view:not\(\.mailbox-view--mobile\)\s+\.mailbox-message-detail-actions\s*\{[^}]*flex-wrap:\s*wrap;[^}]*\}/);
+
+      // The runtime class, not a height or pointer media proxy, is the only FN-8238 gate.
+      expect(css).not.toMatch(/@media\s*\([^)]*(?:max-height:\s*480px|pointer:\s*coarse)[^)]*\)\s*\{[\s\S]*?\.mailbox-view--mobile/);
+    });
+
+    it("keeps system and agent message actions on the mobile detail row", async () => {
+      mockUseViewportMode.mockReturnValue("mobile");
+      const systemMessage: Message = {
+        ...mockMessage,
+        id: "msg-system",
+        fromId: "system",
+        fromType: "system",
+        type: "system",
+      };
+      mockFetchInbox.mockResolvedValue(makeInboxResponse([systemMessage], 0));
+      mockFetchConversation.mockResolvedValue([systemMessage]);
+
+      const { unmount } = render(<MailboxView {...defaultProps} />);
+      await screen.findByTestId("mailbox-item-msg-system");
+      fireEvent.click(screen.getByTestId("mailbox-item-msg-system"));
+      await screen.findByTestId("mailbox-message-detail");
+      expect(screen.getByTestId("mailbox-delete")).toBeInTheDocument();
+      expect(screen.queryByTestId("mailbox-reply")).toBeNull();
+      unmount();
+
+      mockFetchInbox.mockResolvedValue(makeInboxResponse([mockMessage], 0));
+      mockFetchConversation.mockResolvedValue([mockMessage]);
+      render(<MailboxView {...defaultProps} />);
+      await screen.findByTestId("mailbox-item-msg-001");
+      fireEvent.click(screen.getByTestId("mailbox-item-msg-001"));
+      await screen.findByTestId("mailbox-message-detail");
+      expect(screen.getByTestId("mailbox-reply")).toBeInTheDocument();
+      expect(screen.getByTestId("mailbox-delete")).toBeInTheDocument();
+    });
+
+    it("renders every unread Inbox header action together in mobile mode", async () => {
+      mockUseViewportMode.mockReturnValue("mobile");
+      mockFetchInbox.mockResolvedValue(makeInboxResponse([mockMessage], 1));
+
+      render(<MailboxView {...defaultProps} />);
+
+      expect(await screen.findByTestId("mailbox-unread-badge")).toBeInTheDocument();
+      expect(screen.getByTestId("mailbox-header-compose")).toBeInTheDocument();
+      expect(screen.getByTestId("mailbox-mark-all-read")).toBeInTheDocument();
+      expect(screen.getByTestId("mailbox-refresh")).toBeInTheDocument();
+    });
+
     it("defines .mailbox-view base flex layout with min-height: 0", async () => {
       const fs = await import("fs");
       const path = await import("path");

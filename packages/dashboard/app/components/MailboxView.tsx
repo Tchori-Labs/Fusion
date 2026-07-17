@@ -1348,8 +1348,18 @@ export function MailboxView({
     );
   };
 
+  /*
+  FNXC:MailboxMobile 2026-07-17-13:43:
+  FN-8238 gates the full-page mailbox's compact mobile layout on this class, mirroring
+  isMobileViewport() exactly. CSS media or pointer queries cannot read the runtime
+  physical-screen and visualViewport signals that determine the mobile classification.
+  */
   return (
-    <div className="mailbox-view" style={containerKeyboardStyle} data-testid="mailbox-view">
+    <div
+      className={`mailbox-view${isMobile ? " mailbox-view--mobile" : ""}`}
+      style={containerKeyboardStyle}
+      data-testid="mailbox-view"
+    >
       {/*
       FNXC:Navigation 2026-06-22-01:10:
       Mailbox adopts the shared ViewHeader (Command Center-modeled) for a consistent main-content title row. The unread count badge stays beside the title (preserving the mailbox-unread-badge test id), and Compose / Mark-all-read / Refresh controls move into the header actions cluster so they keep working. Tabs remain below the header as their own row.
