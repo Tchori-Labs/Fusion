@@ -333,22 +333,19 @@ FN-8077 removed routes-system.test.ts from this list and the ledger in lockstep.
 */
 const quarantinedDashboardTests: string[] = [
   /*
-  FNXC:DashboardTests 2026-07-16-12:25:
-  RuntimeFallbackBadge hang was a toast-context identity loop (PR #2229); component
-  now depends on stable addToast. File re-admitted. Oversight-mobile focus flake
-  quarantined on sight (ledger lockstep) instead of it.skip source skips.
+  FNXC:DashboardTestQuarantine 2026-07-17-16:50:
+  FN-8245 re-admits all three UI files with their ledger rows removed in lockstep.
+  QuickEntryBox restores focus from its resolved submit path while isolated jsdom
+  globals prevent cross-file focus leakage; PlanningModeModal stream doubles use
+  deterministic microtasks instead of wall-clock timers; and the oversight menu
+  focuses its first button after the opening frame, never the native select.
   */
-  "app/components/__tests__/TaskDetailModal.oversight-mobile.test.tsx",
-  "app/components/__tests__/PlanningModeModal.planning-flow.test.tsx",
-  "app/components/__tests__/QuickEntryBox.test.tsx",
   /*
   FNXC:DashboardTests 2026-07-17-22:10:
   FN-8240 verified the 18 VAL-REMOVAL-005 dashboard API tests on their PG-backed
   async-store or applicable mock/non-store contracts. Remove their ledger/exclude
   pairs so dashboard-api-quality-backfill collects the restored coverage.
   */
-  // FNXC:DashboardTests 2026-07-17-06:35: inventory + ledger lockstep — build-only dist assert not in quality projects.
-  "src/__tests__/plugin-registry-dist.test.ts",
 ];
 
 const qualityApiTests = [
@@ -395,9 +392,12 @@ const qualityAppBackfillTests = ["app/**/*.test.{ts,tsx}"];
 
 const backfillApiExclude = [
   ...qualityApiTests,
-  // FNXC:DashboardDistArtifacts 2026-07-16-08:20: plugin-registry-dist asserts
-  // emitted server files and runs through the explicit test:build command after
-  // its dist bootstrap, rather than adding a full build to API backfill shards.
+  /*
+  FNXC:DashboardDistArtifacts 2026-07-17-15:10:
+  FN-8245 reclassified plugin-registry-dist as a curated skip-list build-only
+  assertion, not a flake. Keep this lane exclusion: test:build supplies its
+  required emitted dist artifact without making every API backfill shard build.
+  */
   "src/__tests__/plugin-registry-dist.test.ts",
   ...skipListDashboardGlobs.filter((file) => file.startsWith("src/")),
 ];

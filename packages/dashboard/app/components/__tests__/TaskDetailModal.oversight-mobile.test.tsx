@@ -407,12 +407,13 @@ describe("TaskDetailModal oversight controls — mobile overflow menu", () => {
   (level-only) state.
   */
   /*
-  FNXC:DashboardTests 2026-07-16-12:25:
-  Focus assertion can flake under concurrent quality load (activeElement never becomes nudge).
-  Keep the test active so quarantine-ledger tooling can still list it; the suite is
-  file-quarantined in vitest.config + test-quarantine.json rather than source-skipped.
+  FNXC:PlannerOversight 2026-07-17-15:58:
+  FN-8245 asserts the invariant against the actual first actionable menu item,
+  including the session-advisor toggle that precedes Nudge. This replaces the
+  stale Nudge-specific expectation without weakening the select-focus guard.
   */
-  it("auto-focuses the first button menuitem (never the native select) when nudge/stop/explain are available", async () => {
+  it.each([["mobile", MOBILE_WIDTH], ["desktop", DESKTOP_WIDTH]] as const)("auto-focuses the first actionable button menuitem (never the native select) at %s width", async (_viewport, width) => {
+    setViewportWidth(width);
     render(
       <TaskDetailModal
         task={makeTask({ id: "FN-213", column: "in-progress", plannerOversightLevel: "autonomous", plannerOverseerState: activeSnapshot })}
@@ -429,10 +430,11 @@ describe("TaskDetailModal oversight controls — mobile overflow menu", () => {
     fireEvent.click(trigger);
 
     const select = await screen.findByTestId("detail-oversight-level-select");
-    const nudgeBtn = await screen.findByTestId("detail-overseer-nudge");
+    const firstAction = await screen.findByTestId("detail-session-advisor-toggle");
+    await screen.findByTestId("detail-overseer-nudge");
 
     await waitFor(() => {
-      expect(document.activeElement).toBe(nudgeBtn);
+      expect(document.activeElement).toBe(firstAction);
     });
     expect(document.activeElement).not.toBe(select);
 
@@ -442,7 +444,8 @@ describe("TaskDetailModal oversight controls — mobile overflow menu", () => {
     expect(screen.getAllByRole("menu")).toHaveLength(1);
   });
 
-  it("does not fall back to focusing the native select when oversight is off and only the level control renders", async () => {
+  it.each([["mobile", MOBILE_WIDTH], ["desktop", DESKTOP_WIDTH]] as const)("does not fall back to focusing the native select when oversight is off and only the level control renders at %s width", async (_viewport, width) => {
+    setViewportWidth(width);
     render(
       <TaskDetailModal
         task={makeTask({ id: "FN-214", column: "todo", plannerOversightLevel: "off" })}
