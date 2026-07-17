@@ -56,6 +56,74 @@ pgDescribe("refineTask / duplicateTask backend mode (PostgreSQL)", () => {
     }
   });
 
+  /*
+   * FNXC:WorkflowOptionalSteps 2026-07-16-00:00:
+   * FN-8188 requires refinements to use the same project-default optional-group
+   * seed and persisted selection as createTask, including empty and absent defaults.
+   */
+  it("refineTask inherits default-on workflow groups and selection like createTask", async () => {
+    const h = await makeHarness();
+    try {
+      await h.store.setDefaultWorkflowId("builtin:coding");
+      const source = await h.store.createTask({
+        title: "Completed source",
+        description: "Original completed work",
+        column: "done",
+      });
+      const control = await h.store.createTask({ description: "Fresh control task" });
+
+      const refined = await h.store.refineTask(source.id, "Please add stronger review coverage");
+
+      expect((await h.store.getTask(control.id)).enabledWorkflowSteps).toEqual(["plan-review", "code-review"]);
+      expect((await h.store.getTask(refined.id)).enabledWorkflowSteps).toEqual(["plan-review", "code-review"]);
+      expect(await h.store.getTaskWorkflowSelectionAsync(refined.id)).toEqual({
+        workflowId: "builtin:coding",
+        stepIds: ["plan-review", "code-review"],
+      });
+    } finally {
+      await teardown();
+    }
+  });
+
+  it("refineTask persists empty default workflow groups and tolerates no default workflow", async () => {
+    const h = await makeHarness();
+    try {
+      await h.store.setDefaultWorkflowId("builtin:marketing");
+      const marketingSource = await h.store.createTask({
+        title: "Marketing source",
+        description: "Completed marketing work",
+        column: "done",
+      });
+      const marketingRefinement = await h.store.refineTask(marketingSource.id, "Update the campaign copy");
+
+      expect((await h.store.getTask(marketingRefinement.id)).enabledWorkflowSteps).toEqual([]);
+      expect(await h.store.getTaskWorkflowSelectionAsync(marketingRefinement.id)).toEqual({
+        workflowId: "builtin:marketing",
+        stepIds: [],
+      });
+
+      await h.store.setDefaultWorkflowId(null);
+      const noDefaultSource = await h.store.createTask({
+        title: "No-default source",
+        description: "Completed work without a configured workflow",
+        column: "done",
+      });
+      const noDefaultControl = await h.store.createTask({ description: "Fresh task without a configured workflow" });
+      const noDefaultRefinement = await h.store.refineTask(noDefaultSource.id, "Tighten the final copy");
+
+      // FNXC:WorkflowOptionalSteps 2026-07-16-00:00: PostgreSQL normalizes omitted
+      // JSONB enabled_workflow_steps to [] for both creation paths, while the fresh
+      // refinement object retains the unset field when no default is configured.
+      expect(noDefaultRefinement.enabledWorkflowSteps).toBeUndefined();
+      expect((await h.store.getTask(noDefaultRefinement.id)).enabledWorkflowSteps).toEqual(
+        (await h.store.getTask(noDefaultControl.id)).enabledWorkflowSteps,
+      );
+      expect(await h.store.getTaskWorkflowSelectionAsync(noDefaultRefinement.id)).toBeUndefined();
+    } finally {
+      await teardown();
+    }
+  });
+
   it("refineTask works for an in-review source task in backend mode", async () => {
     const h = await makeHarness();
     try {
