@@ -32,7 +32,7 @@ import { runPluginSchemaInitHooks, DEFAULT_PLUGIN_SCHEMA_INIT_HOOKS, type Plugin
 FNXC:GitHubImportTranslate 2026-07-17-23:48:
 Advances to 0019 for the import-translation legacy-partition backfill. Per-migration identities above stay fixed; only this latest-version marker moves.
 */
-export const SCHEMA_BASELINE_VERSION = "0019";
+export const SCHEMA_BASELINE_VERSION = "0020";
 const INITIAL_SCHEMA_VERSION = "0000";
 const AUTOMATION_ISOLATION_SCHEMA_VERSION = "0001";
 const ANALYTICS_ISOLATION_SCHEMA_VERSION = "0002";
@@ -103,6 +103,8 @@ export const TASK_MERGER_MODEL_LANE_VERSION = "0017";
  * TaskStore SELECT. Keep this identity fixed when SCHEMA_BASELINE_VERSION advances.
  */
 export const BULK_COMPLETION_REFUSAL_AT_VERSION = "0018";
+/** FNXC:EphemeralAgentTaskCreation 2026-07-30-12:00: durable project-scoped proposal key/index protects task creation across crash and reclaim races. */
+export const TASK_PROPOSAL_CLAIM_VERSION = "0020";
 
 /** Bookkeeping table for the fresh Drizzle migration history. */
 export const MIGRATION_BOOKKEEPING_TABLE = "fusion_schema_migrations";
@@ -209,6 +211,7 @@ const GLOBAL_ROUTINES_MIGRATION_PATH = join(
 );
 const TASK_MERGER_MODEL_LANE_MIGRATION_PATH = join(MIGRATIONS_DIR, "0017_task_merger_model_lane.sql");
 const BULK_COMPLETION_REFUSAL_AT_MIGRATION_PATH = join(MIGRATIONS_DIR, "0018_bulk_completion_refusal_at.sql");
+const TASK_PROPOSAL_CLAIM_MIGRATION_PATH = join(MIGRATIONS_DIR, "0020_task_proposal_claim.sql");
 
 /**
  * Ensure the migration bookkeeping table exists. Lives in the public schema so
@@ -297,6 +300,7 @@ export async function applySchemaBaseline(
     const globalRoutinesAlreadyApplied = applied.includes(GLOBAL_ROUTINES_SCHEMA_VERSION);
     const taskMergerModelLaneAlreadyApplied = applied.includes(TASK_MERGER_MODEL_LANE_VERSION);
     const bulkCompletionRefusalAtAlreadyApplied = applied.includes(BULK_COMPLETION_REFUSAL_AT_VERSION);
+    const taskProposalClaimAlreadyApplied = applied.includes(TASK_PROPOSAL_CLAIM_VERSION);
     let schemaChanged = false;
 
     if (!baselineAlreadyApplied) {
@@ -610,6 +614,13 @@ export async function applySchemaBaseline(
       await tx.execute(
         sql`INSERT INTO public.${sql.identifier(MIGRATION_BOOKKEEPING_TABLE)} (version) VALUES (${BULK_COMPLETION_REFUSAL_AT_VERSION}) ON CONFLICT (version) DO NOTHING`,
       );
+      schemaChanged = true;
+    }
+
+    if (!taskProposalClaimAlreadyApplied) {
+      const migrationSql = await readFile(TASK_PROPOSAL_CLAIM_MIGRATION_PATH, "utf8");
+      await tx.execute(sql.raw(migrationSql));
+      await tx.execute(sql`INSERT INTO public.${sql.identifier(MIGRATION_BOOKKEEPING_TABLE)} (version) VALUES (${TASK_PROPOSAL_CLAIM_VERSION}) ON CONFLICT (version) DO NOTHING`);
       schemaChanged = true;
     }
 

@@ -39,6 +39,7 @@ import {
 } from "../api";
 import { MailboxMessageContent } from "./MailboxMessageContent";
 import { MailboxArtifactAttachment } from "./MailboxArtifactAttachment";
+import { MailboxTaskProposal } from "./MailboxTaskProposal";
 import { MessageComposer } from "./MessageComposer";
 import { ViewHeader } from "./ViewHeader";
 import { WorktrunkInstallApprovalDetails } from "./WorktrunkInstallApprovalDetails";
@@ -584,6 +585,7 @@ export function MailboxView({
         "message:received": onMailboxUpdate,
         "message:read": onMailboxUpdate,
         "message:deleted": onMailboxUpdate,
+        "message:updated": onMailboxUpdate,
         "approval:requested": onMailboxUpdate,
         "approval:updated": onMailboxUpdate,
         "approval:decided": onMailboxUpdate,
@@ -950,6 +952,7 @@ export function MailboxView({
                     taskId={msg.metadata?.taskId}
                     onOpenTask={onOpenTask}
                   />
+                  <MailboxTaskProposal messageId={msg.id} metadata={msg.metadata} projectId={projectId} onOpenTask={onOpenTask} />
                 </div>
               );
             })}
@@ -976,6 +979,7 @@ export function MailboxView({
               taskId={selectedMessage.metadata?.taskId}
               onOpenTask={onOpenTask}
             />
+            <MailboxTaskProposal messageId={selectedMessage.id} metadata={selectedMessage.metadata} projectId={projectId} onOpenTask={onOpenTask} />
           </>
         )}
       </div>

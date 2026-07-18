@@ -9,7 +9,7 @@
 
 import { appendFile, mkdir, readFile, readdir, realpath, stat, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import * as fusionCore from "@fusion/core";
@@ -937,6 +937,9 @@ type AgentTaskCreationOptions = {
   Set true when fn_task_create is registered for an ephemeral/runtime task-worker session (executor-FN-XXXX). The tool then honors the project `ephemeralAgentsCanCreateTasks` toggle and rejects creation when it is disabled. Permanent-agent sessions leave this unset and are never gated.
   */
   callerIsEphemeral?: boolean;
+  messageStore?: MessageStore;
+  sourceAgentId?: string;
+  sourceTaskId?: string;
 };
 
 /*
@@ -1083,14 +1086,23 @@ export function createTaskCreateTool(
           const settings = typeof (store as { getSettings?: unknown }).getSettings === "function"
             ? await store.getSettings().catch(() => ({} as Settings))
             : ({} as Settings);
-          if ((settings as Settings).ephemeralAgentsCanCreateTasks === false) {
-            const message =
-              "Ephemeral task-worker agents are not allowed to create tasks (ephemeralAgentsCanCreateTasks is disabled for this project).";
-            return {
-              content: [{ type: "text" as const, text: `ERROR: ${message}` }],
-              details: { error: message, rule: "ephemeral-agents-cannot-create-tasks" },
-              isError: true,
-            };
+          const policy = fusionCore.resolveEphemeralTaskCreationPolicy(settings as Settings);
+          if (policy === "deny") {
+            const message = "Ephemeral task-worker agents are not allowed to create tasks (ephemeral agent task creation is denied for this project).";
+            return { content: [{ type: "text" as const, text: `ERROR: ${message}` }], details: { error: message, rule: "ephemeral-agents-cannot-create-tasks" }, isError: true };
+          }
+          if (policy === "upon_validation") {
+            if (!options.messageStore) {
+              const message = "Task proposal validation is configured but the mailbox is unavailable; no task was created.";
+              return { content: [{ type: "text" as const, text: `ERROR: ${message}` }], details: { error: message, rule: "ephemeral-agents-cannot-create-tasks" }, isError: true };
+            }
+            const title = params.description.split(/\r?\n/, 1)[0]?.trim().slice(0, 80) || "Follow-up task";
+            await options.messageStore.sendMessage({
+              fromId: options.sourceAgentId ?? provenance?.sourceAgentId ?? "ephemeral-worker", fromType: "agent", toId: DASHBOARD_USER_ID, toType: "user", type: "agent-to-user",
+              content: `Task proposal awaiting validation: ${title}`,
+              metadata: { kind: "task-proposal", proposalStatus: "pending", proposalIdempotencyKey: randomUUID(), taskId: options.sourceTaskId, proposedTask: { title, description: params.description, priority: params.priority, workflowId: params.workflow_id, dependencies: params.dependencies } },
+            });
+            return { content: [{ type: "text" as const, text: "Task proposal submitted to the operator for validation; no task was created." }], details: { proposed: true } };
           }
         }
         const workflowId = params.workflow_id?.trim() || undefined;

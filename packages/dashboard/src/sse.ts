@@ -265,6 +265,7 @@ export type MessageSseEventType =
   | "message:sent"
   | "message:received"
   | "message:read"
+  | "message:updated"
   | "message:deleted";
 
 export type ApprovalSseEventType = "approval:requested" | "approval:updated" | "approval:decided";
@@ -769,6 +770,10 @@ export function createSSE(
       send(`event: message:read\ndata: ${JSON.stringify(message)}\n\n`);
     };
 
+    const onMessageUpdated = (message: unknown) => {
+      send(`event: message:updated\ndata: ${JSON.stringify(message)}\n\n`);
+    };
+
     const onMessageDeleted = (messageId: string) => {
       send(`event: message:deleted\ndata: ${JSON.stringify({ id: messageId })}\n\n`);
     };
@@ -951,6 +956,7 @@ export function createSSE(
         messageStore.off("message:sent", onMessageSent);
         messageStore.off("message:received", onMessageReceived);
         messageStore.off("message:read", onMessageRead);
+        messageStore.off("message:updated", onMessageUpdated);
         messageStore.off("message:deleted", onMessageDeleted);
       }
       approvalSseListeners.delete(onApprovalEvent);
@@ -1072,6 +1078,7 @@ export function createSSE(
       messageStore.on("message:sent", onMessageSent);
       messageStore.on("message:received", onMessageReceived);
       messageStore.on("message:read", onMessageRead);
+      messageStore.on("message:updated", onMessageUpdated);
       messageStore.on("message:deleted", onMessageDeleted);
     }
 

@@ -112,7 +112,9 @@ CREATE TABLE IF NOT EXISTS tasks (
   deletedAt TEXT,
   createdAt TEXT NOT NULL,
   updatedAt TEXT NOT NULL,
-  projectId TEXT
+  projectId TEXT,
+  -- FNXC:EphemeralAgentTaskCreation 2026-07-30-16:00: legacy SQLite cutover sources preserve the durable proposal key so a migrated task remains the idempotency anchor.
+  proposalClaimId TEXT
 );
 `;
 
@@ -1661,6 +1663,12 @@ pgDescribe("SQLite-to-PostgreSQL migrator", () => {
 
   // VAL-MIGRATE-003 — JSON column fidelity
   it("round-trips JSON columns with identical shape (text-JSON → jsonb)", async () => {
+    const legacy = new DatabaseSync(join(ctx!.fusionDir, "fusion.db"));
+    try {
+      legacy.prepare("UPDATE tasks SET proposalClaimId = ? WHERE id = ?").run("legacy-proposal-claim", "FN-100");
+    } finally {
+      legacy.close();
+    }
     await migrateTest(ctx!.db, [
       { sqlitePath: join(ctx!.fusionDir, "fusion.db"), pgSchema: "project" as const },
     ]);
@@ -1673,6 +1681,10 @@ pgDescribe("SQLite-to-PostgreSQL migrator", () => {
     expect(t.steps).toEqual([{ id: "s1", name: "step one" }]);
     expect(t.comments).toEqual([{ author: "agent", body: "hello" }]);
     expect(t.custom_fields).toEqual({ priority: "high", labels: ["a", "b"] });
+    const proposalClaim = (await ctx!.db.execute(sql`
+      SELECT proposal_claim_id FROM project.tasks WHERE id = 'FN-100'
+    `)) as unknown as Array<{ proposal_claim_id: string | null }>;
+    expect(proposalClaim[0].proposal_claim_id).toBe("legacy-proposal-claim");
 
     // Verify the column type is actually jsonb.
     const colInfo = (await ctx!.db.execute(sql`

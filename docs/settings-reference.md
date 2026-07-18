@@ -1710,13 +1710,15 @@ Project-scoped default permission policy for agent runtime action gates. It appl
 - Heartbeat-critical coordination/exempt tools remain non-configurable and allowed to prevent deadlocks.
 - Legacy ephemeral agents without `permissionPolicy` are not rewritten on disk; they inherit this setting when a runtime session is built.
 
-### `ephemeralAgentsCanCreateTasks`
+### `ephemeralAgentTaskCreationPolicy`
 
-Project-scoped backward-compatibility guard for ephemeral/runtime-managed task workers calling `fn_task_create`.
+Project-scoped policy for ephemeral/runtime-managed task workers calling `fn_task_create`.
 
-- Default: `true`, preserving the historical behavior that task workers can create follow-up tasks.
-- When `false`, ephemeral callers are rejected before task creation even if their unified `permissionPolicy` would otherwise allow `fn_task_create`.
-- When `true`, the unified runtime policy still applies: `defaultAgentPermissionPolicy.toolRules.fn_task_create = "block"` blocks ephemeral and permanent agents, and `"require-approval"` creates an approval request before the tool can run.
+- `allow` creates follow-up tasks immediately.
+- `upon_validation` sends a structured proposal to the operator mailbox. The operator can create the proposed task from the message; repeated requests reuse a durable proposal key so one proposal materializes at most one task.
+- `deny` rejects ephemeral follow-up creation. Permanent agents and human/dashboard callers are unaffected.
+- The setting deliberately has no materialized default. The resolver falls back to `allow`; legacy persisted `ephemeralAgentsCanCreateTasks: false` still resolves to `deny` (and legacy `true` resolves to `allow`).
+- The unified runtime policy still applies: `defaultAgentPermissionPolicy.toolRules.fn_task_create = "block"` blocks ephemeral and permanent agents, and `"require-approval"` creates an approval request before the tool can run.
 
 ## Model selection hierarchy
 

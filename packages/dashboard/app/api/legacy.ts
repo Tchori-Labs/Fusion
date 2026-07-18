@@ -8763,6 +8763,11 @@ export function sendMessage(input: SendMessageInput, projectId?: string): Promis
   });
 }
 
+/** Materialize an operator-approved task proposal exactly once. */
+export function createProposedTask(id: string, projectId?: string): Promise<{ task: import("@fusion/core").Task; proposal: Message }> {
+  return api(withProjectId(`/messages/${encodeURIComponent(id)}/create-proposed-task`, projectId), { method: "POST" });
+}
+
 /** Mark a specific message as read. */
 export function markMessageRead(id: string, projectId?: string): Promise<Message> {
   return api<Message>(withProjectId(`/messages/${encodeURIComponent(id)}/read`, projectId), {

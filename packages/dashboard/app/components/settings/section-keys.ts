@@ -65,7 +65,7 @@ const PROJECT_SECTION_KEYS: Record<string, readonly string[]> = {
     "chatRoomSummaryMaxChars",
     "completionDocumentationMode",
     "enabledBuiltinWorkflowIds",
-    "ephemeralAgentsCanCreateTasks",
+    "ephemeralAgentTaskCreationPolicy",
     "ephemeralAgentsEnabled",
     "sessionAdvisorEnabledByDefault",
     "mailAutoCleanupDays",

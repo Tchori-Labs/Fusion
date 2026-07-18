@@ -247,7 +247,7 @@ const SETTING_DESCRIPTION_KEYS: Record<string, string> = {
   chatRoomRecentVerbatimMessages: "general.numberOfMostRecentChatRoomMessagesKept",
   chatRoomSummaryMaxChars: "general.hardCapOnTheSynthesizedEarlierRoomContext",
   completionDocumentationMode: "general.workflowsOrChangelogModeWhenContributorsShouldUpdate",
-  ephemeralAgentsCanCreateTasks: "general.allowEphemeralAgentsToCreateTasksHint",
+  ephemeralAgentTaskCreationPolicy: "general.ephemeralAgentTaskCreationPolicyHint",
   ephemeralAgentsEnabled: "general.whenEnabledDefaultFusionSpawnsShortLived",
   githubLinkImportedIssuesToTracking: "general.whenEnabledImportedGitHubIssuesUseTheirSource",
   // FNXC:GitHubImportTranslate 2026-07-15-09:30: surfaced as plain rows in
@@ -288,6 +288,8 @@ const SETTING_DESCRIPTION_KEYS: Record<string, string> = {
 
 /** Setting keys intentionally not surfaced as a plain Settings UI description field, with reasons. */
 const NOT_SURFACED_ALLOWLIST: Record<string, string> = {
+  // Legacy compatibility input; GeneralSection exposes its policy replacement instead.
+  ephemeralAgentsCanCreateTasks: "legacy compatibility input replaced by ephemeralAgentTaskCreationPolicy",
   // Global-only serve/dashboard LAN discovery switch; no Settings UI description field exists.
   localNetworkDiscoveryEnabled: "global-only LAN discovery runtime switch",
   // Moved to workflow settings (U4) — see MOVED_SETTINGS_KEYS in settings-schema.ts.

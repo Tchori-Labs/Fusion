@@ -698,7 +698,7 @@ Quick Chat is an optional fast, project-scoped assistant surface for conversatio
 
 ## Mailbox View
 
-Mailbox view shows inbox/outbox communication threads and unread state.
+Mailbox view shows inbox/outbox communication threads and unread state. When an ephemeral worker is configured for follow-up validation, its task proposals include a **Create task** action; created proposals link directly to the resulting task.
 
 - Inbox renders one row per message (no sender-based collapsing)
 - clicking a message in the Mail tab opens the task detail pane with full message content and conversation context

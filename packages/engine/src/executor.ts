@@ -11046,6 +11046,9 @@ export class TaskExecutor {
           // Pass agentStore and messageStore for delegation and messaging tools
           agentStore: this.options.agentStore,
           messageStore: this.options.messageStore,
+          callerIsEphemeral: !stepIdentityAgent || isEphemeralAgent(stepIdentityAgent),
+          sourceTaskId: task.id,
+          sourceAgentId: stepIdentityAgent?.id,
           taskEnv,
           onStepStart: (stepIndex) => {
             this.options.stuckTaskDetector?.recordProgress(task.id);
@@ -11609,7 +11612,7 @@ export class TaskExecutor {
         this.createTaskUpdateTool(task.id, codeReviewVerdicts, sessionRef, stepCheckpoints, stuckDetector),
         this.createTaskLogTool(task.id),
         this.createTaskLogsReadTool(task.id),
-        this.createTaskCreateTool(!identityAgent || isEphemeralAgent(identityAgent)),
+        this.createTaskCreateTool(!identityAgent || isEphemeralAgent(identityAgent), task.id, identityAgent?.id),
         this.createTaskAddDepTool(task.id),
         this.createTaskDoneTool(task.id, worktreePath, detail.prompt ?? "", codeReviewVerdicts, () => { taskDone = true; }, audit),
         createRunVerificationTool({
@@ -13849,8 +13852,8 @@ export class TaskExecutor {
   FNXC:EphemeralAgentTaskCreation 2026-07-01-00:00:
   A task-execution session is an ephemeral worker when no permanent identity agent governs it (default executor-FN-XXXX worker) or the governing agent is itself ephemeral. Pass that through so fn_task_create honors the project `ephemeralAgentsCanCreateTasks` toggle; permanent-agent sessions are never gated.
   */
-  private createTaskCreateTool(callerIsEphemeral: boolean): ToolDefinition {
-    return sharedCreateTaskCreateTool(this.store, { sourceType: "api" }, { rootDir: this.rootDir, callerIsEphemeral });
+  private createTaskCreateTool(callerIsEphemeral: boolean, sourceTaskId?: string, sourceAgentId?: string): ToolDefinition {
+    return sharedCreateTaskCreateTool(this.store, { sourceType: "api", sourceAgentId, sourceParentTaskId: sourceTaskId }, { rootDir: this.rootDir, callerIsEphemeral, sourceTaskId, sourceAgentId, messageStore: this.options.messageStore });
   }
 
   private createTaskDocumentWriteTool(taskId: string): ToolDefinition {

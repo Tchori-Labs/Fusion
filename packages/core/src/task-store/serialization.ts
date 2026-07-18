@@ -261,6 +261,7 @@ export function rowToTask(row: TaskRow): Task {
     sourceSessionId: row.sourceSessionId || undefined,
     sourceMessageId: row.sourceMessageId || undefined,
     sourceParentTaskId: row.sourceParentTaskId || undefined,
+    proposalClaimId: row.proposalClaimId || undefined,
     sourceMetadata: (() => {
       const parsed = fromJson<Record<string, unknown>>(row.sourceMetadata) ?? undefined;
       return withTaskBranchContextInSourceMetadata(parsed, parseTaskBranchContextFromSourceMetadata(parsed));

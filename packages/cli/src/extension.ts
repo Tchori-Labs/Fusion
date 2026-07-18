@@ -1,4 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { randomUUID } from "node:crypto";
 import { Type, type TSchema } from "typebox";
 import { StringEnum } from "@earendil-works/pi-ai";
 import * as fusionCore from "@fusion/core";
@@ -1165,17 +1166,28 @@ export default function kbExtension(pi: ExtensionAPI) {
       */
       const fnCtx = ctx as typeof ctx & { agentId?: string };
       const projectSettingsForGate = await store.getSettings();
-      if (
-        projectSettingsForGate.ephemeralAgentsCanCreateTasks === false &&
-        (await isEphemeralCallerAgent(ctx.cwd ?? process.cwd(), fnCtx.agentId))
-      ) {
-        const error =
-          "Ephemeral task-worker agents are not allowed to create tasks (ephemeralAgentsCanCreateTasks is disabled for this project).";
-        return {
-          content: [{ type: "text", text: `ERROR: ${error}` }],
-          isError: true,
-          details: { error, rule: "ephemeral-agents-cannot-create-tasks", callerAgentId: fnCtx.agentId },
-        };
+      const callerIsEphemeral = await isEphemeralCallerAgent(ctx.cwd ?? process.cwd(), fnCtx.agentId);
+      if (callerIsEphemeral) {
+        const policy = fusionCore.resolveEphemeralTaskCreationPolicy(projectSettingsForGate);
+        if (policy === "deny") {
+          const error = "Ephemeral task-worker agents are not allowed to create tasks (ephemeral agent task creation is denied for this project).";
+          return { content: [{ type: "text", text: `ERROR: ${error}` }], isError: true, details: { error, rule: "ephemeral-agents-cannot-create-tasks", callerAgentId: fnCtx.agentId } };
+        }
+        if (policy === "upon_validation") {
+          /*
+          FNXC:EphemeralAgentTaskCreation 2026-07-30-19:10:
+          Validation proposals must work for both durable backends. PostgreSQL uses
+          the scoped async layer; legacy SQLite uses the TaskStore database so an
+          ephemeral CLI caller is never denied merely because it is not backend-mode.
+          */
+          const layer = store.getAsyncLayer();
+          const messageStore = layer
+            ? new fusionCore.MessageStore(null, { asyncLayer: layer })
+            : new fusionCore.MessageStore(store.getDatabase());
+          const title = params.description.split(/\r?\n/, 1)[0]?.trim().slice(0, 80) || "Follow-up task";
+          await messageStore.sendMessage({ fromId: fnCtx.agentId ?? "ephemeral-worker", fromType: "agent", toId: fusionCore.DASHBOARD_USER_ID, toType: "user", type: "agent-to-user", content: `Task proposal awaiting validation: ${title}`, metadata: { kind: "task-proposal", proposalStatus: "pending", proposalIdempotencyKey: randomUUID(), proposedTask: { title, description: params.description, priority: params.priority as TaskPriority | undefined, workflowId: params.workflow_id, dependencies: params.depends } } });
+          return { content: [{ type: "text", text: "Task proposal submitted to the operator for validation; no task was created." }], details: { proposed: true } };
+        }
       }
 
       const normalizedAgentId = normalizeNullableStringInput(params.agentId);

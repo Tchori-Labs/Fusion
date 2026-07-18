@@ -208,18 +208,24 @@ export function GeneralSection({ form, setForm, projectId, addToast, prefixError
         </div>
       </div>
       {/*
-        FNXC:EphemeralAgentTaskCreation 2026-07-01-00:00:
-        Default-on toggle controlling whether ephemeral task-worker agents may open new tasks via fn_task_create. Turning it off confines task creation to humans and permanent agents; ephemeral callers get a rejection.
+        FNXC:EphemeralAgentTaskCreation 2026-07-30-12:00:
+        Operators choose free creation, an operator-mailbox proposal, or denial for ephemeral worker follow-ups.
+        The legacy boolean only supplies the displayed fallback; changing this control persists the non-default policy key.
       */}
-      <SettingsToggleRow
+      <SettingsSelectRow
         descriptor={{
-          key: "ephemeralAgentsCanCreateTasks",
-          label: t("settings.general.allowEphemeralAgentsToCreateTasks", " Allow ephemeral agents to create tasks "),
-          help: t("settings.general.allowEphemeralAgentsToCreateTasksHint", "When enabled (default), ephemeral task-worker agents can open follow-up tasks via fn_task_create. When disabled, only humans and permanent agents can create tasks; ephemeral callers are rejected."),
+          key: "ephemeralAgentTaskCreationPolicy",
+          label: t("settings.general.ephemeralAgentTaskCreationPolicy", "Ephemeral agent follow-up tasks"),
+          help: t("settings.general.ephemeralAgentTaskCreationPolicyHint", "No default — unset policy falls back to Allow. Upon validation sends a proposal to your mailbox for one-click approval; Deny rejects follow-up task creation."),
           scope: "project",
+          options: [
+            { value: "allow", label: t("settings.general.ephemeralAgentTaskCreationPolicyAllow", "Allow") },
+            { value: "upon_validation", label: t("settings.general.ephemeralAgentTaskCreationPolicyUponValidation", "Upon validation") },
+            { value: "deny", label: t("settings.general.ephemeralAgentTaskCreationPolicyDeny", "Deny") },
+          ],
         }}
-        value={form.ephemeralAgentsCanCreateTasks !== false}
-        onChange={(v) => setForm((f) => ({ ...f, ephemeralAgentsCanCreateTasks: v === true }))}
+        value={form.ephemeralAgentTaskCreationPolicy ?? (form.ephemeralAgentsCanCreateTasks === false ? "deny" : "allow")}
+        onChange={(v) => setForm((f) => ({ ...f, ephemeralAgentTaskCreationPolicy: v as "allow" | "upon_validation" | "deny" }))}
       />
       {/*
         FNXC:Workspace 2026-06-24-16:00:

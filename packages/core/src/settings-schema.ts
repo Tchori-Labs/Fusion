@@ -59,7 +59,8 @@ type MovedProjectSettingsKey =
   | "validatorFallbackModelId"
   | "validatorFallbackThinkingLevel";
 
-type ProjectSettingsSchema = Omit<ProjectSettings, MovedProjectSettingsKey>;
+type NonDefaultProjectSettingsKey = "ephemeralAgentTaskCreationPolicy";
+type ProjectSettingsSchema = Omit<ProjectSettings, MovedProjectSettingsKey | NonDefaultProjectSettingsKey>; 
 
 /**
  * Settings schema source of truth.
@@ -807,10 +808,20 @@ export const GLOBAL_SETTINGS_KEYS = Object.freeze(
   Object.keys(DEFAULT_GLOBAL_SETTINGS) as Array<keyof GlobalSettings>,
 );
 
+/*
+FNXC:EphemeralAgentTaskCreation 2026-07-30-12:00:
+The validation policy is persisted as a project setting but intentionally absent from defaults.
+The resolver owns fallback so a legacy-only explicit false remains deny after settings merge.
+*/
+export const NON_DEFAULT_PROJECT_SETTINGS_KEYS = Object.freeze([
+  "ephemeralAgentTaskCreationPolicy",
+] as const satisfies readonly NonDefaultProjectSettingsKey[]);
+
 /** Keys that belong to the project settings scope. */
-export const PROJECT_SETTINGS_KEYS = Object.freeze(
-  Object.keys(DEFAULT_PROJECT_SETTINGS) as Array<keyof ProjectSettings>,
-);
+export const PROJECT_SETTINGS_KEYS = Object.freeze([
+  ...Object.keys(DEFAULT_PROJECT_SETTINGS),
+  ...NON_DEFAULT_PROJECT_SETTINGS_KEYS,
+] as Array<keyof ProjectSettings>);
 
 export function isGlobalSettingsKey(key: string): key is keyof GlobalSettings {
   return (GLOBAL_SETTINGS_KEYS as readonly string[]).includes(key);

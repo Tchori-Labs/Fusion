@@ -242,6 +242,7 @@ export const tasks = projectSchema.table("tasks", {
   sourceMessageId: text("source_message_id"),
   sourceParentTaskId: text("source_parent_task_id"),
   sourceMetadata: jsonb("source_metadata"),
+  proposalClaimId: text("proposal_claim_id"),
   checkedOutBy: text("checked_out_by"),
   checkedOutAt: text("checked_out_at"),
   checkoutNodeId: text("checkout_node_id"),
@@ -298,6 +299,8 @@ export const tasks = projectSchema.table("tasks", {
   the gate is a full tasks-table scan. Sparse: most rows have NULL parent.
   */
   index("idxTasksSourceParentTaskId").on(t.sourceParentTaskId),
+  // FNXC:EphemeralAgentTaskCreation 2026-07-30-12:00: proposal retries share one stable key, so the database—not a read-before-create race—enforces at-most-once materialization.
+  uniqueIndex("uqTasksProjectProposalClaimId").on(t.projectId, t.proposalClaimId).where(sql`${t.proposalClaimId} IS NOT NULL`),
   /*
   FNXC:TaskStoreReads 2026-06-26-10:00:
   Partial index for the hot kanban / board-read query shape

@@ -1392,6 +1392,8 @@ export interface Task {
   id: string;
   /** Immutable lineage identity used for durable commit/task attribution. */
   lineageId?: string;
+  /** Stable task-proposal idempotency key; unique per project when present. */
+  proposalClaimId?: string;
   title?: string;
   description: string;
   /**
@@ -2014,6 +2016,8 @@ export interface TaskCreateInput {
   title?: string;
   /** Optional lineage override for trusted replication/import paths only. */
   lineageId?: string;
+  /** Stable task-proposal idempotency key; repeated creates return the same task. */
+  proposalClaimId?: string;
   /**
    * Opt-in createTask override for soft-deleted ID reuse.
    * Not persisted to storage.
@@ -3718,11 +3722,13 @@ export interface ProjectSettings {
    *    to permanent executor agents using the reporting chain heuristic.
    *  Tasks without an eligible permanent executor remain queued. */
   ephemeralAgentsEnabled?: boolean;
-  /**
-   * FNXC:EphemeralAgentTaskCreation 2026-07-01-00:00:
-   * Gates whether ephemeral/runtime-managed task-worker agents may create new tasks via `fn_task_create`.
-   * Default true preserves the existing behavior where a task-worker can spin off follow-up tasks.
-   * When false, an ephemeral caller's `fn_task_create` is rejected while human/dashboard/CLI callers and permanent agents remain unaffected. */
+  /*
+  FNXC:EphemeralAgentTaskCreation 2026-07-30-12:00:
+  The three-state policy routes ephemeral-worker follow-ups to allow, operator validation, or deny.
+  The policy has no schema default because resolver fallback must preserve persisted legacy false as deny.
+  */
+  ephemeralAgentTaskCreationPolicy?: EphemeralTaskCreationPolicy;
+  /** @deprecated Legacy compatibility read only; resolve with resolveEphemeralTaskCreationPolicy. */
   ephemeralAgentsCanCreateTasks?: boolean;
   /** Approval policy for agent provisioning tools (fn_agent_create/fn_agent_delete). */
   agentProvisioning?: {
@@ -6869,6 +6875,22 @@ export interface MessageReplyReference {
 }
 
 /** Optional metadata attached to mailbox messages. */
+export type EphemeralTaskCreationPolicy = "allow" | "upon_validation" | "deny";
+
+/** Resolve the non-default policy without masking legacy persisted settings. */
+export function resolveEphemeralTaskCreationPolicy(settings: Pick<Settings, "ephemeralAgentTaskCreationPolicy" | "ephemeralAgentsCanCreateTasks">): EphemeralTaskCreationPolicy {
+  if (settings.ephemeralAgentTaskCreationPolicy === "allow" || settings.ephemeralAgentTaskCreationPolicy === "upon_validation" || settings.ephemeralAgentTaskCreationPolicy === "deny") return settings.ephemeralAgentTaskCreationPolicy;
+  return settings.ephemeralAgentsCanCreateTasks === false ? "deny" : "allow";
+}
+
+export interface ProposedTaskMetadata {
+  title: string;
+  description: string;
+  priority?: TaskPriority;
+  workflowId?: string;
+  dependencies?: string[];
+}
+
 export interface MessageMetadata extends Record<string, unknown> {
   /** Optional link to the original message when this message is a reply. */
   replyTo?: MessageReplyReference;
@@ -6878,6 +6900,17 @@ export interface MessageMetadata extends Record<string, unknown> {
    * use sparingly for urgent messages. Ignored when recipient is a user.
    */
   wakeRecipient?: boolean;
+  /** Structured operator-approved follow-up task proposal. */
+  kind?: string;
+  proposedTask?: ProposedTaskMetadata;
+  proposalStatus?: "pending" | "creating" | "created" | "dismissed";
+  createdTaskId?: string;
+  /** Stable proposal key issued at send time and never rotated across reclaims. */
+  proposalIdempotencyKey?: string;
+  /** Transient owner token for the current creating lease only. */
+  claimOwnerToken?: string;
+  /** Durable ISO timestamp used to reclaim a creator that died before task persistence. */
+  claimStartedAt?: string;
 }
 
 /** Message record stored in the system */
@@ -6954,6 +6987,19 @@ export function validateMessageMetadata(metadata: MessageMetadata | undefined): 
 
   if (metadata.wakeRecipient !== undefined && typeof metadata.wakeRecipient !== "boolean") {
     throw new Error("metadata.wakeRecipient must be a boolean");
+  }
+
+  const proposalFieldsPresent = metadata.proposalStatus !== undefined || metadata.createdTaskId !== undefined || metadata.proposalIdempotencyKey !== undefined || metadata.claimOwnerToken !== undefined || metadata.claimStartedAt !== undefined;
+  if (metadata.kind === "task-proposal" || proposalFieldsPresent || metadata.proposedTask !== undefined) {
+    if (metadata.kind !== "task-proposal" || !metadata.proposedTask) throw new Error("task proposal metadata requires kind and proposedTask");
+    const proposal = metadata.proposedTask;
+    if (typeof proposal.title !== "string" || !proposal.title.trim() || typeof proposal.description !== "string" || !proposal.description.trim()) throw new Error("metadata.proposedTask requires non-empty title and description");
+    if (proposal.dependencies !== undefined && (!Array.isArray(proposal.dependencies) || proposal.dependencies.some((id) => typeof id !== "string"))) throw new Error("metadata.proposedTask.dependencies must be string[]");
+    if (proposal.priority !== undefined && !["low", "normal", "high", "urgent"].includes(proposal.priority)) throw new Error("metadata.proposedTask.priority is invalid");
+    if (metadata.proposalStatus !== undefined && !["pending", "creating", "created", "dismissed"].includes(metadata.proposalStatus)) throw new Error("metadata.proposalStatus is invalid");
+    if (typeof metadata.proposalIdempotencyKey !== "string" || !metadata.proposalIdempotencyKey.trim()) throw new Error("task proposal requires proposalIdempotencyKey");
+    if (metadata.claimStartedAt !== undefined && (typeof metadata.claimStartedAt !== "string" || Number.isNaN(Date.parse(metadata.claimStartedAt)))) throw new Error("metadata.claimStartedAt must be an ISO timestamp");
+    if (metadata.proposalStatus === "pending" && (metadata.claimOwnerToken !== undefined || metadata.claimStartedAt !== undefined)) throw new Error("pending proposal cannot have a creation lease");
   }
 }
 
