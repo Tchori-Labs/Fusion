@@ -531,13 +531,13 @@ FN-6774 removes the saturated stuck-task edge stripe from board cards. Keep the 
 }
 
 /*
-FNXC:TaskCardLayout 2026-07-17-13:05 (FN-8234):
-As a direct header child after .card-id, the size chip uses the shared desktop chip height so its baseline stays aligned with the id and trailing actions. Its existing color coding remains unchanged.
+FNXC:TaskCardLayout 2026-07-17-14:00 (FN-8253):
+As a direct header child after .card-id, the size chip must match sibling header-badge height rather than use a bespoke chip-height minimum. Center it on the header row to preserve its baseline alignment with the id and trailing actions. Its existing color coding remains unchanged.
 */
 .card-size-badge {
+  align-self: center;
   flex-shrink: 0;
   box-sizing: border-box;
-  min-height: var(--card-chip-height);
   letter-spacing: 0.5px;
 }
 
@@ -1825,11 +1825,10 @@ The three-dot menu is the sole card move/action entry point. Keep this shared bu
   }
 
   /*
-  FNXC:TaskCardLayout 2026-07-17-13:05 (FN-8234):
-  Keep the direct id-adjacent size chip on the mobile chip-height row with the wrapping badges and trailing actions, preserving the non-wrapping header baseline at narrow and short-landscape breakpoints.
+  FNXC:TaskCardLayout 2026-07-17-14:00 (FN-8253):
+  At narrow and short-landscape breakpoints, the id, wrapping badge group, and trailing actions retain the mobile chip-height row. The direct id-adjacent size chip instead derives its height from shared badge geometry so it matches sibling header badges while its centered alignment preserves the non-wrapping header baseline.
   */
   .card-id,
-  .card-size-badge,
   .card-header-badges,
   .card-header-actions {
     min-height: var(--card-chip-height-mobile);

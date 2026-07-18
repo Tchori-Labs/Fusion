@@ -515,8 +515,15 @@ describe("TaskCard badge wrapping (FN-5162)", () => {
     expect(actionsRule).toContain("overflow: visible;");
     expect(actionsRule).toContain("transform: translateY(calc(var(--space-xs) / 4));");
     expect(actionsRule).not.toMatch(/translateY\(\d/);
-    expect(loadedCss).toContain(".card-id,\n  .card-size-badge,\n  .card-header-badges,\n  .card-header-actions");
+    expect(loadedCss).toContain(".card-id,\n  .card-header-badges,\n  .card-header-actions");
     expect(loadedCss).toContain("min-height: var(--card-chip-height-mobile);");
+  });
+
+  it("derives the size badge height from shared header-badge geometry", () => {
+    const sizeBadgeRule = loadedCss.match(/\.card-size-badge\s*\{(?<body>[^}]*)\}/)?.groups?.body ?? "";
+
+    expect(sizeBadgeRule).toContain("align-self: center;");
+    expect(sizeBadgeRule).not.toContain("min-height:");
   });
 
   it("locks the mobile three-dot menu, size, and Promote controls to the card rhythm", () => {
@@ -529,7 +536,7 @@ describe("TaskCard badge wrapping (FN-5162)", () => {
     expectCssRuleToContain(mobileSection, ".card-header-actions", "overflow: visible;");
     expectCssRuleToContain(mobileSection, ".card-header-actions", "align-items: center;");
     expectCssRuleToContain(mobileSection, ".card-header-actions", "gap: calc(var(--space-xs) / 2);");
-    // Task id, its adjacent size chip, and trailing actions share the locked mobile chip row.
+    // Task id and trailing actions share the locked mobile chip row; the size chip uses shared badge geometry.
     expectCssRuleToContain(mobileSection, ".card-id", "height: var(--card-chip-height-mobile);");
     expectCssRuleToContain(mobileSection, ".card-id", "max-height: var(--card-chip-height-mobile);");
     expect(mobileSection).not.toMatch(/\.card-send-back\s*\{/);
