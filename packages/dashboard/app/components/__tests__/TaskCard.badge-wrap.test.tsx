@@ -543,10 +543,28 @@ describe("TaskCard badge wrapping (FN-5162)", () => {
     expectCssRuleToContain(mobileSection, ".card-send-back-btn", "line-height: 1;");
     expectCssRuleToContain(mobileSection, ".card-send-back-btn", "transform: translateY(calc(var(--space-xs) / -4));");
     expectCssRuleToContain(mobileSection, ".card-menu-btn", "line-height: 1;");
-    expectCssRuleToContain(mobileSection, ".card-size-badge", "line-height: 1;");
-    expectCssRuleToContain(mobileSection, ".card-size-badge", "font-size: 0.5625rem;");
-    expectCssRuleToContain(mobileSection, ".card-size-badge", "padding: calc(var(--space-xs) / 4) calc((var(--space-xs) * 3) / 2);");
-    expectCssRuleToContain(mobileSection, ".card-size-badge", "padding-block: calc((var(--space-xs) / 4) + var(--btn-border-width));");
+    /*
+     * FNXC:TaskCardLayout 2026-07-17-15:00 (FN-8254):
+     * jsdom does not apply the mobile media query. Inspect its shared declaration directly so
+     * text, icon-only, size, PR, mission, and oversight chips cannot regain divergent box geometry.
+     */
+    const mobileHeaderChipSelectors = [
+      ".card-status-badge",
+      ".card-priority-badge",
+      ".card-size-badge",
+      ".card-planner-overseer-state",
+      ".card-execution-mode-badge",
+      ".card-pr-node-badge",
+      ".card-mission-badge",
+      ".card-oversight-badge",
+    ];
+    for (const selector of mobileHeaderChipSelectors) {
+      expectCssRuleToContain(mobileSection, selector, "font-size: 0.5625rem;");
+      expectCssRuleToContain(mobileSection, selector, "line-height: 1;");
+      expectCssRuleToContain(mobileSection, selector, "padding: calc(var(--space-xs) / 4) calc((var(--space-xs) * 3) / 2);");
+      expectCssRuleToContain(mobileSection, selector, "border: var(--btn-border-width) solid transparent;");
+      expectCssRuleNotToContain(mobileSection, selector, "padding-block:");
+    }
     expectCssRuleNotToContain(mobileSection, ".card-send-back-btn", "min-height:");
     expectCssRuleNotToContain(mobileSection, ".card-menu-btn", "min-height:");
     expectCssRuleToContain(menuTouchSection, ".card-menu-btn", "width: 28px;");

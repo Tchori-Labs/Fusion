@@ -471,22 +471,25 @@ warning badge, while generic and release-authorization holds retain the triage a
 /*
 FNXC:PlannerOversight 2026-07-05-00:00:
 FN-7592 replaces the overseer badge's uppercase text label with a small `Eye` icon so it
-reads as a compact glyph rather than a wide pill. Size the badge to the icon (no min-width,
-tight padding) and color it per `PlannerOverseerState` via the `data-planner-overseer-state`
-attribute so operators can distinguish watching/steering/recovering/awaiting-confirmation at
+reads as a compact glyph rather than a wide pill. Color it per `PlannerOverseerState` via the
+`data-planner-overseer-state` attribute so operators can distinguish watching/steering/recovering/awaiting-confirmation at
 a glance without reading text. Colors reuse existing semantic tokens: neutral/info for the
 passive "watching" state, warning for the more active "steering"/"recovering" states, and the
 triage token for "awaiting-confirmation" (a human-decision hold), matching the hue conventions
 used elsewhere in this file (e.g. .card-oversight-badge--*, .card-status-badge--triage).
+
+FNXC:TaskCardLayout 2026-07-17-15:00 (FN-8254):
+The Eye inherits shared text-badge padding, border, and line height. Its token-sized glyph must
+not enlarge that shared box, so icon-only and text header chips stay one height on desktop and mobile.
 */
 .card-planner-overseer-state {
-  padding: calc(var(--space-xs) / 2);
-  line-height: 0;
+  box-sizing: border-box;
+  line-height: 1;
 }
 
 .card-planner-overseer-state svg {
-  width: 12px;
-  height: 12px;
+  width: 0.625rem;
+  height: 0.625rem;
 }
 
 .card-planner-overseer-state[data-planner-overseer-state="watching"] {
@@ -580,18 +583,27 @@ As a direct header child after .card-id, the size chip must match sibling header
   color: var(--color-error-dark);
 }
 
+/*
+FNXC:TaskCardLayout 2026-07-17-15:00 (FN-8254):
+Fast-mode's icon-only chip shares the text-badge box geometry instead of a fixed square. Keep the
+Zap at the badge text size so it remains centered without making the header row taller on desktop or mobile.
+*/
 .card-execution-mode-badge {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 1rem;
-  height: 1rem;
+  box-sizing: border-box;
+  font-size: 0.625rem;
+  font-weight: 600;
+  line-height: 1;
+  padding: calc(var(--space-xs) / 2) var(--space-sm);
+  border: var(--btn-border-width) solid transparent;
   border-radius: var(--radius-pill);
 }
 
 .card-execution-mode-badge svg {
-  width: 0.75rem;
-  height: 0.75rem;
+  width: 0.625rem;
+  height: 0.625rem;
 }
 
 .card-execution-mode-badge--fast {
@@ -823,17 +835,25 @@ falling through to an unstyled transparent shell.
   box-shadow: var(--shadow-md);
 }
 
-/* Mission badge: clickable link to mission from task card */
+/*
+FNXC:TaskCardLayout 2026-07-17-15:00 (FN-8254):
+The clickable mission chip uses the shared text-badge box geometry, including its transparent
+border. This keeps its label and Target glyph on the same header baseline as status and icon-only chips
+at desktop and mobile breakpoints.
+*/
 .card-mission-badge {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  box-sizing: border-box;
+  gap: var(--space-xs);
   font-size: 0.625rem;
   font-weight: 600;
+  line-height: 1;
   font-family: var(--font-mono);
   color: var(--badge-mission-text);
   background: var(--badge-mission-bg);
-  padding: 2px 6px;
+  padding: calc(var(--space-xs) / 2) var(--space-sm);
+  border: var(--btn-border-width) solid transparent;
   border-radius: var(--radius-pill);
   cursor: pointer;
   transition: color var(--transition-fast), background var(--transition-fast);
@@ -841,6 +861,11 @@ falling through to an unstyled transparent shell.
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.card-mission-badge svg {
+  width: 0.625rem;
+  height: 0.625rem;
 }
 
 .card-mission-badge:hover {
@@ -1931,19 +1956,31 @@ The three-dot menu is the sole card move/action entry point. Keep this shared bu
     row-gap: var(--space-xs);
   }
 
-  /* Card: smaller status badges for 280px width */
+  /*
+  FNXC:TaskCardLayout 2026-07-17-15:00 (FN-8254):
+  Every header chip uses this mobile text-badge scale. The former size-only block padding made
+  its box diverge; text, icon-only, PR, oversight, and mission chips must remain one height.
+  */
   .card-status-badge,
   .card-priority-badge,
   .card-size-badge,
-  /* FNXC:PlannerOversight 2026-07-04-00:00: mobile-scale the FN-7516 oversight
-     badge alongside the other .card-meta-badges chips at narrow widths. */
+  .card-no-commits-expected-badge,
+  .card-planner-overseer-state,
+  .card-execution-mode-badge,
+  .card-pr-node-badge,
+  .card-mission-badge,
   .card-oversight-badge {
     font-size: 0.5625rem;
+    line-height: 1;
     padding: calc(var(--space-xs) / 4) calc((var(--space-xs) * 3) / 2);
+    border: var(--btn-border-width) solid transparent;
   }
 
-  .card-size-badge {
-    padding-block: calc((var(--space-xs) / 4) + var(--btn-border-width));
+  .card-planner-overseer-state svg,
+  .card-execution-mode-badge svg,
+  .card-mission-badge svg {
+    width: 0.5625rem;
+    height: 0.5625rem;
   }
 
   .card-stalled-review-reason {
