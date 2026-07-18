@@ -72,6 +72,46 @@ describe("TaskDetailModal oversight controls — mobile overflow menu", () => {
     setViewportWidth(DESKTOP_WIDTH);
   });
 
+  it("lights the shared trigger from the project advisor default while oversight is off", async () => {
+    const api = await import("../../api");
+    vi.mocked(api.fetchSettings).mockResolvedValueOnce({
+      modelPresets: [],
+      autoSelectModelPreset: false,
+      defaultPresetBySize: {},
+      sessionAdvisorEnabledByDefault: true,
+    } as any);
+    vi.mocked(api.fetchBoardWorkflows).mockResolvedValueOnce({
+      flagEnabled: true,
+      defaultWorkflowId: "WF-8263-mobile-project-default",
+      workflows: [{ id: "WF-8263-mobile-project-default", name: "Mobile project default workflow" } as any],
+      taskWorkflowIds: { "FN-8263-mobile-project-default": "WF-8263-mobile-project-default" },
+    });
+    vi.mocked(api.fetchWorkflowSettingValues).mockResolvedValueOnce({
+      stored: {},
+      effective: { plannerOversightLevel: "off", plannerOverseerAdvisorEnabled: false },
+      defaults: {},
+    });
+
+    render(
+      <TaskDetailModal
+        task={makeTask({ id: "FN-8263-mobile-project-default", column: "todo", plannerOversightLevel: undefined, sessionAdvisorEnabled: undefined })}
+        onClose={noop}
+        onMoveTask={noopMove}
+        onDeleteTask={noopDelete}
+        onMergeTask={noopMerge}
+        onOpenDetail={noopOpenDetail}
+        addToast={noop}
+      />,
+    );
+
+    const trigger = await screen.findByTestId("detail-oversight-menu-trigger");
+    await waitFor(() => {
+      expect(trigger.querySelector('[data-testid="eye-icon"]')).toBeInTheDocument();
+    });
+    fireEvent.click(trigger);
+    expect((await screen.findByTestId("detail-session-advisor-toggle"))).toHaveAttribute("aria-pressed", "true");
+  });
+
   it("repaints the shared trigger and menu toggle after disabling a workflow-enabled advisor", async () => {
     const api = await import("../../api");
     let currentTask = makeTask({

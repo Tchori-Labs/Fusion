@@ -3434,13 +3434,26 @@ export function TaskDetailContent({
   const overseerHumanControlSuppressed = Boolean(isTaskPaused) || isDoneOrArchivedColumn || isOverseerHumanReviewTerminal;
   const oversightIsOff = effectiveOversightLevel === "off";
   /*
-  FNXC:PlannerOversight 2026-07-17-13:18:
-  FN-8233: the Oversight trigger must visibly track effective overseer state.
-  `overseerTriggerOn = !oversightIsOff || effectiveSessionAdvisorEnabled` lets
-  either the level select or Session advisor toggle in its dropdown update the
-  shared trigger icon without introducing a stale local state snapshot.
+  FNXC:PlannerOversight 2026-07-18-14:00:
+  FN-8263 keeps the task-detail eye available for a session advisor independently
+  of lifecycle-oversight resolution. Its applicability uses stable inheritance
+  inputs (or an explicit override), so toggling an enabled advisor off repaints
+  EyeOff instead of unmounting the trigger while a workflow request is pending.
   */
-  const overseerTriggerOn = !oversightIsOff || effectiveSessionAdvisorEnabled;
+  const lifecycleOversightControlsResolved = hasTaskOversightOverride || workflowOversightResolved;
+  const sessionAdvisorMenuApplicable =
+    hasSessionAdvisorOverride ||
+    projectSessionAdvisorDefault ||
+    workflowOversightState.sessionAdvisorEnabled;
+  const showOversightMenuTrigger = lifecycleOversightControlsResolved || sessionAdvisorMenuApplicable;
+  /*
+  FNXC:PlannerOversight 2026-07-18-14:10:
+  FN-8263 suppresses the resolver's autonomous fallback while workflow
+  lifecycle oversight is unresolved. The eye still tracks the shared advisor
+  resolver immediately, rather than falsely staying lit after the advisor turns off.
+  */
+  const overseerTriggerOn =
+    (lifecycleOversightControlsResolved && !oversightIsOff) || effectiveSessionAdvisorEnabled;
   const canNudgeOverseer = overseerActive && !oversightIsOff && !overseerHumanControlSuppressed;
   const canExplainOverseer = overseerActive && !oversightIsOff;
   const showStopOverseer = !oversightIsOff;
@@ -4322,7 +4335,7 @@ export function TaskDetailContent({
                   so its Eye resolves through the shared `--icon-size-sm` sizing on
                   mobile and stays visually aligned with Quick Add.
                   */}
-                  {(hasTaskOversightOverride || workflowOversightResolved) && (
+                  {showOversightMenuTrigger && (
                       <div className="detail-oversight-menu-dropdown" ref={oversightMenuRef}>
                         <button
                           type="button"
@@ -4340,8 +4353,9 @@ export function TaskDetailContent({
                         </button>
                         {showOversightMenu && (
                           <div className="detail-oversight-menu" role="menu" onKeyDown={handleOversightMenuKeyDown}>
-                            <label className="detail-oversight-menu-item detail-oversight-menu-item--select">
-                              <span>{t("taskDetail.oversight.label", "Oversight:")}</span>
+                            {lifecycleOversightControlsResolved && (
+                              <label className="detail-oversight-menu-item detail-oversight-menu-item--select">
+                                <span>{t("taskDetail.oversight.label", "Oversight:")}</span>
                               <select
                                 className="detail-oversight-select detail-oversight-menu-item"
                                 data-testid="detail-oversight-level-select"
@@ -4360,8 +4374,9 @@ export function TaskDetailContent({
                                     {OVERSIGHT_LEVEL_LABEL[levelOption]}
                                   </option>
                                 ))}
-                              </select>
-                            </label>
+                                </select>
+                              </label>
+                            )}
                             {/*
                             FNXC:PlannerOversight 2026-07-14-18:11:
                             Per-task session advisor toggle inside the Oversight menu.
@@ -4415,12 +4430,12 @@ export function TaskDetailContent({
                                   : t("taskDetail.sessionAdvisor.inheritSuffix", " (inherited)")}
                               </span>
                             </button>
-                            {!oversightIsOff && (
+                            {lifecycleOversightControlsResolved && !oversightIsOff && (
                               <span className="detail-oversight-controls-label" data-testid="detail-oversight-controls-label">
                                 {t("taskDetail.oversight.controlsLabel", "Overseer controls")}
                               </span>
                             )}
-                            {!oversightIsOff && (
+                            {lifecycleOversightControlsResolved && !oversightIsOff && (
                               <button
                                 type="button"
                                 className={`detail-oversight-menu-item detail-overseer-nudge ${isNudgingOverseer ? "detail-overseer-nudge--saving" : ""}`}
@@ -4439,12 +4454,12 @@ export function TaskDetailContent({
                                 <span>{t("taskDetail.oversight.nudge", "Nudge")}</span>
                               </button>
                             )}
-                            {!oversightIsOff && !canNudgeOverseer && (
+                            {lifecycleOversightControlsResolved && !oversightIsOff && !canNudgeOverseer && (
                               <span className="detail-oversight-controls-helper" data-testid="detail-overseer-nudge-disabled-reason">
                                 {nudgeDisabledReason}
                               </span>
                             )}
-                            {showStopOverseer && (
+                            {lifecycleOversightControlsResolved && showStopOverseer && (
                               <button
                                 type="button"
                                 className={`detail-oversight-menu-item detail-overseer-stop ${isStoppingOverseer ? "detail-overseer-stop--saving" : ""}`}
@@ -4462,7 +4477,7 @@ export function TaskDetailContent({
                                 <span>{t("taskDetail.oversight.stop", "Stop")}</span>
                               </button>
                             )}
-                            {!oversightIsOff && (
+                            {lifecycleOversightControlsResolved && !oversightIsOff && (
                               <button
                                 type="button"
                                 className="detail-oversight-menu-item detail-overseer-explain"
