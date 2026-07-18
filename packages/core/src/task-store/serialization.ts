@@ -374,6 +374,7 @@ export function archiveEntryToTask(
     missionId: entry.missionId,
     sliceId: entry.sliceId,
     assigneeUserId: entry.assigneeUserId,
+    mergeDetails: slim ? undefined : entry.mergeDetails,
   };
 }
 

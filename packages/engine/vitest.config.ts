@@ -295,7 +295,7 @@ export default defineConfig({
             // SQLite-path gate test evicted + quarantined (see engine-core comment + ledger).
             "node_modules/**",
             "dist/**",
-            // FNXC:PgMigrationQuarantine 2026-07-17-16:50: FN-8252 rescued the semantic async-store holdouts through production PostgreSQL seams and current async harnesses; retain only the remaining paired quarantines.
+            // FNXC:PgMigrationQuarantine 2026-07-18-02:10: FN-8258 rescued the ten remaining VAL-REMOVAL-005 holdouts through PostgreSQL harnesses and production-shaped async contracts; retain only unresolved paired quarantines.
             // FNXC:PgMigrationQuarantine 2026-07-14-08:00:
             // FNXC:WorkflowStepInstancePersistence 2026-07-16-20:35: FN-8157 restores this PG-backed foreach suite through async store persistence, so it must execute in engine-default.
             // VAL-REMOVAL-005 deleted the SQLite Database class. These engine-default files fail
@@ -303,19 +303,9 @@ export default defineConfig({
             // getDatabase, walCheckpoint) that throw/return-empty in backend mode, or have mock
             // drift from the async-satellite cutover. Quarantined on sight per AGENTS.md.
             "src/__tests__/backlog-pressure-reporter.test.ts",
-            "src/__tests__/mission-factory-parity.integration.test.ts",
-            "src/__tests__/workflow-graph-task-runner.test.ts",
-            "src/__tests__/agent-tools-intake-column.test.ts",
-            "src/__tests__/agent-workflow-tools-exposure.test.ts",
             "src/__tests__/dependency-blocked-todo-reporter.test.ts",
-            "src/__tests__/executor-task-done-invariant.test.ts",
             "src/__tests__/goal-injection-diagnostics-wiring.test.ts",
-            "src/__tests__/group-merge-coordinator.test.ts",
-            "src/__tests__/hybrid-executor-multi-node-routing.test.ts",
             "src/__tests__/merger-cwd-fallback-removed.test.ts",
-            "src/__tests__/routine-runner.test.ts",
-            "src/__tests__/self-healing-meta-archive-guards.test.ts",
-            "src/__tests__/triage-token-usage.test.ts",
             /*
             FNXC:EngineTests 2026-07-18-08:15:
             heartbeat-error-recovery timed out at 30s on full-suite shard 1

@@ -100,8 +100,14 @@ export async function listBranchGroupsImpl(store: TaskStore, options?: { status?
     return (rows as BranchGroupRow[]).map((row) => store.rowToBranchGroup(row));
 }
 
+/*
+FNXC:BranchGroupCompletion 2026-07-18-01:55:
+Archived shared-branch members remain part of promotion completion: an unlanded archived
+member blocks promotion, while an archived member with persisted landing proof permits it.
+The PostgreSQL path must therefore load archived tasks before applying group membership.
+*/
 export async function listTasksByBranchGroupImpl(store: TaskStore, groupId: string): Promise<Task[]> {
-    const tasks = await store.listTasks({ includeArchived: false, slim: true });
+    const tasks = await store.listTasks({ includeArchived: true, slim: false });
     // Membership filter (incl. legacy synthetic-groupId fallback) is shared with
     // the dashboard list route via `filterTasksByBranchGroup` so semantics can't
     // drift between the two call sites (Fix #8/#9).
