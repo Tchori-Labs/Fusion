@@ -298,12 +298,9 @@ export default defineConfig({
             // FNXC:PgMigrationQuarantine 2026-07-18-04:30: FN-8270 rescued the final seven VAL-REMOVAL-005 holdouts by awaiting PG audit reads and modeling async collaborators. Their paired ledger entries and excludes were removed only after targeted green runs.
             // FNXC:WorkflowStepInstancePersistence 2026-07-16-20:35: FN-8157 restores this PG-backed foreach suite through async store persistence, so it must execute in engine-default.
             /*
-            FNXC:EngineTests 2026-07-18-08:15:
-            heartbeat-error-recovery timed out at 30s on full-suite shard 1
-            (run 29636550951) for the rotation-shaped 401 recovery case under
-            load without product-bug evidence — quarantine on sight per AGENTS.md.
+            FNXC:EngineTests 2026-07-18-07:30:
+            FN-8271 restored heartbeat-error-recovery to engine-default after synchronizing on its first mocked prompt and draining the known retry timers once. This removes the load-amplified thirty-yield fake-timer poll without changing the 30s test timeout or recovery assertions; its matching quarantine-ledger row is removed in lockstep.
             */
-            "src/__tests__/heartbeat-error-recovery.test.ts",
             /*
             FNXC:EngineTests 2026-06-14-02:11:
             FN-6433 rescued the AI-merge suites by replacing broad activeSessionRegistry cleanup with path-scoped cleanup, so the default engine lane should execute them again. The soft-delete blocker residue suite was deleted under the ratchet because deterministic soft-delete deadlock coverage already owns that invariant.
