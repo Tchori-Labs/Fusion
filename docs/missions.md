@@ -99,7 +99,7 @@ The Mission Manager create/edit form exposes this as **Branch strategy** plus a 
 
 ### Mission auto-merge override
 
-The **Merge behavior** control can inherit the project default, explicitly enable auto-merge, or select **Single pull request**. The latter persists `autoMerge: false` on the mission and stamps newly triaged feature tasks with the same false override, while preserving the mission's shared branch group. Returning the control to inherited clears the mission override.
+The **Merge behavior** control can inherit the project default, explicitly enable auto-merge, or select **Single pull request**. In-context help explains that auto-merge lands each feature individually while a single pull request retains all features on a shared branch for joint review. The latter persists `autoMerge: false` on the mission and stamps newly triaged feature tasks with the same false override, while preserving the mission's shared branch group. Returning the control to inherited clears the mission override. Once a shared branch has members, Mission detail displays its branch name, member count, and PR state.
 
 ### Shared branch-group invariant across entry points
 

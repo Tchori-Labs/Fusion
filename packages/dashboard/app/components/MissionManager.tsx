@@ -100,8 +100,11 @@ import {
   fetchAiSession,
   fetchMissionInterviewDrafts,
   discardMissionInterviewDraft,
+  fetchTaskDetail,
+  apiGetBranchGroup,
   api,
   type AiSessionSummary,
+  type BranchGroupSummary,
 } from "../api";
 import type { AutopilotState, MissionInterviewDraftSummary } from "./mission-types";
 import { readCache, SWR_CACHE_KEYS, writeCache } from "../utils/swrCache";
@@ -640,6 +643,7 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
   const initialMissions = readCache<MissionWithSummary[]>(missionsCacheKey);
   const [missions, setMissions] = useState<MissionWithSummary[]>(() => (Array.isArray(initialMissions) ? initialMissions : []));
   const [selectedMission, setSelectedMission] = useState<MissionWithHierarchy | null>(null);
+  const [selectedMissionBranchGroup, setSelectedMissionBranchGroup] = useState<BranchGroupSummary | null>(null);
   const [loading, setLoading] = useState(!(Array.isArray(initialMissions) && initialMissions.length > 0));
   const hasHydratedRef = useRef(Array.isArray(initialMissions) && initialMissions.length > 0);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -1120,6 +1124,41 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
       setDetailLoading(false);
     }
   }, [addToast, loadAssertionsForMilestone, projectId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setSelectedMissionBranchGroup(null);
+
+    const selectedMissionId = selectedMission?.id;
+    const taskIds = selectedMission?.milestones.flatMap((milestone) =>
+      milestone.slices.flatMap((slice) => slice.features.flatMap((feature) => feature.taskId ? [feature.taskId] : [])),
+    ) ?? [];
+    if (!selectedMissionId || taskIds.length === 0) return () => { cancelled = true; };
+
+    void (async () => {
+      for (const taskId of taskIds) {
+        try {
+          const task = await fetchTaskDetail(taskId, projectId);
+          const groupId = task.branchContext?.source === "mission" ? task.branchContext.groupId : undefined;
+          if (!groupId) continue;
+          const { group } = await apiGetBranchGroup(groupId, projectId);
+          /*
+          FNXC:MissionAutoMerge 2026-07-19-00:00:
+          A task can retain a stale or colliding branch-group id. Only show a group that
+          is owned by the selected mission so its detail pane never reports another
+          mission's branch or PR state.
+          */
+          if (group?.sourceType !== "mission" || group.sourceId !== selectedMissionId) continue;
+          if (!cancelled) setSelectedMissionBranchGroup(group);
+          return;
+        } catch {
+          // A stale/deleted linked task or unavailable group must not break mission detail rendering.
+        }
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [projectId, selectedMission]);
 
   useEffect(() => {
     if (!isActive || !selectedMilestoneId) {
@@ -2739,6 +2778,29 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
                     )}
                   </div>
 
+                  {/*
+                  FNXC:MissionAutoMerge 2026-07-19-00:00:
+                  A mission detail must show its actual shared branch, member count, and PR state. Resolve the group through linked member tasks' branchContext.groupId rather than source ownership because branch-name collisions can reuse another mission's group.
+                  */}
+                  {selectedMissionBranchGroup && (
+                    <div className="mission-detail__autopilot" data-testid="mission-shared-branch-summary">
+                      <div className="mission-detail__autopilot-toggle">
+                        <span>{t("missions.sharedBranch", "Shared branch")}: {selectedMissionBranchGroup.branchName}</span>
+                        <span
+                          className="mission-status-badge mission-status-badge--sm"
+                          style={{ backgroundColor: "var(--surface-hover)", color: "var(--text-muted)" }}
+                        >
+                          {selectedMissionBranchGroup.prState === "none"
+                            ? t("missions.noPullRequest", "No PR")
+                            : t(`missions.prState.${selectedMissionBranchGroup.prState}`, selectedMissionBranchGroup.prState)}
+                        </span>
+                      </div>
+                      <span className="mission-detail__autopilot-description">
+                        {t("missions.sharedBranchMembers", "{{count}} member", { count: selectedMissionBranchGroup.completion.total })}
+                      </span>
+                    </div>
+                  )}
+
                   <div className="mission-detail__actions">
                     <div className="mission-detail__run-controls">
                     {selectedMission.status === "active" && (
@@ -2859,6 +2921,13 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
                       <option value="on">{t("missions.autoMergeOn", "Auto-merge")}</option>
                       <option value="off">{t("missions.singlePullRequest", "Single pull request")}</option>
                     </select>
+                    {/*
+                    FNXC:MissionAutoMerge 2026-07-19-00:00:
+                    Operators need in-context guidance for the per-mission merge choice: auto-merge lands each feature independently, while a single pull request keeps all features on one shared branch for joint review.
+                    */}
+                    <span className="mission-detail__autopilot-description">
+                      {t("missions.autoMergeOverrideDescription", "Auto-merge merges each feature as it passes. Single pull request keeps every feature on one shared branch to review and merge together.")}
+                    </span>
                   </label>
                   {(missionForm.branchStrategy.mode === "existing" || missionForm.branchStrategy.mode === "custom-new") && (
                     <label>
@@ -4596,6 +4665,9 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
                       <option value="on">{t("missions.autoMergeOn", "Auto-merge")}</option>
                       <option value="off">{t("missions.singlePullRequest", "Single pull request")}</option>
                     </select>
+                    <span className="mission-detail__autopilot-description">
+                      {t("missions.autoMergeOverrideDescription", "Auto-merge merges each feature as it passes. Single pull request keeps every feature on one shared branch to review and merge together.")}
+                    </span>
                   </label>
                   {(missionForm.branchStrategy.mode === "existing" || missionForm.branchStrategy.mode === "custom-new") && (
                     <label>
@@ -4702,6 +4774,9 @@ export function MissionManager({ isOpen, isInline = false, onClose, addToast, pr
                       <option value="on">{t("missions.autoMergeOn", "Auto-merge")}</option>
                       <option value="off">{t("missions.singlePullRequest", "Single pull request")}</option>
                     </select>
+                    <span className="mission-detail__autopilot-description">
+                      {t("missions.autoMergeOverrideDescription", "Auto-merge merges each feature as it passes. Single pull request keeps every feature on one shared branch to review and merge together.")}
+                    </span>
                   </label>
                   {(missionForm.branchStrategy.mode === "existing" || missionForm.branchStrategy.mode === "custom-new") && (
                     <label>
