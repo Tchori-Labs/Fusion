@@ -425,6 +425,22 @@ const cliBuildConfig = {
     }
 
     /*
+    FNXC:CliPackaging 2026-07-17-19:55:
+    The dashboard's plugin-registry route resolves ./registry-manifest.json next to the
+    bundled server (new URL relative to import.meta.url in plugin-routes.ts), i.e.
+    dist/registry-manifest.json beside bin.js after bundling. It was never staged into
+    the CLI dist, so every published install served an empty plugin registry with a
+    warning. Stage it from the dashboard source of truth in both fast and full modes.
+    */
+    const registryManifestSrc = join(__dirname, "..", "dashboard", "src", "registry-manifest.json");
+    if (existsSync(registryManifestSrc)) {
+      cpSync(registryManifestSrc, join(__dirname, "dist", "registry-manifest.json"));
+      console.log("Copied registry-manifest.json to dist/");
+    } else {
+      console.warn(`WARNING: registry manifest not found at ${registryManifestSrc}; plugin registry will be empty.`);
+    }
+
+    /*
     FNXC:CliPackaging 2026-07-15-03:25:
     Fast local packaging: migrations + optional dashboard client copy only. Skip desktop ensure-build, multi-plugin esbuild staging, and assertAllStagedBundledPluginsLoadable — those dominate CPU/wall time and are only needed for published artifacts. Prior staged dist/plugins/desktop is left in place if present so a previous full build remains usable.
     */
