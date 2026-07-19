@@ -4811,18 +4811,6 @@ export interface ArchivedTaskEntry {
 /** Type of planning question presented to the user */
 export type PlanningQuestionType = "text" | "single_select" | "multi_select" | "confirm";
 
-/** Exact Planning Mode checkpoint prompt shown before a final summary can be displayed. */
-export const PLANNING_DEEPEN_CHECKPOINT_QUESTION = "Would you like to go deeper?";
-
-/** Reserved question id for the server-owned Planning Mode deepening checkpoint. */
-export const PLANNING_DEEPEN_CHECKPOINT_ID = "__planning_deepen_checkpoint__";
-
-/** Reserved checkbox option id that lets the user accept the pending final summary. */
-export const PLANNING_DEEPEN_PROCEED_OPTION_ID = "__planning_deepen_proceed_to_final__";
-
-/** Reserved response key accepted as an explicit proceed signal for the deepening checkpoint. */
-export const PLANNING_DEEPEN_PROCEED_RESPONSE_KEY = "__planning_deepen_proceed__";
-
 /** Isolation mode for project execution */
 export type IsolationMode = "in-process" | "child-process";
 
@@ -5486,18 +5474,7 @@ export interface PlanningQuestion {
   type: PlanningQuestionType;
   question: string;
   description?: string;
-  options?: Array<{ id: string; label: string; description?: string }>;
-  /**
-   * FNXC:PlanningMode 2026-07-16-00:00:
-   * FN-8065 / GitHub #2150 requires the deepening checkpoint to carry a read-only preview
-   * of its withheld pendingSummary. Keeping this optional preserves legacy persisted
-   * currentQuestion rows and leaves ordinary interview questions unchanged.
-   */
-  planPreview?: {
-    title: string;
-    description: string;
-    keyDeliverables: string[];
-  };
+  options?: Array<{ id: string; label: string; description?: string; pros?: string[]; cons?: string[]; isOther?: boolean; customText?: string }>;
 }
 
 /** The final summary generated after planning conversation completes */
@@ -5508,17 +5485,6 @@ export interface PlanningSummary {
   priority?: TaskPriority;
   suggestedDependencies: string[];
   keyDeliverables: string[];
-  /**
-   * FNXC:PlanningMode 2026-07-05-00:00:
-   * The planning AI proposes plan-specific deepening topics (instead of the
-   * fixed, regex-derived generic buckets) so the "Would you like to go
-   * deeper?" checkpoint surfaces suggestions aligned with the user's actual
-   * plan — including angles they had not anticipated. Optional so existing
-   * persisted rows/payloads without it remain valid; the dashboard falls
-   * back to the generic theme candidates when absent or empty
-   * (FN-7616 / issue #1912).
-   */
-  deepeningThemes?: Array<{ id?: string; label: string; description?: string }>;
 }
 
 /** Response from planning endpoints - either a question or the final summary */
@@ -5534,6 +5500,8 @@ export interface PlanningSession {
   history: Array<{ question: PlanningQuestion; response: unknown }>;
   currentQuestion?: PlanningQuestion;
   summary?: PlanningSummary;
+  /** User explicitly validated the continuously maintained running plan. */
+  validated?: boolean;
   /**
    * Optional per-session auto-merge override for tasks planned in this session.
    * Not separately persisted; durable form is a branch_groups row keyed by session id.
