@@ -7,6 +7,9 @@ import { SettingsSelectRow } from "../SettingsSelectRow";
 import { SettingsNumberRow } from "../SettingsNumberRow";
 import { SettingsTextRow } from "../SettingsTextRow";
 import { SettingsHelpTip } from "../SettingsHelpTip";
+import { ReportActionMenu } from "../../ReportActionMenu";
+import { ReportModal } from "../../ReportModal";
+import { resolveReportContextRefs } from "../../../utils/reportContextRefs";
 /*
 FNXC:GitHubImportTranslate 2026-07-15-09:30:
 Locale labels come from core's shared `localeDisplayName` (endonyms), NOT from the LanguageSelector component: importing a component module for a constant drags its i18n/react-i18next initialization into every consumer of this section, which breaks tests that mock react-i18next narrowly.
@@ -44,6 +47,8 @@ GitHub/GitLab settings are NOT in this section. The tracking block, the tracking
 export function GeneralSection({ form, setForm, projectId, addToast, prefixError, setPrefixError, onQuickChatButtonModeChange, onMobileNavPrimaryItemsChange, }: GeneralSectionProps) {
     const { t } = useTranslation("app");
     const [builtinWorkflows, setBuiltinWorkflows] = useState<WorkflowDefinition[]>([]);
+    const [reportAction, setReportAction] = useState<ReportActionType | null>(null);
+    const reportContextRefs = typeof window === "undefined" ? undefined : resolveReportContextRefs(window.location);
     useEffect(() => {
         let cancelled = false;
         fetchWorkflows(projectId, { includeDisabledBuiltins: true })
@@ -135,6 +140,21 @@ export function GeneralSection({ form, setForm, projectId, addToast, prefixError
     };
     return (<>
       <h4 className="settings-section-heading">{t("settings.general.general", "General")}</h4>
+      {/*
+        FNXC:ReportPipeline 2026-07-18-19:30:
+        FN-8348 makes Settings General a canonical report entry point so Bug,
+        Feedback, Idea, and Help stay available when compact Header navigation
+        hides actions. Reuse the shared menu and modal to preserve guided-report
+        capture and deep-link task/agent context.
+      */}
+      <SettingsFieldRow
+        htmlFor="report-action-menu"
+        label={t("settings.general.report", "Report")}
+        help={t("settings.general.reportHelp", "Report a bug, send feedback, share an idea, or get help from Fusion.")}
+        scope="project"
+      >
+        <ReportActionMenu onSelect={setReportAction} />
+      </SettingsFieldRow>
       {/*
         FNXC:SettingsGeneral 2026-07-15-17:35:
         A blank prefix stores `undefined`, not "": empty means "no prefix configured" and must delete the
@@ -703,6 +723,7 @@ export function GeneralSection({ form, setForm, projectId, addToast, prefixError
           <button type="button" className="btn btn-sm" onClick={handleClearLocalData}>{t("settings.general.clearLocalDataButton", "Clear local data")}</button>
         </div>
       </div>
+      {reportAction && <ReportModal actionType={reportAction} contextRefs={reportContextRefs} onClose={() => setReportAction(null)} />}
     </>);
 }
 export default GeneralSection;

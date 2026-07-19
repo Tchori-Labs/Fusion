@@ -2117,7 +2117,7 @@ In **Settings → General**, choose up to six Mobile footer quick actions from t
 
 ## In-app reports
 
-The Header **Report** menu is available on desktop and mobile and offers **Bug**, **Feedback**, **Idea**, and **Help**. Each action begins with a short, guided prompt rather than a raw GitHub issue form.
+The **Report** menu is available in **Settings → General · Project** and the Command Center **Overview** on desktop and mobile. It offers **Bug**, **Feedback**, **Idea**, and **Help**; each action begins with a short, guided prompt rather than a raw GitHub issue form.
 
 Fusion gathers available task/agent context, structures the prompt into a report, scrubs secrets, local paths, project names, home-directory identities, email addresses, and likely personal names, then checks **open** GitHub issues or Discussions for duplicates. Scrubbing is mandatory for every route and is repeated on the server when a reviewed draft is edited before filing. A strong duplicate receives a visible 👍 reaction and one scrubbed data-point comment instead of a new issue or Discussion. Bug and Idea reports use issues; Feedback and unresolved Help reports use repository Discussions. If preparation or filing cannot reach GitHub, Fusion preserves the draft and shows a retryable error.
 

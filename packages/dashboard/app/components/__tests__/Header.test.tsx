@@ -52,6 +52,7 @@ describe("Header", () => {
   it("derives report context from task hash routes and legacy query parameters", () => {
     expect(resolveReportContextRefs({ hash: "#/tasks/FN-8277", search: "?agentId=agent-1" })).toEqual({ taskId: "FN-8277", agentId: "agent-1" });
     expect(resolveReportContextRefs({ hash: "", search: "?taskId=FN-8277" })).toEqual({ taskId: "FN-8277", agentId: undefined });
+    expect(resolveReportContextRefs({ hash: "#/command-center", search: "" })).toBeUndefined();
   });
 
   beforeEach(() => {
@@ -62,6 +63,12 @@ describe("Header", () => {
   it("renders the logo and brand", () => {
     renderHeader();
     expect(screen.getByText("Fusion")).toBeDefined();
+  });
+
+  it.each(["desktop", "tablet", "mobile"] as const)("does not render the relocated Report affordance in the %s header", (tier) => {
+    renderHeader({}, tier);
+    expect(screen.queryByRole("button", { name: "Report" })).toBeNull();
+    expect(screen.queryByText("Report bug")).toBeNull();
   });
 
   it("applies shell host metadata on the header root", () => {

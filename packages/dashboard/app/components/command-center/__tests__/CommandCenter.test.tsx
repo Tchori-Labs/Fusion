@@ -483,6 +483,17 @@ describe("CommandCenter shell", () => {
     expect(screen.queryByTestId("cc-controls-heartbeat")).toBeNull();
   });
 
+  it("renders the report menu and opens its guided modal in every Overview state", async () => {
+    mockEmptyOverviewApi();
+    render(<CommandCenter />);
+
+    expect(screen.getByTestId("command-center-report-actions")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Report" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Report bug" }));
+
+    expect(await screen.findByRole("dialog", { name: "bug report" })).toBeTruthy();
+  });
+
   it("renders throughput last while the Overview branch is loading", () => {
     mockEmptyOverviewApi();
     render(<CommandCenter />);
