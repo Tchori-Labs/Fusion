@@ -2871,6 +2871,10 @@ export interface GlobalSettings {
   /** Global fallback GitHub tracking repo in `owner/repo` format (FN-3868).
    *  Used when a project has no githubTrackingDefaultRepo. */
   githubTrackingDefaultRepo?: string;
+  /** Global fallback configuration for public-roadmap report deduplication. */
+  reportRoadmapDedupeEnabled?: boolean;
+  reportRoadmapLabel?: string;
+  reportRoadmapRepo?: string;
   /** Global GitLab integration enable flag. Undefined is effectively enabled for backward compatibility; projects can override this value. */
   gitlabEnabled?: boolean;
   /** Global fallback GitLab web instance URL. Defaults effectively to https://gitlab.com when unset.
@@ -4219,10 +4223,13 @@ export interface ProjectSettings {
   reportModeByAction?: Partial<Record<ReportActionType, ReportMode>>;
   /**
    * FNXC:ReportPipeline 2026-07-18-12:00:
-   * Roadmap deduplication is opt-in because projects without a roadmap must
-   * retain the existing Issues-and-Discussions-only report behavior.
+   * FR-30 public-roadmap dedupe is an additive GitHub Issue source. Effective
+   * values resolve project → global → built-in defaults and reuse tracking-repo
+   * resolution when no dedicated roadmap repo is configured.
    */
-  reportRoadmapDedup?: boolean;
+  reportRoadmapDedupeEnabled?: boolean;
+  reportRoadmapLabel?: string;
+  reportRoadmapRepo?: string;
   /**
    * FNXC:GitLabConfiguration 2026-07-02-00:00:
    * FN-7422 adds durable GitLab instance/API URL settings for GitLab.com and self-managed hosts. FN-7423 layers token settings onto the same project-over-global configuration contract without adding runtime GitLab imports or tracking.

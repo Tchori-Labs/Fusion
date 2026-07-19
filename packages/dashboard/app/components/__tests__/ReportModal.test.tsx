@@ -62,18 +62,16 @@ describe("ReportModal", () => {
     })));
   });
 
-  it("shows a roadmap match inline without a filing or dead-link affordance", async () => {
-    reportDraft.mockResolvedValueOnce({ kind: "roadmap-match", roadmap: { featureId: "RF-1", title: "Offline report queue", description: "Keep reports available while offline" } });
+  it("offers a reviewed endorsement for a roadmap issue", async () => {
+    reportDraft.mockResolvedValueOnce({ kind: "duplicate-found", report: { userPrompt: "Keep reports while offline", body: "data" }, issue: { number: 30, title: "Offline report queue", url: "https://example.test/issues/30", roadmap: true } });
     render(<ReportModal actionType="idea" onClose={vi.fn()} />);
 
     fireEvent.change(screen.getByLabelText("What would you like Fusion to do?"), { target: { value: "Keep reports while offline" } });
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
 
-    expect(await screen.findByText("Already on the roadmap")).toBeInTheDocument();
-    expect(screen.getByText("Offline report queue")).toBeInTheDocument();
-    expect(screen.getByText("Keep reports available while offline")).toBeInTheDocument();
-    expect(screen.queryByRole("link")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /file/i })).not.toBeInTheDocument();
+    expect(await screen.findByText("Already on the roadmap — add your data point?")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Confirm and add data point" }));
+    await waitFor(() => expect(reportFile).toHaveBeenCalledWith(expect.objectContaining({ endorseRoadmapIssueNumber: 30 })));
   });
 
   it("lets people return to the guided prompt after an unavailable response", async () => {

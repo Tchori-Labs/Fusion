@@ -811,7 +811,7 @@ type PluginsSubsectionId = "fusion-plugins" | "pi-extensions";
 
 /** Local form state extends Settings with a worktreeInitCommand override and lets tokenCap carry null (delete semantic). */
 type SettingsFormState = Settings & { worktreeInitCommand?: string; tokenCap?: number | null };
-type GlobalGitlabSettings = Pick<GlobalSettings, "gitlabEnabled" | "gitlabInstanceUrl" | "gitlabApiBaseUrl" | "gitlabAuthToken" | "gitlabAuthTokenType">;
+type GlobalSourceControlSettings = Pick<GlobalSettings, "gitlabEnabled" | "gitlabInstanceUrl" | "gitlabApiBaseUrl" | "gitlabAuthToken" | "gitlabAuthTokenType" | "reportRoadmapDedupeEnabled" | "reportRoadmapLabel" | "reportRoadmapRepo">;
 
 interface SettingsModalProps {
   onClose: () => void;
@@ -1208,7 +1208,7 @@ export function SettingsModal({
   // Track scoped settings for inheritance detection (fetched alongside merged settings)
   // This stores the raw { global, project } structure from the API
   const [scopedSettings, setScopedSettings] = useState<{ global: GlobalSettings; project: Partial<Settings> } | null>(null);
-  const [globalGitlabSettings, setGlobalGitlabSettings] = useState<GlobalGitlabSettings | null>(null);
+  const [globalGitlabSettings, setGlobalGitlabSettings] = useState<GlobalSourceControlSettings | null>(null);
   // Track initial scoped values for null-as-delete semantics on project overrides
   const [initialScopedValues, setInitialScopedValues] = useState<{ global: GlobalSettings; project: Partial<Settings> } | null>(null);
   const mcpFormForScope = useCallback((scope: McpSettingsScope): Settings => ({
@@ -1768,6 +1768,9 @@ export function SettingsModal({
           gitlabApiBaseUrl: scoped.global.gitlabApiBaseUrl,
           gitlabAuthToken: scoped.global.gitlabAuthToken,
           gitlabAuthTokenType: scoped.global.gitlabAuthTokenType,
+          reportRoadmapDedupeEnabled: scoped.global.reportRoadmapDedupeEnabled,
+          reportRoadmapLabel: scoped.global.reportRoadmapLabel,
+          reportRoadmapRepo: scoped.global.reportRoadmapRepo,
         });
         setInitialScopedValues({
           ...scoped,
@@ -3484,6 +3487,9 @@ export function SettingsModal({
         gitlabApiBaseUrl: gitlabFormForSave.gitlabApiBaseUrl?.trim() || undefined,
         gitlabAuthToken: gitlabFormForSave.gitlabAuthToken?.trim() || undefined,
         gitlabAuthTokenType: gitlabFormForSave.gitlabAuthTokenType ?? "personal",
+        reportRoadmapDedupeEnabled: gitlabFormForSave.reportRoadmapDedupeEnabled,
+        reportRoadmapLabel: gitlabFormForSave.reportRoadmapLabel?.trim() || undefined,
+        reportRoadmapRepo: gitlabFormForSave.reportRoadmapRepo?.trim() || undefined,
         githubAuthToken: form.githubAuthToken?.trim() || undefined,
         prTitlePromptInstructions: form.prTitlePromptInstructions?.trim() || undefined,
         prDescriptionPromptInstructions: form.prDescriptionPromptInstructions?.trim() || undefined,
@@ -3859,12 +3865,15 @@ export function SettingsModal({
             form={form}
             setForm={setForm}
             globalSettings={globalGitlabSettings}
-            onGlobalGitlabSettingsChange={(patch) => setGlobalGitlabSettings((current) => ({
+            onGlobalSourceControlSettingsChange={(patch) => setGlobalGitlabSettings((current) => ({
               gitlabEnabled: current?.gitlabEnabled,
               gitlabInstanceUrl: current?.gitlabInstanceUrl,
               gitlabApiBaseUrl: current?.gitlabApiBaseUrl,
               gitlabAuthToken: current?.gitlabAuthToken,
               gitlabAuthTokenType: current?.gitlabAuthTokenType,
+              reportRoadmapDedupeEnabled: current?.reportRoadmapDedupeEnabled,
+              reportRoadmapLabel: current?.reportRoadmapLabel,
+              reportRoadmapRepo: current?.reportRoadmapRepo,
               ...patch,
             }))}
             globalTrackingRepoOptions={globalTrackingRepoOptions}

@@ -1,10 +1,9 @@
 import type { GlobalSettings, ProjectSettings, ReportActionType, ReportMode } from "@fusion/core";
-import { resolveTaskGithubTracking } from "@fusion/core";
+import { parseRepoSlug, resolveTaskGithubTracking } from "@fusion/core";
 import { GitHubClient } from "./github.js";
 import { resolveGithubTrackingAuth } from "./github-auth.js";
 import { buildIssueSearchQueries, DEDUP_MATCH_THRESHOLD, scoreCandidateIssue } from "./github-tracking-dedup.js";
 import { scrubReportPayload, type ReportScrubContext } from "./report-scrub.js";
-import type { RoadmapDedupSource } from "./report-roadmap-source.js";
 
 export type { ReportActionType, ReportMode };
 
@@ -36,20 +35,18 @@ export interface StructuredReport {
 
 export type ReportResult =
   | { kind: "draft-ready"; report: StructuredReport; mode: ReportMode }
-  | { kind: "duplicate-found"; report: StructuredReport; mode: ReportMode; issue: { number: number; url: string; title: string; discussionId?: string } }
-  | { kind: "roadmap-match"; report: StructuredReport; mode: ReportMode; roadmap: { featureId: string; title: string; description: string } }
+  | { kind: "duplicate-found"; report: StructuredReport; mode: ReportMode; issue: { number: number; url: string; title: string; discussionId?: string; roadmap?: true } }
   | { kind: "filed"; url: string; report: StructuredReport; screenshotNotAttached?: boolean }
   | { kind: "endorsed"; url: string; issueNumber: number; report: StructuredReport; screenshotNotAttached?: boolean }
 
   | { kind: "unavailable"; reason: string; message: string };
 
 export interface ReportPipelineDeps {
-  projectSettings: Pick<ProjectSettings, "reportMode" | "reportModeByAction" | "reportRoadmapDedup" | "githubTrackingDefaultRepo" | "githubAuthMode" | "githubAuthToken">;
+  projectSettings: Pick<ProjectSettings, "reportMode" | "reportModeByAction" | "reportRoadmapDedupeEnabled" | "reportRoadmapLabel" | "reportRoadmapRepo" | "githubTrackingDefaultRepo" | "githubAuthMode" | "githubAuthToken">;
   globalSettings?: Partial<GlobalSettings>;
   client?: Pick<GitHubClient, "createIssue" | "searchIssues" | "commentOnIssue" | "addIssueReaction"> & Partial<Pick<GitHubClient, "searchDiscussions" | "createDiscussion" | "commentOnDiscussion" | "addDiscussionReaction" | "uploadReportImage" | "deleteReportImage">>;
   scrubContext?: ReportScrubContext;
   gatherContext?: (input: ReportInput) => Promise<Record<string, unknown>>;
-  roadmapSource?: RoadmapDedupSource;
 }
 
 const MAX_PROMPT_LENGTH = 4_000;
@@ -145,14 +142,39 @@ async function findDuplicate(client: NonNullable<ReportPipelineDeps["client"]>, 
   return undefined;
 }
 
-export async function findRoadmapMatch(roadmapSource: RoadmapDedupSource, report: StructuredReport) {
+
+export interface ResolvedRoadmapDedupe {
+  enabled: boolean;
+  label: string;
+  repo: { owner: string; repo: string } | null;
+}
+
+export function resolveRoadmapDedupe(deps: Pick<ReportPipelineDeps, "projectSettings" | "globalSettings">): ResolvedRoadmapDedupe {
+  const project = deps.projectSettings;
+  const global = deps.globalSettings;
+  const enabled = project.reportRoadmapDedupeEnabled ?? global?.reportRoadmapDedupeEnabled ?? true;
+  const label = (project.reportRoadmapLabel ?? global?.reportRoadmapLabel ?? "roadmap").trim();
+  const trackingRepo = resolveRepo(deps as ReportPipelineDeps);
+  const repo = parseRepoSlug(project.reportRoadmapRepo ?? global?.reportRoadmapRepo) ?? trackingRepo;
+  return { enabled: enabled && Boolean(label), label, repo };
+}
+
+async function findRoadmapDuplicate(client: NonNullable<ReportPipelineDeps["client"]>, roadmap: ResolvedRoadmapDedupe, report: StructuredReport) {
+  if (!roadmap.enabled || !roadmap.repo) return undefined;
   const keywords = reportKeywords(report);
-  const candidates = await roadmapSource(keywords);
-  const match = candidates
-    .map((candidate) => ({ candidate, score: scoreCandidateIssue(candidate, [], keywords).score }))
-    .filter(({ score }) => score >= DEDUP_MATCH_THRESHOLD)
-    .sort((left, right) => right.score - left.score)[0];
-  return match?.candidate;
+  try {
+    for (const query of buildIssueSearchQueries([], keywords)) {
+      const candidates = await client.searchIssues(roadmap.repo.owner, roadmap.repo.repo, `label:${roadmap.label} ${query}`, { state: "open", limit: 20 });
+      const match = candidates.filter((candidate) => candidate.state === "open")
+        .map((candidate) => ({ candidate, score: scoreCandidateIssue(candidate, [], keywords).score }))
+        .sort((left, right) => right.score - left.score)
+        .find(({ score }) => score >= DEDUP_MATCH_THRESHOLD);
+      if (match) return match.candidate;
+    }
+  } catch {
+    // An optional public roadmap must never block the established destination dedupe path.
+  }
+  return undefined;
 }
 
 function approvedReportImageUrl(candidate: string | undefined, owner: string, repo: string): string | undefined {
@@ -272,7 +294,7 @@ function normalizeSubmittedReport(input: ReportInput, gathered: Record<string, u
   };
 }
 
-export async function runReportPipeline(input: ReportInput, deps: ReportPipelineDeps, options: { file?: boolean; endorseIssueNumber?: number; endorseDiscussionId?: string; report?: StructuredReport } = {}): Promise<ReportResult> {
+export async function runReportPipeline(input: ReportInput, deps: ReportPipelineDeps, options: { file?: boolean; endorseIssueNumber?: number; endorseDiscussionId?: string; endorseRoadmapIssueNumber?: number; report?: StructuredReport } = {}): Promise<ReportResult> {
   const gathered = await deps.gatherContext?.(input) ?? { taskId: input.contextRefs?.taskId, agentId: input.contextRefs?.agentId };
   const normalized = normalizeSubmittedReport(input, gathered, options.report);
   // FNXC:ReportPipeline 2026-07-18-14:30: Screenshot data is validated by the
@@ -282,25 +304,18 @@ export async function runReportPipeline(input: ReportInput, deps: ReportPipeline
   let report: StructuredReport = { ...scrubReportPayload(textualReport, deps.scrubContext), ...(input.screenshot ? { screenshot: input.screenshot } : {}) };
 
   const mode = resolveReportMode(input.actionType, deps.projectSettings);
-  /*
-  FNXC:ReportPipeline 2026-07-18-12:30:
-  An opted-in roadmap hit takes deterministic precedence over GitHub matching
-  and filing. It returns local roadmap context only, so no issue, discussion,
-  comment, reaction, or other external egress can occur in either report mode.
-  */
-  if (deps.projectSettings.reportRoadmapDedup && deps.roadmapSource) {
-    const roadmap = await findRoadmapMatch(deps.roadmapSource, report);
-    if (roadmap) return {
-      kind: "roadmap-match",
-      report,
-      mode,
-      roadmap: { featureId: roadmap.featureId, title: roadmap.title, description: roadmap.body ?? "" },
-    };
-  }
   const clientResult = createClient(deps);
   if (clientResult.unavailable) return clientResult.unavailable;
   const repo = resolveRepo(deps);
   if (!repo || !clientResult.client) return { kind: "unavailable", reason: "repo_missing", message: "Configure a GitHub tracking repository before filing reports." };
+  const roadmap = resolveRoadmapDedupe(deps);
+  /*
+  FNXC:ReportPipeline 2026-07-18-20:15:
+  FR-30 public-roadmap issues are an additive, OPEN-only dedupe source. A roadmap
+  hit deterministically wins over destination matches, and endorsement reuses the
+  issue +1/scrub path; unavailable roadmap search falls through without egress.
+  */
+  const roadmapDuplicate = await findRoadmapDuplicate(clientResult.client, roadmap, report);
   const shouldAttachScreenshot = Boolean(input.screenshot) && (options.file || mode === "auto-file");
   const destination = destinationFor(input.actionType);
   // FNXC:ReportPipeline 2026-07-18-19:30: Validate and publish the scrubbed
@@ -315,6 +330,13 @@ export async function runReportPipeline(input: ReportInput, deps: ReportPipeline
     shouldAttachScreenshot ? input.screenshot : undefined, clientResult.client!, repo.owner, repo.repo,
     async (url) => { await clientResult.client!.commentOnDiscussion!(discussionId, `## Screenshot\n![User-reviewed screenshot](${url})`); },
   );
+  if (options.endorseRoadmapIssueNumber) {
+    if (!roadmapDuplicate || roadmapDuplicate.number !== options.endorseRoadmapIssueNumber || !roadmap.repo) {
+      return { kind: "unavailable", reason: "duplicate_not_verified", message: "The selected roadmap item is no longer an open matching report. Please prepare the report again." };
+    }
+    const endorsed = await endorseDuplicate({ owner: roadmap.repo.owner, repo: roadmap.repo.repo, issueNumber: roadmapDuplicate.number, report, client: clientResult.client, scrubContext: deps.scrubContext });
+    return endorsed;
+  }
   if (options.endorseDiscussionId) {
     if (!clientResult.client.commentOnDiscussion || !clientResult.client.addDiscussionReaction || destination !== "discussion" || duplicate?.discussionId !== options.endorseDiscussionId) {
       return { kind: "unavailable", reason: "duplicate_not_verified", message: "The selected discussion is no longer an open matching report. Please prepare the report again." };
@@ -330,6 +352,10 @@ export async function runReportPipeline(input: ReportInput, deps: ReportPipeline
     const endorsed = await endorseDuplicate({ owner: repo.owner, repo: repo.repo, issueNumber: duplicate.number, report, client: clientResult.client, scrubContext: deps.scrubContext });
     const attachment = await attachToIssue(duplicate.number);
     return { ...endorsed, report: appendReviewedScreenshot(endorsed.report, attachment.screenshotUrl), ...(attachment.screenshotNotAttached ? { screenshotNotAttached: true } : {}) };
+  }
+  if (roadmapDuplicate) {
+    if (mode === "auto-file") return endorseDuplicate({ owner: roadmap.repo!.owner, repo: roadmap.repo!.repo, issueNumber: roadmapDuplicate.number, report, client: clientResult.client, scrubContext: deps.scrubContext });
+    return { kind: "duplicate-found", report, mode, issue: { number: roadmapDuplicate.number, url: roadmapDuplicate.html_url, title: roadmapDuplicate.title, roadmap: true } };
   }
   if (duplicate) {
     if (mode === "auto-file") {

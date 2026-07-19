@@ -8,7 +8,7 @@ import "./ReportModal.css";
 
 const prompts: Record<ReportActionType, string> = { bug: "What went wrong?", feedback: "What would you like to share?", idea: "What would you like Fusion to do?", help: "What would you like help with?" };
 
-type ModalResult = { kind: string; report?: { userPrompt: string; sourcePrompt?: string; summary?: string; body?: string; context?: Record<string, unknown>; sessionToken?: string }; issue?: { number: number; url: string; title: string; discussionId?: string }; roadmap?: { featureId: string; title: string; description: string }; url?: string; answer?: { summary?: string; content?: string }; message?: string; screenshotNotAttached?: boolean };
+type ModalResult = { kind: string; report?: { userPrompt: string; sourcePrompt?: string; summary?: string; body?: string; context?: Record<string, unknown>; sessionToken?: string }; issue?: { number: number; url: string; title: string; discussionId?: string; roadmap?: true }; url?: string; answer?: { summary?: string; content?: string }; message?: string; screenshotNotAttached?: boolean };
 
 
 /**
@@ -55,13 +55,13 @@ export function ReportModal({ actionType, onClose, contextRefs }: { actionType: 
       setError("We could not prepare your report. Check your connection and try again.");
     } finally { setBusy(false); }
   };
-  const file = async (endorseIssueNumber?: number, endorseDiscussionId?: string) => {
+  const file = async (endorseIssueNumber?: number, endorseDiscussionId?: string, endorseRoadmapIssueNumber?: number) => {
     if (!result?.report) return;
     setBusy(true);
     setError(undefined);
     try {
       recordActivity("report");
-setResult(await reportFile({ actionType, report: result.report, endorseIssueNumber, endorseDiscussionId, activityTrace: getRecentActivity(), screenshot: screenshotEnabled ? capturedScreenshot : undefined }));
+setResult(await reportFile({ actionType, report: result.report, endorseIssueNumber, endorseDiscussionId, endorseRoadmapIssueNumber, activityTrace: getRecentActivity(), screenshot: screenshotEnabled ? capturedScreenshot : undefined }));
 
     } catch {
       setError("We could not send your report. Your draft is still here; try again.");
@@ -96,7 +96,8 @@ setResult(await reportFile({ actionType, report: result.report, endorseIssueNumb
       structured data point and require an explicit confirmation after edits
       instead of posting a dedupe match immediately.
       */}
-      <h2>Review data point for a similar open issue</h2>
+      {/* FNXC:ReportPipeline 2026-07-18-20:45: A public-roadmap duplicate is endorsed through the same reviewed data-point UI as an issue, so reporters strengthen the tracked item rather than opening a parallel thread. */}
+      <h2>{result.issue.roadmap ? t("report.roadmapDuplicate.title", "Already on the roadmap — add your data point?") : "Review data point for a similar open issue"}</h2>
       <a href={result.issue.url} target="_blank" rel="noreferrer">{result.issue.title}</a>
       <label htmlFor="report-duplicate-prompt">Report summary</label>
       <textarea id="report-duplicate-prompt" className="input" value={result.report.userPrompt} onChange={(event) => {
@@ -105,16 +106,9 @@ setResult(await reportFile({ actionType, report: result.report, endorseIssueNumb
       }} />
       <label htmlFor="report-duplicate-body">Structured data point</label>
       <textarea id="report-duplicate-body" className="input" value={result.report.body ?? ""} onChange={(event) => setResult({ ...result, report: { ...result.report!, body: event.target.value } })} />
-      <button className="btn btn-primary" type="button" disabled={busy} onClick={() => void file(result.issue!.discussionId ? undefined : result.issue!.number, result.issue!.discussionId)}>Confirm and add data point</button>
+      <button className="btn btn-primary" type="button" disabled={busy} onClick={() => void file(result.issue!.discussionId ? undefined : result.issue!.roadmap ? undefined : result.issue!.number, result.issue!.discussionId, result.issue!.roadmap ? result.issue!.number : undefined)}>Confirm and add data point</button>
     </>}
 
-    {result?.kind === "roadmap-match" && result.roadmap && <>
-      {/* FNXC:ReportPipeline 2026-07-18-12:45: A roadmap match stays inline because the roadmap view is intentionally not a dashboard destination; it informs the reporter and offers no dead deep-link or filing control. */}
-      <h2>{t("report.roadmapMatch.title", "Already on the roadmap")}</h2>
-      <p>{t("report.roadmapMatch.message", "This report matches a feature that is already planned.")}</p>
-      <h3>{result.roadmap.title}</h3>
-      {result.roadmap.description && <p>{result.roadmap.description}</p>}
-    </>}
 {(result?.kind === "filed" || result?.kind === "endorsed") && <><h2>{result.screenshotNotAttached ? "Report sent without screenshot" : "Report sent"}</h2>{result.screenshotNotAttached && <p className="report-modal__warning" role="status">Your report was sent, but the screenshot could not be attached. No screenshot pixels were shared.</p>}<a href={result.url} target="_blank" rel="noreferrer">View on GitHub</a>{result.report?.body && <><label htmlFor="filed-report">Final report</label><textarea id="filed-report" className="input" value={result.report.body} readOnly /></>}</>}
 
     {result?.kind === "help" && <><h2>Suggested help</h2><p>{result.answer?.summary ?? result.answer?.content}</p></>}

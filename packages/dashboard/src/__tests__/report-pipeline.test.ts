@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { endorseDuplicate, runReportPipeline, type ReportPipelineDeps } from "../report-pipeline.js";
 
-const settings = { reportMode: "draft-review" as const, githubTrackingDefaultRepo: "Runfusion/Fusion", githubAuthMode: "token", githubAuthToken: "test" };
+const settings = { reportRoadmapDedupeEnabled: false, reportMode: "draft-review" as const, githubTrackingDefaultRepo: "Runfusion/Fusion", githubAuthMode: "token", githubAuthToken: "test" };
 
 function deps(overrides: Partial<ReportPipelineDeps> = {}): ReportPipelineDeps {
   return {
@@ -45,35 +45,58 @@ describe("report pipeline", () => {
     expect(result.kind).toBe("draft-ready");
   });
 
-  it.each(["bug", "feedback", "idea", "help"] as const)("short-circuits %s reports that strongly match the roadmap without egress", async (actionType) => {
-    const roadmapSource = vi.fn().mockResolvedValue([{ featureId: "RF-1", title: "Dashboard rendering controls", body: "Add dashboard rendering controls" }]);
-    const context = deps({ projectSettings: { ...settings, reportMode: "auto-file", reportRoadmapDedup: true }, roadmapSource });
-    const result = await runReportPipeline({ actionType, userPrompt: "Add dashboard rendering controls" }, context);
-    expect(result).toMatchObject({ kind: "roadmap-match", roadmap: { featureId: "RF-1", title: "Dashboard rendering controls", description: "Add dashboard rendering controls" } });
-    expect(roadmapSource).toHaveBeenCalledOnce();
-    expect(context.client!.createIssue).not.toHaveBeenCalled();
-    expect(context.client!.createDiscussion).not.toHaveBeenCalled();
-    expect(context.client!.commentOnIssue).not.toHaveBeenCalled();
-    expect(context.client!.commentOnDiscussion).not.toHaveBeenCalled();
+  it.each(["bug", "feedback", "idea", "help"] as const)("deduplicates %s reports against an open labeled roadmap issue in auto-file mode", async (actionType) => {
+    const client = {
+      createIssue: vi.fn(), createDiscussion: vi.fn(), addIssueReaction: vi.fn(), commentOnIssue: vi.fn().mockResolvedValue({ url: "roadmap-comment" }),
+      searchIssues: vi.fn().mockImplementation((_owner, _repo, query) => Promise.resolve(query.includes("label:roadmap") ? [{ number: 30, title: "dashboard rendering controls", body: "dashboard rendering controls", html_url: "roadmap-url", state: "open" }] : [])),
+      searchDiscussions: vi.fn().mockResolvedValue([]),
+    };
+    const result = await runReportPipeline({ actionType, userPrompt: "Add dashboard rendering controls" }, deps({ projectSettings: { ...settings, reportMode: "auto-file", reportRoadmapDedupeEnabled: true }, client }));
+    expect(result).toMatchObject({ kind: "endorsed", issueNumber: 30 });
+    expect(client.addIssueReaction).toHaveBeenCalledWith("Runfusion", "Fusion", 30, "+1");
+    expect(client.createIssue).not.toHaveBeenCalled();
+    expect(client.createDiscussion).not.toHaveBeenCalled();
   });
 
-  it("does not read the roadmap source when its opt-in setting is off", async () => {
-    const roadmapSource = vi.fn().mockResolvedValue([{ featureId: "RF-1", title: "Dashboard rendering controls", body: "Add dashboard rendering controls" }]);
-    const context = deps({ projectSettings: { ...settings, reportMode: "auto-file", reportRoadmapDedup: false }, roadmapSource });
-    const result = await runReportPipeline({ actionType: "idea", userPrompt: "Add dashboard rendering controls" }, context);
-    expect(result.kind).toBe("filed");
-    expect(roadmapSource).not.toHaveBeenCalled();
-    expect(context.client!.createIssue).toHaveBeenCalledOnce();
+  it.each(["bug", "feedback"] as const)("returns an endorseable roadmap duplicate for %s reports in draft-review mode", async (actionType) => {
+    const client = {
+      createIssue: vi.fn(), addIssueReaction: vi.fn(), commentOnIssue: vi.fn(), searchDiscussions: vi.fn().mockResolvedValue([]),
+      searchIssues: vi.fn().mockImplementation((_owner, _repo, query) => Promise.resolve(query.includes("label:roadmap") ? [{ number: 30, title: "dashboard rendering controls", body: "dashboard rendering controls", html_url: "roadmap-url", state: "open" }] : [])),
+    };
+    const result = await runReportPipeline({ actionType, userPrompt: "Add dashboard rendering controls" }, deps({ projectSettings: { ...settings, reportRoadmapDedupeEnabled: true }, client }));
+    expect(result).toMatchObject({ kind: "duplicate-found", issue: { number: 30, roadmap: true } });
+    expect(client.addIssueReaction).not.toHaveBeenCalled();
   });
 
-  it("falls through to existing GitHub routing when roadmap candidates do not match", async () => {
-    const context = deps({
-      projectSettings: { ...settings, reportMode: "auto-file", reportRoadmapDedup: true },
-      roadmapSource: vi.fn().mockResolvedValue([{ featureId: "RF-1", title: "Unrelated access controls", body: "Manage permissions" }]),
-    });
-    const result = await runReportPipeline({ actionType: "idea", userPrompt: "Add dashboard rendering controls" }, context);
+  it("ignores closed or disabled roadmap items and falls through to filing", async () => {
+    const client = { createIssue: vi.fn().mockResolvedValue({ htmlUrl: "filed" }), addIssueReaction: vi.fn(), commentOnIssue: vi.fn(), searchIssues: vi.fn().mockResolvedValue([{ number: 30, title: "dashboard rendering controls", body: "dashboard rendering controls", html_url: "roadmap-url", state: "closed" }]) };
+    const result = await runReportPipeline({ actionType: "idea", userPrompt: "Add dashboard rendering controls" }, deps({ projectSettings: { ...settings, reportMode: "auto-file", reportRoadmapDedupeEnabled: false }, client }));
     expect(result.kind).toBe("filed");
-    expect(context.client!.createIssue).toHaveBeenCalledOnce();
+    expect(client.addIssueReaction).not.toHaveBeenCalled();
+  });
+
+  it("prefers a roadmap issue over a matching ordinary destination issue", async () => {
+    const client = { createIssue: vi.fn(), addIssueReaction: vi.fn(), commentOnIssue: vi.fn().mockResolvedValue({ url: "roadmap-comment" }), searchIssues: vi.fn().mockImplementation((_owner, _repo, query) => Promise.resolve([{ number: query.includes("label:roadmap") ? 30 : 9, title: "dashboard rendering controls", body: "dashboard rendering controls", html_url: "url", state: "open" }])) };
+    const result = await runReportPipeline({ actionType: "idea", userPrompt: "Add dashboard rendering controls" }, deps({ projectSettings: { ...settings, reportMode: "auto-file", reportRoadmapDedupeEnabled: true }, client }));
+    expect(result).toMatchObject({ kind: "endorsed", issueNumber: 30 });
+  });
+
+  it("re-verifies a roadmap endorsement and preserves session idempotency", async () => {
+    const client = { createIssue: vi.fn(), addIssueReaction: vi.fn(), commentOnIssue: vi.fn().mockResolvedValue({ url: "roadmap-comment" }), searchIssues: vi.fn().mockImplementation((_owner, _repo, query) => Promise.resolve(query.includes("label:roadmap") ? [{ number: 30, title: "dashboard rendering controls", body: "dashboard rendering controls", html_url: "url", state: "open" }] : [])) };
+    const report = { userPrompt: "Add dashboard rendering controls at /Users/alice/private-project", summary: "Add dashboard rendering controls", body: "secret path /Users/alice/private-project", context: {}, sessionToken: "roadmap-session" };
+    const context = deps({ projectSettings: { ...settings, reportMode: "auto-file", reportRoadmapDedupeEnabled: true }, client });
+    await runReportPipeline({ actionType: "idea", userPrompt: report.userPrompt }, context, { file: true, endorseRoadmapIssueNumber: 30, report });
+    await runReportPipeline({ actionType: "idea", userPrompt: report.userPrompt }, context, { file: true, endorseRoadmapIssueNumber: 30, report });
+    expect(client.addIssueReaction).toHaveBeenCalledOnce();
+    expect(client.commentOnIssue).toHaveBeenCalledOnce();
+    expect(String(client.commentOnIssue.mock.calls[0][3])).not.toContain("private-project");
+  });
+
+  it("resolves roadmap settings project then global then defaults", async () => {
+    const { resolveRoadmapDedupe } = await import("../report-pipeline.js");
+    expect(resolveRoadmapDedupe({ projectSettings: { ...settings, reportRoadmapDedupeEnabled: false }, globalSettings: { reportRoadmapDedupeEnabled: true } }).enabled).toBe(false);
+    expect(resolveRoadmapDedupe({ projectSettings: settings, globalSettings: { reportRoadmapDedupeEnabled: false, reportRoadmapLabel: "planned", reportRoadmapRepo: "other/tracker" } })).toMatchObject({ enabled: false, label: "planned", repo: { owner: "other", repo: "tracker" } });
+    expect(resolveRoadmapDedupe({ projectSettings: settings }).label).toBe("roadmap");
   });
 
   it("files in auto-file mode", async () => {

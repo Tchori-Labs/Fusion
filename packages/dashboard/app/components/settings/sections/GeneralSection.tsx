@@ -336,13 +336,32 @@ export function GeneralSection({ form, setForm, projectId, addToast, prefixError
         ))}
         <SettingsToggleRow
           descriptor={{
-            key: "reportRoadmapDedup",
-            label: t("settings.general.reportRoadmapDedup", "Check roadmap before filing reports"),
-            help: t("settings.general.reportRoadmapDedupHelp", "When enabled, matching roadmap features are shown inline instead of filing another GitHub Issue or Discussion. Default: off."),
+            key: "reportRoadmapDedupeEnabled",
+            label: t("settings.general.reportRoadmapDedupeEnabled", "Deduplicate reports against public roadmap"),
+            help: t("settings.general.reportRoadmapDedupeEnabledHelp", "Match open, labeled roadmap issues before filing. Default: on."),
             scope: "project",
           }}
-          value={form.reportRoadmapDedup === true}
-          onChange={(value) => setForm((current) => ({ ...current, reportRoadmapDedup: value ?? false }))}
+          value={form.reportRoadmapDedupeEnabled ?? true}
+          onChange={(value) => setForm((current) => ({ ...current, reportRoadmapDedupeEnabled: value ?? true }))}
+        />
+        <SettingsTextRow
+          descriptor={{
+            key: "reportRoadmapLabel",
+            label: t("settings.general.reportRoadmapLabel", "Public roadmap label"),
+            help: t("settings.general.reportRoadmapLabelHelp", "Open GitHub Issues with this label are considered roadmap items. Default: roadmap."),
+          }}
+          value={form.reportRoadmapLabel ?? "roadmap"}
+          onChange={(value) => setForm((current) => ({ ...current, reportRoadmapLabel: value || undefined }))}
+        />
+        <SettingsTextRow
+          descriptor={{
+            key: "reportRoadmapRepo",
+            label: t("settings.general.reportRoadmapRepo", "Public roadmap repository (optional)"),
+            help: t("settings.general.reportRoadmapRepoHelp", "GitHub owner/repository containing public roadmap issues. When unset, uses the tracking repository. No default — unset."),
+            placeholder: "owner/repository",
+          }}
+          value={form.reportRoadmapRepo ?? ""}
+          onChange={(value) => setForm((current) => ({ ...current, reportRoadmapRepo: value || undefined }))}
         />
       </div>
       {/*

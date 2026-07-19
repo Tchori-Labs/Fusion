@@ -40,22 +40,17 @@ async function invoke(handler: (req: { body?: unknown }, res: { json: (body: unk
 
 describe("report routes", () => {
   beforeEach(() => vi.clearAllMocks());
-  it("passes an opted-in project roadmap source through both report routes", async () => {
+  it("passes roadmap settings and a roadmap endorsement target to the pipeline", async () => {
     vi.mocked(queryKnowledgePagesAsync).mockResolvedValue([]);
-    vi.mocked(runReportPipeline).mockResolvedValue({ kind: "roadmap-match" } as never);
-    const handlers = setup({ reportMode: "auto-file", reportRoadmapDedup: true });
-    await invoke(handlers.get("/report/draft")!, { actionType: "idea", userPrompt: "Dashboard report controls" });
-    await invoke(handlers.get("/report/file")!, { actionType: "idea", report: { userPrompt: "Dashboard report controls", context: {} } });
-    for (const [, deps] of vi.mocked(runReportPipeline).mock.calls) expect(deps.roadmapSource).toEqual(expect.any(Function));
+    vi.mocked(runReportPipeline).mockResolvedValue({ kind: "duplicate-found" } as never);
+    const handlers = setup({ reportMode: "auto-file", reportRoadmapDedupeEnabled: true, reportRoadmapLabel: "roadmap" });
+    await invoke(handlers.get("/report/file")!, { actionType: "idea", endorseRoadmapIssueNumber: 30, report: { userPrompt: "Dashboard report controls", body: "/Users/alice/private-project", context: {} } });
+    const [input, deps, options] = vi.mocked(runReportPipeline).mock.calls.at(-1)!;
+    expect(deps.projectSettings).toMatchObject({ reportRoadmapDedupeEnabled: true, reportRoadmapLabel: "roadmap" });
+    expect(options).toMatchObject({ endorseRoadmapIssueNumber: 30 });
+    expect((options!.report as { body: string }).body).not.toContain("private-project");
+    expect(input.actionType).toBe("idea");
   });
-
-  it("does not create a roadmap source while the setting is off", async () => {
-    vi.mocked(runReportPipeline).mockResolvedValue({ kind: "draft-ready" } as never);
-    const handlers = setup();
-    await invoke(handlers.get("/report/draft")!, { actionType: "idea", userPrompt: "Dashboard report controls" });
-    expect(vi.mocked(runReportPipeline).mock.calls.at(-1)?.[1].roadmapSource).toBeUndefined();
-  });
-
 
 const PNG_SCREENSHOT = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9WlYk8sAAAAASUVORK5CYII=";
 

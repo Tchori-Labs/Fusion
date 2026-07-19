@@ -2,7 +2,6 @@ import { ApiError } from "../api-error.js";
 import { queryKnowledgePagesAsync } from "../knowledge-index.js";
 import { requireAsyncLayer } from "../require-async-layer.js";
 import { runReportPipeline, type ReportInput, type StructuredReport } from "../report-pipeline.js";
-import { createRoadmapDedupSourceForTaskStore } from "../report-roadmap-source.js";
 import { scrubReportPayload } from "../report-scrub.js";
 import { selfCheckHelp } from "../report-help-selfcheck.js";
 import type { ApiRouteRegistrar } from "./types.js";
@@ -103,7 +102,6 @@ export const registerReportRoutes: ApiRouteRegistrar = ({ router, getScopedStore
         globalSettings: scopes.global,
         scrubContext: { rootDir: store.getRootDir(), projectName: store.getRootDir().split(/[\\/]/).pop() },
         gatherContext: (reportInput) => gatherReportContext(store, reportInput, scopes.project as Record<string, unknown>),
-        roadmapSource: scopes.project.reportRoadmapDedup ? createRoadmapDedupSourceForTaskStore(store) : undefined,
       });
       res.json(result);
     } catch (error) {
@@ -137,6 +135,10 @@ export const registerReportRoutes: ApiRouteRegistrar = ({ router, getScopedStore
       const validatedInput = input;
       const endorseIssueNumber = typeof raw.endorseIssueNumber === "number" ? raw.endorseIssueNumber : undefined;
       const endorseDiscussionId = typeof raw.endorseDiscussionId === "string" ? raw.endorseDiscussionId : undefined;
+      // FNXC:ReportPipeline 2026-07-18-20:30: A browser-supplied public-roadmap
+      // issue number is never authority to comment. The pipeline re-searches the
+      // OPEN label-qualified item and re-scrubs this editable payload before egress.
+      const endorseRoadmapIssueNumber = typeof raw.endorseRoadmapIssueNumber === "number" ? raw.endorseRoadmapIssueNumber : undefined;
       const help = await selfCheckHelpBeforePipeline(store, validatedInput);
       if (help?.answered) {
         res.json({ kind: "help", answer: help.answer });
@@ -147,8 +149,7 @@ export const registerReportRoutes: ApiRouteRegistrar = ({ router, getScopedStore
         globalSettings: scopes.global,
         scrubContext: { rootDir: store.getRootDir(), projectName: store.getRootDir().split(/[\\/]/).pop() },
         gatherContext: (reportInput) => gatherReportContext(store, reportInput, scopes.project as Record<string, unknown>),
-        roadmapSource: scopes.project.reportRoadmapDedup ? createRoadmapDedupSourceForTaskStore(store) : undefined,
-      }, { file: true, endorseIssueNumber, endorseDiscussionId, report: untrusted });
+      }, { file: true, endorseIssueNumber, endorseDiscussionId, endorseRoadmapIssueNumber, report: untrusted });
       res.json(result);
     } catch (error) {
       if (error instanceof ApiError) throw error;

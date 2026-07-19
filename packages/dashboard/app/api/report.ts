@@ -10,5 +10,5 @@ export interface ReportScreenshot { dataUrl: string; capturedAt: string; }
 export interface ReportContextInput { actionType: ReportActionType; userPrompt: string; contextRefs?: { taskId?: string; agentId?: string }; activityTrace?: string[]; screenshot?: ReportScreenshot; }
 
 export function reportDraft(input: ReportContextInput) { return post("/api/report/draft", input); }
-export function reportFile(input: { actionType: ReportActionType; report: unknown; endorseIssueNumber?: number; endorseDiscussionId?: string; activityTrace?: string[]; screenshot?: ReportScreenshot }) { return post("/api/report/file", input); }
+export function reportFile(input: { actionType: ReportActionType; report: unknown; endorseIssueNumber?: number; endorseDiscussionId?: string; endorseRoadmapIssueNumber?: number; activityTrace?: string[]; screenshot?: ReportScreenshot }) { return post("/api/report/file", input); }
 export function reportHelp(question: string) { return post("/api/report/help", { question }); }

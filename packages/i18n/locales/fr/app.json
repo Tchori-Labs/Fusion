@@ -5946,10 +5946,14 @@
       "ephemeralAgentTaskCreationPolicyDeny": "Refuser",
       "reportModeHelp": "Comment les rapports in-app (bug, feedback, idée, aide) sont déposés. Par défaut : draft-review (l'opérateur revoit un brouillon avant dépôt).",
       "reportModeByActionHelp": "Surcharge optionnelle par action du mode de rapport du projet (bug, feedback, idée ou aide). Aucune valeur par défaut — les actions non définies héritent de reportMode.",
+      "reportRoadmapRepo": "Public roadmap repository (optional)",
+      "reportRoadmapRepoHelp": "GitHub owner/repository containing public roadmap issues. When unset, uses the tracking repository. No default — unset.",
       "reviewArtifacts": "Artefacts de revue",
       "reviewArtifactsHint": "Contrôle si les futures tâches éligibles génèrent des livrables de revue. Les rapports utilisateur et la capture d'activité restent séparés. Par défaut : désactivé.",
-      "reportRoadmapDedup": "Vérifier la feuille de route avant d’envoyer les rapports",
-      "reportRoadmapDedupHelp": "Lorsqu’elle est activée, les fonctionnalités correspondantes sont affichées en ligne au lieu de créer un autre problème ou une autre discussion GitHub. Par défaut : désactivé."
+      "reportRoadmapDedupeEnabled": "Deduplicate reports against public roadmap",
+      "reportRoadmapDedupeEnabledHelp": "Match open, labeled roadmap issues before filing. Default: on.",
+      "reportRoadmapLabel": "Public roadmap label",
+      "reportRoadmapLabelHelp": "Open GitHub Issues with this label are considered roadmap items. Default: roadmap."
     },
     "globalGeneral": {
       "andShowsUpdateNoticesInTheCLIAnd": "",
@@ -5964,6 +5968,12 @@
       "frequency": "",
       "general": "",
       "globalDefaultTrackingRepo": "",
+      "reportRoadmapDedupeEnabled": "Global public-roadmap deduplication",
+      "reportRoadmapDedupeEnabledHelp": "Fallback for projects that do not set a public-roadmap deduplication preference. No default — unset (projects default to enabled).",
+      "reportRoadmapLabel": "Global public roadmap label",
+      "reportRoadmapLabelHelp": "Fallback label for open public-roadmap issues when a project does not set one. No default — unset (projects default to roadmap).",
+      "reportRoadmapRepo": "Global public roadmap repository (optional)",
+      "reportRoadmapRepoHelp": "Fallback GitHub owner/repository for public-roadmap issues. When unset, uses the tracking repository. No default — unset.",
       "leaveBothThinkingTogglesOffToKeepThe": "",
       "manualOnlyNeverAutoCheck": "",
       "onStartupOncePerServerLaunch": "",
@@ -9141,6 +9151,9 @@
     "roadmapMatch": {
       "title": "Déjà sur la feuille de route",
       "message": "Ce signalement correspond à une fonctionnalité déjà planifiée."
+    },
+    "roadmapDuplicate": {
+      "title": "Already on the roadmap — add your data point?"
     }
   }
 }
