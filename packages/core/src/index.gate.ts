@@ -725,6 +725,8 @@ export type { TaskDependencyMutation } from "./store.js";
 export {
   findSameAgentDuplicates,
   computeParentIntentClaimId,
+  computeCrossParentDiagnosticClaim,
+  computeCrossParentDiagnosticClaimId,
   archiveAsSameAgentDuplicate,
   flagSameAgentDuplicate,
   flagTriageDuplicate,
