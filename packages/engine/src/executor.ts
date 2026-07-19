@@ -16433,8 +16433,8 @@ ${scopeGuard}
       workflowStepMetadata.requireExternalIntegrationEvidence === true;
 
     /*
-     * FNXC:PlanReviewSpecInjection 2026-07-05-17:20:
-     * FN-7561: the Plan Review reviewer runs readonly with cwd=worktree, but the spec artifact lives at the project root under `.fusion/tasks/<id>/PROMPT.md` — OUTSIDE the task worktree. Instructing the agent to "Read PROMPT.md" therefore had it search the worktree, fail to find the file, and emit "no PROMPT.md file was found / task data lives in a DB" prose instead of a parseable verdict. That malformed/hard-failed output fed the unbounded triage↔plan-review replan loop (FN-7525 looped 13+ times overnight; FN-7575 too). Load the spec text from the store (document layer → on-disk PROMPT.md) ONCE and inject it directly into the reviewer prompt so the verdict never depends on the agent locating the file. Read from the store, not fs, so it is correct regardless of worktree vs project-root layout.
+     * FNXC:WorkflowReviewSpecInjection 2026-07-18-18:15:
+     * FN-7561 established that review agents cannot reliably locate the project-root PROMPT.md from a task worktree. Load it once through the store and embed it for every review-type node. FN-8288 extends that invariant beyond Plan Review: approved planning revisions are authoritative, the original task description is historical, and a failed artifact read must stay visible instead of silently restoring superseded scope.
      */
     const workflowReviewSpecArtifact = isReviewTypeWorkflowStep
       ? await this.readTaskArtifact(task.id, "PROMPT.md")
@@ -16501,17 +16501,25 @@ ${scopeGuard}
      * unrelated local commits can make a plan-only gate reject implementation
      * state and loop back to triage after the planner already approved the spec.
      */
-    const approvedContractBlock = !isPlanReviewStep && workflowReviewSpecText
-      ? `
+    const approvedContractBlock = !isPlanReviewStep
+      ? workflowReviewSpecText
+        ? `
 
 Approved Task Contract:
 - PROMPT.md is the authoritative current contract for this review. It includes any approved planning revisions and scope decisions.
 - The Task Description is historical input only. Do not enforce superseded requirements from the original Task Description when they conflict with PROMPT.md.
 - Do not request behavior that PROMPT.md explicitly defers, excludes, or forbids. Review the implementation against the approved contract reproduced below.
+- Scope exclusions do not waive security, correctness, or data-integrity defects in the approved implementation.
 
 --- BEGIN APPROVED PROMPT.md ---
 ${workflowReviewSpecText}
 --- END APPROVED PROMPT.md ---`
+        : `
+
+Approved Task Contract Unavailable:
+- PROMPT.md could not be loaded for this review. The Task Description is historical input only and is not a substitute contract.
+- Do not infer, reinstate, approve, or reject requirements from the Task Description.
+- Return REVISE with the single reason that the approved contract could not be loaded so the workflow can retry with canonical scope.`
       : "";
     const scopeBlock = isPlanReviewStep
       ? `Plan Review Scope:
