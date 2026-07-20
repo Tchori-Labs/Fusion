@@ -13,6 +13,7 @@ import {
   getCurrentRepo,
   runGh,
 } from "@fusion/core";
+import { ALLOWED_IMAGE_MIMES, MAX_IMAGE_BYTES } from "./issue-image-attachments.js";
 
 const execAsync = promisify(exec);
 
@@ -232,6 +233,23 @@ export interface CreatedIssue {
   number: number;
   htmlUrl: string;
   createdAt: string;
+}
+
+export interface UploadImageAssetParams {
+  owner: string;
+  repo: string;
+  path: string;
+  contentBase64: string;
+  message: string;
+  branch?: string;
+  mimeType: string;
+}
+
+export interface UploadedImageAsset {
+  htmlUrl: string;
+  rawUrl: string;
+  path: string;
+  sha: string;
 }
 
 export interface DiscussionCandidate {
@@ -757,6 +775,45 @@ export class GitHubClient {
 
     this.token = tokenOrOptions?.token;
     this.forceMode = tokenOrOptions?.forceMode;
+  }
+
+  /**
+   * FNXC:ReportScreenshotUpload 2026-07-19-12:00:
+   * Report pixels cross the permanent GitHub boundary only through the documented
+   * Contents API, never the undocumented web upload endpoint. MIME and decoded-size
+   * validation happens before either auth transport. A private repository's raw URL
+   * requires viewer authentication and therefore cannot be promised as anonymous inline media.
+   */
+  async uploadImageAsset(params: UploadImageAssetParams): Promise<UploadedImageAsset> {
+    if (!ALLOWED_IMAGE_MIMES.has(params.mimeType)) throw new Error("Unsupported image MIME type for GitHub upload.");
+    const normalized = params.contentBase64.replace(/\s/g, "");
+    if (!/^[A-Za-z0-9+/]*={0,2}$/.test(normalized) || Buffer.from(normalized, "base64").byteLength > MAX_IMAGE_BYTES) {
+      throw new Error("Image upload exceeds the 5MB limit or is not valid base64.");
+    }
+    const endpoint = `repos/${encodeURIComponent(params.owner)}/${encodeURIComponent(params.repo)}/contents/${params.path.split("/").map(encodeURIComponent).join("/")}`;
+    if (this.forceMode === "gh-cli") { this.requireGh(); return this.uploadImageAssetWithGh(endpoint, params); }
+    if (this.forceMode === "token") { this.requireToken(); return this.uploadImageAssetWithApi(endpoint, params); }
+    if (this.hasGhAuth()) {
+      try { return await this.uploadImageAssetWithGh(endpoint, params); }
+      catch (error) { if (!this.token) throw new Error("Failed to upload GitHub image asset.", { cause: error }); }
+    }
+    if (this.token) return this.uploadImageAssetWithApi(endpoint, params);
+    throw new Error("GitHub CLI (gh) is not available or not authenticated, and no GITHUB_TOKEN provided. Run 'gh auth login' or set GITHUB_TOKEN.");
+  }
+
+  private async uploadImageAssetWithGh(endpoint: string, params: UploadImageAssetParams): Promise<UploadedImageAsset> {
+    const body = JSON.stringify({ message: params.message, content: params.contentBase64, ...(params.branch ? { branch: params.branch } : {}) });
+    const result = await runGhJsonAsync<{ content?: { html_url?: string; download_url?: string; path?: string; sha?: string } }>(["api", "--method", "PUT", endpoint, "--input", "-"], { input: body });
+    const content = result.content;
+    if (!content?.html_url || !content.download_url || !content.path || !content.sha) throw new Error("GitHub Contents API returned an incomplete image asset.");
+    return { htmlUrl: content.html_url, rawUrl: content.download_url, path: content.path, sha: content.sha };
+  }
+
+  private async uploadImageAssetWithApi(endpoint: string, params: UploadImageAssetParams): Promise<UploadedImageAsset> {
+    const result = await this.fetchThrottled<{ content?: { html_url?: string; download_url?: string; path?: string; sha?: string } }>(`${this.baseUrl}/${endpoint}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: params.message, content: params.contentBase64, ...(params.branch ? { branch: params.branch } : {}) }) });
+    const content = result.data?.content;
+    if (!result.success || !content?.html_url || !content.download_url || !content.path || !content.sha) throw new Error(result.error ?? "GitHub Contents API returned an incomplete image asset.");
+    return { htmlUrl: content.html_url, rawUrl: content.download_url, path: content.path, sha: content.sha };
   }
 
   /**

@@ -1,11 +1,13 @@
 import { REPORT_ATTACHMENT_SOURCE, resolveTaskGithubTracking } from "@fusion/core";
+import { ALLOWED_IMAGE_MIMES, MAX_IMAGE_BYTES } from "../issue-image-attachments.js";
+import { readArtifactMediaBytes } from "../artifact-media.js";
 import type { Request, Response } from "express";
 import { ApiError } from "../api-error.js";
 import { GitHubClient } from "../github.js";
 import { resolveGithubTrackingAuth } from "../github-auth.js";
 import { queryKnowledgePagesAsync } from "../knowledge-index.js";
 import { requireAsyncLayer } from "../require-async-layer.js";
-import { runReportPipeline, type ReportInput, type StructuredReport } from "../report-pipeline.js";
+import { runReportPipeline, type ReportInput, type ReportScreenshot, type StructuredReport } from "../report-pipeline.js";
 import { scrubReportPayload } from "../report-scrub.js";
 import { selfCheckHelp } from "../report-help-selfcheck.js";
 import type { ApiRouteRegistrar } from "./types.js";
@@ -30,13 +32,22 @@ function parseActivityTrace(value: unknown): string[] | undefined {
 function parseScreenshotArtifactId(value: unknown): string | undefined {
   if (value === undefined) return undefined;
   if (typeof value !== "string" || !ARTIFACT_ID_PATTERN.test(value)) throw new ApiError(400, "Screenshot artifact reference is invalid.");
-  return value as "issue" | "discussion";
+  return value;
+}
+
+async function resolveReportScreenshot(store: Awaited<ReturnType<Parameters<ApiRouteRegistrar>[0]["getScopedStore"]>>, id: string | undefined): Promise<ReportScreenshot | undefined> {
+  if (!id) return undefined;
+  const artifact = await store.getArtifact(id);
+  if (artifact?.type !== "image" || artifact.metadata?.source !== REPORT_ATTACHMENT_SOURCE || !artifact.mimeType || !ALLOWED_IMAGE_MIMES.has(artifact.mimeType)) throw new ApiError(400, "Screenshot artifact is unavailable or invalid.");
+  const bytes = await readArtifactMediaBytes(store, artifact);
+  if (bytes.length === 0 || bytes.length > MAX_IMAGE_BYTES || imageMimeType(bytes) !== artifact.mimeType) throw new ApiError(400, "Screenshot artifact is unavailable or invalid.");
+  return { artifactId: artifact.id, filename: artifact.title || "Report screenshot", mimeType: artifact.mimeType, bytes };
 }
 
 async function validateScreenshotArtifact(store: Awaited<ReturnType<Parameters<ApiRouteRegistrar>[0]["getScopedStore"]>>, id: string | undefined): Promise<void> {
   if (!id) return;
   const artifact = await store.getArtifact(id);
-  if (artifact?.type !== "image" || artifact.metadata?.source !== REPORT_ATTACHMENT_SOURCE) throw new ApiError(400, "Screenshot artifact is unavailable or invalid.");
+  if (artifact?.type !== "image" || artifact.metadata?.source !== REPORT_ATTACHMENT_SOURCE || !artifact.mimeType || !ALLOWED_IMAGE_MIMES.has(artifact.mimeType)) throw new ApiError(400, "Screenshot artifact is unavailable or invalid.");
 }
 
 function imageMimeType(buffer: Buffer): "image/png" | "image/jpeg" | undefined {
@@ -80,7 +91,8 @@ function parseInput(body: unknown): ReportInput {
  * FNXC:ReportPipeline 2026-07-19-10:00:
  * Report routes persist opted-in PNG/JPEG pixels locally as provenance-marked
  * artifacts. Draft and file requests carry only a validated reference and text
- * note, so no screenshot pixels can cross the GitHub egress boundary.
+ * note. Filing resolves that explicit reference through the guarded artifact-media
+ * seam before the separately consented Contents-API upload; raw request pixels are never accepted.
  */
 export const registerReportRoutes: ApiRouteRegistrar = ({ router, getScopedStore, rethrowAsApiError, reportUpload }) => {
   const attachment = async (req: Request & { file?: { buffer?: Buffer; mimetype?: string } }, res: Response) => {
@@ -114,15 +126,16 @@ export const registerReportRoutes: ApiRouteRegistrar = ({ router, getScopedStore
   router.post("/report/file", async (req, res) => {
     try {
       const store = await getScopedStore(req); const scopes = await store.getSettingsByScopeFast(); const raw = (req.body ?? {}) as Record<string, unknown>; const rawReport = (raw.report ?? raw) as StructuredReport;
-      const { screenshotArtifactId: reportArtifactId, ...textualRawReport } = rawReport;
+      const { screenshotArtifactId: reportArtifactId, attachment: _untrustedAttachment, ...textualRawReport } = rawReport;
       const untrusted = scrubReportPayload(textualRawReport, { rootDir: store.getRootDir(), projectName: store.getRootDir().split(/[\\/]/).pop() });
       const input = parseInput({ actionType: raw.actionType ?? (untrusted.context as Record<string, unknown> | undefined)?.actionType ?? "bug", userPrompt: untrusted.userPrompt ?? untrusted.summary, contextRefs: (untrusted.context as Record<string, unknown> | undefined) && { taskId: typeof (untrusted.context as Record<string, unknown>).taskId === "string" ? (untrusted.context as Record<string, unknown>).taskId : undefined, agentId: typeof (untrusted.context as Record<string, unknown>).agentId === "string" ? (untrusted.context as Record<string, unknown>).agentId : undefined }, activityTrace: raw.activityTrace ?? (untrusted.context as Record<string, unknown> | undefined)?.activityTrace, screenshotArtifactId: raw.screenshotArtifactId ?? reportArtifactId });
       // FNXC:ReportPipeline 2026-07-16-21:00: Validate target before Help can return locally.
       const targetType = parseTargetType(raw.targetType);
-      await validateScreenshotArtifact(store, input.screenshotArtifactId);
-      const help = await selfCheckHelpBeforePipeline(store, input);
+      const attachment = await resolveReportScreenshot(store, input.screenshotArtifactId);
+      const inputWithAttachment = attachment ? { ...input, attachment } : input;
+      const help = await selfCheckHelpBeforePipeline(store, inputWithAttachment);
       if (help?.answered) return void res.json({ kind: "help", answer: help.answer });
-      res.json(await runReportPipeline(input, { projectSettings: scopes.project, globalSettings: scopes.global, scrubContext: { rootDir: store.getRootDir(), projectName: store.getRootDir().split(/[\\/]/).pop() }, gatherContext: (reportInput) => gatherReportContext(store, reportInput, scopes.project as Record<string, unknown>) }, { file: true, targetType, endorseIssueNumber: typeof raw.endorseIssueNumber === "number" ? raw.endorseIssueNumber : undefined, endorseDiscussionId: typeof raw.endorseDiscussionId === "string" ? raw.endorseDiscussionId : undefined, endorseRoadmapIssueNumber: typeof raw.endorseRoadmapIssueNumber === "number" ? raw.endorseRoadmapIssueNumber : undefined, report: untrusted }));
+      res.json(await runReportPipeline(inputWithAttachment, { projectSettings: scopes.project, globalSettings: scopes.global, scrubContext: { rootDir: store.getRootDir(), projectName: store.getRootDir().split(/[\\/]/).pop() }, gatherContext: (reportInput) => gatherReportContext(store, reportInput, scopes.project as Record<string, unknown>) }, { file: true, targetType, endorseIssueNumber: typeof raw.endorseIssueNumber === "number" ? raw.endorseIssueNumber : undefined, endorseDiscussionId: typeof raw.endorseDiscussionId === "string" ? raw.endorseDiscussionId : undefined, endorseRoadmapIssueNumber: typeof raw.endorseRoadmapIssueNumber === "number" ? raw.endorseRoadmapIssueNumber : undefined, report: untrusted }));
     } catch (error) { if (error instanceof ApiError) throw error; rethrowAsApiError(error, "Failed to file report"); }
   });
 

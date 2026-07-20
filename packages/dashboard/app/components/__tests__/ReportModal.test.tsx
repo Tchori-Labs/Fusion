@@ -41,6 +41,11 @@ describe("ReportModal", () => {
     await waitFor(() => expect(reportDraft).toHaveBeenCalledWith(expect.objectContaining({
       screenshotArtifactId: "123e4567-e89b-42d3-a456-426614174000",
     })));
+    reportFile.mockResolvedValueOnce({ kind: "filed", url: "https://example.test/1" });
+    fireEvent.click(await screen.findByRole("button", { name: "File report" }));
+    await waitFor(() => expect(reportFile).toHaveBeenCalledWith(expect.objectContaining({
+      screenshotArtifactId: "123e4567-e89b-42d3-a456-426614174000",
+    })));
   });
 
   it("clears a pending capture when the reporter opts out", async () => {

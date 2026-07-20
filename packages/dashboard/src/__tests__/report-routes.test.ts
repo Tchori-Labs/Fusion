@@ -10,9 +10,13 @@ vi.mock("../require-async-layer.js", () => ({
 vi.mock("../report-pipeline.js", () => ({
   runReportPipeline: vi.fn(),
 }));
+vi.mock("../artifact-media.js", () => ({
+  readArtifactMediaBytes: vi.fn(),
+}));
 
 import { queryKnowledgePagesAsync } from "../knowledge-index.js";
 import { runReportPipeline } from "../report-pipeline.js";
+import { readArtifactMediaBytes } from "../artifact-media.js";
 import { ARTIFACT_ID_PATTERN, MAX_SCREENSHOT_BYTES, registerReportRoutes } from "../routes/register-report-routes.js";
 
 type TestRequest = { body?: unknown; file?: { buffer: Buffer; mimetype?: string } };
@@ -33,7 +37,7 @@ function setup(projectSettings: Record<string, unknown> = { reportMode: "auto-fi
   const store = {
     getSettingsByScopeFast: vi.fn().mockResolvedValue({ project: projectSettings, global: {} }),
     getRootDir: () => "/Users/alice/private-project",
-    getArtifact: vi.fn().mockResolvedValue({ type: "image", metadata: { source: "report-attachment" } }),
+    getArtifact: vi.fn().mockResolvedValue({ id: "123e4567-e89b-42d3-a456-426614174000", type: "image", title: "Report screenshot", mimeType: "image/png", uri: "artifacts/report.png", taskId: "FN-1", metadata: { source: "report-attachment" } }),
     registerArtifact: vi.fn().mockResolvedValue({ id: "123e4567-e89b-42d3-a456-426614174000" }),
   };
   registerReportRoutes({
@@ -65,7 +69,10 @@ async function invoke(handlers: TestHandler[], body: unknown) {
 }
 
 describe("report routes", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(readArtifactMediaBytes).mockResolvedValue(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+  });
 
   it("passes roadmap settings and a roadmap endorsement target to the pipeline", async () => {
     vi.mocked(queryKnowledgePagesAsync).mockResolvedValue([]);
@@ -133,6 +140,31 @@ describe("report routes", () => {
           await expect(invoke(handlers.get(path)!, body)).rejects.toThrow("Screenshot artifact is unavailable or invalid");
         }
       }
+    });
+
+    it("resolves the single persisted screenshot server-side before filing", async () => {
+      vi.mocked(runReportPipeline).mockResolvedValue({ kind: "filed" } as never);
+      const { handlers, store } = setup();
+      const id = "123e4567-e89b-42d3-a456-426614174000";
+      await invoke(handlers.get("/report/file")!, { actionType: "bug", report: { userPrompt: "It crashes", context: {}, screenshotArtifactId: id } });
+
+      expect(readArtifactMediaBytes).toHaveBeenCalledWith(store, expect.objectContaining({ id, metadata: { source: "report-attachment" } }));
+      expect(runReportPipeline).toHaveBeenCalledWith(expect.objectContaining({ attachment: expect.objectContaining({ artifactId: id, mimeType: "image/png", bytes: expect.any(Buffer) }) }), expect.anything(), expect.anything());
+    });
+
+    it("rejects invalid artifact bytes before the filing pipeline", async () => {
+      const id = "123e4567-e89b-42d3-a456-426614174000";
+      const { handlers, store } = setup();
+      store.getArtifact.mockResolvedValue({ id, type: "image", mimeType: "image/png", uri: "../../etc/passwd", taskId: "FN-1", metadata: { source: "report-attachment" } });
+      vi.mocked(readArtifactMediaBytes).mockRejectedValueOnce(new Error("Invalid artifact media path"));
+
+      await expect(invoke(handlers.get("/report/file")!, { actionType: "bug", report: { userPrompt: "It crashes", context: {}, screenshotArtifactId: id } })).rejects.toThrow("Invalid artifact media path");
+      expect(runReportPipeline).not.toHaveBeenCalled();
+
+      store.getArtifact.mockResolvedValue({ id, type: "image", mimeType: "image/png", uri: "artifacts/report.png", taskId: "FN-1", metadata: { source: "report-attachment" } });
+      vi.mocked(readArtifactMediaBytes).mockResolvedValueOnce(Buffer.alloc(MAX_SCREENSHOT_BYTES + 1));
+      await expect(invoke(handlers.get("/report/file")!, { actionType: "bug", report: { userPrompt: "It crashes", context: {}, screenshotArtifactId: id } })).rejects.toThrow("Screenshot artifact is unavailable or invalid");
+      expect(runReportPipeline).not.toHaveBeenCalled();
     });
   });
 
