@@ -240,11 +240,11 @@ export const PLANNING_SYSTEM_PROMPT = `## Planning Mode interaction adapter
 
 First analyze the codebase and active board with the available readonly tools, fn_task_list, and fn_task_show. Treat the workflow planning template above as the quality bar and PROMPT.md structure for the evolving plan, but do not write PROMPT.md or use write tools during this interview.
 
-Ask exactly one next, high-impact question only when the user explicitly requests a refine turn. After an answer, update the running plan and do not ask a question. Never decide that the interview is complete or emit a terminal/complete response. Only the user can validate the plan.
+Start by producing a concrete initial plan for review without asking a question. Ask exactly one next, high-impact question only when the user explicitly requests a refine turn. After an answer, update the running plan and do not ask a question. A JSON response with type "complete" means only that the current plan update is ready for review; it never validates or terminates the session. Only the user can validate the plan.
 
-For a refine turn respond only with JSON: {"type":"question","data":{"id":"unique-id","type":"single_select|multi_select","question":"...","description":"...","options":[{"id":"option-a","label":"...","description":"...","pros":["..."],"cons":["..."]},{"id":"option-b","label":"...","description":"...","pros":["..."],"cons":["..."]},{"id":"other","label":"...","isOther":true}],"runningPlan":{"title":"...","description":"...","suggestedSize":"S|M|L","priority":"normal","suggestedDependencies":[],"keyDeliverables":["concrete work item"]}}}. For an answer-update turn respond only with {"type":"complete","data":{"title":"...","description":"...","suggestedSize":"S|M|L","priority":"normal","suggestedDependencies":[],"keyDeliverables":["concrete work item"]}}.
+For a refine turn respond only with JSON: {"type":"question","data":{"id":"unique-id","type":"single_select|multi_select","question":"...","description":"...","options":[{"id":"option-a","label":"...","description":"...","pros":["..."],"cons":["..."]},{"id":"option-b","label":"...","description":"...","pros":["..."],"cons":["..."]},{"id":"other","label":"...","isOther":true}],"runningPlan":{"title":"...","description":"...","proposedChanges":["specific change"],"acceptanceCriteria":["observable outcome"],"suggestedSize":"S|M|L","priority":"normal","suggestedDependencies":[],"keyDeliverables":["concrete work item"],"suggestedRefinements":["next focus 1","next focus 2","next focus 3"]}}}. For an initial-plan or answer-update turn respond only with {"type":"complete","data":{"title":"...","description":"...","proposedChanges":["specific change"],"acceptanceCriteria":["observable outcome"],"suggestedSize":"S|M|L","priority":"normal","suggestedDependencies":[],"keyDeliverables":["concrete work item"],"suggestedRefinements":["next focus 1","next focus 2","next focus 3"]}}.
 
-Every turn must include the running-plan fields: only title, description, suggestedSize, optional priority, suggestedDependencies, and concrete keyDeliverables informed by the idea and answers so far. Never use interview question text as a deliverable. Do not put PROMPT.md sections (Mission, Before → After, Steps, File Scope, Review Level, Completion Criteria, or Do NOT) in runningPlan or free text: triage writes PROMPT.md only after Validate. Validate serializes this lean plan as plan.md without priority; priority remains a task field. Every question must provide at least two alternatives, each with non-empty pros and cons, plus exactly one Other/write-your-own option. Write every label, option, and Other label in the language of the user's original input. Incorporate free-text Other answers verbatim as steering context for the following question.`;
+Every turn must include the running-plan fields: only title, description, concrete proposedChanges, observable acceptanceCriteria, suggestedSize, optional priority, suggestedDependencies, concrete keyDeliverables, and exactly three concise suggestedRefinements informed by the idea and answers so far. Never use interview question text as a deliverable. Do not put PROMPT.md sections (Mission, Before → After, Steps, File Scope, Review Level, Completion Criteria, or Do NOT) in runningPlan or free text: triage writes PROMPT.md only after Validate. Validate serializes the plan as plan.md without priority or suggestedRefinements; priority remains a task field. Every question must provide at least two alternatives, each with non-empty pros and cons, plus exactly one Other/write-your-own option. Write every label, option, and Other label in the language of the user's original input. Incorporate free-text Other answers verbatim as steering context for the following question.`;
 
 /*
 FNXC:PlanningMode 2026-07-20-14:30:
@@ -303,6 +303,7 @@ export const DRAFT_PLACEHOLDER_TITLE = "New planning session";
  */
 export interface DraftInputPayload {
   initialPlan?: string;
+  generationPurpose?: "initial_plan" | "plan_update" | "question";
   clarificationEnabled?: boolean;
   lastMailboxNotifiedQuestionKey?: string;
   modelProvider?: string;
@@ -399,7 +400,7 @@ interface Session {
   claimOwnerToken?: string;
   claimStartedAt?: string;
   /** Whether the current generation must end at plan review rather than a question. */
-  generationPurpose?: "plan_update" | "question";
+  generationPurpose?: "initial_plan" | "plan_update" | "question";
   /** Last terminal error for retry UX */
   error?: string;
   /** AI agent session for real-time interaction */
@@ -506,12 +507,15 @@ export function normalizePlanningSummaryPayload(
   return {
     title,
     description,
+    proposedChanges: normalizeStringArray(summary.proposedChanges),
+    acceptanceCriteria: normalizeStringArray(summary.acceptanceCriteria),
     suggestedSize: summary.suggestedSize === "S" || summary.suggestedSize === "M" || summary.suggestedSize === "L"
       ? summary.suggestedSize
       : "M",
     priority: isTaskPriority(summary.priority) ? summary.priority : DEFAULT_TASK_PRIORITY,
     suggestedDependencies: normalizeStringArray(summary.suggestedDependencies),
     keyDeliverables: normalizeStringArray(summary.keyDeliverables),
+    suggestedRefinements: normalizeStringArray(summary.suggestedRefinements).slice(0, 3),
   };
 }
 
@@ -607,6 +611,7 @@ function persistSession(session: Session, status: "generating" | "awaiting_input
       ...(typeof session.clarificationEnabled === "boolean"
         ? { clarificationEnabled: session.clarificationEnabled }
         : {}),
+      ...(session.generationPurpose ? { generationPurpose: session.generationPurpose } : {}),
       ...(session.lastMailboxNotifiedQuestionKey ? { lastMailboxNotifiedQuestionKey: session.lastMailboxNotifiedQuestionKey } : {}),
     }),
     conversationHistory: JSON.stringify(session.history),
@@ -741,6 +746,11 @@ function buildSessionFromRow(row: AiSessionRow): Session {
     draftSummarizedFor: payload.summarizedFor,
     clarificationEnabled: typeof payload.clarificationEnabled === "boolean"
       ? payload.clarificationEnabled
+      : undefined,
+    generationPurpose: payload.generationPurpose === "initial_plan"
+      || payload.generationPurpose === "plan_update"
+      || payload.generationPurpose === "question"
+      ? payload.generationPurpose
       : undefined,
     lastMailboxNotifiedQuestionKey: typeof payload.lastMailboxNotifiedQuestionKey === "string"
       ? payload.lastMailboxNotifiedQuestionKey
@@ -1578,7 +1588,8 @@ export async function startExistingSession(
     session.ntfyConfig = runtimeOptions.ntfyConfig;
     session.messageStore = runtimeOptions.messageStore;
   }
-  persistSession(session, "generating");
+  session.generationPurpose = "initial_plan";
+  await persistSession(session, "generating");
   planningStreamManager.registerInitialTurn(sessionId, () => {
     session.pluginRunner = pluginRunner;
     initializeAgent(session, rootDir, store, modelProvider, modelId, session.draftThinkingLevel, promptOverrides, pluginRunner).catch((err) => {
@@ -1661,7 +1672,8 @@ export async function createSessionWithAgent(
   };
 
   sessions.set(sessionId, session);
-  persistSession(session, "generating");
+  session.generationPurpose = "initial_plan";
+  await persistSession(session, "generating");
 
   planningStreamManager.registerInitialTurn(sessionId, () => {
     initializeAgent(
@@ -1741,7 +1753,7 @@ async function initializeAgent(
       session.updatedAt = new Date();
     });
 
-    await continueAgentConversation(session, formatInitialPlanRequestForAgent(session.initialPlan));
+    await continueAgentConversation(session, formatInitialRunningPlanRequestForAgent(session.initialPlan));
   } catch (err) {
     if (err instanceof Error && err.name === "AbortError") {
       return;
@@ -2144,6 +2156,18 @@ export function formatInitialPlanRequestForAgent(initialPlan: string): string {
   ].join("\n\n");
 }
 
+/** Streaming Planning Mode starts with a reviewable work product, never an unsolicited question. */
+export function formatInitialRunningPlanRequestForAgent(initialPlan: string): string {
+  return [
+    "Create a concrete initial implementation plan from this operator idea.",
+    "Inspect the relevant codebase and active-board context before drafting it. Make the description specific about the affected behavior and intended outcome. Provide concrete proposedChanges that name what behavior, component, interface, data, or configuration should change, and acceptanceCriteria stated as observable pass/fail outcomes. Make every key deliverable an actionable work item rather than generic planning advice.",
+    "Also propose exactly three short suggestedRefinements representing the highest-value unresolved areas the operator could explore next.",
+    "Return only type:\"complete\" JSON with title, description, proposedChanges, acceptanceCriteria, suggestedSize, priority, suggestedDependencies, keyDeliverables, and suggestedRefinements. Do not ask a question yet and do not validate the plan; the operator will review it and explicitly choose Refine or Validate.",
+    "Operator idea:",
+    initialPlan,
+  ].join("\n\n");
+}
+
 function buildFallbackDeliverables(initialPlan: string): string[] {
   const subject = initialPlan.trim() || "the requested work";
   return [
@@ -2173,10 +2197,19 @@ function buildRunningSummary(
   return normalizePlanningSummaryPayload({
     title: previousSummary?.title || `Plan: ${subject.slice(0, 74)}`,
     description,
+    proposedChanges: previousSummary?.proposedChanges?.length
+      ? previousSummary.proposedChanges
+      : [`Change the affected workflow to support: ${subject}`],
+    acceptanceCriteria: previousSummary?.acceptanceCriteria?.length
+      ? previousSummary.acceptanceCriteria
+      : [`The requested outcome works end to end for: ${subject}`],
     suggestedSize: previousSummary?.suggestedSize ?? "M",
     priority: previousSummary?.priority,
     suggestedDependencies: previousSummary?.suggestedDependencies ?? [],
     keyDeliverables: previousSummary?.keyDeliverables?.length ? previousSummary.keyDeliverables : buildFallbackDeliverables(subject),
+    suggestedRefinements: previousSummary?.suggestedRefinements?.length
+      ? previousSummary.suggestedRefinements
+      : ["Scope and user experience", "Technical approach and integration", "Validation and rollout"],
   }, { title: `Plan: ${subject}`, description: initialDescription });
 }
 
@@ -2238,7 +2271,11 @@ export function normalizePlanningQuestion(input: unknown, userInput = ""): Plann
   const normalized: PlanningQuestion = { id: typeof source.id === "string" && source.id.trim() ? source.id : randomUUID(), type, question,
     ...(typeof source.description === "string" && source.description.trim() ? { description: source.description.trim() } : {}) };
   const raw = Array.isArray(source.options) ? source.options : [];
-  const alternatives = raw.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object" && !(item as Record<string, unknown>).isOther)
+  const alternatives = raw.filter((item): item is Record<string, unknown> => {
+    if (!item || typeof item !== "object") return false;
+    const option = item as Record<string, unknown>;
+    return option.isOther !== true && option.id !== "other" && option.id !== "__other__";
+  })
     .slice(0, 2).map((item, index) => ({
       id: typeof item.id === "string" && item.id.trim() ? item.id : `option-${index + 1}`,
       label: typeof item.label === "string" && item.label.trim() ? item.label.trim() : fallback.option(index + 1),
@@ -2441,7 +2478,7 @@ async function continueAgentConversation(session: Session, message: string): Pro
       session.error = undefined;
       session.lastGeneratedThinking = session.thinkingOutput;
       session.updatedAt = new Date();
-      const planUpdate = session.generationPurpose === "plan_update";
+      const planUpdate = session.generationPurpose === "plan_update" || session.generationPurpose === "initial_plan";
       session.generationPurpose = undefined;
       /*
       FNXC:PlanningMode 2026-07-20-15:45:
@@ -2450,7 +2487,7 @@ async function continueAgentConversation(session: Session, message: string): Pro
       triggered by the plan-review Refine action, optionally with operator focus text.
       */
       session.currentQuestion = planUpdate ? undefined : coerceQuestionResponse(parsed, session);
-      persistSession(session, "awaiting_input");
+      await persistSession(session, "awaiting_input");
       planningStreamManager.broadcast(session.id, { type: "summary", data: session.summary });
       if (session.currentQuestion) {
         void maybeNotifyPlanningAwaitingInput(session, session.currentQuestion, true);
@@ -2806,11 +2843,11 @@ export async function submitResponse(
       throw new InvalidSessionStateError("No active question in session");
     }
 
+    session.generationPurpose = "question";
     session.error = undefined;
-    persistSession(session, "generating");
+    await persistSession(session, "generating");
 
     await ensureSessionAgent(session, rootDir, session.history, promptOverrides, store);
-    session.generationPurpose = "question";
     const focus = typeof responses.focus === "string" ? responses.focus.trim() : undefined;
     const refineMessage = formatRefineRequestForAgent(session.summary, focus);
     await continueAgentConversation(session, refineMessage);
@@ -2851,7 +2888,7 @@ export async function submitResponse(
     */
     session.currentQuestion = undefined;
     session.generationPurpose = "plan_update";
-    persistSession(session, "generating");
+    await persistSession(session, "generating");
     if (!session.agent) {
       // An edited older answer must be replayed in its original position with every
       // later answer retained; only a newly appended answer is sent after replay.
@@ -2934,11 +2971,12 @@ export async function retrySession(
   */
   session.currentQuestion = undefined;
   session.updatedAt = new Date();
-  persistSession(session, "generating");
+  session.generationPurpose = session.history.length === 0 ? "initial_plan" : "plan_update";
+  await persistSession(session, "generating");
 
   if (session.history.length === 0) {
     await ensureSessionAgent(session, rootDir, [], promptOverrides, store);
-    await continueAgentConversation(session, formatInitialPlanRequestForAgent(session.initialPlan));
+    await continueAgentConversation(session, formatInitialRunningPlanRequestForAgent(session.initialPlan));
     return;
   }
 
@@ -2946,10 +2984,10 @@ export async function retrySession(
   const lastEntry = session.history[session.history.length - 1];
 
   await ensureSessionAgent(session, rootDir, replayHistory, promptOverrides, store);
-  const replayMessage = formatResponseForAgent(
+  const replayMessage = `${formatResponseForAgent(
     lastEntry.question,
     coerceResponseRecord(lastEntry.question, lastEntry.response),
-  );
+  )}\n\nUpdate the running plan only. Do not ask a next question; the operator may explicitly refine after reviewing the plan.`;
   await continueAgentConversation(session, replayMessage);
 }
 
@@ -3108,7 +3146,7 @@ export function formatResponseForAgent(
   System prompts can be displaced by long tool/context turns. Repeat the per-answer contract at the invocation boundary
   so every submitted answer steers the following high-impact question instead of inviting a model-generated completion.
   */
-  return `${answerContext}\n\nUpdate only the lean runningPlan fields (title, description, suggestedSize, optional priority, suggestedDependencies, and concrete keyDeliverables) informed by this answer; never list interview questions as deliverables or PROMPT.md sections such as Mission, Steps, File Scope, Review Level, Completion Criteria, or Do NOT. Then ask exactly one new, high-impact question that does not repeat a prior question. Offer alternatives with pros and cons. Do not complete or validate the plan; only the user can validate it.`;
+  return `${answerContext}\n\nUpdate only the runningPlan fields (title, description, concrete proposedChanges, observable acceptanceCriteria, suggestedSize, optional priority, suggestedDependencies, concrete keyDeliverables, and three suggestedRefinements) informed by this answer; never list interview questions as deliverables or PROMPT.md sections such as Mission, Steps, File Scope, Review Level, Completion Criteria, or Do NOT. Then ask exactly one new, high-impact question that does not repeat a prior question. Offer alternatives with pros and cons. Do not validate the plan; only the user can validate it.`;
 }
 
 function coerceResponseRecord(question: PlanningQuestion, response: unknown): Record<string, unknown> {

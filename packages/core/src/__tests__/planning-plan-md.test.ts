@@ -3,9 +3,11 @@ import { formatPlanningPlanMd, parsePlanningPlanMd } from "../planning-plan-md.j
 
 describe("Planning Mode plan.md", () => {
   it("round-trips the lean operator schema without priority", () => {
-    const formatted = formatPlanningPlanMd({ title: "Ship plans", description: "Keep plans durable.", suggestedSize: "M", priority: "high", suggestedDependencies: ["FN-1"], keyDeliverables: ["Format plan", "Store request"] });
+    const formatted = formatPlanningPlanMd({ title: "Ship plans", description: "Keep plans durable.", proposedChanges: ["Persist the plan state"], acceptanceCriteria: ["Refresh restores the active plan"], suggestedSize: "M", priority: "high", suggestedDependencies: ["FN-1"], keyDeliverables: ["Format plan", "Store request"] });
     expect(formatted).not.toContain("## Priority");
-    expect(parsePlanningPlanMd(formatted)).toEqual({ title: "Ship plans", description: "Keep plans durable.", suggestedSize: "M", suggestedDependencies: ["FN-1"], keyDeliverables: ["Format plan", "Store request"] });
+    expect(formatted).toContain("## What to change\n- Persist the plan state");
+    expect(formatted).toContain("## Acceptance criteria\n- Refresh restores the active plan");
+    expect(parsePlanningPlanMd(formatted)).toEqual({ title: "Ship plans", description: "Keep plans durable.", proposedChanges: ["Persist the plan state"], acceptanceCriteria: ["Refresh restores the active plan"], suggestedSize: "M", suggestedDependencies: ["FN-1"], keyDeliverables: ["Format plan", "Store request"] });
   });
 
   it("round-trips empty dependencies", () => {

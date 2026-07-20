@@ -5663,10 +5663,16 @@ export interface PlanningQuestion {
 export interface PlanningSummary {
   title: string;
   description: string;
+  /** Concrete product, code, or configuration changes proposed by the model. */
+  proposedChanges?: string[];
+  /** Observable pass/fail conditions for the implementation. */
+  acceptanceCriteria?: string[];
   suggestedSize: "S" | "M" | "L";
   priority?: TaskPriority;
   suggestedDependencies: string[];
   keyDeliverables: string[];
+  /** Model-suggested areas the operator can choose for the next refinement question. */
+  suggestedRefinements?: string[];
 }
 
 /** Response from planning endpoints - either a question or the final summary */

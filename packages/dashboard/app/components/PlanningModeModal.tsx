@@ -113,6 +113,8 @@ type ViewState =
   | { type: "breakdown"; sessionId: string; originalSubtasks: SubtaskItem[]; subtasks: SubtaskItem[]; dirty: boolean }
   | { type: "loading" };
 
+type PlanningGenerationActivity = "initial_plan" | "plan_update" | "question";
+
 /**
  * FNXC:PlanningMode 2026-07-20-00:00:
  * A persisted planning `result` is an evolving running plan, not proof that the interview ended.
@@ -191,10 +193,13 @@ function normalizePlanningSummary(summary: PlanningSummary): PlanningSummary {
     ...summary,
     title,
     description,
+    proposedChanges: normalizeStringArray(raw.proposedChanges),
+    acceptanceCriteria: normalizeStringArray(raw.acceptanceCriteria),
     suggestedSize: raw.suggestedSize === "S" || raw.suggestedSize === "M" || raw.suggestedSize === "L" ? raw.suggestedSize : "M",
     priority: normalizeTaskPriority(summary.priority),
     suggestedDependencies: normalizeStringArray(raw.suggestedDependencies),
     keyDeliverables: normalizeStringArray(raw.keyDeliverables),
+    suggestedRefinements: normalizeStringArray(raw.suggestedRefinements).slice(0, 3),
   };
 }
 
@@ -215,7 +220,10 @@ function normalizeQuestionOptions(question: PlanningQuestion): PlanningQuestion 
             option.id.trim().length > 0 &&
             typeof option.label === "string" &&
             option.label.trim().length > 0 &&
-            (option.description === undefined || typeof option.description === "string"),
+            (option.description === undefined || typeof option.description === "string") &&
+            option.isOther !== true &&
+            option.id !== "other" &&
+            option.id !== PLANNING_OTHER_OPTION_ID,
           ),
         )
         .map((option) => ({
@@ -376,6 +384,7 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
   const [loadedSessionTitle, setLoadedSessionTitle] = useState<string | null>(null);
   const [isRefiningSummary, setIsRefiningSummary] = useState(false);
   const [generationStartTime, setGenerationStartTime] = useState<number | null>(null);
+  const [generationActivity, setGenerationActivity] = useState<PlanningGenerationActivity>("initial_plan");
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   // Align long-form planning composers with FN-5146's 640px chat convention so
@@ -430,6 +439,7 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
   draftSessionIdRef is only populated after createPlanningDraft resolves, so it cannot gate concurrent creates while a request is in flight. This synchronous sentinel flips true before the await and gates all subsequent debounce fires, collapsing the create path to exactly one call. Cleared on failure so a later keystroke can retry.
   */
   const draftCreateInFlightRef = useRef(false);
+  const draftCreatePromiseRef = useRef<Promise<{ sessionId: string; title: string }> | null>(null);
   const draftDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Tracks resumeSessionId values the user has explicitly dismissed (via "New
   // Session"). Without this, the resume effect re-fires on every callback
@@ -549,6 +559,7 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
   // FNXC:PlanningModeMobile 2026-07-20-10:30: Empty mobile state opens the composer because no saved destination exists; once sessions exist, every compact detail surface gets this single Back-to-list escape.
   const canReturnToSessionList = isCompactInterview && mobileShowDetail && planningSessions.length > 0;
   const [refineFocus, setRefineFocus] = useState("");
+  const [customRefineFocus, setCustomRefineFocus] = useState<string | null>(null);
   const { addToast } = useToast();
   const { pushNav } = useNavigationHistoryContext();
 
@@ -726,7 +737,22 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
         const session = await fetchAiSession(sessionId);
         if (cancelled || !session) return;
         if (currentSessionIdRef.current !== sessionId) return;
-        if (session.status === "awaiting_input" && session.currentQuestion) {
+        if (session.status === "awaiting_input" && !session.currentQuestion && session.result) {
+          // The initial plan and answer updates intentionally settle without a question.
+          // Recover that plan when its SSE summary event was missed instead of polling forever.
+          resetPlanningAutoRetryBudget();
+          const history = parseConversationHistory(session.conversationHistory);
+          const summary = normalizePlanningSummary(JSON.parse(session.result) as PlanningSummary);
+          conversationHistoryRef.current = history;
+          runningSummaryRef.current = summary;
+          setConversationHistory(history);
+          setResponseHistory(history
+            .map((entry) => entry.response)
+            .filter((response): response is QuestionResponse => Boolean(response && typeof response === "object" && !Array.isArray(response))));
+          setRunningSummary(summary);
+          setView({ type: "plan_review", session: { sessionId, currentQuestion: null, summary }, summary });
+          setStreamingOutput("");
+        } else if (session.status === "awaiting_input" && session.currentQuestion) {
           /*
           FNXC:PlanningTurnReconciliation 2026-07-20-10:36:
           Missed SSE recovery must hydrate the server's entire interview turn together. Keeping
@@ -1225,6 +1251,8 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
     resetPlanningAutoRetryBudget();
     setIsRefiningSummary(false);
     refineSummaryInFlightRef.current = false;
+    setGenerationActivity("initial_plan");
+    savePlanningDescription(startedPlan, projectId);
     setView({ type: "loading" });
 
     try {
@@ -1234,13 +1262,40 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
           ? { planningModelProvider, planningModelId, thinkingLevel: planningThinkingLevel || undefined }
           : (planningThinkingLevel ? { thinkingLevel: planningThinkingLevel } : undefined);
 
-      const draftSessionId = draftSessionIdRef.current;
+      let draftSessionId = draftSessionIdRef.current;
+      if (!draftSessionId) {
+        if (draftDebounceRef.current) {
+          clearTimeout(draftDebounceRef.current);
+          draftDebounceRef.current = null;
+        }
+        const draftPromise = draftCreatePromiseRef.current ?? createPlanningDraft(startedPlan, projectId, modelOverride);
+        draftCreatePromiseRef.current = draftPromise;
+        draftCreateInFlightRef.current = true;
+        const draft = await draftPromise;
+        draftSessionId = draft.sessionId;
+        draftSessionIdRef.current = draft.sessionId;
+        draftCreatePromiseRef.current = null;
+        setPlanningSessions((previous) => dedupeSessionsById([{
+          id: draft.sessionId,
+          type: "planning",
+          status: "draft",
+          title: draft.title,
+          preview: startedPlan.length > 80 ? `${startedPlan.slice(0, 79).trimEnd()}…` : startedPlan,
+          projectId: projectId ?? null,
+          updatedAt: new Date().toISOString(),
+          archived: false,
+        }, ...previous]));
+        setSelectedSessionId(draft.sessionId);
+      }
+      // Persist the durable handle before starting generation so a refresh during
+      // the start request can reopen the draft/generating row in either draft path.
+      savePlanningActiveSession(draftSessionId, projectId);
       const { sessionId } = await startPlanningStreaming(
         startedPlan,
         projectId,
         modelOverride,
         { clarificationEnabled: true, ...(workflowId ? { workflowId } : {}) },
-        draftSessionId ?? undefined,
+        draftSessionId,
       );
       draftSessionIdRef.current = null;
       currentSessionIdRef.current = sessionId;
@@ -1252,6 +1307,8 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
       connectToPlanningStream(sessionId);
       setResponseHistory([]);
     } catch (err) {
+      draftCreatePromiseRef.current = null;
+      draftCreateInFlightRef.current = false;
       setError(getErrorMessage(err) || t("planning.failedStartSession", "Failed to start planning session"));
       setView({ type: "initial" });
       currentSessionIdRef.current = null;
@@ -1372,6 +1429,11 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
           // An unavailable payload cannot provide a safe copy target.
         }
         setActivePlanPrompt(typeof inputPayload?.initialPlan === "string" ? inputPayload.initialPlan : "");
+        if (inputPayload?.generationPurpose === "plan_update" || inputPayload?.generationPurpose === "question" || inputPayload?.generationPurpose === "initial_plan") {
+          setGenerationActivity(inputPayload.generationPurpose);
+        } else if (session.status === "generating") {
+          setGenerationActivity("initial_plan");
+        }
         const parsedHistory = parseConversationHistory(session.conversationHistory);
         setConversationHistory(parsedHistory);
         setResponseHistory(
@@ -1659,6 +1721,8 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
     streamConnectionRef.current?.close();
     streamConnectionRef.current = null;
     draftSessionIdRef.current = null;
+    draftCreatePromiseRef.current = null;
+    draftCreateInFlightRef.current = false;
     if (draftDebounceRef.current) {
       clearTimeout(draftDebounceRef.current);
       draftDebounceRef.current = null;
@@ -2055,6 +2119,7 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
       conversationHistoryRef.current = optimisticHistory;
       setConversationHistory(optimisticHistory);
       resetPlanningAutoRetryBudget();
+      setGenerationActivity("plan_update");
       setView({ type: "loading" });
       setStreamingOutput(""); // Clear old thinking output when entering loading state
       liveGenerationSessionIdRef.current = sessionId;
@@ -2171,10 +2236,12 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
   const handleRefineFromPlan = useCallback(async () => {
     if (view.type !== "plan_review") return;
     setError(null);
+    setGenerationActivity("question");
     setView({ type: "loading" });
     try {
       await respondToPlanning(view.session.sessionId, { refine: true, ...(refineFocus.trim() ? { focus: refineFocus.trim() } : {}) }, projectId);
       setRefineFocus("");
+      setCustomRefineFocus(null);
     } catch (err) {
       setError(getErrorMessage(err) || t("planning.failedSubmitResponse", "Failed to refine plan"));
       setView({ type: "plan_review", session: view.session, summary: view.summary });
@@ -2536,7 +2603,7 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
                   <Sparkles size={32} className="icon-triage-lg" />
                   <h4>{t("planning.initialHeading", "Transform your idea into a detailed task")}</h4>
                   <p className="text-muted">
-                    {t("planning.initialSubheading", "Describe what you want to build in plain language. The AI will ask clarifying questions and help you structure a well-defined task.")}
+                    {t("planning.initialSubheading", "Describe what you want to build in plain language. The AI will generate an initial plan, then you can refine or validate it.")}
                   </p>
                 </div>
 
@@ -2571,8 +2638,13 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
                             : (planningThinkingLevel ? { thinkingLevel: planningThinkingLevel } : undefined);
                         // FNXC:PlanningMode 2026-07-01-00:00: mark in-flight synchronously so debounce fires during the round-trip don't spawn duplicate drafts.
                         draftCreateInFlightRef.current = true;
-                        void createPlanningDraft(content, projectId, modelOverride)
+                        const draftPromise = createPlanningDraft(content, projectId, modelOverride);
+                        draftCreatePromiseRef.current = draftPromise;
+                        void draftPromise
                           .then((response) => {
+                            if (draftCreatePromiseRef.current === draftPromise) {
+                              draftCreatePromiseRef.current = null;
+                            }
                             draftSessionIdRef.current = response.sessionId;
                             setPlanningSessions((prev) => {
                               const draft: AiSessionSummary = {
@@ -2593,6 +2665,7 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
                             // best-effort; clear the in-flight sentinel so a
                             // later keystroke can retry creating the draft.
                             draftCreateInFlightRef.current = false;
+                            draftCreatePromiseRef.current = null;
                           });
                       }, 300);
                     }}
@@ -2718,9 +2791,11 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
                       attempt: autoRetryAttempt,
                       max: MAX_PLANNING_AUTO_RETRIES,
                     })
-                  : streamingOutput
-                    ? t("planning.aiThinking", "AI is thinking...")
-                    : t("planning.generatingQuestion", "Generating next question...")}
+                  : generationActivity === "plan_update"
+                    ? t("planning.updatingPlan", "Updating plan…")
+                    : generationActivity === "question"
+                      ? t("planning.generatingQuestion", "Generating next question…")
+                      : t("planning.generatingInitialPlan", "Generating initial plan…")}
               </p>
               {generationStartTime && (
                 <div className="planning-elapsed">{t("planning.thinkingElapsed", "Thinking… ({{seconds}}s)", { seconds: elapsedSeconds })}</div>
@@ -2803,11 +2878,73 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
               <div className="planning-view-scroll planning-summary-scroll">
                 <h4>{view.summary.title}</h4>
                 <p>{view.summary.description}</p>
+                {(view.summary.proposedChanges?.length ?? 0) > 0 && (
+                  <section>
+                    <h5>{t("planning.proposedChanges", "What to change")}</h5>
+                    <ul>{view.summary.proposedChanges!.map((item) => <li key={item}>{item}</li>)}</ul>
+                  </section>
+                )}
+                {(view.summary.acceptanceCriteria?.length ?? 0) > 0 && (
+                  <section>
+                    <h5>{t("planning.acceptanceCriteria", "Acceptance criteria")}</h5>
+                    <ul>{view.summary.acceptanceCriteria!.map((item) => <li key={item}>{item}</li>)}</ul>
+                  </section>
+                )}
                 {view.summary.keyDeliverables.length > 0 && <ul>{view.summary.keyDeliverables.map((item) => <li key={item}>{item}</li>)}</ul>}
-                <label htmlFor="planning-refine-focus">{t("planning.refineFocus", "Focus the next question (optional)")}</label>
-                <input id="planning-refine-focus" data-testid="planning-refine-focus" className="input" value={refineFocus} onChange={(event) => setRefineFocus(event.target.value)} placeholder={t("planning.refineFocusPlaceholder", "For example: security, real-time updates, or a specific question")}/>
+                <fieldset className="planning-refine-focus" data-testid="planning-refine-focus">
+                  <legend>{t("planning.refineFocus", "Focus the next question")}</legend>
+                  <div className="planning-radio-group" role="radiogroup">
+                    {(view.summary.suggestedRefinements ?? []).map((focus) => (
+                      <label key={focus} className="planning-option planning-option--radio">
+                        <input
+                          type="radio"
+                          name="planning-refine-focus"
+                          value={focus}
+                          checked={customRefineFocus === null && refineFocus === focus}
+                          onChange={() => {
+                            setCustomRefineFocus(null);
+                            setRefineFocus(focus);
+                          }}
+                        />
+                        <span className="planning-option-label">{focus}</span>
+                      </label>
+                    ))}
+                    <label className="planning-option planning-option--radio">
+                      <input
+                        type="radio"
+                        name="planning-refine-focus"
+                        value={PLANNING_OTHER_OPTION_ID}
+                        checked={customRefineFocus !== null}
+                        onChange={() => {
+                          setCustomRefineFocus("");
+                          setRefineFocus("");
+                        }}
+                      />
+                      <span className="planning-option-label">{t("planning.writeOwnFocus", "Write your own focus")}</span>
+                    </label>
+                    {customRefineFocus !== null && (
+                      <input
+                        className="input"
+                        autoFocus
+                        value={customRefineFocus}
+                        onChange={(event) => {
+                          setCustomRefineFocus(event.target.value);
+                          setRefineFocus(event.target.value);
+                        }}
+                        placeholder={t("planning.refineFocusPlaceholder", "Describe what the next question should focus on")}
+                      />
+                    )}
+                  </div>
+                </fieldset>
                 <div className="planning-summary-actions">
-                  <button type="button" className="btn" onClick={() => void handleRefineFromPlan()}>{t("planning.refine", "Refine")}</button>
+                  <button
+                    type="button"
+                    className="btn"
+                    disabled={refineFocus.trim().length === 0}
+                    onClick={() => void handleRefineFromPlan()}
+                  >
+                    {t("planning.refine", "Refine")}
+                  </button>
                   <button type="button" className="btn btn-primary" onClick={() => void handleValidatePlan()}>{t("planning.validatePlan", "Validate")}</button>
                 </div>
               </div>

@@ -790,11 +790,10 @@ describe("Planning Mode Routes", () => {
     });
 
     describe("POST /planning/start-streaming", () => {
-      it("broadcasts a mandatory question instead of accepting a first-turn completion", async () => {
+      it("broadcasts a reviewable initial plan without an unsolicited question", async () => {
         const messages: Array<{ role: string; content: string }> = [];
         const responses = [
-          JSON.stringify({ type: "complete", data: { title: "Too early", description: "A plan", keyDeliverables: [] } }),
-          JSON.stringify({ type: "question", data: { id: "q-stream-required", type: "text", question: "What risk should the plan address?" } }),
+          JSON.stringify({ type: "complete", data: { title: "Reporting workflow plan", description: "A concrete reporting plan", proposedChanges: ["Update report generation"], acceptanceCriteria: ["Reports complete successfully"], keyDeliverables: ["Implement report generation"] } }),
         ];
         let responseIndex = 0;
         __setCreateFnAgent(async () => ({
@@ -819,10 +818,9 @@ describe("Planning Mode Routes", () => {
         expect(res.status).toBe(201);
         planningStreamManager.consumeInitialTurn(res.body.sessionId)!();
         await vi.waitFor(() => {
-          const questions = planningStreamManager.getBufferedEvents(res.body.sessionId, 0)
-            .filter((event) => event.event === "question");
-          expect(questions).toHaveLength(1);
-          expect(JSON.parse(questions[0]!.data)).toMatchObject({ id: expect.any(String), type: expect.any(String) });
+          const events = planningStreamManager.getBufferedEvents(res.body.sessionId, 0);
+          expect(events.filter((event) => event.event === "summary")).toHaveLength(1);
+          expect(events.filter((event) => event.event === "question")).toHaveLength(0);
         });
         expect(messages).toHaveLength(2);
         expect(messages[0]?.content).toContain("Build a detailed reporting workflow");
@@ -1299,7 +1297,8 @@ describe("Planning Mode Routes", () => {
           expect(promptCalls).toHaveLength(1);
           expect(streamRes.body).toContain("event: thinking");
           expect(streamRes.body).toContain("live first-turn reasoning");
-          expect(streamRes.body).toContain("event: question");
+          expect(streamRes.body).toContain("event: summary");
+          expect(streamRes.body).not.toContain("event: question");
         } finally {
           vi.useRealTimers();
         }
@@ -1351,7 +1350,8 @@ describe("Planning Mode Routes", () => {
           expect(promptCalls).toHaveLength(1);
           expect(streamRes.body).toContain("event: thinking");
           expect(streamRes.body).toContain("live first-turn reasoning");
-          expect(streamRes.body).toContain("event: question");
+          expect(streamRes.body).toContain("event: summary");
+          expect(streamRes.body).not.toContain("event: question");
         } finally {
           vi.useRealTimers();
         }
