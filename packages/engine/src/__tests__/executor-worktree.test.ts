@@ -941,6 +941,46 @@ describe("TaskExecutor worktree recovery", () => {
     );
   });
 
+  it.each(["reclaimable", "fully-subsumed"] as const)(
+    "relocates an out-of-root %s same-task worktree before reclaiming it",
+    async (kind) => {
+      const store = createMockStore();
+      const executor = new TaskExecutor(store, "/tmp/test");
+      const conflictPath = "/tmp/legacy-worktrees/recover-fn-8400";
+      const targetPath = "/tmp/test/.worktrees/pearl-otter";
+      vi.spyOn(executor as any, "shouldGenerateNewWorktreeName").mockResolvedValue(false);
+      const relocate = vi.spyOn(executor as any, "relocateReclaimableWorktree").mockResolvedValue(targetPath);
+      vi.spyOn(branchConflictModule, "inspectBranchConflict").mockResolvedValueOnce({
+        kind,
+        livePath: conflictPath,
+        tipSha: "70b47804bc6f27659638e17ac7cf279ed343ff6f",
+        taskAttributedCommitCount: kind === "reclaimable" ? 1 : 0,
+        strandedCommits: kind === "reclaimable"
+          ? [{ sha: "70b47804bc6f27659638e17ac7cf279ed343ff6f", subject: "fix(FN-8400): preserve implementation" }]
+          : [],
+      } as any);
+
+      const result = await (executor as any).handleWorktreeConflict(
+        conflictPath,
+        "fusion/fn-8400",
+        targetPath,
+        "FN-8400",
+        "main",
+        0,
+        false,
+        {},
+      );
+
+      expect(relocate).toHaveBeenCalledWith(conflictPath, targetPath, "FN-8400", {});
+      expect(result).toEqual({ path: targetPath, branch: "fusion/fn-8400" });
+      expect(store.logEntry).toHaveBeenCalledWith(
+        "FN-8400",
+        expect.stringContaining(`at ${targetPath}`),
+        "70b47804bc6f27659638e17ac7cf279ed343ff6f",
+      );
+    },
+  );
+
   it("records recovery context when handling a branch conflict (FN-4847: now discards + requeues instead of pausing)", async () => {
     // FN-4847: branch-conflict-unrecoverable previously paused the task with
     // status=failed + pausedReason="branch-conflict-unrecoverable". The user has

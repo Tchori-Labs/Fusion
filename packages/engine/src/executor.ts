@@ -9,9 +9,9 @@ const execFileAsync = promisify(execFile);
 
 const WORKFLOW_THINKING_LEVEL_SET: ReadonlySet<string> = new Set(THINKING_LEVELS);
 
-import { delimiter, isAbsolute, join, relative, resolve as resolvePath } from "node:path";
+import { delimiter, dirname, isAbsolute, join, relative, resolve as resolvePath } from "node:path";
 import { existsSync, lstatSync, realpathSync } from "node:fs";
-import { readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import type { TaskStore, Task, TaskDetail, TaskTokenUsage, StepStatus, Settings, WorkflowStep, MissionStore, AsyncMissionStore, Slice, AgentState, AgentCapability, RunMutationContext, AgentHeartbeatConfig, Agent, AgentMemoryInclusionMode, ProjectSettings, MergeResult, WorkflowIrNode, WorkflowIrNodeKind, WorkflowStepResult as CoreWorkflowStepResult, ThinkingLevel } from "@fusion/core";
 import { getUnmetSchedulingDependencies } from "./scheduler.js";
 import { RetryStormError, serializeRetryStormError, evaluateCompletedPromotionFailureProvenance, evaluateSkipBypassTaint, resolveWorkflowIrForTask, resolveCompleteColumn, resolveMergeOrchestrationColumn, resolveReboundTarget, resolveColumnAgentBinding, resolveEffectiveAgent, instanceNodeId, getWorkflowExtensionRegistry, getBuiltinWorkflow, parseNoOpCompletionMarker, allowsAutoMergeProcessing, resolveEffectiveAutoMerge, isLiveSharedBranchGroupMemberIntegration, resolveMaxAutoMergeRetries, resolveMaxConsecutiveToolFailureRetries, resolveConsecutiveToolFailureRetryBackoffMs, resolveConsecutiveToolFailureThreshold, resolveExecutorEscalationTarget, resolveOptionalStepRevisionBudget, resolveOptionalReviewRevisionBudget, COMPLETION_SUMMARY_NODE_ID, upsertWorkflowStepResult, AWAITING_APPROVAL_PAUSE_REASON, THINKING_LEVELS, AgentStore, resolveExecutorFallbackModel } from "@fusion/core";
@@ -17954,21 +17954,27 @@ You have access to the file system to review changes.${inlineFixBlock}${verdictB
     });
 
     if (inspection.kind === "reclaimable") {
+      const livePath = isInsideWorktreesDir(this.rootDir, inspection.livePath, settings)
+        ? inspection.livePath
+        : await this.relocateReclaimableWorktree(inspection.livePath, path, taskId, settings);
       await this.store.logEntry(
         taskId,
-        `[recovery] reclaimed existing worktree for ${taskId} at ${inspection.livePath} (${inspection.taskAttributedCommitCount} commits preserved)`,
+        `[recovery] reclaimed existing worktree for ${taskId} at ${livePath} (${inspection.taskAttributedCommitCount} commits preserved)`,
         inspection.tipSha,
       );
-      return { path: inspection.livePath, branch };
+      return { path: livePath, branch };
     }
 
     if (inspection.kind === "fully-subsumed") {
+      const livePath = isInsideWorktreesDir(this.rootDir, inspection.livePath, settings)
+        ? inspection.livePath
+        : await this.relocateReclaimableWorktree(inspection.livePath, path, taskId, settings);
       await this.store.logEntry(
         taskId,
-        `[recovery] reclaimed existing worktree for ${taskId} at ${inspection.livePath} (0 commits preserved)`,
+        `[recovery] reclaimed existing worktree for ${taskId} at ${livePath} (0 commits preserved)`,
         inspection.tipSha,
       );
-      return { path: inspection.livePath, branch };
+      return { path: livePath, branch };
     }
 
     if (shouldGenerateNewName) {
@@ -18016,6 +18022,45 @@ You have access to the file system to review changes.${inlineFixBlock}${verdictB
     }
 
     return null;
+  }
+
+  private async relocateReclaimableWorktree(
+    sourcePath: string,
+    targetPath: string,
+    taskId: string,
+    settings: Partial<Settings>,
+  ): Promise<string> {
+    if (!isInsideWorktreesDir(this.rootDir, targetPath, settings)) {
+      throw new NonRetryableWorktreeError(
+        `Refusing to relocate ${taskId} worktree to path outside configured worktrees directory: ${targetPath}`,
+      );
+    }
+
+    await mkdir(dirname(targetPath), { recursive: true });
+    try {
+      await execFileAsync("git", ["worktree", "move", sourcePath, targetPath], {
+        cwd: this.rootDir,
+        timeout: 120_000,
+        maxBuffer: 10 * 1024 * 1024,
+      });
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      await this.store.logEntry(
+        taskId,
+        `[recovery] failed to relocate preserved worktree from ${sourcePath} to ${targetPath}: ${detail}`,
+        sourcePath,
+      );
+      throw new NonRetryableWorktreeError(
+        `Could not relocate preserved ${taskId} worktree into the configured worktrees directory: ${detail}`,
+      );
+    }
+
+    await this.store.logEntry(
+      taskId,
+      `[recovery] relocated preserved worktree from ${sourcePath} to ${targetPath}`,
+      targetPath,
+    );
+    return targetPath;
   }
 
   private async tryFreshWorktreeAfterLiveConflict(input: {
