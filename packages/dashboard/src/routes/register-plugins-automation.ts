@@ -908,8 +908,17 @@ export function registerPluginsAutomationRoutes(ctx: ApiRoutesContext, deps: Plu
    * Get all plugin top-level dashboard view definitions from active plugins.
    * Returns aggregated array of { pluginId, view } objects.
    */
-  router.get("/plugins/dashboard-views", async (_req: Request, res: Response) => {
-    const views = await options?.pluginLoader?.getPluginDashboardViews() ?? [];
+  /*
+  FNXC:PluginNavigation 2026-07-19-17:01:
+  Dashboard views are a loaded-plugin contract scoped to the requested project. Never use the
+  launch project's fallback loader for an explicit project id: doing so leaks enabled Compound
+  Engineering navigation from project A into project B while B's loader is still absent or empty.
+  */
+  router.get("/plugins/dashboard-views", async (req: Request, res: Response) => {
+    const { engine, projectId } = await getProjectContext(req);
+    const pluginLoader = engine?.getPluginRunner?.()?.getLoader()
+      ?? (projectId === undefined ? options?.pluginLoader : undefined);
+    const views = await pluginLoader?.getPluginDashboardViews() ?? [];
     res.json(views);
   });
 

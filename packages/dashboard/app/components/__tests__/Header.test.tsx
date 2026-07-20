@@ -375,6 +375,35 @@ describe("Header", () => {
       expect(screen.getByTestId("view-toggle-plugin-fusion-plugin-roadmap-roadmaps")).toBeInTheDocument();
     });
 
+    it("shows Compound Engineering in sidebar-off header navigation and removes it after disable and uninstall", () => {
+      const compoundEngineeringView = [{
+        pluginId: "fusion-plugin-compound-engineering",
+        view: {
+          viewId: "compound-engineering",
+          label: "Compound Engineering",
+          componentPath: "./CompoundEngineeringView",
+          icon: "Boxes",
+          placement: "primary" as const,
+          order: 36,
+        },
+      }];
+      const rendered = renderHeader({
+        onChangeView: noop,
+        leftSidebarNavActive: false,
+        pluginDashboardViews: compoundEngineeringView,
+      });
+      const testId = "view-toggle-plugin-fusion-plugin-compound-engineering-compound-engineering";
+
+      expect(screen.getByTestId(testId)).toBeInTheDocument();
+      rendered.rerender(<Header onOpenSettings={noop} onOpenGitHubImport={noop} onChangeView={noop} leftSidebarNavActive={false} pluginDashboardViews={[]} />);
+      expect(screen.queryByTestId(testId)).toBeNull();
+
+      rendered.rerender(<Header onOpenSettings={noop} onOpenGitHubImport={noop} onChangeView={noop} leftSidebarNavActive={false} pluginDashboardViews={compoundEngineeringView} />);
+      expect(screen.getByTestId(testId)).toBeInTheDocument();
+      rendered.rerender(<Header onOpenSettings={noop} onOpenGitHubImport={noop} onChangeView={noop} leftSidebarNavActive={false} pluginDashboardViews={[]} />);
+      expect(screen.queryByTestId(testId)).toBeNull();
+    });
+
     it("renders view overflow trigger when an experimental overflow feature is enabled", () => {
       renderHeader({ onChangeView: noop, experimentalFeatures: { insights: true } });
       expect(screen.getByTestId("view-toggle-overflow-trigger")).toBeDefined();
