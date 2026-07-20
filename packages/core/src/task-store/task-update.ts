@@ -22,7 +22,7 @@ import {validateFileScopeInPromptContent} from "../task-store/file-scope.js";
 import {__setTaskActivityLogLimitsForTesting, isBootstrapPromptStub, rewriteHeadingLine, rewriteMissionSection} from "../task-store/comments.js";
 import {applyOriginalDescription} from "../original-description-policy.js";
 import {normalizeTaskReviewState} from "../task-store/review-state.js";
-import {hasOwnDeclaredSymbols, normalizeDeclaredSymbols, extractDeclaredSymbolsFromPrompt} from "../task-symbol-resolution.js";
+import {hasOwnDeclaredSymbols, normalizeDeclaredSymbols, extractDeclaredSymbolsFromPrompt, resolveTaskSymbolsForTask} from "../task-symbol-resolution.js";
 
 export async function updateTaskUnlockedImpl(store: TaskStore, id: string, updates: Parameters<TaskStore["updateTask"]>[1], runContext?: RunMutationContext,): Promise<Task> {
     {
@@ -37,6 +37,7 @@ export async function updateTaskUnlockedImpl(store: TaskStore, id: string, updat
 
       const dir = store.taskDir(id);
       const task = await store.readTaskJson(dir);
+      const wasFailed = task.status === "failed";
 
       // Capture title/description before mutation so the PROMPT.md stub
       // detector below can compare against the exact wrapper bytes that the
@@ -757,6 +758,20 @@ export async function updateTaskUnlockedImpl(store: TaskStore, id: string, updat
         });
       } else {
         await store.atomicWriteTaskJson(dir, task);
+      }
+
+      /*
+      FNXC:MissionSymbolAdmission 2026-08-01-00:00:
+      A workflow failure may park in the current in-progress column rather than
+      move out of it. Release that task's durable symbols on the status edge as
+      well as moveTask's column-exit path, allowing engine reconciliation to
+      record failure provenance without incorrectly completing the feature.
+      */
+      if (store.backendMode && !wasFailed && task.status === "failed") {
+        const symbols = resolveTaskSymbolsForTask(task);
+        if (symbols.resolvable) {
+          await store.releaseSymbolLocks(symbols.symbols, id);
+        }
       }
 
       // Update cache if watcher is active

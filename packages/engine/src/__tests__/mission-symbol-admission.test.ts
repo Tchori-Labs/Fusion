@@ -15,6 +15,7 @@ function store(overrides: Partial<{ mission: Mission | undefined; milestone: Mil
   const values = { mission, milestone, slice, feature, ...overrides };
   return {
     getFeatureByTaskId: async () => values.feature,
+    getFeature: async (id: string) => id === feature.id ? values.feature : undefined,
     getSlice: async () => values.slice,
     getMilestone: async () => values.milestone,
     getMission: async () => values.mission,
@@ -25,6 +26,30 @@ describe("decideMissionSymbolAdmission", () => {
   it("uses symbol locking for approved mission lineage with normalized declarations", async () => {
     await expect(decideMissionSymbolAdmission(task({ declaredSymbols: ["pkg/a.ts#A", " pkg/b.ts # B "] }), store())).resolves.toMatchObject({
       kind: "symbol-lock", symbols: ["pkg/a.ts#a", "pkg/b.ts#b"], reason: "approved",
+    });
+  });
+
+  it("resolves Decision-A follow-up metadata without replacing source feature ownership", async () => {
+    const followUp = task({
+      id: "FN-2",
+      declaredSymbols: ["pkg/a.ts#A"],
+      sourceMetadata: { missionLineage: { missionId: mission.id, sliceId: slice.id, featureId: feature.id } },
+    });
+
+    await expect(decideMissionSymbolAdmission(followUp, store())).resolves.toMatchObject({
+      kind: "symbol-lock", feature: { id: feature.id, taskId: "FN-1" },
+    });
+  });
+
+  it("blocks malformed Decision-A metadata rather than falling back to another feature", async () => {
+    const followUp = task({
+      id: "FN-2",
+      declaredSymbols: ["pkg/a.ts#A"],
+      sourceMetadata: { missionLineage: { missionId: mission.id, sliceId: slice.id, featureId: "F-missing" } },
+    });
+
+    await expect(decideMissionSymbolAdmission(followUp, store())).resolves.toEqual({
+      kind: "lineage-blocked", reason: "missing-feature",
     });
   });
 

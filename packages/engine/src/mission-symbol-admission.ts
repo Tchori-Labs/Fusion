@@ -32,14 +32,39 @@ export interface MissionSymbolAdmissionOptions {
 
 type MissionReader = Pick<
   MissionStore | AsyncMissionStore,
-  "getMission" | "getMilestone" | "getSlice" | "getFeatureByTaskId"
+  "getMission" | "getMilestone" | "getSlice" | "getFeature" | "getFeatureByTaskId"
 >;
 
+type PersistedMissionLineage = { missionId: string; sliceId: string; featureId: string };
+
+function parsePersistedMissionLineage(task: Task): PersistedMissionLineage | undefined {
+  const candidate = task.sourceMetadata?.missionLineage;
+  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return undefined;
+  const { missionId, sliceId, featureId } = candidate as Record<string, unknown>;
+  return typeof missionId === "string" && typeof sliceId === "string" && typeof featureId === "string"
+    ? { missionId, sliceId, featureId }
+    : undefined;
+}
+
 /**
- * Resolve the canonical feature link rather than title matching: scheduler
- * admission must fail closed for mission work whose hierarchy cannot be proven.
+ * FNXC:MissionSymbolAdmission 2026-08-01-00:00:
+ * Decision-A follow-up tasks retain the source feature's scalar taskId and carry
+ * a separately validated sourceMetadata.missionLineage reference. Resolve that
+ * reference before the canonical link so scheduler admission and reconciliation
+ * preserve source ownership without treating a metadata-shaped value as proof.
  */
-async function resolveFeature(store: MissionReader, task: Task): Promise<MissionFeature | undefined> {
+export async function resolveMissionFeatureForTask(
+  store: MissionReader,
+  task: Task,
+): Promise<MissionFeature | undefined> {
+  const persisted = parsePersistedMissionLineage(task);
+  if (persisted) {
+    const feature = await store.getFeature(persisted.featureId);
+    if (feature?.sliceId === persisted.sliceId && task.sliceId === persisted.sliceId && task.missionId === persisted.missionId) {
+      return feature;
+    }
+    return undefined;
+  }
   return await store.getFeatureByTaskId(task.id);
 }
 
@@ -65,7 +90,7 @@ export async function decideMissionSymbolAdmission(
       : { kind: "coarse-fallback", reason: "non-mission" };
   }
 
-  const feature = await resolveFeature(missionStore, task);
+  const feature = await resolveMissionFeatureForTask(missionStore, task);
   const missionLinked = declaredMissionLink || Boolean(feature);
   if (!missionLinked) return { kind: "coarse-fallback", reason: "non-mission" };
   // Resolve every stated lineage edge independently so diagnostics distinguish

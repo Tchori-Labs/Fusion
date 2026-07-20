@@ -47,7 +47,7 @@ import type { WorkflowIr, WorkflowIrV2 } from "@fusion/core";
 import { runHoldReleaseSweep, isUnplannedForExecution, type SlotReservation } from "./hold-release.js";
 import { moveTaskToReplanColumn } from "./replan-target.js";
 import { evaluateParkedAgentTaskLink } from "./task-agent-sync.js";
-import { decideMissionSymbolAdmission } from "./mission-symbol-admission.js";
+import { decideMissionSymbolAdmission, resolveMissionFeatureForTask } from "./mission-symbol-admission.js";
 
 const SYMBOL_LOCK_LEASE_MS = 10 * 60_000;
 
@@ -857,8 +857,17 @@ export class Scheduler {
         this.options.snapshotManager?.invalidate("task:updated");
       }
       // Track mission failure signals before moveTask clears failure metadata.
-      if (task.sliceId && task.column === "in-progress" && task.status === "failed") {
-        this.failedTaskIds.add(task.id);
+      if (task.sliceId && task.status === "failed") {
+        if (task.column === "in-progress") this.failedTaskIds.add(task.id);
+        /*
+        FNXC:MissionReconciliation 2026-08-01-00:00:
+        In-place failure parks do not emit task:moved, but they release the
+        task's durable symbol lock. Reconcile any mission-linked failure update
+        so the roadmap records withheld provenance without fabricating completion.
+        */
+        if (this.options.missionStore) {
+          void this.handleMissionTaskMove(task.id, task.column);
+        }
       } else if (task.status !== "failed") {
         this.failedTaskIds.delete(task.id);
       }
@@ -2285,10 +2294,6 @@ export class Scheduler {
    */
   /**
    * FNXC:MissionSymbolAdmission 2026-07-19-22:04:
-   * Admission leases are intentionally short so crash recovery can reclaim them,
-   * but every active mission owner renews on the scheduler heartbeat. Renewal runs
-   * before pause handling because a paused scheduler still permits existing work to
-   * finish and must not let same-symbol work enter after its original lease expires.
    * Active implementation follows the workflow `countsTowardWip` trait, so renamed
    * and multi-WIP workflows keep their declared symbols exclusively held.
    */
@@ -3138,7 +3143,7 @@ export class Scheduler {
   }
 
   private async resolveMissionFeatureForTask(missionStore: MissionStore | AsyncMissionStore, task: Task): Promise<MissionFeature | undefined> {
-    const linkedFeature = await missionStore.getFeatureByTaskId(task.id);
+    const linkedFeature = await resolveMissionFeatureForTask(missionStore, task);
     if (linkedFeature) {
       return linkedFeature;
     }

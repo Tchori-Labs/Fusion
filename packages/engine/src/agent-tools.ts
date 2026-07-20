@@ -37,6 +37,12 @@ import { validateCodeNodeSources } from "./code-node-runner.js";
 
 const TASK_CREATE_PRIORITY_VALUES = ["low", "normal", "high", "urgent"] as const;
 
+const missionLineageParams = Type.Object({
+  mission_id: Type.String({ description: "Approved mission ID for this implementation task" }),
+  slice_id: Type.String({ description: "Approved slice ID under the mission" }),
+  feature_id: Type.String({ description: "Approved feature ID under the slice" }),
+});
+
 export const taskCreateParams = Type.Object({
   description: Type.String({ description: "What needs to be done" }),
   dependencies: Type.Optional(
@@ -54,6 +60,7 @@ export const taskCreateParams = Type.Object({
         "Omit to inherit the project default workflow. Use fn_workflow_list to discover valid IDs.",
     }),
   ),
+  mission_lineage: Type.Optional(missionLineageParams),
 });
 
 export const taskLogParams = Type.Object({
@@ -384,6 +391,7 @@ export const delegateTaskParams = Type.Object({
         "Omit to inherit the project default workflow. Use fn_workflow_list to discover valid IDs.",
     }),
   ),
+  mission_lineage: Type.Optional(missionLineageParams),
   override: Type.Optional(Type.Boolean({ description: "Set true to bypass executor-role assignment policy" })),
 });
 
@@ -940,7 +948,65 @@ type AgentTaskCreationOptions = {
   messageStore?: MessageStore;
   sourceAgentId?: string;
   sourceTaskId?: string;
+  /** Require a caller-supplied lineage rather than inheriting a task-parent lineage. */
+  requireMissionLineage?: boolean;
 };
+
+type MissionLineageReference = {
+  missionId: string;
+  sliceId: string;
+  featureId: string;
+};
+
+/**
+ * FNXC:MissionAdmission 2026-07-30-00:00:
+ * FN-8307 requires every autonomous implementation create/delegate operation to
+ * prove an active Feature → Slice → Milestone → Mission chain before persistence.
+ * Decision A records that proof on the new task without calling linkFeatureToTask:
+ * a feature's scalar taskId remains owned by its source task and cannot be stolen
+ * by a follow-up task.
+ */
+async function resolveApprovedMissionLineage(
+  store: TaskStore,
+  requested: { mission_id: string; slice_id: string; feature_id: string } | undefined,
+  sourceTaskId: string | undefined,
+): Promise<MissionLineageReference | { error: string }> {
+  const missionStore = store.getMissionStore?.();
+  if (!missionStore) return { error: "Mission lineage is unavailable; no task was created." };
+
+  let requestedLineage = requested;
+  if (!requestedLineage && sourceTaskId) {
+    const sourceFeature = await missionStore.getFeatureByTaskId(sourceTaskId);
+    if (sourceFeature) {
+      const sourceSlice = await missionStore.getSlice(sourceFeature.sliceId);
+      const sourceMilestone = sourceSlice ? await missionStore.getMilestone(sourceSlice.milestoneId) : undefined;
+      if (sourceSlice && sourceMilestone) {
+        requestedLineage = {
+          mission_id: sourceMilestone.missionId,
+          slice_id: sourceSlice.id,
+          feature_id: sourceFeature.id,
+        };
+      }
+    }
+  }
+  if (!requestedLineage) return { error: "Approved mission_lineage is required; no task was created." };
+
+  const [feature, slice, mission] = await Promise.all([
+    missionStore.getFeature(requestedLineage.feature_id),
+    missionStore.getSlice(requestedLineage.slice_id),
+    missionStore.getMission(requestedLineage.mission_id),
+  ]);
+  const milestone = slice ? await missionStore.getMilestone(slice.milestoneId) : undefined;
+  if (!feature || !slice || !milestone || !mission
+    || feature.sliceId !== slice.id || milestone.missionId !== mission.id) {
+    return { error: "mission_lineage must name one valid Feature → Slice → Milestone → Mission chain; no task was created." };
+  }
+  const approval = fusionCore.evaluateMissionLineageApproval({
+    feature, slice, milestone, mission, task: {}, planApprovalRequired: false,
+  });
+  if (!approval.approved) return { error: `Mission lineage is not approved (${approval.reason}); no task was created.` };
+  return { missionId: mission.id, sliceId: slice.id, featureId: feature.id };
+}
 
 /*
 FNXC:AgentRouting 2026-07-29-00:00:
@@ -1196,6 +1262,14 @@ export function createTaskCreateTool(
           }
         }
         const workflowId = params.workflow_id?.trim() || undefined;
+        const lineage = await resolveApprovedMissionLineage(
+          store,
+          params.mission_lineage,
+          options?.requireMissionLineage ? undefined : options?.sourceTaskId ?? provenance?.sourceParentTaskId,
+        );
+        if ("error" in lineage) {
+          return { content: [{ type: "text" as const, text: `ERROR: ${lineage.error}` }], details: { rule: "mission-lineage-required" }, isError: true };
+        }
         /*
         FNXC:Workflows 2026-07-05-00:00:
         fn_task_create must NOT hardcode column:"triage" here. TaskStore.createTask already
@@ -1213,12 +1287,16 @@ export function createTaskCreateTool(
           dependencies: params.dependencies,
           priority: params.priority,
           ...(workflowId ? { workflowId } : {}),
-          source: provenance ? {
-            sourceType: provenance.sourceType,
-            sourceAgentId: provenance.sourceAgentId,
-            sourceRunId: provenance.sourceRunId,
-            sourceParentTaskId: provenance.sourceParentTaskId,
-          } : undefined,
+          missionId: lineage.missionId,
+          sliceId: lineage.sliceId,
+          source: {
+            sourceType: provenance?.sourceType ?? "api",
+            sourceAgentId: provenance?.sourceAgentId,
+            sourceRunId: provenance?.sourceRunId,
+            sourceParentTaskId: provenance?.sourceParentTaskId ?? options?.sourceTaskId,
+            // Decision A: lineage metadata is deliberately distinct from feature.taskId.
+            sourceMetadata: { missionLineage: lineage },
+          },
         }, options);
         const deps = task.dependencies.length ? ` (depends on: ${task.dependencies.join(", ")})` : "";
         const workflow = workflowId ? ` (workflow: ${workflowId})` : "";
@@ -4431,6 +4509,10 @@ export function createDelegateTaskTool(
 
       try {
         const workflowId = params.workflow_id?.trim() || undefined;
+        const lineage = await resolveApprovedMissionLineage(taskStore, params.mission_lineage, options?.sourceTaskId);
+        if ("error" in lineage) {
+          return { content: [{ type: "text" as const, text: `ERROR: ${lineage.error}` }], details: { rule: "mission-lineage-required" }, isError: true };
+        }
         // Create task assigned to the target agent
         const { task, wasDuplicate } = await createAgentTask(taskStore, {
           description: params.description,
@@ -4438,9 +4520,16 @@ export function createDelegateTaskTool(
           column: "todo",
           assignedAgentId: params.agent_id,
           ...(workflowId ? { workflowId } : {}),
+          missionId: lineage.missionId,
+          sliceId: lineage.sliceId,
           source: {
             sourceType: "api",
-            ...(override ? { sourceMetadata: { executorRoleOverride: true } } : {}),
+            sourceParentTaskId: options?.sourceTaskId,
+            sourceAgentId: options?.sourceAgentId,
+            sourceMetadata: {
+              missionLineage: lineage,
+              ...(override ? { executorRoleOverride: true } : {}),
+            },
           },
         }, options);
 

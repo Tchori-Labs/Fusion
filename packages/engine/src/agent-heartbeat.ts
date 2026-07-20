@@ -2506,7 +2506,16 @@ export class HeartbeatMonitor {
             sourceType: "agent_heartbeat",
             sourceAgentId: agentId,
             sourceRunId: runContext?.runId,
-          }, { rootDir: this.rootDir }));
+          }, {
+            rootDir: this.rootDir,
+            /*
+            FNXC:MissionAdmission 2026-08-01-02:00:
+            Idle heartbeats have no source task whose approved lineage can be
+            inherited. Require a supplied lineage so the factory validates and
+            persists the same Feature → Slice → Milestone → Mission proof.
+            */
+            requireMissionLineage: true,
+          }));
 
           /*
           FNXC:AgentTooling 2026-06-27-11:45:
@@ -2518,7 +2527,7 @@ export class HeartbeatMonitor {
 
           // Agent delegation tools
           heartbeatTools.push(createListAgentsTool(this.store));
-          heartbeatTools.push(createDelegateTaskTool(this.store, taskStore, { rootDir: this.rootDir }));
+          heartbeatTools.push(createDelegateTaskTool(this.store, taskStore, { rootDir: this.rootDir, sourceAgentId: agentId }));
           heartbeatTools.push(createTaskAssignTool(this.store, taskStore));
           heartbeatTools.push(createGetAgentConfigTool(this.store, agentId));
           heartbeatTools.push(createUpdateAgentConfigTool(this.store, agentId));
@@ -3131,8 +3140,13 @@ export class HeartbeatMonitor {
               : [];
             const noTaskActionGuidanceLines = plannerHeartbeatPatrolEnabled
               ? [
-                "2. **Create new tasks** — Use fn_task_create for net-new executable work.",
-                "   Prefer concrete tasks with clear outcomes; avoid vague placeholders.",
+                /*
+                FNXC:MissionAdmission 2026-07-30-00:00:
+                FN-8307 forbids idle heartbeats from inventing implementation work.
+                Creation/delegation is available only with a validated approved mission lineage.
+                */
+                "2. **Mission-linked tasks only** — Use fn_task_create only with an approved Feature → Slice → Milestone → Mission reference.",
+                "   Do not create off-mission implementation work; prefer safe coordination when no approved lineage exists.",
                 "",
               ]
               : [
@@ -3143,7 +3157,7 @@ export class HeartbeatMonitor {
             const noTaskFlowGuidanceLines = plannerHeartbeatPatrolEnabled
               ? [
                 "5. **Monitor project flow** — Review board/project signals and surface issues",
-                "   by creating or delegating follow-up work as appropriate.",
+                "   by creating or delegating only approved mission-linked follow-up work as appropriate.",
                 "",
               ]
               : [
@@ -3186,15 +3200,15 @@ export class HeartbeatMonitor {
               "   If replying, use fn_send_message and include reply_to_message_id so threads stay linked.",
               "",
               ...noTaskActionGuidanceLines,
-              "3. **Delegate work** — Use fn_list_agents to find available specialists, then",
-              "   fn_delegate_task when immediate ownership by a specific agent is beneficial.",
+              "3. **Delegate mission work** — Use fn_list_agents to find available specialists, then",
+              "   fn_delegate_task only with an approved Feature → Slice → Milestone → Mission reference.",
               "",
               "4. **Update memory** — Use fn_memory_append for durable, reusable learnings",
               "   (conventions, pitfalls, architecture constraints), not transient chatter.",
               "",
               ...noTaskFlowGuidanceLines,
               "When auto-claim relevant tasks is enabled, review Open Task Candidates above and",
-              "prioritize tasks that align with your role and soul before creating net-new tasks.",
+              "prioritize approved mission work that aligns with your role and soul before creating tasks.",
               ...candidateLines,
               ...pendingMessagesLines,
               ...pendingRoomMessagesLines,
@@ -3750,7 +3764,7 @@ export class HeartbeatMonitor {
       sourceAgentId: agentId,
       sourceRunId: runContext?.runId,
       sourceParentTaskId: taskId,
-    }, { rootDir: this.rootDir });
+    }, { rootDir: this.rootDir, sourceTaskId: taskId, sourceAgentId: agentId });
     const trackedCreateTool: ToolDefinition = {
       ...baseCreateTool,
       execute: async (id: string, params: Static<typeof taskCreateParams>, signal, onUpdate, ctx) => {
@@ -3807,7 +3821,7 @@ export class HeartbeatMonitor {
     tools.push(createArtifactViewTool(taskStore));
     // Agent delegation tools — discover and delegate work to other agents
     tools.push(createListAgentsTool(this.store));
-    tools.push(createDelegateTaskTool(this.store, taskStore, { rootDir: this.rootDir }));
+    tools.push(createDelegateTaskTool(this.store, taskStore, { rootDir: this.rootDir, sourceTaskId: taskId, sourceAgentId: agentId }));
     tools.push(createTaskAssignTool(this.store, taskStore));
     tools.push(createGetAgentConfigTool(this.store, agentId));
     tools.push(createUpdateAgentConfigTool(this.store, agentId));
