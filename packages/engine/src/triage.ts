@@ -178,6 +178,7 @@ import { archiveAsGhostBug } from "./self-healing.js";
 import { createRunAuditor, generateSyntheticRunId } from "./run-audit.js";
 import { resolveAndEmitGoalContext } from "./goal-injection-diagnostics.js";
 import { accumulateSessionTokenUsage } from "./session-token-usage.js";
+import { finalizePlanningSegment, startPlanningSegment } from "@fusion/core";
 import type { AgentActionGateContext } from "./agent-action-gate.js";
 import { buildAgentGatedActionSummary } from "./permanent-agent-gating.js";
 
@@ -1574,6 +1575,10 @@ export class TriageProcessor {
           "triage",
         );
 
+        // FNXC:TaskTiming 2026-08-01-10:00: triage owns the initial planning lane;
+        // first-start wins so a crash between ownership and persistence cannot open a second segment.
+        const planningStart = startPlanningSegment(task);
+        if (planningStart.planningStartedAt) await this.store.updateTask(task.id, planningStart);
         // Register session so the global pause listener can terminate it
         this.activeSessions.set(task.id, session);
 
@@ -1827,6 +1832,11 @@ export class TriageProcessor {
           Every triage planning exit path, including APPROVE, retry, pause/stuck abort, split/delete, and rate-limit wrapper attempts, records the active session's actual model before disposal so by-model analytics do not collapse triage usage to missing buckets.
           */
           await this.recordTriageSessionTokenUsage(task.id, session, { agentId: triageRunContext.agentId });
+          const livePlanningTask = await this.store.getTask(task.id);
+          if (livePlanningTask) {
+            const planningEnd = finalizePlanningSegment(livePlanningTask);
+            if (planningEnd.planningStartedAt === null) await this.store.updateTask(task.id, planningEnd);
+          }
           session.dispose();
         }
       };

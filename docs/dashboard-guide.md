@@ -2155,3 +2155,6 @@ The uploaded image uses the tracking repository's raw URL. It renders inline for
 ## Chat-requested task verification
 
 Chat can queue `fn_task_request_verification` for an **in-progress** task that has a live executor worktree. The only profiles are `verify:fast` (default) and the project-configured `test-command`; chat never accepts or executes raw shell text. Command-execution policy applies to the request, including approval and denial outcomes. Use `fn_task_verification_status` to read the persisted request, running state, or bounded terminal output. The executor owns the actual run and shared verification concurrency slot, so results remain visible through task execution state and Command Center observability.
+
+
+Productivity duration uses total agent-active time: planning (`cumulativePlanningMs`) plus execution (`cumulativeActiveMs`); queued column dwell is not included.

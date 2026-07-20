@@ -96,6 +96,7 @@ import { Type, type Static } from "@earendil-works/pi-ai";
 import { describeModel, formatModelMarkerDetails, promptWithFallback, compactSessionContext } from "./pi.js";
 import { buildAgentGatedActionSummary } from "./permanent-agent-gating.js";
 import { accumulateSessionTokenUsage, captureSessionTokenBaseline, mergeTokenUsagePerModel, resetSessionTokenBaseline } from "./session-token-usage.js";
+import { finalizePlanningSegment, startPlanningSegment } from "@fusion/core";
 import { enforceTaskTokenBudgetForPersist } from "./token-budget-enforcer.js";
 import {
   createResolvedAgentSession,
@@ -1730,6 +1731,12 @@ export class TaskExecutor {
   private effectiveColumnAgentByTask = new Map<string, string>();
   /** Active pre-merge workflow step sessions per task. */
   private activeWorkflowStepSessions = new Map<string, AgentSession>();
+  /**
+   * FNXC:TaskTiming 2026-08-01-12:00:
+   * Only graph-owned Plan Review sessions appear here. Self-healing uses this
+   * narrow liveness proof so it never finalizes an in-flight planning segment.
+   */
+  private activePlanningWorkflowSessions = new Set<string>();
   /** Steering comments already observed for active workflow step sessions. */
   private activeWorkflowStepSessionSeenSteeringIds = new Map<string, Set<string>>();
   /** Active configured-command abort controllers keyed by task. */
@@ -2457,6 +2464,17 @@ export class TaskExecutor {
       ...this.resumingUnpaused,
       ...TaskExecutor.processWideGraphRouting,
     ]);
+  }
+
+  /**
+   * FNXC:TaskTiming 2026-08-01-12:00:
+   * A planning segment has one owner: a graph Plan Review session is live only
+   * while both its session registration and planning ownership marker remain.
+   * This is intentionally narrower than isTaskActive(), which also covers
+   * implementation and non-planning workflow sessions.
+   */
+  hasActivePlanningWorkflowSession(taskId: string): boolean {
+    return this.activePlanningWorkflowSessions.has(taskId) && this.activeWorkflowStepSessions.has(taskId);
   }
 
   isTaskActive(taskId: string): boolean {
@@ -16635,6 +16653,19 @@ You have access to the file system to review changes.${inlineFixBlock}${verdictB
         `Workflow step '${workflowStep.name}' using model: ${workflowModelDetails}`,
       );
       this.setActiveWorkflowStepSession(task.id, session, worktreePath, this.createSeenSteeringIds(task));
+      // FNXC:TaskTiming 2026-08-01-10:00: graph-owned Plan Review is the only
+      // post-spec planning lane. Start before prompting and finalize in finally before any replan handoff.
+      const ownsPlanningSegment = workflowStep.id === "graph:plan-review-step" || workflowStep.name === "Plan Review";
+      if (ownsPlanningSegment) {
+        this.activePlanningWorkflowSessions.add(task.id);
+        const planningStart = startPlanningSegment(task);
+        try {
+          if (planningStart.planningStartedAt) await this.store.updateTask(task.id, planningStart);
+        } catch (error) {
+          this.activePlanningWorkflowSessions.delete(task.id);
+          throw error;
+        }
+      }
 
       let output = "";
       const deltaNormalizer = createStreamingDeltaNormalizer();
@@ -16717,6 +16748,9 @@ You have access to the file system to review changes.${inlineFixBlock}${verdictB
           if (workflowStep.requiresBrowser === true) {
             await logBrowserVerificationActivity(`[browser-verification] finished browser verification for task ${task.id}: timed out`);
           }
+          // FNXC:TaskCost 2026-08-01-10:00: Plan Review tokens are task cost;
+          // snapshot before timeout disposal just like normal completion.
+          await accumulateSessionTokenUsage(this.store, task.id, session, { agentId: task.assignedAgentId ?? undefined, role: "executor" });
           try { session.dispose(); } catch { /* best-effort */ }
           await agentLogger.flush();
           return { success: false, error: `workflow step timed out after ${timeoutMs}ms`, timedOut: true };
@@ -16772,6 +16806,9 @@ You have access to the file system to review changes.${inlineFixBlock}${verdictB
         return { success: true, output: parsed.output };
       } catch (err: unknown) {
         await agentLogger.flush();
+        // Persist the delta before error disposal so graph-owned planning reviews
+        // cannot disappear from operator cost totals.
+        await accumulateSessionTokenUsage(this.store, task.id, session, { agentId: task.assignedAgentId ?? undefined, role: "executor" });
         try { session.dispose(); } catch { /* best-effort */ }
         if ((err instanceof ReadonlyViolationError) || ((err as { code?: string } | null)?.code === "READONLY_VIOLATION")) {
           const violation = err as ReadonlyViolationError;
@@ -16792,6 +16829,19 @@ You have access to the file system to review changes.${inlineFixBlock}${verdictB
         return { success: false, error: errorMessage };
       } finally {
         if (timeoutHandle) clearTimeout(timeoutHandle);
+        if (ownsPlanningSegment) {
+          try {
+            const livePlanningTask = await this.store.getTask(task.id);
+            if (livePlanningTask) {
+              const planningEnd = finalizePlanningSegment(livePlanningTask);
+              if (planningEnd.planningStartedAt === null) await this.store.updateTask(task.id, planningEnd);
+            }
+          } finally {
+            // Finalize before releasing Plan Review ownership so triage can only
+            // begin a subsequent, non-overlapping planning segment.
+            this.activePlanningWorkflowSessions.delete(task.id);
+          }
+        }
         const activeWorkflowStepSession = this.activeWorkflowStepSessions.get(task.id);
         if (activeWorkflowStepSession === session) {
           this.deleteActiveWorkflowStepSession(task.id, worktreePath);

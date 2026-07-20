@@ -2078,6 +2078,14 @@ export interface Task {
    *  Incremented whenever the task leaves `in-progress`; never decremented and
    *  never cleared by reopen flows. */
   cumulativeActiveMs?: number;
+  /**
+   * FNXC:TaskTiming 2026-08-01-10:00:
+   * Monotonic active AI planning duration. Unlike column dwell this is only
+   * accrued by a live planning session and is never cleared by reopen.
+   */
+  cumulativePlanningMs?: number;
+  /** Open planning AI segment; finalized exactly once into cumulativePlanningMs. */
+  planningStartedAt?: string;
   /*
   FNXC:TaskTiming 2026-06-26-10:14:
   Per-stage dwell-time instrumentation. `cumulativeActiveMs` only measures `in-progress`,
@@ -4908,6 +4916,10 @@ export interface ArchivedTaskEntry {
   firstExecutionAt?: string;
   /** Accumulated active runtime spent in `in-progress` across attempts. */
   cumulativeActiveMs?: number;
+  /** Accumulated active AI planning duration carried through archive/restore. */
+  cumulativePlanningMs?: number;
+  /** Open planning AI segment carried through archive/restore. */
+  planningStartedAt?: string;
   /** FNXC:TaskTiming 2026-06-26-10:14: per-column cumulative dwell (ms) carried through
    *  archive/restore so per-stage wall-clock survives archival. See Task.columnDwellMs. */
   columnDwellMs?: Record<string, number>;
