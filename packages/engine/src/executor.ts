@@ -1662,11 +1662,12 @@ export class TaskExecutor {
   private workflowRerunPending = new Set<string>();
   /**
    * Task ids whose current `task:moved` event is being emitted by this
-   * executor's workflow column-boundary hook. The store emits synchronously,
-   * so this narrowly distinguishes a graph's own transition from an external
-   * engine/user move that must still hard-cancel the active run.
+   * executor's workflow lifecycle handling (column boundaries or Plan Review
+   * replans). The store emits synchronously, so this narrowly distinguishes a
+   * graph's own transition from an external engine/user move that must still
+   * hard-cancel the active run.
    */
-  private workflowBoundaryMovesInFlight = new Set<string>();
+  private workflowLifecycleMovesInFlight = new Set<string>();
   /** FN-5256: in-flight session-disposal promises keyed by taskId. The
    *  task:moved (away from in-progress) and task:deleted listeners populate
    *  this so a fast re-dispatch (task:moved → in-progress) awaits the prior
@@ -3045,7 +3046,7 @@ export class TaskExecutor {
           }),
         );
       } else if (from === "in-progress") {
-        if (this.workflowBoundaryMovesInFlight.has(task.id) && this.graphRouting.has(task.id)) {
+        if (this.workflowLifecycleMovesInFlight.has(task.id) && this.graphRouting.has(task.id)) {
           executorLog.log(
             `[event:task:moved] Preserving graph run for ${task.id} across its own ${from} → ${to} boundary`,
           );
@@ -4570,13 +4571,32 @@ export class TaskExecutor {
       }
       await this.persistTokenUsage(task.id);
       const originColumn = task.column;
-      const promotedFromTodo = originColumn === "todo";
-      if (promotedFromTodo) {
+      const promotedFromPlannerColumn = originColumn === "todo" || originColumn === "triage";
+      let completionTask = task;
+      if (promotedFromPlannerColumn) {
         this.recoveringCompleted.add(task.id);
-        await this.store.moveTask(task.id, "in-progress");
+        /*
+        FNXC:WorkflowLifecycle 2026-07-20-08:42:
+        Advanced-triage recovery reaches this shared seam with completed work, a
+        preserved worktree, and a durable merge pin. The workflow transition map
+        deliberately rejects triage -> in-review, so re-home through the legal
+        triage -> todo -> in-progress path while the recovery ownership set prevents
+        scheduler/executor dispatch. Todo callers retain their existing single hop.
+        */
+        if (originColumn === "triage") {
+          completionTask = await this.store.moveTask(task.id, "todo", {
+            moveSource: "engine",
+            recoveryRehome: true,
+            bypassGuards: true,
+            preserveProgress: true,
+            preserveWorktree: true,
+            preserveResumeState: true,
+          });
+        }
+        completionTask = await this.store.moveTask(task.id, "in-progress");
       }
-      await this.handoffTaskToReview(task, "completed-task-recovered");
-      if (promotedFromTodo) {
+      await this.handoffTaskToReview(completionTask, "completed-task-recovered");
+      if (promotedFromPlannerColumn) {
         this.recoveringCompleted.delete(task.id);
       }
       this.clearCompletedTaskWatchdog(task.id);
@@ -4757,7 +4777,12 @@ export class TaskExecutor {
         optionalStepRevisionLogOutcome(feedback, revisionKey),
         this.getRunContextFor(taskId),
       );
-      await moveTaskToReplanColumn(this.store, { id: taskId, column: liveTask.column }, replanColumn);
+      this.workflowLifecycleMovesInFlight.add(taskId);
+      try {
+        await moveTaskToReplanColumn(this.store, { id: taskId, column: liveTask.column }, replanColumn);
+      } finally {
+        this.workflowLifecycleMovesInFlight.delete(taskId);
+      }
       await this.store.updateTask(taskId, {
         status: "needs-replan",
         error: null,
@@ -5836,7 +5861,7 @@ export class TaskExecutor {
       // row fields so an ordinary requeue re-resolves the CURRENT IR fresh.
       clearPin: pinPersistence.clearPin,
       moveTask: async (toColumn, ctx) => {
-        this.workflowBoundaryMovesInFlight.add(task.id);
+        this.workflowLifecycleMovesInFlight.add(task.id);
         try {
           await this.store.moveTask(task.id, toColumn, {
             moveSource: "engine",
@@ -5846,7 +5871,7 @@ export class TaskExecutor {
             workflowMoveMetadata: { fromColumn: ctx.fromColumn, nodeId: ctx.nodeId },
           });
         } finally {
-          this.workflowBoundaryMovesInFlight.delete(task.id);
+          this.workflowLifecycleMovesInFlight.delete(task.id);
         }
       },
       emitAudit: async (event) => {

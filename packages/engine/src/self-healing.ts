@@ -3028,6 +3028,11 @@ export class SelfHealingManager {
       const tasks = await this.store.listTasks({ column: "triage", slim: true });
       const executingIds = this.options.getExecutingTaskIds?.() ?? new Set<string>();
       const planningIds = this.options.getPlanningTaskIds?.() ?? new Set<string>();
+      const hasForeignPathOwner = (task: Task) => {
+        if (!task.worktree) return false;
+        const owner = activeSessionRegistry.lookupByPath(task.worktree);
+        return owner != null && owner.taskId !== task.id;
+      };
       const candidates = tasks.filter((task) =>
         task.column === "triage"
         && task.status == null
@@ -3038,7 +3043,8 @@ export class SelfHealingManager {
         && !executingIds.has(task.id)
         && !planningIds.has(task.id)
         && this.options.isTaskActive?.(task.id) !== true
-        && !(task.worktree && activeSessionRegistry.isPathActive(task.worktree)),
+        && this.options.getActiveMergeTaskId?.() !== task.id
+        && !hasForeignPathOwner(task),
       );
 
       let recovered = 0;
@@ -3056,9 +3062,19 @@ export class SelfHealingManager {
             || !live.workflowIrPinNodeId
             || (this.options.getExecutingTaskIds?.() ?? new Set<string>()).has(live.id)
             || this.options.isTaskActive?.(live.id) === true
-            || activeSessionRegistry.isPathActive(live.worktree)
+            || this.options.getActiveMergeTaskId?.() === live.id
+            || hasForeignPathOwner(live)
           ) {
             continue;
+          }
+
+          // A prior aborted graph can leave its own registry claim behind after every
+          // executable/planning/merge owner has gone away. The durable task row and the
+          // liveness callbacks above prove that claim is stale; clear it so completed
+          // recovery can reuse the preserved worktree instead of rejecting its own path.
+          const pathOwner = activeSessionRegistry.lookupByPath(live.worktree);
+          if (pathOwner?.taskId === live.id) {
+            activeSessionRegistry.unregisterPath(live.worktree);
           }
 
           const steps = live.steps ?? [];
@@ -3083,7 +3099,8 @@ export class SelfHealingManager {
             && !(this.options.getExecutingTaskIds?.() ?? new Set<string>()).has(current.id)
             && !(this.options.getPlanningTaskIds?.() ?? new Set<string>()).has(current.id)
             && this.options.isTaskActive?.(current.id) !== true
-            && !(current.worktree && activeSessionRegistry.isPathActive(current.worktree)),
+            && this.options.getActiveMergeTaskId?.() !== current.id
+            && !hasForeignPathOwner(current),
           {
             moveSource: "engine",
             workflowMoveSource: "self-healing-advanced-triage",
