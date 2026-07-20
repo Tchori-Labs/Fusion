@@ -3651,7 +3651,15 @@ export class HeartbeatMonitor {
 
     const actionLines = ["### Actions for Unresponsive Reports"];
     if (hasStuck) {
-      actionLines.push("- For **stuck** reports: consider sending a message via fn_send_message asking for status, or reassigning their task via fn_delegate_task to a healthy agent.");
+      /*
+      FNXC:ReportsHealthRecovery 2026-07-20-00:36:
+      FN-8410 found that a durable engineer can remain `running` while a useful
+      executor session advances its task without refreshing lastHeartbeatAt.
+      Reports Health must preserve the stuck signal for genuinely orphaned runs,
+      but its first action must require live-work proof before any reassignment
+      so a manager does not terminate productive work to clear an optical alert.
+      */
+      actionLines.push("- For **stuck** reports: first check task-log/step progress, the active heartbeat run, and worktree/session liveness. If work is live, do not stop or reassign it; request status if needed. Reassign only after no live session and no forward progress are confirmed.");
     }
     if (hasStale) {
       actionLines.push("- For **stale** reports: the agent may have lost its heartbeat trigger — create a follow-up task to investigate.");

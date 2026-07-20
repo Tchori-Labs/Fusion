@@ -385,6 +385,8 @@ describe("executeHeartbeat", () => {
       const section = await (monitor as any).buildReportsHealthSection("agent-001", store);
       expect(section).toContain("**stuck**");
       expect(section).toContain("Actions for Unresponsive Reports");
+      expect(section).toContain("first check task-log/step progress, the active heartbeat run, and worktree/session liveness");
+      expect(section).toContain("If work is live, do not stop or reassign it");
     });
 
     it("buildReportsHealthSection classifies stale agents", async () => {
