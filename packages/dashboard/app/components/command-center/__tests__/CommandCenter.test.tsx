@@ -483,15 +483,11 @@ describe("CommandCenter shell", () => {
     expect(screen.queryByTestId("cc-controls-heartbeat")).toBeNull();
   });
 
-  it("renders the report menu and opens its guided modal in every Overview state", async () => {
+  it("does not retain a duplicate report entry on Overview", () => {
     mockEmptyOverviewApi();
     render(<CommandCenter />);
 
-    expect(screen.getByTestId("command-center-report-actions")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Report" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Report bug" }));
-
-    expect(await screen.findByRole("dialog", { name: "bug report" })).toBeTruthy();
+    expect(screen.queryByTestId("command-center-report-actions")).toBeNull();
   });
 
   it("renders throughput last while the Overview branch is loading", () => {

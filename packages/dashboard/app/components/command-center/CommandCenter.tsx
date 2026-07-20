@@ -1,15 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AlertCircle, Gauge } from "lucide-react";
-import type { ActivityAnalytics, ColorTheme, LiveSnapshot, ReportActionType, SignalsAnalytics, ThemeMode, TokenAnalytics, ToolAnalytics, TaskVerificationRequest } from "@fusion/core";
+import type { ActivityAnalytics, ColorTheme, LiveSnapshot, SignalsAnalytics, ThemeMode, TokenAnalytics, ToolAnalytics, TaskVerificationRequest } from "@fusion/core";
 import { api, fetchCodebaseMetrics, withProjectId, type CodebaseMetrics } from "../../api/legacy";
 import { formatBytes } from "../../utils/formatBytes";
 import { DateRangePicker, defaultPresets, rangeFromPreset, type DateRange } from "./DateRangePicker";
 import { LoadingSpinner } from "../LoadingSpinner";
 import { TaskVerificationStatus } from "../TaskVerificationStatus";
-import { ReportActionMenu } from "../ReportActionMenu";
-import { ReportModal } from "../ReportModal";
-import { resolveReportContextRefs } from "../../utils/reportContextRefs";
 import { TokensArea } from "./areas/TokensArea";
 import { ToolsArea } from "./areas/ToolsArea";
 import { ActivityArea } from "./areas/ActivityArea";
@@ -150,30 +147,6 @@ interface CommandCenterProps {
   The Overview (Command Center landing) surfaces "View Board"/"View Agents" shortcuts directly under the Live activity snapshot (the engine-activity strip, the closest "AI engine" element on Overview). Navigation is owned by App's view router, so thread an optional onChangeView down to OverviewTab rather than letting the Command Center mutate routing state itself. Moved here from the Team-tab Heartbeat card (FN earlier).
   */
   onChangeView?: (view: TaskView) => void;
-}
-
-/**
- * FNXC:ReportPipeline 2026-07-18-19:35:
- * FN-8348 makes the Command Center Overview a second canonical report home.
- * Keeping the trigger with its modal in this always-rendered controls fragment
- * preserves the guided pipeline and task/agent deep-link context in loading,
- * empty, error, and populated dashboard states.
- */
-function ReportActionCard() {
-  const { t } = useTranslation("app");
-  const [reportAction, setReportAction] = useState<ReportActionType | null>(null);
-  const contextRefs = typeof window === "undefined" ? undefined : resolveReportContextRefs(window.location);
-
-  return (
-    <section className="card cc-report-actions" data-testid="command-center-report-actions">
-      <div>
-        <h3 className="cc-report-actions__title">{t("commandCenter.report.title", "Report")}</h3>
-        <p>{t("commandCenter.report.description", "Report a bug, send feedback, share an idea, or get help.")}</p>
-      </div>
-      <ReportActionMenu onSelect={setReportAction} />
-      {reportAction && <ReportModal actionType={reportAction} contextRefs={contextRefs} onClose={() => setReportAction(null)} />}
-    </section>
-  );
 }
 
 function OverviewTab({
@@ -395,21 +368,23 @@ function OverviewTab({
   FNXC:CommandCenter 2026-06-22-20:55:
   The Overview's AI-engine controls are a SINGLE instance: the CommandCenterControls "AI engine" card (Stop AI Engine) now also hosts the "View Board"/"View Agents" shortcuts (threaded onChangeView). The earlier duplicate `.cc-overview-engine-panel` (a second AI Engine row) was removed — the buttons moved into the first instance.
   */
+  /*
+  FNXC:CommandCenter 2026-07-19-14:00:
+  FN-8406 makes System the sole Command Center report home. Overview keeps only
+  operational controls and analytics, avoiding a duplicate report affordance.
+  */
   const controlsSection = (
-    <>
-      <CommandCenterControls
-        projectId={projectId}
-        colorTheme={colorTheme}
-        themeMode={themeMode}
-        shadcnCustomColors={shadcnCustomColors}
-        resolvedThemeMode={resolvedThemeMode}
-        onColorThemeChange={onColorThemeChange}
-        onThemeModeChange={onThemeModeChange}
-        onShadcnCustomColorsChange={onShadcnCustomColorsChange}
-        onChangeView={onChangeView}
-      />
-      <ReportActionCard />
-    </>
+    <CommandCenterControls
+      projectId={projectId}
+      colorTheme={colorTheme}
+      themeMode={themeMode}
+      shadcnCustomColors={shadcnCustomColors}
+      resolvedThemeMode={resolvedThemeMode}
+      onColorThemeChange={onColorThemeChange}
+      onThemeModeChange={onThemeModeChange}
+      onShadcnCustomColorsChange={onShadcnCustomColorsChange}
+      onChangeView={onChangeView}
+    />
   );
   const throughputSection = (
     <div className="cc-overview-throughput" data-testid="command-center-throughput">
