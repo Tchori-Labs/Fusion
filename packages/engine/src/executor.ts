@@ -14,7 +14,7 @@ import { existsSync, lstatSync, realpathSync } from "node:fs";
 import { readFile, rm, writeFile } from "node:fs/promises";
 import type { TaskStore, Task, TaskDetail, TaskTokenUsage, StepStatus, Settings, WorkflowStep, MissionStore, AsyncMissionStore, Slice, AgentState, AgentCapability, RunMutationContext, AgentHeartbeatConfig, Agent, AgentMemoryInclusionMode, ProjectSettings, MergeResult, WorkflowIrNode, WorkflowIrNodeKind, WorkflowStepResult as CoreWorkflowStepResult, ThinkingLevel } from "@fusion/core";
 import { getUnmetSchedulingDependencies } from "./scheduler.js";
-import { RetryStormError, serializeRetryStormError, evaluateCompletedPromotionFailureProvenance, evaluateSkipBypassTaint, resolveWorkflowIrForTask, resolveCompleteColumn, resolveMergeOrchestrationColumn, resolveReboundTarget, resolveColumnAgentBinding, resolveEffectiveAgent, instanceNodeId, getWorkflowExtensionRegistry, getBuiltinWorkflow, parseNoOpCompletionMarker, allowsAutoMergeProcessing, resolveEffectiveAutoMerge, isLiveSharedBranchGroupMemberIntegration, resolveMaxAutoMergeRetries, resolveMaxConsecutiveToolFailureRetries, resolveConsecutiveToolFailureRetryBackoffMs, resolveConsecutiveToolFailureThreshold, resolveExecutorEscalationTarget, resolveOptionalStepRevisionBudget, resolveOptionalReviewRevisionBudget, COMPLETION_SUMMARY_NODE_ID, upsertWorkflowStepResult, AWAITING_APPROVAL_PAUSE_REASON, THINKING_LEVELS, AgentStore, resolveExecutorFallbackModel } from "@fusion/core";
+import { RetryStormError, serializeRetryStormError, evaluateCompletedPromotionFailureProvenance, evaluateSkipBypassTaint, resolveWorkflowIrForTask, resolveCompleteColumn, resolveMergeOrchestrationColumn, resolveReboundTarget, resolveColumnAgentBinding, resolveEffectiveAgent, instanceNodeId, getWorkflowExtensionRegistry, getBuiltinWorkflow, parseNoOpCompletionMarker, allowsAutoMergeProcessing, resolveEffectiveAutoMerge, isLiveSharedBranchGroupMemberIntegration, resolveMaxAutoMergeRetries, resolveMaxConsecutiveToolFailureRetries, resolveConsecutiveToolFailureRetryBackoffMs, resolveConsecutiveToolFailureThreshold, resolveExecutorEscalationTarget, resolveOptionalStepRevisionBudget, resolveOptionalReviewRevisionBudget, COMPLETION_SUMMARY_NODE_ID, upsertWorkflowStepResult, AWAITING_APPROVAL_PAUSE_REASON, THINKING_LEVELS, ACTIVE_WORKFLOW_WORK_ITEM_STATES, AgentStore, resolveExecutorFallbackModel } from "@fusion/core";
 import { finalizeProvenAutoMergeTask } from "./auto-merge-finalization.js";
 import { mergeEffectiveSettings } from "./effective-settings.js";
 import { generateFeatureVideo, type GenerateFeatureVideoOptions } from "./review-artifacts/feature-video.js";
@@ -191,7 +191,7 @@ import type { StuckTaskDetector, StuckTaskEvent } from "./stuck-task-detector.js
 import type { PluginRunner } from "./plugin-runner.js";
 import { isContextLimitError } from "./context-limit-detector.js";
 import { StepSessionExecutor } from "./step-session-executor.js";
-import { makeAncestryBlastRadiusGuard, resetStepToBaseline, runTaskStep } from "./step-runner.js";
+import { makeAncestryBlastRadiusGuard, resetStepToBaseline, runTaskStep, type RunTaskStepResult } from "./step-runner.js";
 // FNXC:MergerUnification 2026-06-21-19:05: the foundation branch imported `acquireWorkspaceRepoWorktree` here but never used it in executor.ts (the agent tool wraps it via agent-tools.ts), which fails lint on the inherited base. Removed until master-plan U1 re-adds it together with its per-repo acquisition usage.
 import { acquireTaskWorktree, type AcquireTaskWorktreeResult } from "./worktree-acquisition.js";
 import { resolveCapturedBaseCommitSha } from "./base-commit-capture.js";
@@ -5659,7 +5659,7 @@ export class TaskExecutor {
         const workItems = await this.store.listWorkflowWorkItemsForTask?.(task.id, { kinds: ["task"] }) ?? [];
         for (let index = workItems.length - 1; index >= 0; index -= 1) {
           const candidate = workItems[index];
-          if (["held", "runnable", "running", "retrying"].includes(candidate.state)) {
+          if (ACTIVE_WORKFLOW_WORK_ITEM_STATES.includes(candidate.state)) {
             continuation = candidate;
             break;
           }
@@ -5956,7 +5956,7 @@ export class TaskExecutor {
       clearPin: pinPersistence.clearPin,
       onSuspend: async (suspension) => {
         const items = await this.store.listWorkflowWorkItemsForTask(task.id, { kinds: ["task"] });
-        const live = items.filter((item) => ["held", "runnable", "running", "retrying"].includes(item.state));
+        const live = items.filter((item) => ACTIVE_WORKFLOW_WORK_ITEM_STATES.includes(item.state));
         if (live.some((item) => item.nodeId === suspension.nodeId)) return;
         await this.store.replaceActiveTaskWorkflowContinuation({
           runId: `${workflowRunId ?? `${task.id}:workflow`}:continuation:${suspension.nodeId}:${items.length}`,
@@ -5996,7 +5996,7 @@ export class TaskExecutor {
           target: event.taskId,
           metadata:
             event.type === "task:column-transition"
-              ? { taskId: event.taskId, workflowId: event.workflowId, fromColumn: event.fromColumn, toColumn: event.toColumn, nodeId: event.nodeId }
+              ? { taskId: event.taskId, workflowId: event.workflowId, fromColumn: event.fromColumn, toColumn: event.toColumn, nodeId: event.nodeId, irHash: event.irHash }
               : { taskId: event.taskId, workflowId: event.workflowId, pinnedNodeId: event.pinnedNodeId, reason: event.reason },
         });
       },
@@ -6688,6 +6688,57 @@ export class TaskExecutor {
     return only;
   }
 
+  /**
+   * Project a graph-owned step only after it has a real worktree.
+   *
+   * A fresh task has no worktree until the authoritative implementation pass
+   * acquires one. Projecting before that pass produces a false "step started"
+   * event and captures the baseline from the project root. In that fresh path,
+   * let the implementation pass own the first projection and reuse the base SHA
+   * it captures during worktree acquisition. Resumed and isolated-step runs
+   * already have a worktree, so they keep the normal per-step projection and
+   * pre-work baseline behavior.
+   */
+  private async runProjectedGraphTaskStep(
+    task: Task,
+    live: TaskDetail,
+    stepIndex: number,
+    active: ForeachActiveContext,
+    governingNodeId?: string,
+    thinkingLevel?: ThinkingLevel,
+  ): Promise<RunTaskStepResult> {
+    const worktreePath = active.worktreePath || live.worktree;
+    const runStep = (idx: number) =>
+      this.runGraphTaskStep(
+        task,
+        idx,
+        active.instanceId,
+        governingNodeId,
+        thinkingLevel,
+      );
+
+    if (!worktreePath) {
+      const result = await runStep(stepIndex);
+      const refreshed = await this.store.getTask(task.id).catch(() => live);
+      return {
+        outcome: result.success ? "success" : "failure",
+        baselineSha: refreshed.baseCommitSha,
+        checkpointId: undefined,
+      };
+    }
+
+    return runTaskStep(
+      {
+        store: this.store,
+        worktreePath,
+        runStep,
+      },
+      { id: task.id, steps: live.steps },
+      stepIndex,
+      { markDoneOnSuccess: active.deferDoneToReview !== true, projectionSource: "graph" },
+    );
+  }
+
   /** Public authoritative-driver seam factory: exposes the same real lifecycle
    * seams the internal graph runner uses, without changing legacy behavior. */
   public createAuthoritativeWorkflowPrimitives(settings: Settings): WorkflowRuntimePrimitives {
@@ -6790,24 +6841,14 @@ export class TaskExecutor {
             data: { status: liveStatus },
           };
         }
-        const worktreePath = active.worktreePath || live.worktree || this.rootDir;
         this.graphStepActiveContext.set(this.graphActiveContextKey(task.id, active.instanceId), active);
         const stepGoverningNodeId = context[SEAM_GOVERNING_NODE_CONTEXT_KEY];
-        return await runTaskStep(
-          {
-            store: this.store,
-            worktreePath,
-            runStep: (idx) =>
-              this.runGraphTaskStep(
-                task,
-                idx,
-                active.instanceId,
-                typeof stepGoverningNodeId === "string" ? stepGoverningNodeId : undefined,
-              ),
-          },
-          { id: task.id, steps: live.steps },
+        return await this.runProjectedGraphTaskStep(
+          task,
+          live,
           stepIndex,
-          { markDoneOnSuccess: active.deferDoneToReview !== true, projectionSource: "graph" },
+          active,
+          typeof stepGoverningNodeId === "string" ? stepGoverningNodeId : undefined,
         );
       },
       resetTaskStep: async (ctx, task, stepIndex, baselineSha, checkpointId) => {
@@ -7390,7 +7431,6 @@ export class TaskExecutor {
         // worktree when the foreach allocated one; otherwise the task's main
         // worktree (shared isolation — unchanged). The file-scope guard the session
         // machinery installs applies to either worktree unchanged (not bypassed).
-        const worktreePath = active.worktreePath || live.worktree || this.rootDir;
         // Stamp the active instance so `runGraphTaskStep` can honor
         // `deferDoneToReview` when judging a non-terminal step (FIX 3).
         this.graphStepActiveContext.set(this.graphActiveContextKey(seamTask.id, active.instanceId), active);
@@ -7405,35 +7445,15 @@ export class TaskExecutor {
         // foreach (overwrite mid-build, or clear while the shared pass is live).
         const stepGoverningNodeId = context[SEAM_GOVERNING_NODE_CONTEXT_KEY];
         const seamThinkingLevel = context[SEAM_THINKING_LEVEL_CONTEXT_KEY];
-        const result: Awaited<ReturnType<typeof runTaskStep>> = await runTaskStep(
-          {
-            store: this.store,
-            worktreePath,
-            // U6/U8: graph-owned per-step physics. Per-step-review workflows
-            // pin StepSessionExecutor inside runGraphTaskStep; final-review coding
-            // honors runStepsInNewSessions and may reuse one executor session.
-            // Thread the instanceId so the active-context read is per-instance
-            // (parallel-foreach safe).
-            runStep: (stepIndex) =>
-              this.runGraphTaskStep(
-                seamTask,
-                stepIndex,
-                active.instanceId,
-                typeof stepGoverningNodeId === "string" ? stepGoverningNodeId : undefined,
-                typeof seamThinkingLevel === "string" && WORKFLOW_THINKING_LEVEL_SET.has(seamThinkingLevel)
-                  ? (seamThinkingLevel as ThinkingLevel)
-                  : undefined,
-              ),
-          },
-          { id: seamTask.id, steps: live.steps },
+        const result = await this.runProjectedGraphTaskStep(
+          seamTask,
+          live,
           active.stepIndex,
-          {
-            // Single-authority done-marking (U6/KTD-4): when the foreach template
-            // has a step-review node, leave the step in-progress so the review's
-            // APPROVE marks it done (the review is the single done authority).
-            markDoneOnSuccess: active.deferDoneToReview !== true,
-            projectionSource: "graph",
-          },
+          active,
+          typeof stepGoverningNodeId === "string" ? stepGoverningNodeId : undefined,
+          typeof seamThinkingLevel === "string" && WORKFLOW_THINKING_LEVEL_SET.has(seamThinkingLevel)
+            ? (seamThinkingLevel as ThinkingLevel)
+            : undefined,
         );
         // Capture baseline/checkpoint back into the reserved active context so the
         // foreach sub-walk threads them to later template nodes (step-review/reset).
