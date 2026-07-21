@@ -28,6 +28,7 @@ import {
 
 const MOCK_TASK_STORE = {
   listTasks: vi.fn(async () => []),
+  getSettings: vi.fn(async () => ({})),
   getTask: vi.fn(async () => {
     throw new Error("not found");
   }),
@@ -74,7 +75,7 @@ describe("planning generation cancellation", () => {
 
     expect(promptSignal?.aborted).toBe(true);
     expect(dispose).toHaveBeenCalledTimes(1);
-    expect((await getSession(sessionId))?.error).toMatch(/stopped by user/i);
+    expect((await getSession(sessionId))?.error).toBeUndefined();
 
     resolveHungPrompt?.();
     await new Promise((resolve) => setTimeout(resolve, 0));

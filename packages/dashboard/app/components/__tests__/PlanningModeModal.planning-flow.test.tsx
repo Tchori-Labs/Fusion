@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { PlanningModeModal } from "../PlanningModeModal";
-import { mockCreatePlanningDraft, mockFetchAiSession, mockFetchAiSessions, mockRespondToPlanning, mockStartPlanningStreaming, mockValidatePlanningSession, mockCreateTaskFromPlanning, mockTasks, mockSummary } from "./PlanningModeModal.test-helpers";
+import { mockCreatePlanningDraft, mockFetchAiSession, mockFetchAiSessions, mockRespondToPlanning, mockStartPlanningStreaming, mockStopPlanningGeneration, mockValidatePlanningSession, mockCreateTaskFromPlanning, mockTasks, mockSummary } from "./PlanningModeModal.test-helpers";
 
 const mockViewportMode = vi.hoisted(() => vi.fn(() => "desktop" as "desktop" | "mobile"));
 const mockConnectPlanningStream = vi.hoisted(() => vi.fn());
@@ -24,7 +24,7 @@ vi.mock("../../api", () => {
     fetchAiSession: (...args: unknown[]) => mockFetchAiSession(...args), fetchAiSessions: (...args: unknown[]) => mockFetchAiSessions(...args),
     respondToPlanning: (...args: unknown[]) => mockRespondToPlanning(...args), validatePlanningSession: (...args: unknown[]) => mockValidatePlanningSession(...args), createTaskFromPlanning: (...args: unknown[]) => mockCreateTaskFromPlanning(...args),
     fetchSettings: fn().mockResolvedValue({ modelPresets: [], autoSelectModelPreset: false, defaultPresetBySize: {} }), fetchGlobalSettings: fn().mockResolvedValue({}), fetchModels: fn().mockResolvedValue([]), fetchWorkflowSteps: fn().mockResolvedValue([]), fetchBoardWorkflows: fn().mockResolvedValue({ workflows: [] }),
-    startPlanning: fn(), startPlanningStreaming: (...args: unknown[]) => mockStartPlanningStreaming(...args), createPlanningDraft: (...args: unknown[]) => mockCreatePlanningDraft(...args), connectPlanningStream: (...args: unknown[]) => mockConnectPlanningStream(...args), rewindPlanningSession: fn(), retryPlanningSession: fn(), cancelPlanning: fn(), stopPlanningGeneration: fn(), updatePlanningSessionDraft: fn(), updatePlanningSessionTitle: fn(), startPlanningBreakdown: fn(), createTasksFromPlanning: fn(), parseConversationHistory: (raw: string) => JSON.parse(raw || "[]"), acquireSessionLock: fn(), releaseSessionLock: fn(), forceAcquireSessionLock: fn(), uploadAttachment: fn(), deleteAttachment: fn(), updateTask: fn(), pauseTask: fn(), unpauseTask: fn(), fetchTaskDetail: fn(), requestSpecRevision: fn(), approvePlan: fn(), rejectPlan: fn(), refineTask: fn(), deleteAiSession: fn(), refineText: fn(), getRefineErrorMessage: (error: Error) => error.message,
+    startPlanning: fn(), startPlanningStreaming: (...args: unknown[]) => mockStartPlanningStreaming(...args), createPlanningDraft: (...args: unknown[]) => mockCreatePlanningDraft(...args), connectPlanningStream: (...args: unknown[]) => mockConnectPlanningStream(...args), rewindPlanningSession: fn(), retryPlanningSession: fn(), cancelPlanning: fn(), stopPlanningGeneration: (...args: unknown[]) => mockStopPlanningGeneration(...args), updatePlanningSessionDraft: fn(), updatePlanningSessionTitle: fn(), startPlanningBreakdown: fn(), createTasksFromPlanning: fn(), parseConversationHistory: (raw: string) => JSON.parse(raw || "[]"), acquireSessionLock: fn(), releaseSessionLock: fn(), forceAcquireSessionLock: fn(), uploadAttachment: fn(), deleteAttachment: fn(), updateTask: fn(), pauseTask: fn(), unpauseTask: fn(), fetchTaskDetail: fn(), requestSpecRevision: fn(), approvePlan: fn(), rejectPlan: fn(), refineTask: fn(), deleteAiSession: fn(), refineText: fn(), getRefineErrorMessage: (error: Error) => error.message,
   };
 });
 
@@ -39,7 +39,7 @@ const summaryWithRefinements = {
 };
 
 describe("PlanningModeModal sequential flow", () => {
-  beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); mockPlanningSse.events = null; mockViewportMode.mockReturnValue("desktop"); mockFetchAiSessions.mockResolvedValue([]); mockCreatePlanningDraft.mockResolvedValue({ sessionId: "draft-1", title: "Secure plan" }); mockStartPlanningStreaming.mockResolvedValue({ sessionId: "draft-1" }); mockValidatePlanningSession.mockResolvedValue({ summary: mockSummary, validated: true }); mockCreateTaskFromPlanning.mockResolvedValue({ id: "FN-8442" }); });
+  beforeEach(() => { vi.clearAllMocks(); localStorage.clear(); mockPlanningSse.events = null; mockViewportMode.mockReturnValue("desktop"); mockFetchAiSessions.mockResolvedValue([]); mockCreatePlanningDraft.mockResolvedValue({ sessionId: "draft-1", title: "Secure plan" }); mockStartPlanningStreaming.mockResolvedValue({ sessionId: "draft-1" }); mockStopPlanningGeneration.mockResolvedValue({ success: true }); mockValidatePlanningSession.mockResolvedValue({ summary: mockSummary, validated: true }); mockCreateTaskFromPlanning.mockResolvedValue({ id: "FN-8442" }); });
   it("persists a draft before generation and immediately shows initial-plan progress", async () => {
     render(<PlanningModeModal isOpen onClose={vi.fn()} onTaskCreated={vi.fn()} onTasksCreated={vi.fn()} tasks={mockTasks} projectId="project-1" />);
     fireEvent.change(screen.getByLabelText("What do you want to build?"), { target: { value: "Build secure accounts" } });
@@ -356,6 +356,49 @@ describe("PlanningModeModal sequential flow", () => {
     expect(await screen.findByText("Generating plan…")).toBeInTheDocument();
     await waitFor(() => expect(mockConnectPlanningStream).toHaveBeenCalledTimes(1));
     expect(mockConnectPlanningStream).toHaveBeenCalledWith("session-1", "project-1", expect.any(Object));
+  });
+  it("keeps elapsed thinking time scoped to each generating session", async () => {
+    const now = Date.parse("2026-07-21T08:00:30.000Z");
+    const dateNow = vi.spyOn(Date, "now").mockReturnValue(now);
+    mockFetchAiSession.mockImplementation(async (sessionId: string) => ({
+      ...base,
+      id: sessionId,
+      status: "generating",
+      currentQuestion: null,
+      result: JSON.stringify(summaryWithRefinements),
+      inputPayload: JSON.stringify({
+        generationPurpose: "plan_update",
+        generationStartedAt: new Date(now - (sessionId === "session-1" ? 25_000 : 7_000)).toISOString(),
+      }),
+    }));
+    const props = { isOpen: true, onClose: vi.fn(), onTaskCreated: vi.fn(), onTasksCreated: vi.fn(), tasks: mockTasks, projectId: "project-1" };
+    const { rerender } = render(<PlanningModeModal {...props} resumeSessionId="session-1" />);
+
+    expect(await screen.findByText("Thinking… (25s)")).toBeInTheDocument();
+
+    rerender(<PlanningModeModal {...props} resumeSessionId="session-2" />);
+    expect(await screen.findByText("Thinking… (7s)")).toBeInTheDocument();
+    dateNow.mockRestore();
+  });
+  it("returns to the prior question without an error when generation is stopped", async () => {
+    const priorQuestion = { id: "q-prior", type: "text", question: "What should change?" };
+    mockFetchAiSession.mockResolvedValue({
+      ...base,
+      status: "generating",
+      currentQuestion: null,
+      result: JSON.stringify(summaryWithRefinements),
+      conversationHistory: JSON.stringify([{ question: priorQuestion, response: { "q-prior": "Preserve drafts" } }]),
+      inputPayload: JSON.stringify({ generationPurpose: "plan_update", generationStartedAt: new Date().toISOString() }),
+    });
+    renderSession({});
+
+    await waitFor(() => expect(mockConnectPlanningStream).toHaveBeenCalledWith("session-1", "project-1", expect.any(Object)));
+    fireEvent.click(await screen.findByRole("button", { name: "Stop" }));
+
+    await waitFor(() => expect(mockStopPlanningGeneration).toHaveBeenCalledWith("session-1", "project-1"));
+    expect(await screen.findByText("What should change?")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Type your answer here...")).toHaveValue("Preserve drafts");
+    expect(screen.queryByText(/Generation stopped by user/i)).toBeNull();
   });
   it("renders exactly one write-your-own choice for normalized select questions", async () => {
     mockFetchAiSession.mockResolvedValue({

@@ -811,16 +811,20 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
       return;
     }
 
-    const startedAt = Date.now();
-    setGenerationStartTime(startedAt);
-    setElapsedSeconds(0);
+    const startedAt = generationStartTime ?? Date.now();
+    if (generationStartTime === null) {
+      setGenerationStartTime(startedAt);
+    }
 
-    const timer = setInterval(() => {
+    const updateElapsed = () => {
       setElapsedSeconds(Math.max(0, Math.floor((Date.now() - startedAt) / 1000)));
-    }, 1000);
+    };
+    updateElapsed();
+
+    const timer = setInterval(updateElapsed, 1000);
 
     return () => clearInterval(timer);
-  }, [view.type]);
+  }, [generationStartTime, view.type]);
 
   // Fallback for missed SSE 'question'/'summary' events: when the loading
   // state lingers, periodically refetch the session and transition the view
@@ -1218,6 +1222,7 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
       setIsRetrying(!options.auto);
       setIsAutoRetrying(options.auto);
       setStreamingOutput("");
+      setGenerationStartTime(Date.now());
       setView({ type: "loading" });
 
       currentSessionIdRef.current = retryTarget.sessionId;
@@ -1366,6 +1371,7 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
     refineSummaryInFlightRef.current = false;
     setGenerationActivity("initial_plan");
     savePlanningDescription(startedPlan, projectId);
+    setGenerationStartTime(Date.now());
     setView({ type: "loading" });
 
     try {
@@ -1499,6 +1505,7 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
       setIsRetrying(false);
       setIsRefiningSummary(false);
       refineSummaryInFlightRef.current = false;
+      setGenerationStartTime(null);
       setView({ type: "loading" });
 
       try {
@@ -1544,6 +1551,14 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
           // An unavailable payload cannot provide a safe copy target.
         }
         setActivePlanPrompt(typeof inputPayload?.initialPlan === "string" ? inputPayload.initialPlan : "");
+        const persistedGenerationStartedAt = typeof inputPayload?.generationStartedAt === "string"
+          ? Date.parse(inputPayload.generationStartedAt)
+          : Number.NaN;
+        setGenerationStartTime(
+          session.status === "generating" && Number.isFinite(persistedGenerationStartedAt)
+            ? persistedGenerationStartedAt
+            : null,
+        );
         if (inputPayload?.generationPurpose === "plan_update" || inputPayload?.generationPurpose === "question" || inputPayload?.generationPurpose === "initial_plan") {
           setGenerationActivity(inputPayload.generationPurpose);
         } else if (session.status === "generating") {
@@ -2250,6 +2265,7 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
       setConversationHistory(optimisticHistory);
       resetPlanningAutoRetryBudget();
       setGenerationActivity("plan_update");
+      setGenerationStartTime(Date.now());
       setView({ type: "loading" });
       setStreamingOutput(""); // Clear old thinking output when entering loading state
       liveGenerationSessionIdRef.current = sessionId;
@@ -2341,6 +2357,9 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
     if (!sessionId) {
       return;
     }
+    const priorQuestion = workspaceQuestion;
+    const summary = runningSummaryRef.current;
+    const history = conversationHistoryRef.current;
 
     try {
       await stopPlanningGeneration(sessionId, projectId);
@@ -2354,13 +2373,31 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
     setIsAutoRetrying(false);
     setIsRefiningSummary(false);
     refineSummaryInFlightRef.current = false;
-    setView({
-      type: "error",
-      session: { sessionId, currentQuestion: null, summary: null },
-      errorMessage: t("planning.generationStopped", "Generation stopped by user. You can retry or start a new session."),
-    });
+    setError(null);
     setStreamingOutput("");
-  }, [projectId, t]);
+    setGenerationStartTime(null);
+
+    if (priorQuestion) {
+      const answered = history.some((entry) => entry.question?.id === priorQuestion.id && entry.response);
+      setEditingQuestionId(answered ? priorQuestion.id : null);
+      setWorkspaceQuestion(priorQuestion);
+      setView({
+        type: "question",
+        session: { sessionId, currentQuestion: priorQuestion, summary },
+      });
+    } else if (summary) {
+      setWorkspaceQuestion(null);
+      setView({
+        type: "plan_review",
+        session: { sessionId, currentQuestion: null, summary },
+        summary,
+      });
+    } else {
+      draftSessionIdRef.current = sessionId;
+      setInitialPlan(_activePlanPrompt);
+      setView({ type: "initial" });
+    }
+  }, [_activePlanPrompt, projectId, workspaceQuestion]);
 
   const handleRetryFromError = useCallback(async () => {
     if (view.type !== "error") {
@@ -2383,6 +2420,7 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
     setError(null);
     setGenerationActivity("question");
     setIsRefineMenuOpen(false);
+    setGenerationStartTime(Date.now());
     setView({ type: "loading" });
     try {
       const response = await respondToPlanning(sessionId, { refine: true, focus: refinementInstructions }, projectId);
