@@ -306,6 +306,7 @@ describe("PlanningModeModal sequential flow", () => {
     expect(screen.getByTestId("planning-question-pane")).toHaveTextContent("Which outcome matters most?");
   });
   it("opens a freeform refinement prompt and uses it for the plan and next questions", async () => {
+    mockViewportMode.mockReturnValue("mobile");
     mockFetchAiSession.mockResolvedValue({
       ...base,
       status: "awaiting_input",
@@ -341,7 +342,11 @@ describe("PlanningModeModal sequential flow", () => {
     fireEvent.change(screen.getByLabelText("Refinement instructions"), { target: { value: "   " } });
     expect(screen.getByRole("button", { name: "Apply refinement" })).toBeDisabled();
     fireEvent.change(screen.getByLabelText("Refinement instructions"), { target: { value: "Add migration sequencing and ask about rollout risks." } });
-    fireEvent.click(screen.getByRole("button", { name: "Apply refinement" }));
+    const applyButton = screen.getByRole("button", { name: "Apply refinement" });
+    expect(fireEvent.pointerDown(applyButton, { pointerType: "touch" })).toBe(false);
+    expect(applyButton).toBeInTheDocument();
+    expect(mockRespondToPlanning).not.toHaveBeenCalled();
+    fireEvent.click(applyButton);
     await waitFor(() => expect(mockRespondToPlanning).toHaveBeenCalledWith("session-1", { refine: true, focus: "Add migration sequencing and ask about rollout risks." }, "project-1"));
     expect(await screen.findByText("Which migration risk should come first?")).toBeInTheDocument();
   });

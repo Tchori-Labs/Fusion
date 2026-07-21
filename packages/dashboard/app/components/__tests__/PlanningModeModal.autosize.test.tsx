@@ -158,13 +158,21 @@ describe("PlanningModeModal autosize", () => {
     mockUseMobileKeyboard.mockReturnValue({ keyboardOverlap: 0, viewportHeight: null, viewportOffsetTop: 0, keyboardOpen: false });
   });
 
-  it("starts planning on the first mobile touch while the keyboard is open", async () => {
+  it.each(["modal", "embedded"] as const)("starts planning on the first mobile touch without dismissing the %s surface", async (presentation) => {
     mockUseViewportMode.mockReturnValue("mobile");
     mockUseMobileKeyboard.mockReturnValue({ keyboardOverlap: 320, viewportHeight: 480, viewportOffsetTop: 0, keyboardOpen: true });
-    render(<PlanningModeModal isOpen={true} onClose={vi.fn()} onTaskCreated={vi.fn()} onTasksCreated={vi.fn()} tasks={mockTasks} />);
+    const onClose = vi.fn();
+    render(<PlanningModeModal isOpen={true} onClose={onClose} onTaskCreated={vi.fn()} onTasksCreated={vi.fn()} tasks={mockTasks} presentation={presentation} />);
 
     fireEvent.change(screen.getByPlaceholderText(/Build a user authentication/i), { target: { value: "Build a mobile-first dashboard" } });
-    fireEvent.pointerDown(screen.getByRole("button", { name: "Start Planning" }), { pointerType: "touch" });
+    const startButton = screen.getByRole("button", { name: "Start Planning" });
+    fireEvent.pointerDown(startButton, { pointerType: "touch" });
+
+    expect(startButton).toBeInTheDocument();
+    expect(mockStartPlanningStreaming).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+
+    fireEvent.click(startButton);
 
     await waitFor(() => expect(mockStartPlanningStreaming).toHaveBeenCalledWith(
       "Build a mobile-first dashboard",

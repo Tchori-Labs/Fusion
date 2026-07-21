@@ -444,10 +444,11 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
   const viewRef = useRef<ViewState>({ type: "initial" });
   /*
   FNXC:PlanningMode 2026-07-20-23:52:
-  Mobile touch starts on pointer-down because closing the software keyboard resizes the
-  visual viewport before click, which can move the button and cancel that first click.
-  Keep a synchronous single-flight guard so touch compatibility events and rapid input
-  cannot start two planning sessions.
+  Prevent default on mobile pointer-down for keyboard-backed actions so the focused textarea
+  does not blur and resize the visual viewport before click. The action still starts from
+  click, after the gesture finishes, so replacing the control cannot retarget the trailing
+  touch click to navigation.
+  Keep a synchronous single-flight guard so rapid activation cannot start two sessions.
   */
   const startPlanningInFlightRef = useRef(false);
   /*
@@ -2435,11 +2436,10 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
     }
   }, [projectId, t, workflowId, workspaceQuestion]);
 
-  const handleStartPlanningPointerDown = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
+  const handleMobileKeyboardActionPointerDown = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
     if (viewportMode !== "mobile" || event.pointerType === "mouse") return;
     event.preventDefault();
-    void handleStartPlanning();
-  }, [handleStartPlanning, viewportMode]);
+  }, [viewportMode]);
 
   const handleRetryCreateTask = useCallback(async () => {
     if (view.type !== "create_retry" || validateCreateInFlightRef.current) return;
@@ -2679,7 +2679,7 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
               >
                 {t("common.cancel", "Cancel")}
               </button>
-              <button type="button" className="btn btn-primary" disabled={!refinementInstructions} onClick={() => void handleRefineFromPlan()}>
+              <button type="button" className="btn btn-primary" disabled={!refinementInstructions} onPointerDown={handleMobileKeyboardActionPointerDown} onClick={() => void handleRefineFromPlan()}>
                 {t("planning.applyRefinement", "Apply refinement")}
               </button>
             </div>
@@ -3071,7 +3071,7 @@ export function PlanningModeModal({ isOpen, onClose, onTaskCreated, onTasksCreat
               <div className="planning-view-footer">
                 <button
                   className="btn btn-primary planning-start-btn"
-                  onPointerDown={handleStartPlanningPointerDown}
+                  onPointerDown={handleMobileKeyboardActionPointerDown}
                   onClick={() => void handleStartPlanning()}
                   disabled={!initialPlan.trim()}
                 >
