@@ -555,7 +555,7 @@ describe("TaskChatTab", () => {
 
   it("uses status and text runtime markers before static overrides for reviewer, executor, and planner icons", () => {
     mockLogs([
-      makeEntry({ agent: "triage", type: "text", text: "Triage using model: openai/gpt-4o" }),
+      makeEntry({ agent: "triage", type: "text", text: "Planning using model: openai/gpt-4o" }),
       makeEntry({ agent: "executor", type: "status", text: "Executor using model: openai/gpt-4o" }),
       makeEntry({ agent: "reviewer", type: "status", text: "Reviewer using model: openai-codex/gpt-5.6-terra" }),
     ]);
