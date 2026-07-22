@@ -76,6 +76,7 @@ import {
   buildAutostashLabel,
   captureSingleCommitLandedMetadata,
   isNonFastForwardPushError,
+  isRebaseInProgress,
   parsePushRemoteTarget,
   pushToRemoteAfterMerge,
   runMergeAdvanceAutoSync,
@@ -1436,9 +1437,20 @@ async function runPushAfterMergeStep(input: {
     }
   } catch (err: unknown) {
     if (err instanceof Error && err.name === "MergeAbortedError") {
-      // The task already finalized — an abort mid-push must not re-surface as a
-      // failed/aborted merge. Skip quietly; the next merge's push reconciles.
-      aiMergeLog.warn(`${taskId}: push after merge aborted by shutdown signal — skipping (merge already finalized)`);
+      /*
+      FNXC:MergePush 2026-07-22-18:48:
+      Tchori-Labs/Fusion#5 requires shutdown aborts after finalization to remain non-fatal but never silent. The remote recovery branch preserves the approved squash; MergeResult, task log, and run-audit identify that the target push did not complete.
+      */
+      const message = "Push after merge aborted by shutdown signal; the local merge remains finalized and its divergence recovery branch is retained";
+      result.pushedToRemote = false;
+      result.pushError = message;
+      aiMergeLog.warn(`${taskId}: ${message}`);
+      await audit.git({
+        type: "push:origin",
+        target: taskId,
+        metadata: { integrationBranch, remote: settings.pushRemote ?? "origin", outcome: "aborted" },
+      }).catch(() => undefined);
+      await store.logEntry(taskId, message, "PushToRemoteFailed").catch(() => undefined);
       return;
     }
     const message = getErrorMessage(err);
@@ -2263,6 +2275,18 @@ export async function pushAfterMergeToRemote(input: {
     }
     return { pushed: true, remote, targetBranch, refAdvanced: true, rebasedSha };
   } finally {
+    /*
+    FNXC:MergePush 2026-07-22-18:48:
+    The divergence clean room must never survive an unexpected exit with staged, uncommitted rebase state. This outer guard complements the resolver helper's catch so cleanup is safe even when a future throw bypasses that helper.
+    */
+    if (pushRoot && worktreeAdded && isRebaseInProgress(pushRoot)) {
+      try {
+        await git(["rebase", "--abort"], pushRoot, { timeout: 120_000 });
+        await log("Push after merge: aborted the unfinished clean-room rebase before cleanup");
+      } catch (abortError: unknown) {
+        aiMergeLog.warn(`${taskId}: failed to abort unfinished push rebase before cleanup: ${getErrorMessage(abortError)}`);
+      }
+    }
     for (const registeredPath of registeredPaths) {
       activeSessionRegistry.unregisterPath(registeredPath);
     }

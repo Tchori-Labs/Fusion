@@ -41,6 +41,15 @@ function git(cwd: string, args: string): string {
   return execSync(`git ${args}`, { cwd, encoding: "utf-8" }).trim();
 }
 
+function hasRef(cwd: string, ref: string): boolean {
+  try {
+    execSync(`git show-ref --verify --quiet ${ref}`, { cwd, stdio: "pipe" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function initRepoWithRemote(): { dir: string; originDir: string } {
   const root = mkdtempSync(join(tmpdir(), "fusion-ai-merge-push-conflict-"));
   tracked.add(root);
@@ -137,10 +146,10 @@ function expectNoRebaseWorktree(repoDir: string): void {
 }
 
 describe("runAiMerge push-after-merge conflicting divergence", () => {
-  it.fails("continues a resolver-staged rebase and pushes the converged refs", async () => {
+  it("continues a resolver-staged rebase and pushes the converged refs", async () => {
     const { dir, originDir } = initRepoWithRemote();
     advanceOriginConflicting(originDir);
-    const { store } = makeStore();
+    const { store, storeMocks } = makeStore();
     installStagingResolver();
 
     const result = await runAiMerge(store, dir, "KB-002", { manual: true }, {
@@ -153,6 +162,15 @@ describe("runAiMerge push-after-merge conflicting divergence", () => {
     expect(git(dir, "rev-parse main")).toBe(originMain);
     expect(git(dir, "show main:shared.txt")).toBe("remote side\ntask side");
     expect(git(dir, "log --pretty=%s main")).toContain("remote: conflicting side");
+    expect(hasRef(originDir, "refs/heads/fusion/kb-002-stranded")).toBe(false);
+    expect(storeMocks.recordRunAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+      mutationType: "push:recovery-branch",
+      metadata: expect.objectContaining({ outcome: "success" }),
+    }));
+    expect(storeMocks.recordRunAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+      mutationType: "push:recovery-branch",
+      metadata: expect.objectContaining({ outcome: "deleted" }),
+    }));
     expectNoRebaseWorktree(dir);
   });
 
@@ -169,9 +187,13 @@ describe("runAiMerge push-after-merge conflicting divergence", () => {
     });
 
     expect(task.column).toBe("done");
-    expect(result.pushedToRemote).toBeUndefined();
-    expect(logs.some((entry) => entry.action === "PushToRemoteFailed")).toBe(false);
-    expect(storeMocks.recordRunAuditEvent).not.toHaveBeenCalledWith(expect.objectContaining({ mutationType: "push:origin" }));
+    expect(result.pushedToRemote).toBe(false);
+    expect(result.pushError).toContain("aborted by shutdown signal");
+    expect(logs.some((entry) => entry.action === "PushToRemoteFailed")).toBe(true);
+    expect(storeMocks.recordRunAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+      mutationType: "push:origin",
+      metadata: expect.objectContaining({ outcome: "aborted" }),
+    }));
     expect(git(originDir, "rev-parse refs/heads/fusion/kb-002-stranded")).toBe(git(dir, "rev-parse main"));
     expect(storeMocks.recordRunAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
       mutationType: "push:recovery-branch",
