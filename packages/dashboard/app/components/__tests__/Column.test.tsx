@@ -214,6 +214,41 @@ describe("Column Coding (Ideas) header indicator", () => {
   });
 });
 
+/*
+FNXC:BoardColumnDescriptions 2026-07-21-00:00:
+Todo and In Review omit redundant readiness prose, and the shared Column renderer
+must leave no empty description shell across desktop/mobile and task-data states.
+*/
+describe("Column legacy descriptions", () => {
+  it.each([
+    ["Todo", "todo" as ColumnType, "Specified and ready to start"],
+    ["In Review", "in-review" as ColumnType, "Complete — ready to merge"],
+  ])("omits the description shell for an empty %s column", (label, column, removedDescription) => {
+    render(<Column {...defaultProps} column={column} tasks={[]} />);
+
+    expect(screen.getByRole("heading", { name: label, level: 2 })).toBeInTheDocument();
+    expect(screen.queryByText(removedDescription)).not.toBeInTheDocument();
+    expect(document.querySelector(".column-desc")).toBeNull();
+  });
+
+  it.each([
+    ["Todo", "todo" as ColumnType, "Specified and ready to start"],
+    ["In Review", "in-review" as ColumnType, "Complete — ready to merge"],
+  ])("omits the description shell for a populated %s column", (label, column, removedDescription) => {
+    render(<Column {...defaultProps} column={column} tasks={[{ ...makeTask("FN-8480"), column }]} />);
+
+    expect(screen.getByRole("heading", { name: label, level: 2 })).toBeInTheDocument();
+    expect(screen.queryByText(removedDescription)).not.toBeInTheDocument();
+    expect(document.querySelector(".column-desc")).toBeNull();
+  });
+
+  it("retains the description for Planning", () => {
+    render(<Column {...defaultProps} tasks={[]} />);
+
+    expect(screen.getByText("Raw ideas — AI will plan these")).toHaveClass("column-desc");
+  });
+});
+
 describe("Column workflow mode (U9)", () => {
   it("uses the workflow column display name instead of the legacy label", () => {
     render(
