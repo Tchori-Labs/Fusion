@@ -303,7 +303,7 @@ describe("findWorktreeUser", () => {
 describe("push-after-merge", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockedExistsSync.mockImplementation((path) => !String(path).includes("rebase-"));
+    mockedExistsSync.mockReturnValue(true);
     mockedCreateFnAgent.mockResolvedValue({
       session: {
         prompt: vi.fn().mockResolvedValue(undefined),
@@ -583,7 +583,6 @@ describe("push-after-merge", () => {
   it("auto-resolves lock-file rebase conflicts and continues", async () => {
     let rebaseInProgress = false;
     let hasConflicts = false;
-    mockedExistsSync.mockImplementation((path) => String(path).includes("rebase-") ? rebaseInProgress : true);
 
     mockedExecSync.mockImplementation((cmd: any) => {
       const cmdStr = String(cmd);
@@ -603,7 +602,6 @@ describe("push-after-merge", () => {
         hasConflicts = false;
         return Buffer.from("");
       }
-      if (cmdStr.includes("git rev-parse --git-path rebase-")) return "/tmp/root/.git/rebase-merge" as any;
       if (cmdStr.includes("git rev-parse --verify REBASE_HEAD")) {
         if (rebaseInProgress) return "rebasehead" as any;
         const err = new Error("fatal: Needed a single revision") as Error & { status?: number };
@@ -640,7 +638,6 @@ describe("push-after-merge", () => {
   it("uses AI to resolve complex rebase conflicts", async () => {
     let rebaseInProgress = false;
     let hasConflicts = false;
-    mockedExistsSync.mockImplementation((path) => String(path).includes("rebase-") ? rebaseInProgress : true);
 
     mockedCreateFnAgent.mockResolvedValue({
       session: {
@@ -668,7 +665,6 @@ describe("push-after-merge", () => {
       if (cmdStr.startsWith("git diff-tree -p -w") || (cmdStr.startsWith("git diff") && cmdStr.includes("-w") && cmdStr.includes(":2:"))) {
         return "@@\n-foo\n+bar" as any;
       }
-      if (cmdStr.includes("git rev-parse --git-path rebase-")) return "/tmp/root/.git/rebase-merge" as any;
       if (cmdStr.includes("git rev-parse --verify REBASE_HEAD")) {
         if (rebaseInProgress) return "rebasehead" as any;
         const err = new Error("fatal: Needed a single revision") as Error & { status?: number };
@@ -821,7 +817,6 @@ describe("push-after-merge", () => {
 
   it("aborts rebase when conflicts remain unresolved", async () => {
     let rebaseInProgress = false;
-    mockedExistsSync.mockImplementation((path) => String(path).includes("rebase-") ? rebaseInProgress : true);
 
     mockedCreateFnAgent.mockResolvedValue({
       session: {
@@ -854,7 +849,6 @@ describe("push-after-merge", () => {
         rebaseInProgress = false;
         return Buffer.from("");
       }
-      if (cmdStr.includes("git rev-parse --git-path rebase-")) return "/tmp/root/.git/rebase-merge" as any;
       if (cmdStr.includes("git symbolic-ref --short HEAD")) return "main" as any;
 
       return Buffer.from("");
