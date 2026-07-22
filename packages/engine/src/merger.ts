@@ -5756,11 +5756,11 @@ Tchori-Labs/Fusion#5 exposed that `REBASE_HEAD` can remain resolvable after `git
 export function isRebaseInProgress(rootDir: string): boolean {
   try {
     const gitPath = (name: "rebase-merge" | "rebase-apply") => {
-      const output = execSync(`git rev-parse --git-path ${name}`, {
+      const output = String(execSync(`git rev-parse --git-path ${name}`, {
         cwd: rootDir,
         encoding: "utf-8",
         stdio: "pipe",
-      }).trim();
+      })).trim();
       return resolve(rootDir, output);
     };
     return existsSync(gitPath("rebase-merge")) || existsSync(gitPath("rebase-apply"));

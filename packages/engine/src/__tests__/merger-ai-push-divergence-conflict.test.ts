@@ -26,7 +26,7 @@ vi.mock("../pi.js", async (importOriginal) => {
   };
 });
 
-import { runAiMerge } from "../merger-ai.js";
+import { pushAfterMergeToRemote, runAiMerge } from "../merger-ai.js";
 
 const RM = { recursive: true, force: true, maxRetries: 5, retryDelay: 50 } as const;
 const tracked = new Set<string>();
@@ -120,14 +120,27 @@ function realMergeAgent(branch: string) {
 
 const approveReviewer = () => vi.fn(async () => "REVIEW_VERDICT: approve");
 
-function installStagingResolver(options?: { abortController?: AbortController }): void {
+function installStagingResolver(options?: { abortController?: AbortController; resolutions?: string[] }): void {
+  let resolutionIndex = 0;
   createResolvedAgentSessionMock.mockImplementation(async (sessionOptions: { cwd: string }) => ({
     session: {
       prompt: vi.fn(async () => {
-        writeFileSync(join(sessionOptions.cwd, "shared.txt"), "remote side\ntask side\n");
+        const resolution = options?.resolutions?.[resolutionIndex] ?? "remote side\ntask side\n";
+        resolutionIndex += 1;
+        writeFileSync(join(sessionOptions.cwd, "shared.txt"), resolution);
         execSync("git add shared.txt", { cwd: sessionOptions.cwd, stdio: "pipe" });
         options?.abortController?.abort();
       }),
+      dispose: vi.fn(),
+      getSessionStats: vi.fn(() => ({ tokens: { input: 0, output: 0 } })),
+    },
+  }));
+}
+
+function installUnresolvedResolver(): void {
+  createResolvedAgentSessionMock.mockImplementation(async () => ({
+    session: {
+      prompt: vi.fn(async () => undefined),
       dispose: vi.fn(),
       getSessionStats: vi.fn(() => ({ tokens: { input: 0, output: 0 } })),
     },
@@ -174,9 +187,64 @@ describe("runAiMerge push-after-merge conflicting divergence", () => {
     expectNoRebaseWorktree(dir);
   });
 
-  it("characterizes the previously silent abort after the resolver stages conflicts", async () => {
+  it("continues through sequential conflicts from multiple local-only commits", async () => {
+    const { dir, originDir } = initRepoWithRemote();
+    git(dir, "checkout -q fusion/kb-002");
+    writeFileSync(join(dir, "shared.txt"), "task final\n");
+    git(dir, "add -A");
+    git(dir, "commit -q -m 'feat: task final'");
+    git(dir, "checkout -q main");
+    git(dir, "cherry-pick fusion/kb-002~1 fusion/kb-002");
+    advanceOriginConflicting(originDir);
+    const { store } = makeStore();
+    const auditGit = vi.fn(async () => undefined);
+    installStagingResolver({ resolutions: ["remote side\ntask side\n", "remote side\ntask final\n"] });
+
+    const result = await pushAfterMergeToRemote({
+      store,
+      projectRootDir: dir,
+      taskId: "KB-002",
+      settings: { pushAfterMerge: true } as never,
+      integrationBranch: "main",
+      audit: { git: auditGit } as never,
+      log: vi.fn(async () => undefined),
+    });
+
+    expect(result.pushed).toBe(true);
+    expect(createResolvedAgentSessionMock).toHaveBeenCalledTimes(2);
+    expect(git(originDir, "rev-parse main")).toBe(git(dir, "rev-parse main"));
+    expect(git(dir, "show main:shared.txt")).toBe("remote side\ntask final");
+    expectNoRebaseWorktree(dir);
+  });
+
+  it("surfaces an unresolvable conflict and retains its recovery branch", async () => {
     const { dir, originDir } = initRepoWithRemote();
     advanceOriginConflicting(originDir);
+    const { store, storeMocks, task, logs } = makeStore();
+    installUnresolvedResolver();
+
+    const result = await runAiMerge(store, dir, "KB-002", { manual: true }, {
+      mergeAgent: realMergeAgent("fusion/kb-002"),
+      reviewAgent: approveReviewer(),
+    });
+
+    expect(task.column).toBe("done");
+    expect(result.pushedToRemote).toBe(false);
+    expect(result.pushError).toContain("Unresolved rebase conflicts remain");
+    expect(logs.some((entry) => entry.action === "PushToRemoteFailed")).toBe(true);
+    expect(storeMocks.recordRunAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+      mutationType: "push:origin",
+      metadata: expect.objectContaining({ outcome: "failed" }),
+    }));
+    expect(git(originDir, "rev-parse refs/heads/fusion/kb-002-stranded")).toBe(git(dir, "rev-parse main"));
+    expectNoRebaseWorktree(dir);
+  });
+
+  it("surfaces an abort after the resolver stages conflicts", async () => {
+    const { dir, originDir } = initRepoWithRemote();
+    advanceOriginConflicting(originDir);
+    git(originDir, "update-ref refs/heads/fusion/kb-002-stranded refs/heads/main");
+    const priorRecoverySha = git(originDir, "rev-parse refs/heads/fusion/kb-002-stranded");
     const { store, storeMocks, task, logs } = makeStore();
     const abortController = new AbortController();
     installStagingResolver({ abortController });
@@ -194,6 +262,7 @@ describe("runAiMerge push-after-merge conflicting divergence", () => {
       mutationType: "push:origin",
       metadata: expect.objectContaining({ outcome: "aborted" }),
     }));
+    expect(git(originDir, "rev-parse refs/heads/fusion/kb-002-stranded")).not.toBe(priorRecoverySha);
     expect(git(originDir, "rev-parse refs/heads/fusion/kb-002-stranded")).toBe(git(dir, "rev-parse main"));
     expect(storeMocks.recordRunAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
       mutationType: "push:recovery-branch",
