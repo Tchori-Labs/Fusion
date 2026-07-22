@@ -290,25 +290,40 @@ FNXC:LegacyAdoption 2026-07-19-04:40 (U9b / KTD-8):
 Orphaned pending step results. A pre-cutover crash leaves a `pending` result with no live
 session and the graph waits on it forever; a LEASED one is real work in flight.
 */
-describe("resolveOrphanedPendingStepResults (U9b)", () => {
-  it("clears pending results with no live session and preserves live ones", () => {
-    const results = [
+describe("resolveOrphanedPendingStepResults (U9b, FN-8492 rewrite-to-failed)", () => {
+  it("marks dead-session pending results failed and preserves live/completed ones", () => {
+    const input = [
       { stepIndex: 0, status: "done" },
       { stepIndex: 1, status: "pending" },   // orphaned
       { stepIndex: 2, status: "pending" },   // live — leased
       { stepIndex: 3, status: "failed" },
     ];
-    const { cleared, clearedCount } = resolveOrphanedPendingStepResults(
-      results,
+    const { results, orphanedCount } = resolveOrphanedPendingStepResults(
+      input,
       (r) => r.stepIndex === 2,
+      { output: "orphan-note", completedAt: "2026-07-22T23:00:00.000Z" },
     );
-    expect(clearedCount).toBe(1);
-    expect(cleared.map((r) => r.stepIndex)).toEqual([0, 2, 3]);
+    expect(orphanedCount).toBe(1);
+    expect(results.map((r) => r.status)).toEqual(["done", "failed", "pending", "failed"]);
+    expect(results[1]).toMatchObject({ output: "orphan-note", completedAt: "2026-07-22T23:00:00.000Z" });
+  });
+
+  /*
+  FNXC:OrphanedPendingSteps 2026-07-22-16:35 (FN-8492 review follow-up):
+  Deletion is a severity inversion: the merge gate blocks on pending/failed results, not
+  on an enabled step with NO result, so deleting a dead review's pending entry silently
+  satisfied the gate and the task merged with its review skipped. Rewrite, never delete.
+  */
+  it("NEVER deletes an orphaned entry — deletion silently satisfied the merge gate", () => {
+    const input = [{ stepIndex: 0, status: "pending" }];
+    const { results } = resolveOrphanedPendingStepResults(input, () => false);
+    expect(results).toHaveLength(1);
+    expect(results[0]?.status).toBe("failed");
   });
 
   it("is a no-op on empty/absent results", () => {
-    expect(resolveOrphanedPendingStepResults([], () => false).clearedCount).toBe(0);
-    expect(resolveOrphanedPendingStepResults(null, () => false).clearedCount).toBe(0);
+    expect(resolveOrphanedPendingStepResults([], () => false).orphanedCount).toBe(0);
+    expect(resolveOrphanedPendingStepResults(null, () => false).orphanedCount).toBe(0);
   });
 });
 

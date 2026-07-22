@@ -57,6 +57,8 @@ export interface LegacyAdoptionAction {
 export const LEGACY_STATUS_ADOPTION: Readonly<Record<string, LegacyAdoptionAction>> = {
   // ── Triage plan-review statuses whose writers U3 deleted → graph re-entry ──
   "planning": { kind: "resume-graph", note: "re-enter planning node" },
+  "plan-review-unavailable": { kind: "resume-graph", note: "plan-review retry (leased)" },
+  // ── Live graph signals with post-cutover writers — preserve, never clear ───
   /*
   FNXC:LegacyAdoption 2026-07-22-15:55 (FN-8498 incident):
   `needs-replan` is NOT legacy — post-U3 it is written live by the graph's own plan-replan
@@ -67,7 +69,6 @@ export const LEGACY_STATUS_ADOPTION: Readonly<Record<string, LegacyAdoptionActio
   after a restart). Preserve it: the status is self-resuming — triage picks it up as-is.
   */
   "needs-replan": { kind: "preserve", note: "live graph replan signal — triage todo-rediscovery consumes it" },
-  "plan-review-unavailable": { kind: "resume-graph", note: "plan-review retry (leased)" },
   // ── Scheduler / dispatch transient states → re-pickup ─────────────────────
   "queued": { kind: "resume-graph", note: "scheduler re-queue" },
   "triaged": { kind: "resume-graph", note: "scheduler re-pickup" },
@@ -250,22 +251,32 @@ export function planLegacyAdoption(
 
 /*
 FNXC:LegacyAdoption 2026-07-19-04:00 (U9b / KTD-8):
-Orphaned `pending` workflow-step results. A pre-cutover crash can leave a step result
-`pending` with no live session behind it; the graph will wait on it forever. Clear those,
-but ONLY when the caller proves no live session holds the step — a leased/live one is real
-work in flight and must survive. Pure: the caller supplies liveness.
+Orphaned `pending` workflow-step results. A crash/restart can leave a step result
+`pending` with no live session behind it; the graph will wait on it forever. Act only
+when the caller proves no live session holds the step — a leased/live one is real work
+in flight and must survive. Pure: the caller supplies liveness and the orphan mark.
+
+FNXC:OrphanedPendingSteps 2026-07-22-16:35 (FN-8492 review follow-up):
+The original U9b shape DELETED the orphaned entry. Review of the shipped consumer proved
+deletion is a severity inversion: the merge gate blocks on pending/failed results, not on
+an enabled step with NO result, so deleting a dead Code Review's pending entry silently
+SATISFIED the gate and the task merged with its review skipped (FN-8492 landed unreviewed
+minutes after an equivalent manual clear). Orphans are now REWRITTEN to status:"failed"
+instead — the merge gate stays closed and the existing failed-pre-merge-steps recovery /
+FN-7720 operator-bypass paths own the re-run-or-bypass decision. Never delete.
 */
 export function resolveOrphanedPendingStepResults<T extends { stepIndex?: number; status?: string }>(
   results: readonly T[] | null | undefined,
   isLive: (result: T) => boolean,
-): { cleared: T[]; clearedCount: number } {
-  if (!results || results.length === 0) return { cleared: [], clearedCount: 0 };
-  let clearedCount = 0;
-  const cleared = results.filter((result) => {
-    if (result.status !== "pending") return true;
-    if (isLive(result)) return true;
-    clearedCount++;
-    return false;
+  orphanMark?: { output?: string; completedAt?: string },
+): { results: T[]; orphanedCount: number } {
+  if (!results || results.length === 0) return { results: [], orphanedCount: 0 };
+  let orphanedCount = 0;
+  const next = results.map((result) => {
+    if (result.status !== "pending") return result;
+    if (isLive(result)) return result;
+    orphanedCount++;
+    return { ...result, status: "failed", ...(orphanMark ?? {}) } as T;
   });
-  return { cleared, clearedCount };
+  return { results: next, orphanedCount };
 }

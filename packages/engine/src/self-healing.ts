@@ -2698,6 +2698,11 @@ export class SelfHealingManager {
           { name: "reconcile-done-task-integrity", fn: () => this.reconcileDoneTaskIntegrity() },
           { name: "reconcile-stale-merger-status", fn: () => this.reconcileStaleMergerStatus() },
           { name: "reconcile-stale-duplicate-decision", fn: () => this.reconcileStaleDuplicateDecisionPause() },
+          // FNXC:OrphanedPendingSteps 2026-07-22-16:35 (FN-8492 review follow-up): also
+          // steady-state — a step session can die without an engine restart, and startup-only
+          // cadence left that case riding the 3×30-min stall escalator to a deadlock park.
+          // Live sessions register their worktree path, so the liveness veto holds here.
+          { name: "reconcile-orphaned-pending-step-results", fn: () => this.reconcileOrphanedPendingStepResults() },
           { name: "recover-mergeable-review", fn: () => this.recoverMergeableReviewTasks() },
           // FNXC:Workspace 2026-06-22-09:30 (Phase D U1) — workspace-mode reconcilers.
           { name: "reconcile-workspace-partial-lands", fn: () => this.reconcileWorkspacePartialLands() },
@@ -6673,18 +6678,30 @@ export class SelfHealingManager {
 
   /*
   FNXC:OrphanedPendingSteps 2026-07-22-16:20 (FN-8492 incident):
-  Startup consumer of `resolveOrphanedPendingStepResults` — the U9b helper shipped with NO
-  caller (the same gap U9 left for the adoption table), so an engine restart that killed an
+  Consumer of `resolveOrphanedPendingStepResults` — the U9b helper shipped with NO caller
+  (the same gap U9 left for the adoption table), so an engine restart that killed an
   in-flight pre-merge step session left its `pending` workflowStepResult behind forever.
   The merge gate read it as "incomplete pre-merge workflow steps", surfaced an identical
   stall every 30 minutes, and after 3 stalls the deadlock disposer parked the task `failed`
   (FN-8492: Code Review died in the 21:29 restart, task parked two hours later).
 
-  Runs at STARTUP, right after legacy adoption: sessions do not survive a restart, so a
-  `pending` result with no live session behind it is orphaned by construction. Liveness
-  uses the canonical triple (activeSessionRegistry path, executingTaskLock, isTaskActive)
-  because runStartupRecovery runs AFTER the executor resumes orphaned sessions — a resumed
-  session re-registers its path and must veto the clear. User pauses are never disturbed.
+  FNXC:OrphanedPendingSteps 2026-07-22-16:35 (review follow-up, same day):
+  Orphans are REWRITTEN to status:"failed" (never deleted) — deleting a pending review
+  entry silently satisfied the merge gate and FN-8492 merged with Code Review skipped; the
+  failed rewrite keeps the gate closed and hands re-run/bypass to the existing
+  failed-pre-merge-steps recovery and FN-7720 operator-bypass paths.
+
+  Runs at startup (right after legacy adoption) AND in periodic maintenance: a step
+  session can die without an engine restart, and waiting for the next boot leaves the
+  task riding the 3×30-min stall escalator to a deadlock park. Liveness uses the
+  canonical triple (activeSessionRegistry path, executingTaskLock, isTaskActive) — live
+  workflow-step sessions register their worktree path (kind "workflow-step") for their
+  whole run, so a live review always vetoes. `in-progress` rows are skipped entirely:
+  they are executor-owned and `resumeOrphaned()` re-attaches their sessions on a
+  DEFERRED timer (getResumeOrphanDelayMs, ~30s), so at startup their liveness cannot be
+  proven yet and must not be judged here. The row is re-read immediately before the
+  write so the whole-array update cannot clobber a lease written after the page
+  snapshot. User pauses are never disturbed.
   */
   async reconcileOrphanedPendingStepResults(): Promise<number> {
     try {
@@ -6692,24 +6709,47 @@ export class SelfHealingManager {
       let offset = 0;
       let recovered = 0;
 
+      const isSessionLive = (taskId: string): boolean => {
+        const livePaths = activeSessionRegistry.pathsForTask(taskId);
+        return livePaths.some((path) => activeSessionRegistry.isPathActive(path))
+          || executingTaskLock.has(taskId)
+          || this.options.isTaskActive?.(taskId) === true;
+      };
+
       for (;;) {
         const tasks = await this.store.listTasks({ slim: true, includeArchived: false, limit: pageSize, offset });
         for (const task of tasks) {
           // An operator park is authoritative; this sweep must not reach through it.
           if (task.userPaused === true) continue;
-          const results = task.workflowStepResults;
-          if (!results?.some((result) => result.status === "pending")) continue;
+          // Executor-owned rows: resume is deferred at startup, liveness unprovable here.
+          if (task.column === "in-progress") continue;
+          if (!task.workflowStepResults?.some((result) => result.status === "pending")) continue;
+          if (isSessionLive(task.id)) continue;
 
-          const livePaths = activeSessionRegistry.pathsForTask(task.id);
-          const hasActiveRegisteredPath = livePaths.some((path) => activeSessionRegistry.isPathActive(path));
-          const sessionLive = hasActiveRegisteredPath || executingTaskLock.has(task.id)
-            || this.options.isTaskActive?.(task.id) === true;
-
-          const { cleared, clearedCount } = resolveOrphanedPendingStepResults(results, () => sessionLive);
-          if (clearedCount === 0) continue;
+          // Re-read the live row before mutating: the page snapshot can be stale against
+          // a merger/planner that wrote a fresh pending lease after the page was fetched.
+          const fresh = await this.store.getTask(task.id);
+          if (!fresh || fresh.userPaused === true || fresh.column === "in-progress") continue;
+          const { results, orphanedCount } = resolveOrphanedPendingStepResults(
+            fresh.workflowStepResults,
+            () => isSessionLive(task.id),
+            {
+              output: "Step session did not survive an engine restart or crash; marked failed by self-healing (FN-8492).",
+              completedAt: new Date().toISOString(),
+            },
+          );
+          if (orphanedCount === 0) continue;
 
           try {
-            await this.store.updateTask(task.id, { workflowStepResults: cleared });
+            await this.store.updateTask(task.id, { workflowStepResults: results });
+            // Counted on the successful mutation; a failed audit emit below must not
+            // understate how many tasks were actually recovered.
+            recovered += 1;
+          } catch (error) {
+            log.warn(`reconcileOrphanedPendingStepResults: failed for ${task.id}: ${error instanceof Error ? error.message : String(error)}`);
+            continue;
+          }
+          try {
             await createRunAuditor(this.store, {
               runId: generateSyntheticRunId("reconcile-orphaned-pending-steps", task.id),
               agentId: "self-healing",
@@ -6717,25 +6757,24 @@ export class SelfHealingManager {
               taskLineageId: task.lineageId,
               phase: "reconcile-orphaned-pending-step-results",
             }).database({
-              type: "task:reconcile-orphaned-pending-step-results" as DatabaseMutationType,
+              type: "task:reconcile-orphaned-pending-step-results",
               target: task.id,
               // ids/counts/outcomes only — never step output or reviewer prose.
               metadata: {
                 taskId: task.id,
                 column: task.column,
-                clearedCount,
-                remainingCount: cleared.length,
+                orphanedCount,
+                resultCount: results.length,
               },
             });
-            recovered += 1;
           } catch (error) {
-            log.warn(`reconcileOrphanedPendingStepResults: failed for ${task.id}: ${error instanceof Error ? error.message : String(error)}`);
+            log.warn(`reconcileOrphanedPendingStepResults: audit emit failed for ${task.id}: ${error instanceof Error ? error.message : String(error)}`);
           }
         }
         if (tasks.length < pageSize) break;
         offset += tasks.length;
       }
-      if (recovered > 0) log.log(`Cleared orphaned pending step results on ${recovered} task(s)`);
+      if (recovered > 0) log.log(`Marked orphaned pending step results failed on ${recovered} task(s)`);
       return recovered;
     } catch (error) {
       log.error(`reconcileOrphanedPendingStepResults failed: ${error instanceof Error ? error.message : String(error)}`);

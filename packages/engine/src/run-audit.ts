@@ -571,6 +571,14 @@ export type DatabaseMutationType =
    * deliberately left in place so the operator can see what it carried. Same metadata shape.
    */
   | "task:reconcile-legacy-adoption-unmappable"
+  /*
+  FNXC:OrphanedPendingSteps 2026-07-22-16:35 (FN-8492):
+  Startup/periodic rewrite of orphaned `pending` workflow-step results (no live session
+  behind them) to `failed`, so the merge gate stays closed and failed-pre-merge-steps
+  recovery owns the re-run. Metadata ids/counts-only:
+  { taskId, column, orphanedCount, resultCount }.
+  */
+  | "task:reconcile-orphaned-pending-step-results"
   /**
    * FNXC:MergeQueue 2026-07-15-10:05:
    * Wedged single-flight merge reclaim. Metadata ids/outcomes-only:
