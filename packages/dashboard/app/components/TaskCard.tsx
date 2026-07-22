@@ -43,7 +43,7 @@ import { getRunningOptionalGateBadge, getRunningWorkflowStepLabel, getUnifiedTas
 import { ACTIVE_STATUSES, isTaskAgentActive } from "../utils/taskActivity";
 import { getPrBadgeModifierClass } from "../utils/prBadgeClass";
 import { getTotalAgentActiveMs, getEndToEndDurationMs, getTimedDurationMs, getWorkflowRuntimeMs, parseTimestampToMs } from "../utils/taskTiming";
-import { getTaskStatusBadgeLabel, shouldSuppressPlanningStatusBadge } from "../utils/taskStatusBadgeLabel";
+import { getTaskStatusBadgeLabel, hasTaskStatusBadge } from "../utils/taskStatusBadgeLabel";
 import { isReviewBudgetExhaustedApproval } from "../utils/reviewBudgetApproval";
 import { canStartPrFeedbackAddressing, getTaskPrimaryPrInfo } from "../utils/prFeedback";
 import type { ToastType } from "../hooks/useToast";
@@ -2973,9 +2973,8 @@ function TaskCardComponent({
     && Boolean(task.recentAgentActivityAt)
     && isAgentActive;
   const showStatusBadge = !isPaused
-    && (Boolean(visualStatus) || isTransientPlannerActive)
-    && visualStatus !== "queued"
-    && !shouldSuppressPlanningStatusBadge({ status: visualStatus, column: task.column });
+    && (hasTaskStatusBadge(visualStatus) || isTransientPlannerActive)
+    && visualStatus !== "queued";
   const hasCardMetaBadges = showPriorityBadge
     || task.executionMode === "fast"
     // FNXC:PlannerOversight 2026-07-04-00:00: the oversight badge is opt-in

@@ -2295,7 +2295,8 @@ describe("TaskCard", () => {
   it.each([
     { column: "todo" as const, status: "planning" },
     { column: "in-progress" as const, status: "planning" },
-  ])("FN-8170 suppresses stale planning status and its empty header wrapper on $column cards", ({ column, status }) => {
+    { column: "triage" as const, status: "planning" },
+  ])("FN-8475 renders real planning status and a non-empty header wrapper on $column cards", ({ column, status }) => {
     const { container } = render(
       <TaskCard
         task={makeTask({ column, status })}
@@ -2304,11 +2305,12 @@ describe("TaskCard", () => {
       />,
     );
 
-    expect(screen.queryByText("planning")).toBeNull();
-    expect(container.querySelector(".card-header-badges")).toBeNull();
+    const badge = screen.getByText("planning");
+    expect(badge).toHaveClass("card-status-badge");
+    expect(container.querySelector(".card-header-badges")).toContainElement(badge);
   });
 
-  it("FN-8170 preserves triage planning and non-planning status badges", () => {
+  it("FN-8475 preserves non-planning status badges", () => {
     const { rerender } = render(
       <TaskCard
         task={makeTask({ column: "triage", status: "planning" })}
