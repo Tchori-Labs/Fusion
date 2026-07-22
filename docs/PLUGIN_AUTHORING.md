@@ -593,6 +593,68 @@ Route handlers receive the same loader-built `PluginContext` used by hooks/tools
 - Route path: `/status`
 - Full URL: `/api/plugins/fusion-plugin-notification/status`
 
+### UI metadata endpoints
+
+<!-- FNXC:UiMetadataApi 2026-07-14-00:00: Frontend plugins and command palettes must discover host navigation and Settings metadata through authenticated, read-only APIs instead of hardcoding dashboard-owned ids, labels, or search terms. -->
+
+Frontend integrations can enumerate the host UI before presenting navigation or settings commands. Both endpoints inherit the dashboard's standard `/api` authentication, are read-only, return static project-independent metadata, and do not require a project id.
+
+`GET /api/views` returns canonical built-in view ids in dashboard order:
+
+```json
+{
+  "views": [
+    { "id": "board", "label": "Board", "labelKey": "nav.board" },
+    { "id": "command-center", "label": "Dashboard", "labelKey": "nav.commandCenter" },
+    {
+      "id": "dev-server",
+      "label": "Dev Server",
+      "labelKey": "nav.devServer",
+      "aliases": ["devserver"]
+    },
+    {
+      "id": "task-detail",
+      "label": "Task Detail",
+      "labelKey": "taskDetail.title",
+      "internal": true
+    }
+  ]
+}
+```
+
+`aliases` lists accepted legacy ids; use the canonical `id` for new links. `internal: true` identifies a programmatic destination that is not a normal navigation entry. Optional fields are omitted when they do not apply.
+
+`GET /api/settings/sections` returns selectable Settings sections; non-selectable group-header rows are excluded:
+
+```json
+{
+  "sections": [
+    {
+      "id": "appearance",
+      "label": "Appearance",
+      "labelKey": "settings.nav.appearance",
+      "scope": "global",
+      "group": "Preferences",
+      "keywords": ["theme", "color", "sidebar"],
+      "searchableKeys": [],
+      "advanced": false
+    },
+    {
+      "id": "authentication",
+      "label": "Authentication",
+      "labelKey": "settings.nav.authentication",
+      "scope": null,
+      "group": "AI & Models",
+      "keywords": ["login", "OAuth", "API key"],
+      "searchableKeys": [],
+      "advanced": false
+    }
+  ]
+}
+```
+
+`scope` is `global`, `project`, or `null` for sections backed by a dedicated subsystem rather than a settings blob. `group` is the Settings navigation group label, `keywords` and `searchableKeys` support command/search matching, and `advanced` indicates whether the dashboard hides the section until Advanced settings are enabled.
+
 ### Supported Methods
 
 - `GET`
