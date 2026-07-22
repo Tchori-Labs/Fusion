@@ -376,6 +376,8 @@ svg.spinning {
   --provider-openai: #10a37f;
   --provider-gemini: #4285f4;
   --provider-openrouter: #6f4cff;
+  --provider-brave: #fb542b;
+  --provider-tavily: #4f46e5;
   --provider-minimax: #e73562;
   --provider-zai: #1a6dff;
   --provider-kimi: #6c5ce7;
@@ -402,6 +404,10 @@ svg.spinning {
   --provider-omp: var(--provider-omp-gradient-mid);
   --provider-hermes: #d4961c;
   --provider-openclaw: #ff4f40;
+  --provider-openclaw-outline: #3a0a0d;
+  --provider-openclaw-highlight: #ff775f;
+  --provider-openclaw-eye: #081016;
+  --provider-openclaw-eye-highlight: #f5fbff;
   --provider-paperclip: var(--text);
   --provider-icon-contrast: var(--bg);
 
