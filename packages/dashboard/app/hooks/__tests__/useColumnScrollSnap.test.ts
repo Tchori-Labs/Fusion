@@ -343,6 +343,63 @@ describe("useColumnScrollSnap", () => {
     expect(scroller.scrollLeft).toBe(0);
   });
 
+  /*
+  FNXC:BoardNavigation 2026-07-22-15:10:
+  Tap-to-stop during post-lift momentum must not hard-jump using the original swipe direction.
+  */
+  it("does not jump when the user taps during momentum after a swipe", () => {
+    const scroller = createScroller(3, 0);
+    renderHook(() => useColumnScrollSnap(scroller, { mobileOnly: true, isUserInteraction: () => true }));
+
+    act(() => {
+      // Start a forward swipe and lift so the idle settle is armed.
+      dispatchPointerEvent(scroller, "pointerdown", 200);
+      dispatchPointerEvent(scroller, "pointermove", 160);
+      scroller.scrollLeft = 30;
+      scroller.dispatchEvent(new Event("scroll"));
+      dispatchPointerEvent(scroller, "pointerup", 160);
+
+      // Coast a bit more (native fling), then the user taps to stop mid-travel.
+      scroller.scrollLeft = 55;
+      scroller.dispatchEvent(new Event("scroll"));
+      dispatchPointerEvent(scroller, "pointerdown", 100);
+      dispatchPointerEvent(scroller, "pointerup", 100);
+    });
+
+    // Without re-baselining the second touch, the original rightward settle would jump to COLUMN_WIDTH.
+    settleAfterMomentum();
+    act(() => {
+      vi.advanceTimersByTime(500);
+    });
+
+    expect(scroller.scrollLeft).toBe(55);
+  });
+
+  it("starts a new directional settle after a pan that continues from a mid-momentum re-touch", () => {
+    const scroller = createScroller(3, 0);
+    renderHook(() => useColumnScrollSnap(scroller, { mobileOnly: true, isUserInteraction: () => true }));
+
+    act(() => {
+      dispatchPointerEvent(scroller, "pointerdown", 200);
+      dispatchPointerEvent(scroller, "pointermove", 160);
+      scroller.scrollLeft = 30;
+      scroller.dispatchEvent(new Event("scroll"));
+      dispatchPointerEvent(scroller, "pointerup", 160);
+
+      // Interrupt fling, then pan back left so settle must use the new gesture only.
+      scroller.scrollLeft = 55;
+      scroller.dispatchEvent(new Event("scroll"));
+      dispatchPointerEvent(scroller, "pointerdown", 100);
+      dispatchPointerEvent(scroller, "pointermove", 140);
+      scroller.scrollLeft = 20;
+      scroller.dispatchEvent(new Event("scroll"));
+      dispatchPointerEvent(scroller, "pointerup", 140);
+    });
+    settleAfterMomentum();
+
+    expect(scroller.scrollLeft).toBe(0);
+  });
+
   it("does not attach on non-phone desktop", () => {
     stubViewport("wide-short-desktop");
     expect(isMobileViewport()).toBe(false);

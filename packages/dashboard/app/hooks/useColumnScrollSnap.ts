@@ -8,6 +8,11 @@ rubber-band/fling end often reverses for a frame — and (2) origin±nearest hyb
 Direction is locked at finger-up from net gesture delta only (never post-lift ticks). Target
 is always the next column in that scroll direction from the current viewport (classic
 directional page snap). Pin until next touch; hard-jump kills residual fling.
+
+FNXC:BoardNavigation 2026-07-22-15:10:
+A tap during post-lift momentum must cancel the pending directional settle and re-baseline
+the gesture at the current scrollLeft (pointerHeld true). Otherwise the original swipe's
+idle timer still hard-jumps the board away from where the user stopped.
 */
 /** After lift/cancel/wheel: wait for scroll idle (momentum finished) before paging. */
 const SCROLL_IDLE_SETTLE_MS = 48;
@@ -389,12 +394,35 @@ export function useColumnScrollSnap(
       idleTimer = setTimeout(snapInScrollDirection, SCROLL_IDLE_SETTLE_MS);
     };
 
+    /*
+    FNXC:BoardNavigation 2026-07-22-15:10:
+    A second touch during post-lift momentum must cancel the pending directional settle and start a fresh gesture at the current scrollLeft.
+    Previously, re-touch while interactionActive only re-captured the pointer and returned early — pointerHeld stayed false, the idle timer kept the original swipe direction, and the board hard-jumped away from where the user tapped to stop.
+    */
     const beginInteraction = (event: Event) => {
       if (!isUserInteraction(event)) return;
 
       clearPin();
 
+      // Mid-momentum re-touch (or duplicate pointerdown+touchstart): cancel pending snap and re-baseline.
       if (interactionActive) {
+        clearIdleTimer();
+        lockedDirection = 0;
+        sawHorizontalMovement = false;
+        gestureStartScrollLeft = scroller.scrollLeft;
+        lastScrollLeft = scroller.scrollLeft;
+        const clientX = getClientX(event);
+        gestureStartClientX = clientX;
+        lastClientX = clientX;
+
+        if (event.type === "wheel") {
+          pointerHeld = false;
+          suspendNativeSnap();
+          armIdleSettle();
+          return;
+        }
+
+        pointerHeld = true;
         if (event.type === "pointerdown" && "pointerId" in event) {
           try {
             scroller.setPointerCapture((event as PointerEvent).pointerId);
