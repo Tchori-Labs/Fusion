@@ -2128,6 +2128,38 @@ export async function pushAfterMergeToRemote(input: {
     return { pushed: false, remote, targetBranch, error: fastPathError };
   }
 
+  /*
+  FNXC:MergePush 2026-07-22-18:42:
+  Tchori-Labs/Fusion#5 requires approved content to reach durable remote storage before the divergence clean room starts. Force-updating a task-scoped recovery ref makes retries idempotent and preserves the pre-rebase squash across aborts or process death without changing the non-fatal post-finalization push contract.
+  */
+  const recoveryBranch = `fusion/${taskId.toLowerCase()}-stranded`;
+  const recoveryRef = `refs/heads/${recoveryBranch}`;
+  try {
+    await git(["push", "--force", remote, `${localSha}:${recoveryRef}`], projectRootDir, { timeout: 120_000 });
+    await audit.git({
+      type: "push:recovery-branch",
+      target: taskId,
+      metadata: { taskId, remote, recoveryBranch, sha: localSha, outcome: "success" },
+    }).catch(() => undefined);
+    await store.logEntry(
+      taskId,
+      `Push after merge: preserved the approved pre-rebase squash on ${remote}/${recoveryBranch} at ${localSha}`,
+      "PushRecoveryBranch",
+    ).catch(() => undefined);
+  } catch (recoveryError: unknown) {
+    const message = getErrorMessage(recoveryError);
+    await audit.git({
+      type: "push:recovery-branch",
+      target: taskId,
+      metadata: { taskId, remote, recoveryBranch, sha: localSha, outcome: "failed" },
+    }).catch(() => undefined);
+    await store.logEntry(
+      taskId,
+      `Push after merge: could not preserve the approved squash on recovery branch ${remote}/${recoveryBranch}; continuing the non-fatal divergence rebase: ${message}`,
+      "PushRecoveryBranchFailed",
+    ).catch(() => undefined);
+  }
+
   // 2. Divergence path: remote moved ahead — rebase in a detached clean room.
   await log(`Push after merge: ${remote}/${targetBranch} has diverged — rebasing in a clean room before pushing`);
   let pushRoot: string | undefined;
@@ -2161,6 +2193,34 @@ export async function pushAfterMergeToRemote(input: {
     });
     if (!pushResult.pushed) {
       return { pushed: false, remote, targetBranch, error: pushResult.error };
+    }
+
+    // The approved content is now on the target branch, so clean up the
+    // temporary recovery ref. Deletion remains best-effort: a cleanup problem
+    // must not turn a successful target push into a failed merge outcome.
+    try {
+      await git(["push", remote, `:${recoveryRef}`], canonicalPushRoot, { timeout: 120_000 });
+      await audit.git({
+        type: "push:recovery-branch",
+        target: taskId,
+        metadata: { taskId, remote, recoveryBranch, sha: localSha, outcome: "deleted" },
+      }).catch(() => undefined);
+      await store.logEntry(
+        taskId,
+        `Push after merge: deleted recovery branch ${remote}/${recoveryBranch} after the target push succeeded`,
+        "PushRecoveryBranch",
+      ).catch(() => undefined);
+    } catch (recoveryDeleteError: unknown) {
+      await audit.git({
+        type: "push:recovery-branch",
+        target: taskId,
+        metadata: { taskId, remote, recoveryBranch, sha: localSha, outcome: "delete-failed" },
+      }).catch(() => undefined);
+      await store.logEntry(
+        taskId,
+        `Push after merge: target push succeeded but recovery branch ${remote}/${recoveryBranch} could not be deleted: ${getErrorMessage(recoveryDeleteError)}`,
+        "PushRecoveryBranchFailed",
+      ).catch(() => undefined);
     }
 
     // The clean-room HEAD is what the remote now has. Advance the local

@@ -172,6 +172,11 @@ describe("runAiMerge push-after-merge conflicting divergence", () => {
     expect(result.pushedToRemote).toBeUndefined();
     expect(logs.some((entry) => entry.action === "PushToRemoteFailed")).toBe(false);
     expect(storeMocks.recordRunAuditEvent).not.toHaveBeenCalledWith(expect.objectContaining({ mutationType: "push:origin" }));
+    expect(git(originDir, "rev-parse refs/heads/fusion/kb-002-stranded")).toBe(git(dir, "rev-parse main"));
+    expect(storeMocks.recordRunAuditEvent).toHaveBeenCalledWith(expect.objectContaining({
+      mutationType: "push:recovery-branch",
+      metadata: expect.objectContaining({ outcome: "success", recoveryBranch: "fusion/kb-002-stranded" }),
+    }));
     expectNoRebaseWorktree(dir);
   });
 });
