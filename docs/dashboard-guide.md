@@ -20,6 +20,9 @@ When Fusion detects a newer `@runfusion/fusion` release, the Settings modal foot
 <!-- FNXC:SettingsSearchDocs 2026-07-04-00:00: Settings search is section-discovery, not a global command palette. Document that it filters visible Settings sections by section names and setting keywords while preserving feature-gated hidden sections. -->
 Use **Search settings** at the top of Settings to find the section that contains a setting by name or keyword. The same search works in the Settings modal and embedded Settings page, filters both the desktop section list and mobile section picker, and only searches sections currently visible for enabled feature flags.
 
+<!-- FNXC:UiMetadataApi 2026-07-14-00:00: External dashboard integrations need the same view and Settings-section registry that the UI renders, exposed without duplicating labels or search terms. -->
+Plugin and command-palette authors can discover the dashboard's built-in navigation through `GET /api/views` and selectable Settings sections through `GET /api/settings/sections`. These authenticated, read-only endpoints return static metadata; see the [Plugin Authoring Guide](./PLUGIN_AUTHORING.md#ui-metadata-endpoints) for response fields and examples.
+
 <!-- FNXC:Settings 2026-07-09-12:00: FN-7751 keeps FN-7713's collapsed mobile search row but moves the toggle inline beside the section dropdown so mobile Settings exposes one compact section/search control row; desktop/tablet keep the row always visible with no toggle. -->
 On mobile, the search row starts collapsed behind a compact toggle icon beside the **Settings Section** dropdown to save vertical space; tap it to reveal the search input and tap again to hide it. An in-progress search query is preserved across collapse/expand. Desktop and tablet always show the search row with no toggle.
 
@@ -2083,8 +2086,10 @@ The merge-advance notice includes an explicit **Push to origin** action for the 
 - Standard push is `git push origin refs/heads/<branch>:refs/heads/<branch>` with no plain `--force` path.
 - Advanced mode enables opt-in `--force-with-lease=refs/heads/<branch>:<localSha>` only.
 - Non-fast-forward and lease-stale failures surface actionable messaging with Smart Pull.
-- Every attempt records `mutationType: "push:origin"` run-audit metadata: `integrationBranch`, `remote`, `localSha`, `remoteSha`, `aheadCount`, `behindCount`, `forceWithLease`, `outcome`, optional `stderrPreview`, and `durationMs`.
-- Push remains explicit user authorization only through dashboard HTTP routes (no scheduler/heartbeat auto-push).
+- Every dashboard Smart Push attempt records `mutationType: "push:origin"` run-audit metadata: `integrationBranch`, `remote`, `localSha`, `remoteSha`, `aheadCount`, `behindCount`, `forceWithLease`, `outcome`, optional `stderrPreview`, and `durationMs`.
+- Automatic post-merge pushes also emit `push:origin`; failed and shutdown-aborted attempts use `outcome: "failed"` and `outcome: "aborted"`, respectively, while leaving the already-finalized task done.
+- When post-merge push detects remote divergence, `push:recovery-branch` records the remote safety-ref lifecycle with IDs/outcomes-only metadata: `taskId`, `remote`, `recoveryBranch`, `sha`, and `outcome` (`success`, `failed`, `deleted`, or `delete-failed`). The `fusion/<task-id>-stranded` ref is deleted after a successful target push and retained after failure or abort.
+- Dashboard Push remains explicit user authorization only through dashboard HTTP routes; the separate `pushAfterMerge` project setting controls automatic post-merge pushes.
 
 ## Shared branch groups
 
