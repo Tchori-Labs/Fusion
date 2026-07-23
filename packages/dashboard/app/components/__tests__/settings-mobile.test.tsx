@@ -121,6 +121,7 @@ vi.mock("../../api", () => ({
   listDiscussionCategories: vi.fn(() => Promise.resolve({ categories: [] })),
   // SettingsModal renders ProjectDefaultWorkflowField → WorkflowSelector, which loads these on mount.
   fetchWorkflows: vi.fn(() => Promise.resolve([])),
+  listDiscussionCategories: vi.fn(() => Promise.resolve({ categories: [] })),
   fetchProjectDefaultWorkflow: vi.fn(() => Promise.resolve({ workflowId: null })),
   setProjectDefaultWorkflow: vi.fn(() => Promise.resolve({ workflowId: null })),
 }));
@@ -544,7 +545,7 @@ describe("SettingsModal mobile adaptations", () => {
 
     await waitFor(() => expect(updateSettings).toHaveBeenCalled());
 
-    const payload = vi.mocked(updateSettings).mock.calls[0][0] as Record<string, unknown>;
+    const payload = vi.mocked(updateSettings).mock.calls.at(-1)![0] as Record<string, unknown>;
     expect(payload.pushAfterMerge).toBe(false);
     expect(payload).not.toHaveProperty("pushRemote");
   });
