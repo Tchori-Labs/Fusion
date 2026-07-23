@@ -103,6 +103,69 @@ describe("useViewState", () => {
     }
   });
 
+  it("applies a valid Settings section deep link", async () => {
+    const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    const onSettingsSectionDeepLink = vi.fn();
+    window.history.replaceState({}, "", "/?view=settings&section=merge");
+
+    try {
+      const { result } = renderHook(() =>
+        useViewState(createOptions({ onSettingsSectionDeepLink })),
+      );
+
+      await waitFor(() => {
+        expect(result.current.taskView).toBe("settings");
+      });
+      expect(onSettingsSectionDeepLink).toHaveBeenCalledTimes(1);
+      expect(onSettingsSectionDeepLink).toHaveBeenCalledWith("merge");
+    } finally {
+      window.history.replaceState({}, "", originalUrl || "/");
+    }
+  });
+
+  it("passes an unknown Settings section through without throwing", async () => {
+    const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    const onSettingsSectionDeepLink = vi.fn();
+    window.history.replaceState({}, "", "/?view=settings&section=not-a-real-section");
+
+    try {
+      const { result } = renderHook(() =>
+        useViewState(createOptions({ onSettingsSectionDeepLink })),
+      );
+
+      await waitFor(() => {
+        expect(result.current.taskView).toBe("settings");
+      });
+      expect(onSettingsSectionDeepLink).toHaveBeenCalledWith("not-a-real-section");
+      // SettingsModal.remote-notifications.test.tsx covers the in-modal first-visible fallback.
+    } finally {
+      window.history.replaceState({}, "", originalUrl || "/");
+    }
+  });
+
+  it.each([
+    ["/?view=settings", "Settings without a section"],
+    ["/?view=board&section=merge", "a section on a non-Settings view"],
+    ["/", "no navigation params"],
+  ])("does not apply a Settings section for %s (%s)", async (url) => {
+    const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    const onSettingsSectionDeepLink = vi.fn();
+    window.history.replaceState({}, "", url);
+
+    try {
+      const { result } = renderHook(() =>
+        useViewState(createOptions({ onSettingsSectionDeepLink })),
+      );
+
+      await waitFor(() => {
+        expect(result.current.taskView).toBe(url.includes("view=settings") ? "settings" : "board");
+      });
+      expect(onSettingsSectionDeepLink).not.toHaveBeenCalled();
+    } finally {
+      window.history.replaceState({}, "", originalUrl || "/");
+    }
+  });
+
   it("explicit setTaskView/handleChangeTaskView to settings still opens Settings", async () => {
     const { result } = renderHook(() => useViewState(createOptions()));
 

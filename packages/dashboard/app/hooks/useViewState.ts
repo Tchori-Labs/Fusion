@@ -117,6 +117,7 @@ interface UseViewStateOptions {
   openSetupWizard: () => void;
   themeMode: ThemeMode;
   setThemeMode: (mode: ThemeMode) => void;
+  onSettingsSectionDeepLink?: (sectionId: string) => void;
 }
 
 export interface UseViewStateResult {
@@ -135,6 +136,7 @@ export function useViewState(options: UseViewStateOptions): UseViewStateResult {
     currentProject,
     themeMode,
     setThemeMode,
+    onSettingsSectionDeepLink,
   } = options;
 
   const [viewMode, setViewMode] = useState<ViewMode>(() => {
@@ -196,7 +198,8 @@ export function useViewState(options: UseViewStateOptions): UseViewStateResult {
       return;
     }
 
-    const viewParam = new URLSearchParams(window.location.search).get("view");
+    const params = new URLSearchParams(window.location.search);
+    const viewParam = params.get("view");
     const legacyReliabilityView = migrateLegacyReliabilityView(viewParam);
     const retiredStashRecoveryView = migrateRetiredStashRecoveryView(viewParam);
     if (legacyReliabilityView) {
@@ -204,9 +207,18 @@ export function useViewState(options: UseViewStateOptions): UseViewStateResult {
     } else if (retiredStashRecoveryView) {
       setTaskView(retiredStashRecoveryView);
     } else if (viewParam && isTaskView(viewParam)) {
-      setTaskView(normalizeTaskView(viewParam));
+      const normalizedView = normalizeTaskView(viewParam);
+      setTaskView(normalizedView);
+      const sectionParam = params.get("section");
+      if (normalizedView === "settings" && sectionParam) {
+        onSettingsSectionDeepLink?.(sectionParam);
+      }
     }
-  }, []);
+    /*
+    FNXC:DeepLink 2026-07-14-00:23:
+    A Settings section deep link flows through modalManager.settingsInitialSection to both the embedded Settings view in MainContent and the modal presentation in AppModals. Raw section ids intentionally pass through unchanged: SettingsModal reveals known advanced sections and degrades unknown or hidden ids to its first visible default section.
+    */
+  }, [onSettingsSectionDeepLink]);
 
   useEffect(() => {
     if (projectsLoading || currentProjectLoading) return;

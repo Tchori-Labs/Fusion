@@ -403,6 +403,11 @@ function AppInner() {
   // Navigation history for browser back button (desktop + mobile).
   const { pushNav, replaceCurrent, removeNav } = useNavigationHistory({ enabled: true });
 
+  const handleSettingsSectionDeepLink = useCallback(
+    (section: string) => modalManager.setSettingsSection(section as SectionId),
+    [modalManager.setSettingsSection],
+  );
+
   // View state must be defined before useTasks since useTasks depends on taskView for SSE gating
   const { viewMode, setViewMode, taskView, setTaskView, handleChangeTaskView } = useViewState({
     projectsLoading,
@@ -414,6 +419,7 @@ function AppInner() {
     openSetupWizard: modalManager.openSetupWizard,
     themeMode,
     setThemeMode,
+    onSettingsSectionDeepLink: handleSettingsSectionDeepLink,
   });
 
   const { views: rawPluginDashboardViews } = usePluginDashboardViews(currentProject?.id);
