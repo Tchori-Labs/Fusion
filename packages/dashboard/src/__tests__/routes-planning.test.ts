@@ -901,9 +901,21 @@ describe("Planning Mode Routes", () => {
           answers the validation checkpoint, so streaming must retain that question event.
           */
           expect(events.filter((event) => event.event === "question")).toHaveLength(1);
+          expect(events.filter((event) => event.event === "complete")).toHaveLength(0);
         });
+        expect((await planningModule.getSession(res.body.sessionId))?.validated).toBe(false);
         expect(messages).toHaveLength(2);
         expect(messages[0]?.content).toContain("Build a detailed reporting workflow");
+
+        const validationRes = await REQUEST(
+          buildApp(),
+          "POST",
+          `/api/planning/${res.body.sessionId}/validate`,
+          undefined,
+          { "Content-Type": "application/json" },
+        );
+        expect(validationRes).toMatchObject({ status: 200, body: { validated: true } });
+        expect(planningStreamManager.getBufferedEvents(res.body.sessionId, 0).filter((event) => event.event === "complete")).toHaveLength(1);
       });
 
       it("rejects invalid planning depth", async () => {
@@ -1595,7 +1607,7 @@ describe("Planning Mode Routes", () => {
         expect(streamRes.body.indexOf("event: summary")).toBeLessThan(streamRes.body.indexOf("event: question"));
       });
 
-      it("terminalizes a validated persisted summary session", async () => {
+      it("ends a replayed stream only after the explicit validation route", async () => {
         const startRes = await REQUEST(
           buildApp(),
           "POST",
@@ -1604,24 +1616,22 @@ describe("Planning Mode Routes", () => {
           { "Content-Type": "application/json" },
         );
         const sessionId = startRes.body.sessionId as string;
-        const { getSession } = await import("../planning.js");
-        const session = await getSession(sessionId);
-        expect(session).toBeDefined();
-        // @ts-expect-error - test setup mutates the in-memory terminal session.
-        session!.summary = { title: "Validated plan", description: "Ready", suggestedSize: "S", keyDeliverables: [] };
-        // @ts-expect-error - test setup restores this as a settled terminal session.
-        session!.generationPurpose = undefined;
-        // @ts-expect-error - test setup mutates the in-memory terminal session.
-        session!.currentQuestion = undefined;
-        // @ts-expect-error - test setup mutates the in-memory terminal session.
-        session!.validated = true;
 
-        const streamPromise = REQUEST(buildApp(), "GET", `/api/planning/${sessionId}/stream`);
-        setTimeout(() => planningStreamManager.broadcast(sessionId, { type: "complete" }), 0);
-        const streamRes = await streamPromise;
+        const validationRes = await REQUEST(
+          buildApp(),
+          "POST",
+          `/api/planning/${sessionId}/validate`,
+          undefined,
+          { "Content-Type": "application/json" },
+        );
+        expect(validationRes).toMatchObject({ status: 200, body: { validated: true } });
+
+        // No timer or synthetic stream event is needed: validation creates the terminal replay.
+        const streamRes = await REQUEST(buildApp(), "GET", `/api/planning/${sessionId}/stream`);
 
         expect(streamRes.body).toContain("event: summary");
         expect(streamRes.body).toContain("event: complete");
+        expect(planningStreamManager.getBufferedEvents(sessionId, 0).filter((event) => event.event === "complete")).toHaveLength(1);
       });
 
       it("emits catch-up question event for awaiting_input sessions", async () => {
@@ -1679,30 +1689,81 @@ describe("Planning Mode Routes", () => {
     });
 
     describe("POST /planning/respond", () => {
-      it("updates the plan after an answer", async () => {
-        // First create a session
+      it("keeps a model completion as a running plan until explicit validation", async () => {
+        const responses = [
+          JSON.stringify({
+            type: "question",
+            data: { id: "q-scope", type: "text", question: "Which scope is needed?" },
+          }),
+          JSON.stringify({
+            type: "complete",
+            data: {
+              title: "Auth plan from the answered turn",
+              description: "Preserve the model plan without terminalizing the interview.",
+              suggestedSize: "M",
+              suggestedDependencies: [],
+              keyDeliverables: ["Implement authentication"],
+            },
+          }),
+        ];
+        let responseIndex = 0;
+        __setCreateFnAgent(async () => ({
+          session: {
+            state: { messages: [] },
+            prompt: vi.fn(async function (this: { state: { messages: Array<{ role: string; content: string }> } }, message: string) {
+              this.state.messages.push({ role: "user", content: message });
+              this.state.messages.push({ role: "assistant", content: responses[responseIndex++]! });
+            }),
+            dispose: vi.fn(),
+          },
+        }));
+
         const startRes = await REQUEST(
           buildApp(),
           "POST",
           "/api/planning/start",
           JSON.stringify({ initialPlan: "Build a user auth system" }),
-          { "Content-Type": "application/json" }
+          { "Content-Type": "application/json" },
         );
         expect(startRes.status).toBe(201);
-        const sessionId = startRes.body.sessionId;
+        const sessionId = startRes.body.sessionId as string;
 
-        // Submit a response
-        const res = await REQUEST(
+        const answerRes = await REQUEST(
           buildApp(),
           "POST",
           "/api/planning/respond",
-          JSON.stringify({ sessionId, responses: { scope: "medium" } }),
-          { "Content-Type": "application/json" }
+          JSON.stringify({ sessionId, responses: { "q-scope": "Medium" } }),
+          { "Content-Type": "application/json" },
         );
 
-        expect(res.status).toBe(200);
-        expect(res.body.type).toBe("question");
-        expect(planningModule.getSummary(sessionId)).toBeDefined();
+        /*
+        FNXC:PlanningRouteTests 2026-07-23-08:45:
+        A model `complete` payload after an answer updates the durable running plan but is
+        coerced to one next question. Only the validate route may set the terminal flag.
+        Keep this route-level seam explicit so fixtures cannot regress to answer-driven completion.
+        */
+        expect(answerRes).toMatchObject({
+          status: 200,
+          body: { type: "question", data: { id: expect.any(String) } },
+        });
+        expect(planningModule.getSummary(sessionId)).toMatchObject({
+          title: "Auth plan from the answered turn",
+          keyDeliverables: ["Implement authentication"],
+        });
+        expect((await planningModule.getSession(sessionId))?.validated).toBe(false);
+
+        const validationRes = await REQUEST(
+          buildApp(),
+          "POST",
+          `/api/planning/${sessionId}/validate`,
+          undefined,
+          { "Content-Type": "application/json" },
+        );
+        expect(validationRes).toMatchObject({
+          status: 200,
+          body: { validated: true, summary: { title: "Auth plan from the answered turn" } },
+        });
+        expect((await planningModule.getSession(sessionId))?.validated).toBe(true);
       });
 
       it("requires an explicit refine request before asking another question", async () => {

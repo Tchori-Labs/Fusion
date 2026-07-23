@@ -2544,6 +2544,16 @@ export async function validateSession(sessionId: string): Promise<PlanningSummar
   session.summary = session.summary ?? buildRunningSummary(session.initialPlan, session.history);
   session.currentQuestion = undefined;
   session.editingQuestionId = undefined;
+  /*
+  FNXC:PlanningMode 2026-07-23-08:55:
+  Validation is the sole terminal transition, including after a synchronous initial turn left
+  generation metadata behind. Clear that non-terminal metadata so stream replay recognizes the
+  validated session, emits its one terminal complete event, and closes without a synthetic event.
+  */
+  session.generationPurpose = undefined;
+  session.generationStartedAt = undefined;
+  session.generationReturnQuestion = undefined;
+  session.pendingContextualComments = undefined;
   session.validated = true;
   session.error = undefined;
   session.updatedAt = new Date();
