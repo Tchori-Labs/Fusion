@@ -32,6 +32,7 @@ function createOptions(overrides: Partial<Parameters<typeof useViewState>[0]> = 
 
 describe("useViewState", () => {
   beforeEach(() => {
+    vi.restoreAllMocks();
     vi.clearAllMocks();
     localStorage.clear();
     window.history.replaceState({}, "", "/");
@@ -165,6 +166,59 @@ describe("useViewState", () => {
     } finally {
       window.history.replaceState({}, "", originalUrl || "/");
     }
+  });
+
+  it("applies pushState plus PopStateEvent view transitions without reload", async () => {
+    const { result } = renderHook(() => useViewState(createOptions()));
+    await waitFor(() => expect(result.current.taskView).toBe("board"));
+
+    act(() => {
+      window.history.pushState({}, "", "/?view=list");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+
+    await waitFor(() => expect(result.current.taskView).toBe("list"));
+  });
+
+  it("applies a Settings section from pushState plus PopStateEvent", async () => {
+    const onSettingsSectionDeepLink = vi.fn();
+    const { result } = renderHook(() =>
+      useViewState(createOptions({ onSettingsSectionDeepLink })),
+    );
+
+    act(() => {
+      window.history.pushState({}, "", "/?view=settings&section=worktrees");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+
+    await waitFor(() => expect(result.current.taskView).toBe("settings"));
+    expect(onSettingsSectionDeepLink).toHaveBeenCalledTimes(1);
+    expect(onSettingsSectionDeepLink).toHaveBeenCalledWith("worktrees");
+  });
+
+  it("does not churn state for the same view or reset it for missing/invalid params", async () => {
+    const { result } = renderHook(() => useViewState(createOptions()));
+    await act(async () => result.current.handleChangeTaskView("list"));
+    const replaceStateSpy = vi.spyOn(window.history, "replaceState");
+
+    act(() => {
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    expect(result.current.taskView).toBe("list");
+    expect(replaceStateSpy).not.toHaveBeenCalled();
+
+    act(() => {
+      window.history.pushState({}, "", "/?project=proj_123");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    expect(result.current.taskView).toBe("list");
+
+    act(() => {
+      window.history.pushState({}, "", "/?view=not-a-view");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    expect(result.current.taskView).toBe("list");
+    replaceStateSpy.mockRestore();
   });
 
   it("explicit setTaskView/handleChangeTaskView to settings still opens Settings", async () => {

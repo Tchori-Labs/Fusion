@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { StrictMode, createElement, type PropsWithChildren } from "react";
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { useDeepLink } from "../useDeepLink";
 import * as api from "../../api";
 import type { ProjectInfo } from "../../api";
@@ -383,6 +383,71 @@ describe("useDeepLink", () => {
       "/?project=proj_123",
     );
     expect(closeTaskDetail).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens each changed task param through pushState plus PopStateEvent", async () => {
+    const pushStateSpy = vi.spyOn(window.history, "pushState").mockImplementation((_state, _unused, url) => {
+      Object.defineProperty(window, "location", {
+        configurable: true,
+        value: new URL(String(url), "http://localhost:3000"),
+      });
+    });
+    const { openTaskDetail } = renderUseDeepLink();
+
+    act(() => {
+      window.history.pushState({}, "", "/?task=FN-123");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    await waitFor(() => expect(mockFetchTaskDetail).toHaveBeenCalledWith("FN-123", "proj_123"));
+
+    act(() => {
+      window.history.pushState({}, "", "/?task=FN-456");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    await waitFor(() => expect(mockFetchTaskDetail).toHaveBeenCalledWith("FN-456", "proj_123"));
+
+    expect(mockFetchTaskDetail).toHaveBeenCalledTimes(2);
+    expect(openTaskDetail).toHaveBeenCalledTimes(2);
+    expect(pushStateSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("switches changed project params through pushState plus PopStateEvent", async () => {
+    vi.spyOn(window.history, "pushState").mockImplementation((_state, _unused, url) => {
+      Object.defineProperty(window, "location", {
+        configurable: true,
+        value: new URL(String(url), "http://localhost:3000"),
+      });
+    });
+    const { setCurrentProject } = renderUseDeepLink();
+
+    act(() => {
+      window.history.pushState({}, "", "/?project=proj_456");
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+
+    await waitFor(() => expect(setCurrentProject).toHaveBeenCalledWith(otherProject));
+    expect(mockFetchTaskDetail).not.toHaveBeenCalled();
+  });
+
+  it("fetches a task deep link only once under StrictMode", async () => {
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: new URL("http://localhost:3000/?task=FN-888"),
+    });
+    const strictWrapper = ({ children }: PropsWithChildren) => createElement(StrictMode, null, children);
+
+    renderHook(() => useDeepLink({
+      projectId: defaultProject.id,
+      projects: [defaultProject, otherProject],
+      projectsLoading: false,
+      currentProject: defaultProject,
+      setCurrentProject: vi.fn(),
+      addToast: vi.fn(),
+      openTaskDetail: vi.fn(),
+      closeTaskDetail: vi.fn(),
+    }), { wrapper: strictWrapper });
+
+    await waitFor(() => expect(mockFetchTaskDetail).toHaveBeenCalledTimes(1));
   });
 
   it("prevents duplicate fetches when rerendering after project switch", async () => {

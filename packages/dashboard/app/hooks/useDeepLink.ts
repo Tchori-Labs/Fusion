@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { TaskDetail } from "@fusion/core";
 import { fetchTaskDetail, type ProjectInfo } from "../api";
@@ -39,8 +39,9 @@ export function useDeepLink(options: UseDeepLinkOptions): UseDeepLinkResult {
     closeTaskDetail,
   } = options;
 
-  // Prevent duplicate fetches when project switching causes the effect to re-run.
-  const deepLinkFetchedRef = useRef(false);
+  // Prevent duplicate fetches while allowing a changed task param to open a new detail.
+  const deepLinkFetchedRef = useRef<string | null>(null);
+  const [urlVersion, setUrlVersion] = useState(0);
 
   // Guard against StrictMode double-effect path rewrites.
   const pathRewroteRef = useRef(false);
@@ -77,6 +78,12 @@ export function useDeepLink(options: UseDeepLinkOptions): UseDeepLinkResult {
 
   // Cancel any pending not-found timer on unmount so it never toasts after teardown.
   useEffect(() => () => clearProjectNotFoundTimer(), [clearProjectNotFoundTimer]);
+
+  useEffect(() => {
+    const handlePopState = () => setUrlVersion((version) => version + 1);
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
 
   useEffect(() => {
     if (!pathRewroteRef.current) {
@@ -141,10 +148,14 @@ export function useDeepLink(options: UseDeepLinkOptions): UseDeepLinkResult {
       projectSwitchAppliedRef.current = null;
     }
 
+    /*
+     * FNXC:DeepLink 2026-07-14-00:27:
+     * Popstate re-reads project/task params without reloading. Task fetch deduplication is keyed by the last task id so a new `?task=` value opens its detail once under StrictMode; removing `task` does not force-close an already-open detail because close ownership remains with handleDetailClose and the navigation-history stack.
+     */
     if (!taskId) return;
 
-    if (deepLinkFetchedRef.current) return;
-    deepLinkFetchedRef.current = true;
+    if (deepLinkFetchedRef.current === taskId) return;
+    deepLinkFetchedRef.current = taskId;
 
     fetchTaskDetail(taskId, taskProjectId)
       .then((detail) => {
@@ -163,6 +174,7 @@ export function useDeepLink(options: UseDeepLinkOptions): UseDeepLinkResult {
     addToast,
     openTaskDetail,
     clearProjectNotFoundTimer,
+    urlVersion,
     // deepLinkFetchedRef intentionally excluded - it's a mutable ref, not state
   ]);
 

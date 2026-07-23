@@ -159,6 +159,10 @@ export function useViewState(options: UseViewStateOptions): UseViewStateResult {
     return "board";
   });
   const hasHydratedScopedTaskViewRef = useRef(false);
+  const taskViewRef = useRef(taskView);
+  const settingsSectionDeepLinkRef = useRef(onSettingsSectionDeepLink);
+  taskViewRef.current = taskView;
+  settingsSectionDeepLinkRef.current = onSettingsSectionDeepLink;
 
   useEffect(() => {
     window.localStorage.setItem("kb-dashboard-view-mode", viewMode);
@@ -194,32 +198,43 @@ export function useViewState(options: UseViewStateOptions): UseViewStateResult {
     setScopedItem("kb-dashboard-task-view", taskView, currentProject?.id);
   }, [currentProject?.id, taskView]);
 
-  useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
+  const applyViewParamsFromUrl = useCallback(() => {
+    if (typeof window === "undefined") return;
 
     const params = new URLSearchParams(window.location.search);
     const viewParam = params.get("view");
-    const legacyReliabilityView = migrateLegacyReliabilityView(viewParam);
-    const retiredStashRecoveryView = migrateRetiredStashRecoveryView(viewParam);
-    if (legacyReliabilityView) {
-      setTaskViewState(legacyReliabilityView);
-    } else if (retiredStashRecoveryView) {
-      setTaskViewState(retiredStashRecoveryView);
-    } else if (viewParam && isTaskView(viewParam)) {
-      const normalizedView = normalizeTaskView(viewParam);
-      setTaskViewState(normalizedView);
-      const sectionParam = params.get("section");
-      if (normalizedView === "settings" && sectionParam) {
-        onSettingsSectionDeepLink?.(sectionParam);
-      }
+    const resolvedView =
+      migrateLegacyReliabilityView(viewParam)
+      ?? migrateRetiredStashRecoveryView(viewParam)
+      ?? (viewParam === "roadmaps" ? migrateLegacyRoadmapsView(viewParam) : null)
+      ?? (isTaskView(viewParam) ? normalizeTaskView(viewParam) : null);
+
+    // Missing and invalid view params are intentionally inert on popstate.
+    if (!resolvedView) return;
+
+    if (resolvedView !== taskViewRef.current) {
+      taskViewRef.current = resolvedView;
+      setTaskViewState(resolvedView);
+    }
+
+    const sectionParam = params.get("section");
+    if (resolvedView === "settings" && sectionParam) {
+      settingsSectionDeepLinkRef.current?.(sectionParam);
     }
     /*
     FNXC:DeepLink 2026-07-14-00:23:
     A Settings section deep link flows through modalManager.settingsInitialSection to both the embedded Settings view in MainContent and the modal presentation in AppModals. Raw section ids intentionally pass through unchanged: SettingsModal reveals known advanced sections and degrades unknown or hidden ids to its first visible default section.
+
+    FNXC:DeepLink 2026-07-14-00:27:
+    The same parser handles initial load and popstate so browser navigation and plugin-dispatched PopStateEvent transitions stay SPA-side. Missing/invalid views never reset state, and the current-view ref prevents duplicate state churn while coexisting with useNavigationHistory's earlier popstate listener.
     */
-  }, [onSettingsSectionDeepLink]);
+  }, []);
+
+  useEffect(() => {
+    applyViewParamsFromUrl();
+    window.addEventListener("popstate", applyViewParamsFromUrl);
+    return () => window.removeEventListener("popstate", applyViewParamsFromUrl);
+  }, [applyViewParamsFromUrl]);
 
   useEffect(() => {
     if (projectsLoading || currentProjectLoading) return;
@@ -240,6 +255,7 @@ export function useViewState(options: UseViewStateOptions): UseViewStateResult {
   Explicit dashboard view transitions replace the owned URL params without adding browser-history depth; useNavigationHistory remains the sole owner of that stack. Mount deep links and project-scoped hydration use the internal state setter so a plain load and project restore leave the address bar untouched, while every public view transition preserves unrelated params and removes stale Settings sections when leaving Settings.
   */
   const setTaskView = useCallback((newView: TaskView) => {
+    taskViewRef.current = newView;
     setTaskViewState(newView);
     replaceViewInUrl(newView);
   }, []);
