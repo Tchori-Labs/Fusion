@@ -179,6 +179,44 @@ describe("Column count-flash", () => {
 
     expect(screen.getByLabelText("1 executing of 4")).toHaveTextContent("1/4");
   });
+
+  it("counts cards with active chrome — a REVISING (needs-replan) todo card and a live code-review gate", () => {
+    // Header must equal the number of visibly active cards (FN-8494 keeps REVISING chrome on
+    // parked replans; a live gate session runs with null status and a pending step lease).
+    const tasks = [
+      { ...makeTask("FN-001"), column: "todo" as ColumnType, status: "needs-replan" as any },
+      { ...makeTask("FN-002"), column: "todo" as ColumnType },
+    ];
+    render(
+      <Column
+        {...defaultProps}
+        column={"todo" as ColumnType}
+        columnFlags={{ hold: true }}
+        tasks={tasks}
+      />,
+    );
+    expect(screen.getByLabelText("1 executing of 2")).toHaveTextContent("1/2");
+  });
+
+  it("counts an in-review card whose code-review gate holds a pending step lease", () => {
+    const tasks = [
+      {
+        ...makeTask("FN-001"),
+        column: "in-review" as ColumnType,
+        workflowStepResults: [{ workflowStepId: "code-review", workflowStepName: "Code Review", status: "pending" as const, startedAt: new Date().toISOString() }],
+      },
+      { ...makeTask("FN-002"), column: "in-review" as ColumnType },
+    ];
+    render(
+      <Column
+        {...defaultProps}
+        column={"in-review" as ColumnType}
+        columnFlags={{ mergeBlocker: true }}
+        tasks={tasks}
+      />,
+    );
+    expect(screen.getByLabelText("1 executing of 2")).toHaveTextContent("1/2");
+  });
 });
 
 /*

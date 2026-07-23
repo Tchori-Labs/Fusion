@@ -11,6 +11,8 @@ import { WorktreeGroup } from "./WorktreeGroup";
 import { QuickEntryBox } from "./QuickEntryBox";
 import { PluginSlot } from "./PluginSlot";
 import { groupByWorktree } from "../utils/worktreeGrouping";
+import { isTaskAgentActive } from "../utils/taskActivity";
+import { isTaskStuck } from "../utils/taskStuck";
 import type { ToastType } from "../hooks/useToast";
 import type { TaskContextMenuColumnMetadata } from "./TaskContextMenu";
 import { ChevronDown, ChevronUp, MoreVertical } from "lucide-react";
@@ -291,10 +293,22 @@ function ColumnComponent({ column, tasks, projectId, maxConcurrent, showWorktree
   FNXC:BoardColumnCount 2026-07-21-19:30:
   Column header is executing/total (e.g. 3/4). Executing uses the same Running predicate as the
   footer (unpaused WIP, live planners, active review). Total is the card count in this lane.
+
+  FNXC:BoardColumnCount 2026-07-22-06:10:
+  The header must agree with the cards below it: a Todo card parked in the durable
+  `needs-replan` stage keeps its REVISING badge and activity chrome (FN-8494), so a header
+  that only counts live agents read 0/2 under a glowing card. Union the shared Running
+  predicate with the card's own activity-chrome predicate (isTaskAgentActive, same
+  globalPaused/stuck gates the card applies) so the count equals the number of visibly
+  active cards. Footer Running and admission intentionally keep the live-agent-only truth —
+  a parked replan must not consume top-level concurrency capacity.
   */
   const activeTaskCount = useMemo(
-    () => tasks.filter((task) => isRunningAgentTask(enrichRunningAgentTaskShapeFromFlags(task, columnFlags))).length,
-    [tasks, columnFlags],
+    () => tasks.filter((task) =>
+      isRunningAgentTask(enrichRunningAgentTaskShapeFromFlags(task, columnFlags))
+      || isTaskAgentActive(task, { globalPaused, isStuck: isTaskStuck(task, taskStuckTimeoutMs, lastFetchTimeMs) }),
+    ).length,
+    [tasks, columnFlags, globalPaused, taskStuckTimeoutMs, lastFetchTimeMs],
   );
   // When search is active, skip pagination so all matching tasks are visible
   const shouldPaginate = !isArchived && !isSearchActive && !showWorktreeGroups && tasks.length > PAGINATED_COLUMN_THRESHOLD;
