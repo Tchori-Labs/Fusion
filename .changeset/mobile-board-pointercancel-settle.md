@@ -2,6 +2,6 @@
 "@runfusion/fusion": patch
 ---
 
-summary: Fix mobile board drags resting between columns, edge-column snap-back glitches, and fling overshoot past the mostly-visible column.
+summary: Fix mobile board column snapping — mid-screen rests, edge glitches, fling overshoot, false swipes from vertical card scrolls, and re-drags after tap-to-stop.
 category: fix
-dev: useColumnScrollSnap now ignores pointercancel while the touch stream is still live (native scroll takeover), and settle targets the nearest column clamped to one column of progress from the gesture origin (resolveSettleTargetIndex) instead of always paging past it.
+dev: useColumnScrollSnap now ignores pointercancel while the touch stream is live, settles to nearest-with-min-progress (resolveSettleTargetIndex), requires horizontal-dominant finger travel for pan intent, and lets a gesture begun mid-transit settle to plain nearest so a corrective drag wins.

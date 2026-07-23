@@ -48,13 +48,13 @@ function addMediaChangeListener(query: MediaQueryList, listener: () => void): ()
   return () => query.removeListener(listener);
 }
 
-function getClientX(event: Event): number | null {
+function getClientPoint(event: Event): { x: number; y: number } | null {
   if (typeof TouchEvent !== "undefined" && event instanceof TouchEvent) {
     const touch = event.touches[0] ?? event.changedTouches[0];
-    return touch ? touch.clientX : null;
+    return touch ? { x: touch.clientX, y: touch.clientY } : null;
   }
   if ("clientX" in event && typeof (event as PointerEvent).clientX === "number") {
-    return (event as PointerEvent).clientX;
+    return { x: (event as PointerEvent).clientX, y: (event as PointerEvent).clientY };
   }
   return null;
 }
@@ -112,15 +112,23 @@ export function isColumnCentered(
  * Resolve pan direction from the full gesture (net deltas only).
  * Do NOT pass last micro-tick direction for settle — rubber-band flips it.
  * +1 = scroll right / next columns, -1 = scroll left / previous.
+ *
+ * FNXC:BoardNavigation 2026-07-22-21:40:
+ * Finger travel counts as horizontal pan intent only when it dominates the vertical axis —
+ * a vertical card-list scroll with incidental diagonal drift must not page the board.
+ * The board's own horizontal scrollDelta stays authoritative regardless of finger axis.
  */
 export function resolvePanDirection(options: {
   scrollDelta: number;
   /** gestureStartClientX - endClientX: finger left → positive → next column */
   clientDelta: number;
+  /** gestureStartClientY - endClientY: vertical finger travel for axis dominance. */
+  clientDeltaY?: number;
 }): number {
-  const { scrollDelta, clientDelta } = options;
+  const { scrollDelta, clientDelta, clientDeltaY = 0 } = options;
   if (scrollDelta > CENTER_TOLERANCE_PX) return 1;
   if (scrollDelta < -CENTER_TOLERANCE_PX) return -1;
+  if (Math.abs(clientDelta) <= Math.abs(clientDeltaY)) return 0;
   if (clientDelta >= MIN_PAN_CLIENT_PX) return 1;
   if (clientDelta <= -MIN_PAN_CLIENT_PX) return -1;
   return 0;
@@ -249,9 +257,20 @@ export function useColumnScrollSnap(
     let gestureStartScrollLeft = scroller.scrollLeft;
     /** Column the viewport rested on when the gesture began — the paging baseline. */
     let gestureStartColumnIndex = 0;
+    /*
+    FNXC:BoardNavigation 2026-07-22-21:40:
+    The commit-one-column paging rule assumes the gesture began AT REST centered on its origin
+    column. A re-touch mid-transit (tap-to-stop during momentum, then drag) is not at rest: the
+    forced min-one-column progress from a mid-transit origin overrode the user's corrective drag
+    and paged past where they dragged. Such gestures settle on the plain nearest column instead —
+    the new drag's landing point always wins over the interrupted scroll.
+    */
+    let gestureStartCentered = true;
     let lastScrollLeft = scroller.scrollLeft;
     let gestureStartClientX: number | null = null;
     let lastClientX: number | null = null;
+    let gestureStartClientY: number | null = null;
+    let lastClientY: number | null = null;
     /** Locked at finger-up / cancel — never updated by post-lift rubber-band ticks. */
     let lockedDirection = 0;
     let sawHorizontalMovement = false;
@@ -314,7 +333,11 @@ export function useColumnScrollSnap(
         gestureStartClientX !== null && lastClientX !== null
           ? gestureStartClientX - lastClientX
           : 0;
-      lockedDirection = resolvePanDirection({ scrollDelta, clientDelta });
+      const clientDeltaY =
+        gestureStartClientY !== null && lastClientY !== null
+          ? gestureStartClientY - lastClientY
+          : 0;
+      lockedDirection = resolvePanDirection({ scrollDelta, clientDelta, clientDeltaY });
     };
 
     /*
@@ -381,23 +404,31 @@ export function useColumnScrollSnap(
         gestureStartClientX !== null && lastClientX !== null
           ? gestureStartClientX - lastClientX
           : 0;
+      const clientDeltaY =
+        gestureStartClientY !== null && lastClientY !== null
+          ? gestureStartClientY - lastClientY
+          : 0;
 
       // Prefer direction locked at lift; recompute only if never locked.
       const direction =
         lockedDirection !== 0
           ? lockedDirection
-          : resolvePanDirection({ scrollDelta, clientDelta });
+          : resolvePanDirection({ scrollDelta, clientDelta, clientDeltaY });
 
+      // FNXC:BoardNavigation 2026-07-22-21:40: finger travel implies pan only when horizontal dominates.
       const hadPanIntent =
         sawHorizontalMovement ||
         Math.abs(scrollDelta) > CENTER_TOLERANCE_PX ||
-        Math.abs(clientDelta) >= MIN_PAN_CLIENT_PX;
+        (Math.abs(clientDelta) >= MIN_PAN_CLIENT_PX && Math.abs(clientDelta) > Math.abs(clientDeltaY));
 
+      const startedCentered = gestureStartCentered;
       interactionActive = false;
       sawHorizontalMovement = false;
       lockedDirection = 0;
       gestureStartClientX = null;
       lastClientX = null;
+      gestureStartClientY = null;
+      lastClientY = null;
 
       /*
       FNXC:BoardNavigation 2026-07-22-15:26:
@@ -433,7 +464,14 @@ export function useColumnScrollSnap(
         return;
       }
 
-      const targetIndex = direction === 0
+      /*
+      FNXC:BoardNavigation 2026-07-22-21:40:
+      Commit-one-column paging only applies to gestures that began at rest centered on their
+      origin column. A gesture begun mid-transit (tap-to-stop during momentum, then drag)
+      settles on the plain nearest column so the new drag's landing point wins over the
+      interrupted scroll's pending destination.
+      */
+      const targetIndex = direction === 0 || !startedCentered
         ? nearestColumnIndex(scroller, columns)
         : resolveSettleTargetIndex(scroller, columns, direction, gestureStartColumnIndex);
       const targetLeft = scrollLeftToCenterColumn(scroller, columns[targetIndex]);
@@ -462,11 +500,15 @@ export function useColumnScrollSnap(
         lockedDirection = 0;
         sawHorizontalMovement = false;
         gestureStartScrollLeft = scroller.scrollLeft;
-        gestureStartColumnIndex = nearestColumnIndex(scroller, getSnapColumns(scroller));
+        const columns = getSnapColumns(scroller);
+        gestureStartColumnIndex = nearestColumnIndex(scroller, columns);
+        gestureStartCentered = isColumnCentered(scroller, columns);
         lastScrollLeft = scroller.scrollLeft;
-        const clientX = getClientX(event);
-        gestureStartClientX = clientX;
-        lastClientX = clientX;
+        const point = getClientPoint(event);
+        gestureStartClientX = point?.x ?? null;
+        lastClientX = point?.x ?? null;
+        gestureStartClientY = point?.y ?? null;
+        lastClientY = point?.y ?? null;
 
         if (event.type === "wheel") {
           pointerHeld = false;
@@ -491,11 +533,15 @@ export function useColumnScrollSnap(
       sawHorizontalMovement = false;
       lockedDirection = 0;
       gestureStartScrollLeft = scroller.scrollLeft;
-      gestureStartColumnIndex = nearestColumnIndex(scroller, getSnapColumns(scroller));
+      const columns = getSnapColumns(scroller);
+      gestureStartColumnIndex = nearestColumnIndex(scroller, columns);
+      gestureStartCentered = isColumnCentered(scroller, columns);
       lastScrollLeft = scroller.scrollLeft;
-      const clientX = getClientX(event);
-      gestureStartClientX = clientX;
-      lastClientX = clientX;
+      const point = getClientPoint(event);
+      gestureStartClientX = point?.x ?? null;
+      lastClientX = point?.x ?? null;
+      gestureStartClientY = point?.y ?? null;
+      lastClientY = point?.y ?? null;
 
       if (event.type === "wheel") {
         pointerHeld = false;
@@ -524,13 +570,14 @@ export function useColumnScrollSnap(
 
     const handlePointerMove = (event: Event) => {
       if (!interactionActive || pinnedScrollLeft !== null) return;
-      const clientX = getClientX(event);
-      if (clientX === null) return;
-      lastClientX = clientX;
-      if (
-        gestureStartClientX !== null &&
-        Math.abs(gestureStartClientX - clientX) >= MIN_PAN_CLIENT_PX
-      ) {
+      const point = getClientPoint(event);
+      if (point === null) return;
+      lastClientX = point.x;
+      lastClientY = point.y;
+      // FNXC:BoardNavigation 2026-07-22-21:40: only dominant-horizontal travel is a board pan.
+      const dx = gestureStartClientX !== null ? Math.abs(gestureStartClientX - point.x) : 0;
+      const dy = gestureStartClientY !== null ? Math.abs(gestureStartClientY - point.y) : 0;
+      if (dx >= MIN_PAN_CLIENT_PX && dx > dy) {
         markMoved();
       }
     };

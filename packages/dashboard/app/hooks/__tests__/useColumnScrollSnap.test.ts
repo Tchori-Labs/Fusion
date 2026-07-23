@@ -70,9 +70,14 @@ function createScroller(columnCount = 3, initialScrollLeft = 0): HTMLElement {
   return scroller;
 }
 
-function dispatchPointerEvent(scroller: HTMLElement, type: string, clientX: number): void {
+function dispatchPointerEvent(
+  scroller: HTMLElement,
+  type: string,
+  clientX: number,
+  clientY = 0,
+): void {
   scroller.dispatchEvent(
-    new PointerEvent(type, { clientX, pointerId: 1, isPrimary: true, bubbles: true, cancelable: true }),
+    new PointerEvent(type, { clientX, clientY, pointerId: 1, isPrimary: true, bubbles: true, cancelable: true }),
   );
 }
 
@@ -277,6 +282,63 @@ describe("useColumnScrollSnap", () => {
 
     settleAfterMomentum();
     expect(scroller.scrollLeft).toBe(COLUMN_WIDTH);
+  });
+
+  /*
+  FNXC:BoardNavigation 2026-07-22-21:40:
+  A vertical card-list scroll with incidental diagonal drift (dx ≥ 12px but dy dominant) must
+  not read as a horizontal swipe — it previously paged the board to the next column.
+  */
+  it("does not page the board when a vertical card-list scroll drifts diagonally", () => {
+    const scroller = createScroller(3, 0);
+    renderHook(() => useColumnScrollSnap(scroller, { mobileOnly: true, isUserInteraction: () => true }));
+
+    act(() => {
+      dispatchPointerEvent(scroller, "pointerdown", 200, 400);
+      // 15px of horizontal drift during 140px of vertical scrolling inside a column.
+      dispatchPointerEvent(scroller, "pointermove", 185, 260);
+      dispatchPointerEvent(scroller, "pointerup", 185, 260);
+    });
+    settleAfterMomentum();
+    act(() => {
+      vi.advanceTimersByTime(500);
+    });
+
+    expect(scroller.scrollLeft).toBe(0);
+  });
+
+  /*
+  FNXC:BoardNavigation 2026-07-22-21:40:
+  Tap-to-stop during momentum, then drag: the new drag's landing point must win. The
+  commit-one-column clamp only applies to gestures that began centered at rest — from a
+  mid-transit origin it forced a page past the corrective drag.
+  */
+  it("takes the new drag's landing point after a tap-to-stop mid-transit", () => {
+    const scroller = createScroller(3, 0);
+    renderHook(() => useColumnScrollSnap(scroller, { mobileOnly: true, isUserInteraction: () => true }));
+
+    act(() => {
+      // Swipe right, coast mid-transit past column 1's center.
+      dispatchPointerEvent(scroller, "pointerdown", 200);
+      dispatchPointerEvent(scroller, "pointermove", 160);
+      scroller.scrollLeft = 30;
+      scroller.dispatchEvent(new Event("scroll"));
+      dispatchPointerEvent(scroller, "pointerup", 160);
+      scroller.scrollLeft = 130;
+      scroller.dispatchEvent(new Event("scroll"));
+
+      // Tap to stop, then drag back left onto column 1's center.
+      dispatchPointerEvent(scroller, "pointerdown", 150);
+      dispatchPointerEvent(scroller, "pointermove", 180);
+      scroller.scrollLeft = 100;
+      scroller.dispatchEvent(new Event("scroll"));
+      dispatchPointerEvent(scroller, "pointerup", 180);
+    });
+    settleAfterMomentum();
+
+    // Regression: the min-progress clamp previously forced column 0 (scrollLeft 0).
+    expect(scroller.scrollLeft).toBe(COLUMN_WIDTH);
+    expect(isColumnCentered(scroller, [...scroller.children] as HTMLElement[])).toBe(true);
   });
 
   it("does not overshoot a fling that decelerates with the next column mostly on screen", () => {
