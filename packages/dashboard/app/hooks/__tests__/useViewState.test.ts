@@ -34,6 +34,7 @@ describe("useViewState", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
+    window.history.replaceState({}, "", "/");
     vi.spyOn(pluginViewRegistry, "isPluginViewRegistered").mockImplementation(() => false);
   });
 
@@ -294,6 +295,61 @@ describe("useViewState", () => {
     });
 
     expect(result.current.taskView).toBe("agents");
+  });
+
+  it("leaves a plain initial URL untouched", async () => {
+    const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    window.history.replaceState({}, "", "/");
+    const replaceStateSpy = vi.spyOn(window.history, "replaceState");
+
+    try {
+      const { result } = renderHook(() => useViewState(createOptions()));
+      await waitFor(() => expect(result.current.taskView).toBe("board"));
+
+      expect(replaceStateSpy).not.toHaveBeenCalled();
+      expect(window.location.href).toBe(`${window.location.origin}/`);
+    } finally {
+      replaceStateSpy.mockRestore();
+      window.history.replaceState({}, "", originalUrl || "/");
+    }
+  });
+
+  it("syncs an explicit view transition with replaceState and preserves unrelated URL state", async () => {
+    const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    window.history.replaceState({ navIndex: 2 }, "", "/?project=proj_123&pr=42#tasks");
+    const replaceStateSpy = vi.spyOn(window.history, "replaceState");
+
+    try {
+      const { result } = renderHook(() => useViewState(createOptions()));
+      await act(async () => result.current.handleChangeTaskView("list"));
+
+      expect(result.current.taskView).toBe("list");
+      expect(window.location.search).toBe("?project=proj_123&pr=42&view=list");
+      expect(window.location.hash).toBe("#tasks");
+      expect(window.history.state).toEqual({ navIndex: 2 });
+      expect(replaceStateSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      replaceStateSpy.mockRestore();
+      window.history.replaceState({}, "", originalUrl || "/");
+    }
+  });
+
+  it("preserves a Settings section while in Settings and removes it when leaving", async () => {
+    const originalUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    window.history.replaceState({}, "", "/?view=settings&section=merge");
+
+    try {
+      const { result } = renderHook(() => useViewState(createOptions()));
+      await waitFor(() => expect(result.current.taskView).toBe("settings"));
+
+      await act(async () => result.current.handleChangeTaskView("settings"));
+      expect(window.location.search).toBe("?view=settings&section=merge");
+
+      await act(async () => result.current.handleChangeTaskView("board"));
+      expect(window.location.search).toBe("?view=board");
+    } finally {
+      window.history.replaceState({}, "", originalUrl || "/");
+    }
   });
 
   it("handleToggleTheme cycles dark → light → system → dark", async () => {

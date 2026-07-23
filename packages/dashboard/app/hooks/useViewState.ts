@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { ThemeMode } from "@fusion/core";
 import type { ProjectInfo } from "../api";
 import { getScopedItem, setScopedItem } from "../utils/projectStorage";
+import { replaceViewInUrl } from "../utils/viewUrlState";
 import { getPluginViewId, isPluginViewId, isPluginViewRegistered } from "../plugins/pluginViewRegistry";
 
 export type ViewMode = "overview" | "project";
@@ -147,7 +148,7 @@ export function useViewState(options: UseViewStateOptions): UseViewStateResult {
     return "overview";
   });
 
-  const [taskView, setTaskView] = useState<TaskView>(() => {
+  const [taskView, setTaskViewState] = useState<TaskView>(() => {
     const saved = getScopedItem("kb-dashboard-task-view");
     const legacyReliabilityView = migrateLegacyReliabilityView(saved);
     if (legacyReliabilityView) return legacyReliabilityView;
@@ -168,20 +169,20 @@ export function useViewState(options: UseViewStateOptions): UseViewStateResult {
     const legacyReliabilityView = migrateLegacyReliabilityView(saved);
     const retiredStashRecoveryView = migrateRetiredStashRecoveryView(saved);
     if (legacyReliabilityView) {
-      setTaskView(legacyReliabilityView);
+      setTaskViewState(legacyReliabilityView);
     } else if (retiredStashRecoveryView) {
-      setTaskView(retiredStashRecoveryView);
+      setTaskViewState(retiredStashRecoveryView);
     } else if (saved === "roadmaps") {
-      setTaskView(migrateLegacyRoadmapsView(saved));
+      setTaskViewState(migrateLegacyRoadmapsView(saved));
     } else if (isTaskView(saved)) {
       const preserveLegacyOnFirstScopedHydration =
         !hasHydratedScopedTaskViewRef.current && saved === "devserver";
 
-      setTaskView(
+      setTaskViewState(
         preserveLegacyOnFirstScopedHydration ? "devserver" : resolveLandingTaskView(normalizeTaskView(saved)),
       );
     } else {
-      setTaskView("board");
+      setTaskViewState("board");
     }
 
     if (currentProject?.id) {
@@ -203,12 +204,12 @@ export function useViewState(options: UseViewStateOptions): UseViewStateResult {
     const legacyReliabilityView = migrateLegacyReliabilityView(viewParam);
     const retiredStashRecoveryView = migrateRetiredStashRecoveryView(viewParam);
     if (legacyReliabilityView) {
-      setTaskView(legacyReliabilityView);
+      setTaskViewState(legacyReliabilityView);
     } else if (retiredStashRecoveryView) {
-      setTaskView(retiredStashRecoveryView);
+      setTaskViewState(retiredStashRecoveryView);
     } else if (viewParam && isTaskView(viewParam)) {
       const normalizedView = normalizeTaskView(viewParam);
-      setTaskView(normalizedView);
+      setTaskViewState(normalizedView);
       const sectionParam = params.get("section");
       if (normalizedView === "settings" && sectionParam) {
         onSettingsSectionDeepLink?.(sectionParam);
@@ -234,9 +235,18 @@ export function useViewState(options: UseViewStateOptions): UseViewStateResult {
   Do not auto-open the project-only setup wizard just because there are zero projects; that wizard is opened from the Project step or explicit Add Project actions.
   */
 
+  /*
+  FNXC:DeepLink 2026-07-14-00:24:
+  Explicit dashboard view transitions replace the owned URL params without adding browser-history depth; useNavigationHistory remains the sole owner of that stack. Mount deep links and project-scoped hydration use the internal state setter so a plain load and project restore leave the address bar untouched, while every public view transition preserves unrelated params and removes stale Settings sections when leaving Settings.
+  */
+  const setTaskView = useCallback((newView: TaskView) => {
+    setTaskViewState(newView);
+    replaceViewInUrl(newView);
+  }, []);
+
   const handleChangeTaskView = useCallback((newView: TaskView) => {
     setTaskView(newView);
-  }, []);
+  }, [setTaskView]);
 
   const handleToggleTheme = useCallback(() => {
     const cycle: ThemeMode[] = ["dark", "light", "system"];
