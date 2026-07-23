@@ -27,6 +27,9 @@ A comprehensive guide to creating Fusion plugins that extend the task board with
 
 See also: [External Plugin Authoring guide](./plugins/external-authoring.md)
 
+<!-- FNXC:TestidContract 2026-07-23-00:52: Plugin authors and frontend integrators must use the documented compatibility selectors rather than coupling extensions to dashboard classes or DOM position. -->
+Frontend integrations should use the [stable dashboard `data-testid` contract](./dashboard-testid-contract.md) for supported settings, navigation, project-selector, and task-card selectors.
+
 ## 1. Getting Started
 
 ### What Are Fusion Plugins?

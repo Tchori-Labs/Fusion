@@ -174,6 +174,10 @@ export function ProjectSelector({
     return null;
   }, [filteredProjects, searchQuery, currentProject]);
 
+  /*
+  FNXC:TestidContract 2026-07-23-00:52:
+  Every selectable project row must retain project-selector-item-<raw project id> after it moves between bookmarked, recent, and general result groups. The stable integrator selector contract is documented in docs/dashboard-testid-contract.md; grouping state must not change addressability.
+  */
   // Organize projects for display: bookmarked first, then recent, then others
   const displayProjects = useMemo(() => {
     const recentIds = new Set(recentProjects.map((p) => p.id));
@@ -467,6 +471,7 @@ export function ProjectSelector({
                   onClick={() => handleSelectProject(project)}
                   role="option"
                   aria-selected={currentProject?.id === project.id}
+                  data-testid={`project-selector-item-${project.id}`}
                 >
                   {renderStatusIcon(project.status)}
                   <span className="project-selector__item-name">
@@ -503,6 +508,7 @@ export function ProjectSelector({
                     onClick={() => handleSelectProject(project)}
                     role="option"
                     aria-selected={currentProject?.id === project.id}
+                    data-testid={`project-selector-item-${project.id}`}
                   >
                     {renderStatusIcon(project.status)}
                     <span className="project-selector__item-name">
