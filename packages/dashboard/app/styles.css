@@ -2812,6 +2812,17 @@ Task cards reuse the compact badge chip dimensions for GitLab links, but stale G
   padding: 12px 0;
 }
 
+/*
+FNXC:PluginOverlayLayering 2026-07-23-01:21:
+The supported plugin overlay mount spans the viewport in the root stacking context and follows the live dashboard ceiling through --fusion-max-z. It is empty and click-through by default, so existing layout and interactions remain unchanged; interactive plugin children must opt back into pointer events.
+*/
+#plugin-overlay-root {
+  position: fixed;
+  inset: 0;
+  z-index: calc(var(--fusion-max-z, 10600) + 1);
+  pointer-events: none;
+}
+
 /* === Toasts === */
 /*
 FNXC:ToastTheming 2026-06-21-00:00:
