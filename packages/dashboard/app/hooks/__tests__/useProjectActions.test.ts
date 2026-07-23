@@ -31,6 +31,7 @@ function createOptions(overrides: Partial<Parameters<typeof useProjectActions>[0
     setCurrentProject: vi.fn(),
     clearCurrentProject: vi.fn(),
     setViewMode: vi.fn(),
+    setTaskView: vi.fn(),
     currentProject: PROJECT,
     refreshProjects: vi.fn().mockResolvedValue(undefined),
     toggleFavoriteProvider: vi.fn().mockResolvedValue(undefined),
@@ -108,6 +109,7 @@ describe("useProjectActions", () => {
 
     expect(options.clearCurrentProject).toHaveBeenCalledTimes(1);
     expect(options.setViewMode).toHaveBeenCalledWith("overview");
+    expect(options.setTaskView).toHaveBeenCalledWith("command-center");
     expect(window.location.search).toBe("?task=FN-1&room=room-1");
     expect(window.location.hash).toBe("#thread");
     expect(window.history.state).toEqual({ preserved: "state" });
