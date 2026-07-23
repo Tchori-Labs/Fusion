@@ -243,6 +243,27 @@ afterEach(() => {
 });
 
 describe("TaskCard", () => {
+  it("keeps its stable raw-id testid on normal and editing roots", () => {
+    render(
+      <TaskCard
+        task={makeTask({ id: "FN-CONTRACT", column: "todo" })}
+        onOpenDetail={noop}
+        addToast={noop}
+        onUpdateTask={vi.fn(async () => makeTask({ id: "FN-CONTRACT", column: "todo" }))}
+      />,
+    );
+
+    const normalRoot = screen.getByTestId("task-card-FN-CONTRACT");
+    expect(normalRoot).toHaveClass("card");
+    expect(normalRoot).not.toHaveClass("card-editing");
+
+    fireEvent.doubleClick(normalRoot);
+
+    const editingRoot = screen.getByTestId("task-card-FN-CONTRACT");
+    expect(editingRoot).toHaveClass("card", "card-editing");
+    expect(editingRoot.querySelector(".card-edit-desc-textarea")).toBeInTheDocument();
+  });
+
   it("renders GitLab tracking badges for linked and stale items without dropping GitHub badges", () => {
     const gitlabItem = {
       kind: "merge_request" as const,

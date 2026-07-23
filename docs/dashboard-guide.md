@@ -11,6 +11,9 @@ Discussion filing uses the same scrub-before-egress report pipeline as Issues. F
 
 The Fusion dashboard is the main control plane for tasks, agents, missions, settings, logs, and repository operations.
 
+<!-- FNXC:TestidContract 2026-07-23-00:52: Integrators need one canonical selector reference instead of depending on CSS classes or DOM structure. -->
+For plugin and end-to-end integration selectors, see the [stable dashboard `data-testid` contract](./dashboard-testid-contract.md).
+
 ## Dashboard Updates
 
 When Fusion detects a newer `@runfusion/fusion` release, the Settings modal footer shows the available version with **Learn more** and **Update now** actions. **Update now** installs the latest global package with npm; after it succeeds, both the Settings update-success state and dashboard update banner offer a one-click **Restart Fusion** action because the already-running dashboard server is unchanged until restart. When Fusion is unsupervised (for example, started with `--no-supervise`), either action remains disabled and explains that Fusion must be restarted manually.

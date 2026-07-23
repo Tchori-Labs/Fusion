@@ -150,6 +150,31 @@ describe("ProjectSelector", () => {
     expect(screen.getByText("Project Two")).toBeDefined();
   });
 
+  it("keeps the stable project item testid across bookmarked, recent, and general groups", () => {
+    mockBookmarkedIds = new Set(["proj_bookmarked"]);
+    const projects = [
+      makeProject({ id: "proj_current", name: "Current" }),
+      makeProject({ id: "proj_bookmarked", name: "Bookmarked" }),
+      makeProject({ id: "proj_recent", name: "Recent" }),
+      makeProject({ id: "proj_other", name: "Other" }),
+    ];
+
+    render(
+      <ProjectSelector
+        projects={projects}
+        currentProject={projects[0]}
+        recentProjectIds={["proj_recent"]}
+        onSelect={noop}
+        onViewAll={noop}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("project-selector-trigger"));
+    for (const projectId of ["proj_bookmarked", "proj_recent", "proj_other"]) {
+      expect(screen.getByTestId(`project-selector-item-${projectId}`)).toBeInTheDocument();
+    }
+  });
+
   it("renders fallback status icons for unknown or missing project statuses", () => {
     expect(() => {
       render(

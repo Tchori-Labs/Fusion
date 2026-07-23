@@ -4577,6 +4577,10 @@ export function SettingsModal({
               {showMobileSectionPicker && (
                 <div className="settings-mobile-section-picker">
                   {/**
+                   * FNXC:TestidContract 2026-07-23-00:52:
+                   * Settings navigation exposes stable integrator selectors without changing its desktop or mobile behavior. Desktop section buttons use the raw SETTINGS_SECTIONS id, while mobile exposes one stable select whose options remain addressable by value; keep this contract synchronized with docs/dashboard-testid-contract.md.
+                   */}
+                  {/**
                    * FNXC:Settings 2026-07-09-00:00:
                    * FN-7752 removes the visible mobile section-picker label to reclaim vertical space on narrow Settings screens. The select keeps "Settings Section" as its aria-label so screen readers and getByLabelText tests keep the same accessible name without an empty label shell.
                    */}
@@ -4584,6 +4588,7 @@ export function SettingsModal({
                     {hasSettingsSearchResults ? (
                       <select
                         id="settings-mobile-section"
+                        data-testid="settings-mobile-section-select"
                         aria-label={t("settings.mobileNav.label", "Settings Section")}
                         className="select touch-target"
                         value={activeSection}
@@ -4753,6 +4758,7 @@ export function SettingsModal({
                   return (
                     <button
                       key={section.id}
+                      data-testid={`settings-section-${section.id}`}
                       className={`settings-nav-item${activeSection === section.id ? " active" : ""}`}
                       onClick={() => void requestSectionChange(section.id)}
                       title={

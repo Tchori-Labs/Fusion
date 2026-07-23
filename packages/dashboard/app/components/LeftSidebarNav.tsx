@@ -50,6 +50,10 @@ interface SidebarNavEntry {
   view?: TaskView;
   isActive: boolean;
   icon: ComponentType<LucideProps>;
+  /*
+  FNXC:TestidContract 2026-07-23-00:52:
+  Desktop/tablet sidebar destinations expose stable sidebar-nav-* selectors for integrators, including plugin-derived ids, while mobile continues to use MobileNavBar instead of rendering this component. Keep these ids synchronized with docs/dashboard-testid-contract.md and never derive them from translated labels.
+  */
   testId: string;
   badge?: number;
   dot?: "pending" | "online";
