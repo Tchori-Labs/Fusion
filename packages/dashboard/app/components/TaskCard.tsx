@@ -2935,12 +2935,17 @@ function TaskCardComponent({
     || Boolean(task.size)
     || hasContextMenuActions;
 
+  /*
+  FNXC:TestidContract 2026-07-23-00:52:
+  Every TaskCard host exposes the same stable raw-id selector on the component root, including the editing/saving early return, so integrators never depend on a host wrapper or lose the card while its render path changes. Keep this contract synchronized with docs/dashboard-testid-contract.md.
+  */
   if (isEditing) {
     return (
       <div
         ref={cardRef}
         className={cardClass}
         data-id={task.id}
+        data-testid={`task-card-${task.id}`}
         data-column={task.column}
         onDoubleClick={handleDoubleClick}
       >
@@ -2972,6 +2977,7 @@ function TaskCardComponent({
       ref={cardRef}
       className={cardClass}
       data-id={task.id}
+      data-testid={`task-card-${task.id}`}
       data-column={task.column}
       draggable={isDraggable}
       onDragStart={isDraggable ? handleDragStart : undefined}
