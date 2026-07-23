@@ -9,13 +9,37 @@ FNXC:TaskPopupLayer 2026-07-17-15:55:
 Task-detail popups and Quick Chat are interaction-stack peers in this lower board-layer band: the
 most recently mounted or pointer/focus-interacted peer is on top. Terminal, right-dock expand,
 Files, New Task, and other utility surfaces continue to use the separate 10100+ utility band.
+
+FNXC:PluginOverlayLayering 2026-07-23-01:21:
+Plugins need a stable layer above every dashboard-managed utility window even though this stack is
+session-monotonic and unbounded. Keep `--fusion-max-z` at the 10600 boot floor until this utility
+counter exceeds it, then raise the inline root value after each claim. The lower 220+ task-detail
+band is intentionally excluded; the floor already dominates it and only utility claims can grow
+past the dashboard's static layers.
 */
+export const FUSION_MAX_Z_FLOOR = 10600;
+
 let topZ = 10100;
 let taskDetailTopZ = 220;
+let lastSyncedFusionMaxZ: number | undefined;
+
+function syncFusionMaxZ(): void {
+  if (typeof document === "undefined") return;
+
+  const value = Math.max(topZ, FUSION_MAX_Z_FLOOR);
+  if (value === lastSyncedFusionMaxZ) return;
+
+  document.documentElement.style.setProperty("--fusion-max-z", String(value));
+  lastSyncedFusionMaxZ = value;
+}
+
+syncFusionMaxZ();
 
 /** Claim the front of the shared floating-utility stack. Monotonic, session-length. */
 export function nextFloatingZ(): number {
-  return ++topZ;
+  const nextZ = ++topZ;
+  syncFusionMaxZ();
+  return nextZ;
 }
 
 /** Current top of the floating-utility stack (read-only). Lets a utility window skip a needless bump when already on top. */
