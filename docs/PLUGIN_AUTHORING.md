@@ -743,6 +743,18 @@ Current host constraints:
 - `componentPath` is stored for authoring symmetry/future expansion, but render resolution is currently done through a host-side static registry (`pluginId + viewId`)
 - Use stable IDs; runtime view key format is `plugin:${pluginId}:${viewId}`
 
+### Navigating the dashboard from a plugin
+
+<!-- FNXC:DeepLinkDocs 2026-07-14-00:33: Frontend plugins use the dashboard's history-plus-popstate contract for no-reload navigation; pushState alone does not notify React hooks. -->
+Dashboard frontend plugins may navigate to built-in or registered plugin views, projects, tasks, and Settings sections through the live URL-param contract. Update the URL with `history.pushState`, then dispatch `PopStateEvent` so the dashboard re-reads the params without a page reload:
+
+```ts
+window.history.pushState({}, "", "/?view=board");
+window.dispatchEvent(new PopStateEvent("popstate"));
+```
+
+The same recipe accepts composite URLs such as `/?view=plugin:my-plugin:reports&project=proj_123`, `/?task=FN-123&project=proj_123`, or `/?view=settings&section=merge`. Settings `section` values use the host's Settings section ids; unknown or unavailable ids degrade safely to the default visible Settings section rather than throwing. Preserve any query params and hash fragments your plugin does not own when constructing a transition. Browser Back/Forward uses the same popstate path.
+
 ### Static host registry model
 
 Dashboard view components are resolved from a host-side registry and must be explicitly registered:

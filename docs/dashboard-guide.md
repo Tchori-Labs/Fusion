@@ -157,11 +157,15 @@ The built-in **Database Backup** automation runs the backup in-process (via the 
 
 ## Deep Links
 
-Use deep links to open a specific task directly from notifications, chat, or external tools.
+Use deep links to open dashboard views, Settings sections, projects, or tasks directly from notifications, plugins, chat, and external tools.
 
-- `/tasks/<TASK_ID>` (for example, `/tasks/FN-1234`) opens that task, and can include `?project=<project-id>` for multi-project routing.
-- `/?task=<TASK_ID>[&project=<project-id>]` is the canonical in-app form and opens the task detail modal on load.
-- Selecting a project from the dashboard project switcher writes `?project=<project-id>` into the URL and preserves unrelated query parameters/hash fragments, so refreshing the browser keeps the same selected project instead of returning to the default project.
+<!-- FNXC:DeepLinkDocs 2026-07-14-00:32: The dashboard URL is a live SPA navigation contract: view/section/project/task params can be bookmarked or applied by browser/plugin popstate without reloading, while unknown Settings sections fall back safely. -->
+- `/?view=<id>` opens a built-in dashboard view. Supported built-in ids are `board`, `list`, `graph`, `agents`, `missions`, `chat`, `documents`, `research`, `evals`, `goalsView`, `todos`, `planning`, `skills`, `mailbox`, `insights`, `memory`, `command-center`, `secrets`, `dev-server` (plus legacy alias `devserver`), `pull-requests`, `workflows`, `import-tasks`, `automations`, `settings`, and `task-detail`. Registered plugin view ids use `plugin:<plugin-id>:<view-id>`.
+- `/?view=settings&section=<id>` opens the embedded Settings page at that section. Section values are the Settings section ids, including `global-general`, `authentication`, `merge`, `worktrees`, and `project-models`. An unknown or unavailable section still opens Settings and falls back to its default visible section without crashing.
+- `/?project=<project-id>` selects a project. The project switcher writes this param while preserving unrelated query parameters and hash fragments, so refresh keeps the selected project.
+- `/?task=<TASK_ID>[&project=<project-id>]` opens task detail, optionally in the named project.
+- `/tasks/<TASK_ID>` (for example, `/tasks/FN-1234`) is the shareable path form and can include `?project=<project-id>` for multi-project routing.
+- Explicit in-app view changes update `?view=` with `history.replaceState`, preserving other params, the hash, and existing history state without adding history entries. Browser Back/Forward and a dispatched `PopStateEvent` re-apply valid `view`, `section`, `project`, and changed `task` params without a full page reload; missing or invalid view params leave the current view unchanged.
 <!-- FNXC:ProjectUrlState 2026-07-02-00:00: The project switcher now uses the same `?project=` URL contract as task deep links so non-default project selections survive browser refresh and can be shared/bookmarked. -->
 - Legacy path-style links (including trailing-slash forms like `/tasks/<TASK_ID>/` and older hash-style entry points that resolve to that path) are normalized client-side to the canonical query form with `history.replaceState`, so the URL updates without a full reload.
 - In non-headless dashboard mode, the server also issues an HTTP 301 redirect from `/tasks/<TASK_ID>` to `/?task=<TASK_ID>` and preserves `?project=` when present.
@@ -169,8 +173,9 @@ Use deep links to open a specific task directly from notifications, chat, or ext
 - Configure `dashboardHost` and `ntfyDashboardHost` in [settings reference](./settings-reference.md) so generated notification links use the correct base URL.
 
 ```text
+/?view=settings&section=merge
+/?view=board&project=my-project
 /tasks/FN-1234
-/?task=FN-1234
 /?task=FN-1234&project=my-project
 ```
 
