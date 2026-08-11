@@ -183,3 +183,28 @@ describe("window.fusion.api", () => {
     expect(importers).toEqual(["main.tsx"]);
   });
 });
+
+describe("documented window.fusion.api scope contract", () => {
+  const contractStart = "<!-- fusion-dashboard-api-client-contract:start -->";
+  const contractEnd = "<!-- fusion-dashboard-api-client-contract:end -->";
+
+  it("keeps documented endpoints and client methods equal to the public contract", async () => {
+    const guide = readFileSync(resolve(__dirname, "../../../../docs/PLUGIN_AUTHORING.md"), "utf-8");
+    const start = guide.indexOf(contractStart);
+    const end = guide.indexOf(contractEnd);
+    expect(start, "PLUGIN_AUTHORING.md is missing the dashboard API contract start marker").toBeGreaterThanOrEqual(0);
+    expect(end, "PLUGIN_AUTHORING.md is missing the dashboard API contract end marker").toBeGreaterThan(start);
+
+    const rows = [...guide.slice(start + contractStart.length, end).matchAll(
+      /\| `([A-Z]+)` \| `([^`]+)` \| `([A-Za-z]+)\(\)` \|/g,
+    )].map((match) => ({ method: match[1], path: match[2], clientMethod: match[3] }));
+    const { FUSION_API_ALLOWED_ENDPOINTS, createFusionApiClient } = await loadClientModule();
+    const documentedEndpoints = rows.map(({ method, path }) => ({ method, path }));
+    const allowedEndpoints = FUSION_API_ALLOWED_ENDPOINTS.map(({ method, path }) => ({ method, path }));
+
+    expect(documentedEndpoints).toEqual(allowedEndpoints);
+    expect(allowedEndpoints).toEqual(documentedEndpoints);
+    expect(rows.map(({ clientMethod }) => clientMethod).sort()).toEqual(Object.keys(createFusionApiClient()).sort());
+    expect(Object.keys(createFusionApiClient()).sort()).toEqual(rows.map(({ clientMethod }) => clientMethod).sort());
+  });
+});
