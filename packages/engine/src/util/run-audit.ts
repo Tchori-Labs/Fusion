@@ -497,6 +497,12 @@ export type DatabaseMutationType =
   | "agent:auto-recover-error-state"
   | "agent:reset-error-state-on-startup"
   | "agent:error-retry-exhausted"
+  /**
+   * FNXC:RunAudit 2026-08-11-10:41:
+   * Retry-exhausted rearm records only agentId, retry counts, prior state and
+   * pause reason, fixed trigger, and source. Never persist `lastError` prose.
+   */
+  | "agent:rearm-error-retry-exhausted"
   | "agent:error-parked-unrecoverable"
   /*
   FNXC:RunAudit 2026-07-15-00:00:
