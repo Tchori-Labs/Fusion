@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { count, eq, desc, and } from "drizzle-orm";
+import { count, eq, desc, and, sql } from "drizzle-orm";
 import type { Database } from "../db/db.js";
 import { fromJson } from "../db/db.js";
 import type { AsyncDataLayer } from "../postgres/data-layer.js";
@@ -39,6 +39,11 @@ interface ApprovalRequestRow {
   completedAt: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+/** FNXC:ApprovalQueueVisibility 2026-08-11-11:20: Cross-project reads are an explicit read-only escape hatch; ordinary approval callers remain bound to their layer's RLS project scope. */
+export interface ApprovalRequestReadOptions {
+  crossProject?: boolean;
 }
 
 interface ApprovalRequestAuditEventRow {
@@ -203,12 +208,31 @@ export class ApprovalRequestStore {
     return created;
 }
 
-  async get(id: string): Promise<ApprovalRequest | null> {
-        return asyncApprovalRequestStore.getApprovalRequest(this.asyncLayer!.db, id);
-}
+  /**
+   * FNXC:ApprovalQueueVisibility 2026-08-11-11:20:
+   * Tchori-Labs/Fusion#17 requires a global operator queue without making every
+   * engine, CLI, or chat caller cross-project. The bypass is transaction-local,
+   * read-only by convention, and never reaches approval mutation methods.
+   */
+  private async readWithScope<T>(
+    options: ApprovalRequestReadOptions | undefined,
+    read: (handle: Parameters<typeof asyncApprovalRequestStore.getApprovalRequest>[0]) => Promise<T>,
+  ): Promise<T> {
+    if (!options?.crossProject) {
+      return read(this.asyncLayer!.db);
+    }
+    return this.asyncLayer!.transaction(async (tx) => {
+      await tx.execute(sql`SELECT set_config('fusion.project_bypass', 'on', true)`);
+      return read(tx);
+    }, { accessMode: "read only" });
+  }
 
-  async list(input: ApprovalRequestListInput = {}): Promise<ApprovalRequest[]> {
-        return asyncApprovalRequestStore.listApprovalRequests(this.asyncLayer!.db, input);
+  async get(id: string, options?: ApprovalRequestReadOptions): Promise<ApprovalRequest | null> {
+    return this.readWithScope(options, (handle) => asyncApprovalRequestStore.getApprovalRequest(handle, id));
+  }
+
+  async list(input: ApprovalRequestListInput = {}, options?: ApprovalRequestReadOptions): Promise<ApprovalRequest[]> {
+    return this.readWithScope(options, (handle) => asyncApprovalRequestStore.listApprovalRequests(handle, input));
 }
 
   async getPendingCountsByActor(): Promise<Map<string, number>> {
@@ -280,7 +304,10 @@ export class ApprovalRequestStore {
         return asyncApprovalRequestStore.markApprovalRequestCompleted(this.asyncLayer!, requestId, input);
 }
 
-  async getAuditHistory(requestId: string): Promise<ApprovalRequestAuditEvent[]> {
-        return asyncApprovalRequestStore.getApprovalAuditHistory(this.asyncLayer!.db, requestId);
+  async getAuditHistory(
+    requestId: string,
+    options?: ApprovalRequestReadOptions,
+  ): Promise<ApprovalRequestAuditEvent[]> {
+    return this.readWithScope(options, (handle) => asyncApprovalRequestStore.getApprovalAuditHistory(handle, requestId));
 }
 }

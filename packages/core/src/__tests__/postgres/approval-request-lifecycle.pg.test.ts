@@ -26,6 +26,7 @@ function adminExec(statement: string): void {
 
 interface StoreTestCtx {
   dbName: string;
+  testUrl: string;
   layer: AsyncDataLayer;
 }
 
@@ -41,7 +42,7 @@ async function setupCtx(): Promise<StoreTestCtx> {
   const connections = await createConnectionSetFromUrl(backend, { poolMax: 3, connectTimeoutSeconds: 5 });
   await applySchemaBaseline(connections.migration);
   const layer = createAsyncDataLayer(connections);
-  return { dbName, layer };
+  return { dbName, testUrl, layer };
 }
 
 async function teardownCtx(ctx: StoreTestCtx | null): Promise<void> {
@@ -89,6 +90,58 @@ pgDescribe("approval request lifecycle security (PostgreSQL)", () => {
     });
     return store;
   }
+
+  /*
+  FNXC:ApprovalQueueVisibility 2026-08-11-11:20:
+  Tchori-Labs/Fusion#17's silent zero came from context.ts resolving an omitted
+  projectId to a fallback layer while connection.ts bound that layer's
+  fusion.project_id GUC to another project. This test preserves both halves:
+  ordinary reads stay RLS-bound to project-b, while the explicit read-only
+  bypass returns project-a rows and their audit history for a global queue.
+  */
+  it("keeps default reads scoped while opt-in reads expose cross-project requests and audit history", async () => {
+    ctx = await setupCtx();
+    const { ApprovalRequestStore } = await import("../../agents/approval-request-store.js");
+    const { createConnectionSetFromUrl } = await import("../../postgres/connection.js");
+    const { resolveBackendWithOptions } = await import("../../postgres/backend-resolver.js");
+    const backend = resolveBackendWithOptions({ databaseUrl: ctx.testUrl, databaseMigrationUrl: ctx.testUrl });
+    const projectAConnections = await createConnectionSetFromUrl(backend, {
+      poolMax: 1,
+      connectTimeoutSeconds: 5,
+      projectId: "project-a",
+      bypassProjectIsolation: false,
+      useRuntimeRole: true,
+    });
+    const projectBConnections = await createConnectionSetFromUrl(backend, {
+      poolMax: 1,
+      connectTimeoutSeconds: 5,
+      projectId: "project-b",
+      bypassProjectIsolation: false,
+      useRuntimeRole: true,
+    });
+    const projectA = createAsyncDataLayer(projectAConnections, { projectId: "project-a" });
+    const projectB = createAsyncDataLayer(projectBConnections, { projectId: "project-b" });
+    try {
+      const projectAStore = new ApprovalRequestStore(null, { asyncLayer: projectA });
+      const request = await projectAStore.create({
+        requester: REQUESTER,
+        targetAction: { category: "command_execution", action: "run", summary: "Run command", resourceType: "command", resourceId: "cmd-a" },
+      });
+      const projectBStore = new ApprovalRequestStore(null, { asyncLayer: projectB });
+
+      await expect(projectBStore.list()).resolves.toEqual([]);
+      await expect(projectBStore.get(request.id)).resolves.toBeNull();
+
+      const globalRequests = await projectBStore.list({}, { crossProject: true });
+      expect(globalRequests).toHaveLength(1);
+      expect(globalRequests[0]).toMatchObject({ id: request.id, projectId: "project-a" });
+      await expect(projectBStore.get(request.id, { crossProject: true })).resolves.toMatchObject({ projectId: "project-a" });
+      await expect(projectBStore.getAuditHistory(request.id, { crossProject: true })).resolves.toHaveLength(1);
+    } finally {
+      await projectA.close();
+      await projectB.close();
+    }
+  });
 
   it("a same-verdict replay is rejected as an invalid transition", async () => {
     ctx = await setupCtx();
