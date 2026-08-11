@@ -9,7 +9,7 @@
  *
  * Behavioral invariants preserved (see docs/storage.md):
  *   VAL-DATA-007 — On store open, each prefix sequence is bumped to
- *     max(current, max(task suffix)+1, max(archived suffix)+1, max(reservation)+1).
+ *     max(current, max(task suffix)+1, max(project-archived suffix)+1, max(cold-storage archived suffix)+1, max(reservation)+1).
  *   VAL-DATA-008 — Soft-deleted/archived IDs stay reserved (never reassigned).
  *     The reconciliation intentionally scans soft-deleted task rows (no
  *     deleted_at filter) so a soft-deleted ID continues to hold its sequence
@@ -18,8 +18,9 @@
  * PostgreSQL mapping notes:
  *   - The `distributed_task_id_state` table uses `prefix` as its primary key
  *     and `next_sequence` as the per-prefix counter.
- *   - The reconciliation scans `project.tasks` (including soft-deleted rows)
- *     and `project.archived_tasks` for the max suffix per prefix.
+ *   - The reconciliation scans `project.tasks` (including soft-deleted rows),
+ *     `project.archived_tasks`, and cold-storage `archive.archived_tasks` for the
+ *     max suffix per prefix.
  *   - The config-table legacy `nextId` is honored only for the configured
  *     prefix (deprecated; preserved for one release then dropped).
  *
@@ -100,8 +101,8 @@ export async function getConfiguredPrefixAndLegacyNextId(
 
 /**
  * FNXC:TaskStoreAllocator 2026-06-24-14:10:
- * Scan a task-id-bearing table (`tasks` or `archived_tasks`) for the max
- * numeric suffix under a given prefix. This intentionally does NOT filter
+ * Scan a task-id-bearing table for the max numeric suffix under a given prefix.
+ * This intentionally does NOT filter
  * `deleted_at` so soft-deleted and archived IDs keep their sequence floor
  * reserved (VAL-DATA-008, FN-5105).
  *
@@ -125,7 +126,7 @@ export async function getConfiguredPrefixAndLegacyNextId(
  */
 async function getMaxTaskSequenceFromTable(
   db: AsyncDataLayer["db"] | DbTransaction,
-  table: "tasks" | "archived_tasks",
+  table: "tasks" | "archived_tasks" | "cold_storage_archived_tasks",
   prefix: string,
 ): Promise<number> {
   try {
@@ -135,11 +136,16 @@ async function getMaxTaskSequenceFromTable(
         .select({ id: schema.project.tasks.id })
         .from(schema.project.tasks)
         .where(sql`${schema.project.tasks.id} LIKE ${`${prefix}-%`}`);
-    } else {
+    } else if (table === "archived_tasks") {
       rows = await db
         .select({ id: schema.project.archivedTasks.id })
         .from(schema.project.archivedTasks)
         .where(sql`${schema.project.archivedTasks.id} LIKE ${`${prefix}-%`}`);
+    } else {
+      rows = await db
+        .select({ id: schema.archive.archivedTasks.id })
+        .from(schema.archive.archivedTasks)
+        .where(sql`${schema.archive.archivedTasks.id} LIKE ${`${prefix}-%`}`);
     }
     let maxSequence = 0;
     for (const row of rows) {
@@ -176,11 +182,11 @@ async function getMaxReservationSequence(
 /**
  * FNXC:TaskStoreAllocator 2026-06-24-14:15:
  * Compute the next-sequence floor for a prefix:
- *   max(current, configured-legacy-nextId, max(task suffix)+1, max(archived suffix)+1, max(reservation)+1)
+ *   max(current, configured-legacy-nextId, max(task suffix)+1, max(project-archived suffix)+1, max(cold-storage archived suffix)+1, max(reservation)+1)
  *
  * This is the core of VAL-DATA-007. Every known prefix gets bumped to at least
- * one past the highest in-use suffix across tasks, archived tasks, and
- * reservations so a newly-allocated id never collides with an existing one.
+ * one past the highest in-use suffix across tasks, project archives, cold-storage
+ * archives, and reservations so a newly-allocated id never collides with an existing one.
  *
  * FNXC:ProjectTaskIdentity 2026-07-14-13:59:
  * The runtime session binds every scan here to one project through forced RLS.
@@ -200,8 +206,15 @@ export async function computeNextSequenceFloor(
   }
   const taskHighWaterMark = (await getMaxTaskSequenceFromTable(db, "tasks", prefix)) + 1;
   const archivedHighWaterMark = (await getMaxTaskSequenceFromTable(db, "archived_tasks", prefix)) + 1;
+  /*
+  FNXC:TaskStoreAllocator 2026-08-11-10:34:
+  Archive cleanup snapshots then hard-deletes the live task row, leaving cold storage as the
+  only holder of its display ID. Forced RLS supplies the project boundary for this scan, so an
+  explicit project_id predicate would duplicate and alter the allocator's isolation contract.
+  */
+  const coldStorageHighWaterMark = (await getMaxTaskSequenceFromTable(db, "cold_storage_archived_tasks", prefix)) + 1;
   const reservationHighWaterMark = (await getMaxReservationSequence(db, prefix)) + 1;
-  return Math.max(nextSequence, taskHighWaterMark, archivedHighWaterMark, reservationHighWaterMark);
+  return Math.max(nextSequence, taskHighWaterMark, archivedHighWaterMark, coldStorageHighWaterMark, reservationHighWaterMark);
 }
 
 /**
@@ -267,6 +280,18 @@ export async function getKnownPrefixes(
     }
   } catch {
     // best-effort
+  }
+
+  try {
+    const coldStorageRows = await db
+      .select({ id: schema.archive.archivedTasks.id })
+      .from(schema.archive.archivedTasks);
+    for (const row of coldStorageRows) {
+      const parsed = parseTaskIdForAllocator(row.id ?? "");
+      if (parsed) prefixes.add(parsed.prefix);
+    }
+  } catch {
+    // best-effort: old stores may not have cold storage yet.
   }
 
   return prefixes;
@@ -390,7 +415,17 @@ async function taskIdExists(
     .from(schema.project.archivedTasks)
     .where(eq(schema.project.archivedTasks.id, taskId))
     .limit(1);
-  return archivedRows.length > 0;
+  if (archivedRows.length > 0) return true;
+  try {
+    const coldStorageRows = await tx
+      .select({ one: sql<number>`1` })
+      .from(schema.archive.archivedTasks)
+      .where(eq(schema.archive.archivedTasks.id, taskId))
+      .limit(1);
+    return coldStorageRows.length > 0;
+  } catch {
+    return false;
+  }
 }
 
 /**
