@@ -227,7 +227,8 @@ function createMockGlobalSettingsStore() {
 
 function createMockStore(overrides: Partial<TaskStore> = {}): TaskStore {
   return {
-    getTask: vi.fn(),
+    // FNXC:GithubImport 2026-08-11-10:34: GitHub import proves createTask persistence with a target-store read-back; generic fixtures model that persisted result unless a test overrides it.
+    getTask: vi.fn().mockImplementation(async (id: string) => ({ ...FAKE_TASK_DETAIL, id, column: "triage" })),
     listTasks: vi.fn().mockResolvedValue([]),
     searchTasks: vi.fn().mockResolvedValue([]),
     createTask: vi.fn(),

@@ -43,6 +43,7 @@ import {
 // FNXC:TaskLookup404 2026-07-26-11:40: shared task-miss -> 404 mapping seam.
 import { isTaskLookupMiss, rethrowTaskApiError } from "./task-lookup-error.js";
 import { GitHubClient, buildGitHubIssueSource, descriptionReferencesSourceUrl, isGitHubIssueAlreadyImported, type PrReviewSnapshot, parseBadgeUrl } from "../github.js";
+import { assertExplicitImportProject, assertImportedTaskPersisted, countRegisteredProjects } from "./github-import-project-scope.js";
 import { importIssueImageAttachments, githubImagePolicy } from "../issue-image-attachments.js";
 import { GitHubIssueCommentService } from "../github-issue-comment.js";
 import { GitHubTrackingCommentService } from "../github-tracking-comments.js";
@@ -2613,7 +2614,7 @@ export async function refreshIssueInBackground(
 }
 
 export function registerGitGitHubRoutes(ctx: ApiRoutesContext): void {
-  const { router, getProjectContext, rethrowAsApiError, store, options } = ctx;
+  const { router, getProjectContext, getProjectIdFromRequest, rethrowAsApiError, store, options } = ctx;
 
   /*
   FNXC:Workspace 2026-06-24-21:00:
@@ -4162,13 +4163,20 @@ export function registerGitGitHubRoutes(ctx: ApiRoutesContext): void {
         throw badRequest("issueNumber is required and must be a positive number");
       }
 
+      const explicitProjectId = getProjectIdFromRequest(req);
+      await assertExplicitImportProject({
+        explicitProjectId,
+        registeredProjectCount: explicitProjectId ? 0 : await countRegisteredProjects(options),
+        route: "POST /api/github/issues/import",
+      });
+
       // Check gh authentication
       if (!isGhAuthenticated()) {
         throw unauthorized("Not authenticated with GitHub. Run `gh auth login`.");
       }
 
       const client = new GitHubClient();
-      const { store: scopedStore } = await getProjectContext(req);
+      const { store: scopedStore, projectId } = await getProjectContext(req);
 
       let issue: {
         number: number;
@@ -4209,6 +4217,7 @@ export function registerGitGitHubRoutes(ctx: ApiRoutesContext): void {
         if (isGitHubIssueAlreadyImported(existingTask, { owner, repo, issueNumber, sourceUrl })) {
           throw new ApiError(409, `Issue #${issueNumber} already imported as ${existingTask.id}`, {
             existingTaskId: existingTask.id,
+            projectId,
           });
         }
       }
@@ -4295,7 +4304,13 @@ export function registerGitGitHubRoutes(ctx: ApiRoutesContext): void {
         }
       }
 
-      const importedTask = (await scopedStore.getTask(task.id)) ?? task;
+      let importedTask;
+      try {
+        importedTask = await assertImportedTaskPersisted(scopedStore, task.id, projectId);
+      } catch (error) {
+        severityAuditLog.warn(`[fusion:github-import] Task ${task.id} was not persisted in project ${projectId ?? "launch"}`);
+        throw error;
+      }
       res.status(201).json(importedTask);
     } catch (err: unknown) {
       if (err instanceof ApiError) {
@@ -4448,9 +4463,16 @@ export function registerGitGitHubRoutes(ctx: ApiRoutesContext): void {
         throw badRequest("issueNumbers must contain only positive integers");
       }
 
+      const explicitProjectId = getProjectIdFromRequest(req);
+      await assertExplicitImportProject({
+        explicitProjectId,
+        registeredProjectCount: explicitProjectId ? 0 : await countRegisteredProjects(options),
+        route: "POST /api/github/issues/batch-import",
+      });
+
       const token = process.env.GITHUB_TOKEN;
       const githubClient = new GitHubClient(token);
-      const { store: scopedStore } = await getProjectContext(req);
+      const { store: scopedStore, projectId } = await getProjectContext(req);
 
       // Get existing tasks to check for duplicates
       const existingTasks = await scopedStore.listTasks({ slim: false, includeArchived: false });
@@ -4562,6 +4584,14 @@ export function registerGitGitHubRoutes(ctx: ApiRoutesContext): void {
             ...(importedIssueGithubTracking ? { githubTracking: importedIssueGithubTracking } : {}),
           });
 
+          let importedTask;
+          try {
+            importedTask = await assertImportedTaskPersisted(scopedStore, task.id, projectId);
+          } catch (error) {
+            severityAuditLog.warn(`[fusion:github-import] Task ${task.id} was not persisted in project ${projectId ?? "launch"}`);
+            throw error;
+          }
+
           // Log the import action
           await scopedStore.logEntry(task.id, "Imported from GitHub", sourceUrl);
 
@@ -4607,10 +4637,9 @@ export function registerGitGitHubRoutes(ctx: ApiRoutesContext): void {
           results.push({
             issueNumber,
             success: true,
-            taskId: task.id,
+            taskId: importedTask.id,
           });
 
-          // Add to existingTasks to avoid duplicate imports within the same batch
           existingTasks.push(task);
         } catch (err: unknown) {
       if (err instanceof ApiError) {
@@ -4915,13 +4944,20 @@ export function registerGitGitHubRoutes(ctx: ApiRoutesContext): void {
         throw badRequest("prNumber is required and must be a positive number");
       }
 
+      const explicitProjectId = getProjectIdFromRequest(req);
+      await assertExplicitImportProject({
+        explicitProjectId,
+        registeredProjectCount: explicitProjectId ? 0 : await countRegisteredProjects(options),
+        route: "POST /api/github/pulls/import",
+      });
+
       // Check gh authentication
       if (!isGhAuthenticated()) {
         throw unauthorized("Not authenticated with GitHub. Run `gh auth login`.");
       }
 
       const client = new GitHubClient();
-      const { store: scopedStore } = await getProjectContext(req);
+      const { store: scopedStore, projectId } = await getProjectContext(req);
 
       let pr: {
         number: number;
@@ -4962,6 +4998,7 @@ export function registerGitGitHubRoutes(ctx: ApiRoutesContext): void {
         if (descriptionReferencesSourceUrl(existingTask.description, sourceUrl)) {
           throw new ApiError(409, `PR #${prNumber} already imported as ${existingTask.id}`, {
             existingTaskId: existingTask.id,
+            projectId,
           });
         }
       }
@@ -4987,10 +5024,18 @@ export function registerGitGitHubRoutes(ctx: ApiRoutesContext): void {
         },
       });
 
+      let importedTask;
+      try {
+        importedTask = await assertImportedTaskPersisted(scopedStore, task.id, projectId);
+      } catch (error) {
+        severityAuditLog.warn(`[fusion:github-import] Task ${task.id} was not persisted in project ${projectId ?? "launch"}`);
+        throw error;
+      }
+
       // Log the import action
       await scopedStore.logEntry(task.id, "Imported PR from GitHub", sourceUrl);
 
-      res.status(201).json(task);
+      res.status(201).json(importedTask);
     } catch (err: unknown) {
       if (err instanceof ApiError) {
         throw err;
@@ -5018,9 +5063,15 @@ export function registerGitGitHubRoutes(ctx: ApiRoutesContext): void {
       if (comment.createdAt !== undefined && (typeof comment.createdAt !== "string" || !comment.createdAt.trim())) {
         throw badRequest("comment.createdAt must be a non-empty string when provided");
       }
+      const explicitProjectId = getProjectIdFromRequest(req);
+      await assertExplicitImportProject({
+        explicitProjectId,
+        registeredProjectCount: explicitProjectId ? 0 : await countRegisteredProjects(options),
+        route: "POST /api/github/comments/import",
+      });
       if (!isGhAuthenticated()) throw unauthorized("Not authenticated with GitHub. Run `gh auth login`.");
 
-      const { store: scopedStore } = await getProjectContext(req);
+      const { store: scopedStore, projectId } = await getProjectContext(req);
       const sourceUrl = `https://github.com/${owner.trim()}/${repo.trim()}/${type === "pull" ? "pull" : "issues"}/${number}`;
       const task = await scopedStore.createTask({
         title: `Resolve feedback from @${author.trim()} on #${number}`,
@@ -5031,8 +5082,15 @@ export function registerGitGitHubRoutes(ctx: ApiRoutesContext): void {
           sourceMetadata: { sourceUrl, number, type, commentAuthor: author.trim(), commentCreatedAt: comment.createdAt },
         },
       });
+      let importedTask;
+      try {
+        importedTask = await assertImportedTaskPersisted(scopedStore, task.id, projectId);
+      } catch (error) {
+        severityAuditLog.warn(`[fusion:github-import] Task ${task.id} was not persisted in project ${projectId ?? "launch"}`);
+        throw error;
+      }
       await scopedStore.logEntry(task.id, "Imported PR/issue comment from GitHub", sourceUrl);
-      res.status(201).json(task);
+      res.status(201).json(importedTask);
     } catch (err: unknown) {
       if (err instanceof ApiError) throw err;
       rethrowAsApiError(err);
