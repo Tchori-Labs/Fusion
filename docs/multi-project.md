@@ -141,6 +141,12 @@ Resolution order without `--project`:
 2. default project
 3. current-directory auto-detection
 
+## GitHub import project targeting
+
+GitHub task-creating import endpoints (`/api/github/issues/import`, `/api/github/issues/batch-import`, `/api/github/pulls/import`, and `/api/github/comments/import`) require an explicit `projectId` in the query or JSON body once the central registry has more than one project. Requests without it receive `400` with `details.code: "PROJECT_ID_REQUIRED"`; zero- and one-project installations retain the legacy default-project behavior.
+
+A successful GitHub import is read back from the resolved target project before the endpoint reports success. If that read-back fails, the endpoint returns `500` with `details.code: "IMPORT_NOT_PERSISTED"` (including the task and resolved project IDs) rather than a transient task object that was never stored.
+
 ## Project Health Tracking
 
 Central health tracking keeps mutable project metrics, including:
