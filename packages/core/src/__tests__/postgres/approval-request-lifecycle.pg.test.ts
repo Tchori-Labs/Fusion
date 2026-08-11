@@ -132,9 +132,21 @@ pgDescribe("approval request lifecycle security (PostgreSQL)", () => {
       await expect(projectBStore.list()).resolves.toEqual([]);
       await expect(projectBStore.get(request.id)).resolves.toBeNull();
 
+      const projectBRequest = await projectBStore.create({
+        requester: { ...REQUESTER, actorId: "agent-2" },
+        targetAction: { category: "command_execution", action: "run", summary: "Run project-b command", resourceType: "command", resourceId: "cmd-b" },
+      });
+      await expect(projectAStore.list()).resolves.toMatchObject([{ id: request.id, projectId: "project-a" }]);
+      await expect(projectBStore.list()).resolves.toMatchObject([{ id: projectBRequest.id, projectId: "project-b" }]);
+      await expect(projectBStore.list({ status: "approved" })).resolves.toEqual([]);
+
       const globalRequests = await projectBStore.list({}, { crossProject: true });
-      expect(globalRequests).toHaveLength(1);
-      expect(globalRequests[0]).toMatchObject({ id: request.id, projectId: "project-a" });
+      expect(globalRequests).toHaveLength(2);
+      expect(globalRequests).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: request.id, projectId: "project-a" }),
+        expect.objectContaining({ id: projectBRequest.id, projectId: "project-b" }),
+      ]));
+      await expect(projectBStore.list({ status: "pending", limit: 1, offset: 1 }, { crossProject: true })).resolves.toHaveLength(1);
       await expect(projectBStore.get(request.id, { crossProject: true })).resolves.toMatchObject({ projectId: "project-a" });
       await expect(projectBStore.getAuditHistory(request.id, { crossProject: true })).resolves.toHaveLength(1);
     } finally {
