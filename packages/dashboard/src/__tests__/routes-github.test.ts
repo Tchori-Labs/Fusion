@@ -989,6 +989,41 @@ describe("POST /github/issues/import", () => {
     expect(store.logEntry).toHaveBeenCalledWith("FN-001", "Imported from GitHub", "https://github.com/owner/repo/issues/1");
   });
 
+  /*
+  FNXC:GithubImport 2026-08-11-10:34:
+  The early persistence guard must run BEFORE the log entry, comment fetch, and image-attachment
+  side effects — not just before the response. A store whose createTask reports success but whose
+  target-project read-back comes back empty (the exact failure this guard exists for) must fail
+  fast, so none of these side effects run against a task that was never actually persisted.
+  */
+  it("does not run import side effects when the early persistence guard fails", async () => {
+    // Body carries an image so a passing run WOULD call fetch via importIssueImageAttachments;
+    // asserting fetch was never invoked proves the guard blocked that side effect too, not just
+    // that there happened to be no image to attach.
+    const originalFetch = globalThis.fetch;
+    const fetchSpy = vi.fn();
+    globalThis.fetch = fetchSpy as unknown as typeof globalThis.fetch;
+    (store.getTask as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    getIssueSpy.mockResolvedValueOnce({
+      ...mockGitHubIssue,
+      body: "Broken here:\n\n![shot](https://github.com/user-attachments/assets/abc-123)",
+    });
+
+    try {
+      const res = await REQUEST(buildApp(), "POST", "/api/github/issues/import", JSON.stringify({ owner: "owner", repo: "repo", issueNumber: 1 }), {
+        "Content-Type": "application/json",
+      });
+
+      expect(res.status).toBe(500);
+      expect(store.logEntry).not.toHaveBeenCalled();
+      expect(getIssueDetailSpy).not.toHaveBeenCalled();
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(store.addAttachment).not.toHaveBeenCalled();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   it("returns 400 when issueNumber is missing", async () => {
     const res = await REQUEST(buildApp(), "POST", "/api/github/issues/import", JSON.stringify({ owner: "owner", repo: "repo" }), {
       "Content-Type": "application/json",

@@ -45,4 +45,16 @@ describe("GitHub import project-scope guard", () => {
       details: { code: "IMPORT_NOT_PERSISTED", taskId: "KB-012", projectId: "named-project" },
     });
   });
+
+  it("maps a rejected getTask to the same IMPORT_NOT_PERSISTED code, with a distinct message and cause", async () => {
+    const readFailure = new Error("connection reset");
+    const store = { getTask: vi.fn().mockRejectedValue(readFailure) } as unknown as TaskStore;
+
+    await expect(assertImportedTaskPersisted(store, "KB-013", "named-project")).rejects.toMatchObject({
+      statusCode: 500,
+      message: expect.stringContaining("could not be verified"),
+      details: { code: "IMPORT_NOT_PERSISTED", taskId: "KB-013", projectId: "named-project" },
+      cause: readFailure,
+    });
+  });
 });

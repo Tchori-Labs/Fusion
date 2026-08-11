@@ -52,13 +52,28 @@ export function assertExplicitImportProject(input: {
  * FNXC:GithubImport 2026-08-11-10:34:
  * An import response must only claim success after a target-project read-back proves createTask
  * persisted the task; returning the transient create result masked lost imports.
+ *
+ * FNXC:GithubImport 2026-08-11-14:20:
+ * A REJECTED `getTask` (connection drop, timeout, ...) is a different failure than a confirmed-absent
+ * task, but callers only switch on `IMPORT_NOT_PERSISTED`, so it must map to the same code — with a
+ * message that says persistence could not be VERIFIED rather than confirmed absent, and the original
+ * error threaded through as `cause` for diagnostics.
  */
 export async function assertImportedTaskPersisted(
   store: TaskStore,
   taskId: string,
   projectId: string | undefined,
 ): Promise<Task> {
-  const task = await store.getTask(taskId);
+  let task: Task | undefined;
+  try {
+    task = await store.getTask(taskId);
+  } catch (error) {
+    throw new ApiError(500, "GitHub import task persistence could not be verified", {
+      code: "IMPORT_NOT_PERSISTED",
+      taskId,
+      projectId,
+    }, error);
+  }
   if (!task) {
     throw new ApiError(500, "GitHub import task was not persisted", {
       code: "IMPORT_NOT_PERSISTED",

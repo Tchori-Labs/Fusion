@@ -4262,6 +4262,15 @@ export function registerGitGitHubRoutes(ctx: ApiRoutesContext): void {
         ...(importedIssueGithubTracking ? { githubTracking: importedIssueGithubTracking } : {}),
       });
 
+      // FNXC:GithubImport 2026-08-11-10:34: fail fast before any side effect
+      // runs against a task that createTask reported but never actually persisted.
+      try {
+        await assertImportedTaskPersisted(scopedStore, task.id, projectId);
+      } catch (error) {
+        severityAuditLog.warn(`[fusion:github-import] Task ${task.id} was not persisted in project ${projectId ?? "launch"}`);
+        throw error;
+      }
+
       // Log the import action
       await scopedStore.logEntry(task.id, "Imported from GitHub", sourceUrl);
 

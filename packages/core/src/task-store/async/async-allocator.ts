@@ -100,6 +100,32 @@ export async function getConfiguredPrefixAndLegacyNextId(
 }
 
 /**
+ * FNXC:TaskStoreAllocator 2026-08-11-14:20:
+ * True only for the Postgres "relation does not exist" condition (SQLSTATE
+ * 42P01) — how a cold-storage query fails on a store that predates the
+ * `archive` schema. drizzle/postgres.js wrap the raw driver error in a `cause`
+ * chain, so this walks a few levels looking for the code. Any OTHER failure
+ * (permission, connectivity, timeout, ...) is not a "cold storage missing"
+ * signal and must propagate — the three call sites below used to treat every
+ * failure as compatibility fallback, which let a transient/permission error on
+ * `taskIdExists` read as "id free" and reissue a display id a hard-deleted
+ * task still owns in cold storage.
+ */
+const COLD_STORAGE_MISSING_SQLSTATE = "42P01";
+const MAX_COLD_STORAGE_ERROR_CAUSE_DEPTH = 4;
+
+function isColdStorageMissingError(error: unknown): boolean {
+  let current: unknown = error;
+  for (let depth = 0; current !== undefined && current !== null && depth < MAX_COLD_STORAGE_ERROR_CAUSE_DEPTH; depth += 1) {
+    if (typeof current !== "object") break;
+    const candidate = current as { code?: unknown; cause?: unknown };
+    if (candidate.code === COLD_STORAGE_MISSING_SQLSTATE) return true;
+    current = candidate.cause;
+  }
+  return false;
+}
+
+/**
  * FNXC:TaskStoreAllocator 2026-06-24-14:10:
  * Scan a task-id-bearing table for the max numeric suffix under a given prefix.
  * This intentionally does NOT filter
@@ -155,8 +181,9 @@ async function getMaxTaskSequenceFromTable(
       }
     }
     return maxSequence;
-  } catch {
-    return 0;
+  } catch (error) {
+    if (isColdStorageMissingError(error)) return 0;
+    throw error;
   }
 }
 
@@ -290,8 +317,9 @@ export async function getKnownPrefixes(
       const parsed = parseTaskIdForAllocator(row.id ?? "");
       if (parsed) prefixes.add(parsed.prefix);
     }
-  } catch {
-    // best-effort: old stores may not have cold storage yet.
+  } catch (error) {
+    // Old stores may not have cold storage yet — anything else must propagate.
+    if (!isColdStorageMissingError(error)) throw error;
   }
 
   return prefixes;
@@ -423,8 +451,9 @@ async function taskIdExists(
       .where(eq(schema.archive.archivedTasks.id, taskId))
       .limit(1);
     return coldStorageRows.length > 0;
-  } catch {
-    return false;
+  } catch (error) {
+    if (isColdStorageMissingError(error)) return false;
+    throw error;
   }
 }
 
