@@ -803,6 +803,44 @@ describe("POST /tasks", () => {
     expect(store.createTask).toHaveBeenCalledTimes(1);
   });
 
+  it("returns a strict-JSON-safe response for NUL-contaminated task text", async () => {
+    const title = "before\u0000fnlvl=info\u0000after";
+    const description = "before\u0000fnlvl=info\u0000after";
+    const persistedTask = {
+      ...FAKE_TASK_DETAIL,
+      id: "FN-NUL-001",
+      title: "beforefnlvl=infoafter",
+      description: "beforefnlvl=infoafter",
+      column: "triage",
+    };
+    (store.createTask as ReturnType<typeof vi.fn>).mockResolvedValue(persistedTask);
+
+    const res = await performRequest(
+      buildApp(),
+      "POST",
+      "/api/tasks",
+      JSON.stringify({ title, description }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(201);
+    expect(res.body).toMatchObject({
+      id: "FN-NUL-001",
+      title: "beforefnlvl=infoafter",
+      description: "beforefnlvl=infoafter",
+    });
+    expect(store.createTask).toHaveBeenCalledWith(
+      expect.objectContaining({ title, description }),
+      expect.any(Object),
+    );
+    /*
+     * FNXC:TaskPersistenceNulSanitize 2026-08-11-11:15:
+     * JSON.parse would accept a correctly escaped response even if the HTTP writer later emitted
+     * raw control bytes. Inspect bodyBuffer to preserve the reported jq-safe response invariant.
+     */
+    expect([...res.bodyBuffer].some((byte) => byte >= 0x00 && byte <= 0x1f)).toBe(false);
+  });
+
   it("does not synchronously create tracking issues in POST /tasks route", async () => {
     const createIssueSpy = vi.spyOn(GitHubClient.prototype, "createIssue").mockResolvedValue({
       owner: "task",
