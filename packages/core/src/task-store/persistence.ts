@@ -10,6 +10,7 @@
 import type { Task } from "../types.js";
 import { normalizeTaskPriority } from "../tasks/task-priority.js";
 import { toJson, toJsonNullable, fromJson} from "../db/db.js";
+import { sanitizeTextValue } from "../postgres/nul-sanitize.js";
 
 /** Database row shape for the tasks table (all columns). */
 export interface TaskRow {
@@ -254,8 +255,14 @@ const serializeTaskSessionAdvisorEnabled: TaskColumnDescriptor["serialize"] = (t
 export const TASK_COLUMN_DESCRIPTORS: TaskColumnDescriptor[] = [
   defineTaskColumn("id", (task) => task.id),
   defineTaskColumn("lineageId", (_task, context) => context.lineageId),
-  defineTaskColumn("title", (task) => task.title ?? null),
-  defineTaskColumn("description", (task) => task.description ?? ""),
+  /*
+   * FNXC:TaskPersistenceNulSanitize 2026-08-11-11:15:
+   * PostgreSQL text rejects U+0000, while task title/description accept untrusted GitHub-import
+   * and free-text input. Sanitize at this shared create/update boundary, mirroring FN-8791's
+   * chat/mailbox guard, so every persistence path stores safe text without changing clean values.
+   */
+  defineTaskColumn("title", (task) => sanitizeTextValue(task.title ?? null)),
+  defineTaskColumn("description", (task) => sanitizeTextValue(task.description ?? "")),
   defineTaskColumn("priority", (task) => normalizeTaskPriority(task.priority)),
   defineTaskColumn("column", (task) => task.column, '"column"'),
   defineTaskColumn("status", (task) => task.status ?? null),
