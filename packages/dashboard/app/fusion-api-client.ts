@@ -45,11 +45,25 @@ export interface FusionDashboardApi {
   getSettingsSections(init?: { signal?: AbortSignal }): Promise<FusionApiSettingsSectionsResponse>;
 }
 
+export interface FusionWindowNamespace {
+  api: FusionDashboardApi;
+  [key: string]: unknown;
+}
+
+declare global {
+  interface Window {
+    fusion?: FusionWindowNamespace;
+    __fusionApiClientInstalled?: boolean;
+  }
+}
+
+let installedFusionApiClient: FusionDashboardApi | undefined;
+
 function documentedScope(): string {
   return FUSION_API_ALLOWED_ENDPOINTS.map(({ method, path }) => `${method} ${path}`).join(", ");
 }
 
-/** Reject every request outside the stable external-integration endpoint contract before fetch can run. */
+/** FNXC:FrontendPluginApi 2026-08-11-11:32: Reject every request outside the stable external-integration endpoint contract before fetch can run. */
 export function assertAllowedFusionApiEndpoint(method: string, path: string): void {
   const origin = window.location.origin;
   const resolved = new URL(path, origin);
@@ -66,7 +80,7 @@ export function assertAllowedFusionApiEndpoint(method: string, path: string): vo
 async function getJson<T>(path: FusionApiAllowedEndpoint["path"], signal?: AbortSignal): Promise<T> {
   assertAllowedFusionApiEndpoint("GET", path);
 
-  // Read window.fetch at dispatch time so installAuthFetch() remains the one auth-recovery wrapper.
+  // FNXC:FrontendPluginApi 2026-08-11-11:32: Read window.fetch at dispatch time so installAuthFetch() remains the one auth-recovery wrapper.
   const response = await window.fetch(path, {
     method: "GET",
     signal,
@@ -97,4 +111,21 @@ export function createFusionApiClient(): FusionDashboardApi {
     getViews: (init) => getJson<FusionApiViewsResponse>("/api/views", init?.signal),
     getSettingsSections: (init) => getJson<FusionApiSettingsSectionsResponse>("/api/settings/sections", init?.signal),
   };
+}
+
+/**
+ * FNXC:FrontendPluginApi 2026-08-11-11:32: Publish the fixed-scope client without taking ownership of other Fusion globals; bootstrap must remain resilient when an embedding host exposes a read-only window.
+ */
+export function installFusionApiClient(): void {
+  if (typeof window === "undefined") return;
+
+  try {
+    if (window.__fusionApiClientInstalled && window.fusion?.api) return;
+
+    const api = installedFusionApiClient ??= createFusionApiClient();
+    window.fusion = { ...(window.fusion ?? {}), api };
+    window.__fusionApiClientInstalled = true;
+  } catch {
+    // FNXC:FrontendPluginApi 2026-08-11-11:32: An uncooperative host global must not prevent the dashboard from mounting.
+  }
 }

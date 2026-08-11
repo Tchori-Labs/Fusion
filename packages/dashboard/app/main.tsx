@@ -4,6 +4,7 @@ import { RootErrorBoundary } from "./components/ErrorBoundary";
 import { DesktopLaunchGate } from "./components/DesktopLaunchGate";
 import { App } from "./App";
 import { installAuthFetch } from "./auth";
+import { installFusionApiClient } from "./fusion-api-client";
 import { installVersionCheck } from "./versionCheck";
 import { installSwUpdate } from "./swUpdate";
 import { bootstrapShellHostContext } from "./shell-host";
@@ -16,6 +17,8 @@ import "./styles.css";
 // the token that was either captured from `?token=` in the launch URL or
 // stored from a previous session.
 installAuthFetch();
+// FNXC:FrontendPluginApi 2026-08-11-11:32: Publish the integrator client after token capture and before React mounts.
+installFusionApiClient();
 installVersionCheck();
 bootstrapShellHostContext();
 registerBundledPluginViews();
