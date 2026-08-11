@@ -83,6 +83,8 @@ export interface ApprovalRequestSummary {
   updatedAt: string;
   decidedAt?: string;
   decidedBy?: string;
+  /** FNXC:ApprovalQueueVisibility 2026-08-11-11:25: The global approval queue includes owning scope so callers can issue explicitly scoped detail and decision requests. */
+  projectId?: string;
 }
 
 export interface ApprovalRequestDetail extends ApprovalRequestSummary {
