@@ -1905,6 +1905,24 @@ describe("projectId store scoping regressions", () => {
     return app;
   }
 
+  it("rejects every task-creating GitHub import before default-project routing when multiple projects exist", async () => {
+    const imports = [
+      ["/api/github/issues/import", { owner: "owner", repo: "repo", issueNumber: 1 }],
+      ["/api/github/issues/batch-import", { owner: "owner", repo: "repo", issueNumbers: [1] }],
+      ["/api/github/pulls/import", { owner: "owner", repo: "repo", prNumber: 1 }],
+      ["/api/github/comments/import", { owner: "owner", repo: "repo", number: 1, type: "issue", comment: { author: "reviewer", body: "body" } }],
+    ] as const;
+
+    for (const [path, body] of imports) {
+      mockCentralListProjects.mockResolvedValueOnce([{ id: "launch" }, { id: "named" }]);
+      const res = await REQUEST(buildApp(), "POST", path, JSON.stringify(body), { "Content-Type": "application/json" });
+      expect(res.status).toBe(400);
+      expect(res.body.details).toMatchObject({ code: "PROJECT_ID_REQUIRED", registeredProjectCount: 2 });
+    }
+
+    expect(defaultStore.createTask).not.toHaveBeenCalled();
+  });
+
   it("routes github issue import mutations to scoped store when projectId is provided", async () => {
     vi.spyOn(GitHubClient.prototype, "getIssue").mockResolvedValue({
       number: 1,
