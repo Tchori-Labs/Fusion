@@ -16,7 +16,7 @@ import type {Task, TaskCreateInput, Settings} from "../types.js";
 import "../builtin-traits.js";
 import {applyReviewLevelPreset} from "../tasks/review-level-preset.js";
 import {normalizeTaskPriority} from "../tasks/task-priority.js";
-import {sanitizeTitle, summarizeTitle} from "../ai/ai-summarize.js";
+import {deriveFallbackTaskTitle, FALLBACK_TASK_TITLE, sanitizeTitle, summarizeTitle} from "../ai/ai-summarize.js";
 import {extractTaskIdTokens, normalizeTitleForTaskId} from "../tasks/task-title-id-drift.js";
 import {resolveTitleSummarizerSettingsModel} from "../ai/model-resolution.js";
 import {resolveEffectiveSettingsById} from "../workflows/workflow-settings-resolver.js";
@@ -44,6 +44,27 @@ import {
   resolveTaskIntakeOwner,
   type IntakeOwnershipExemption,
 } from "../tasks/task-intake-owner-resolver.js";
+
+/*
+FNXC:TriageTitleFallback 2026-08-11-11:02:
+Task creation must never persist a blank title. Intake validates only `description`, the default
+`autoSummarizeTitles` is false, and description-only agent/API creates previously landed without a
+visible title. The terminal-triage backfill and refine derivation cannot protect every create path.
+
+Use the existing deterministic, never-LLM derivation at both shared insert helpers: an explicit
+usable title wins; otherwise derive the description's first meaningful line and use `FALLBACK_TASK_TITLE`
+as the non-empty final fallback. Normalize each candidate for task-ID drift before it is persisted.
+*/
+export function resolveCreatedTaskTitle(
+  title: string | undefined | null,
+  description: string,
+  id: string,
+): string {
+  const normalized = normalizeTitleForTaskId(title, id).title?.trim();
+  if (normalized) return normalized;
+  const derived = normalizeTitleForTaskId(deriveFallbackTaskTitle(description), id).title?.trim();
+  return derived || FALLBACK_TASK_TITLE;
+}
 
 type CreateTaskWithAfterInsert = TaskCreateInput & {
   /** Internal transaction hook; never persisted in task source metadata. */
@@ -417,6 +438,9 @@ export async function createTaskBackendImpl(store: TaskStore, input: TaskCreateI
     // Deferred title summarization (same fire-and-forget pattern as SQLite path).
     if (hasPendingSummarization && shouldInvokeTaskCreatedHook) {
       const id = task.id;
+      const createTimeFallbackTitle = title
+        ? undefined
+        : resolveCreatedTaskTitle(undefined, input.description, id);
       Promise.resolve().then(async () => {
         try {
           const generatedTitle = await onSummarize!(input.description);
@@ -425,7 +449,13 @@ export async function createTaskBackendImpl(store: TaskStore, input: TaskCreateI
             await store.trackDeferredTaskCreatedWork(async () => {
               if (store.closing) return;
               const currentTask = await store.getTask(id);
-              if (currentTask && !currentTask.title) {
+              /*
+              FNXC:TriageTitleFallback 2026-08-11-11:04:
+              Creation now always stores a deterministic fallback, so `!currentTask.title` alone
+              would disable auto-summarization. Replace only the exact placeholder, never a title
+              supplied by an operator or produced by planning after creation.
+              */
+              if (currentTask && (!currentTask.title || currentTask.title === createTimeFallbackTitle)) {
                 const normalizedTitle = normalizeTitleForTaskId(sanitizedTitle, id);
                 if (normalizedTitle.title && !store.closing) {
                   await store.updateTask(id, { title: normalizedTitle.title });
@@ -593,7 +623,7 @@ export async function _createTaskInternalBackendImpl(store: TaskStore, input: Ta
       id,
       lineageId: input.lineageId ?? generateTaskLineageId(),
       proposalClaimId: input.proposalClaimId,
-      title: normalizedTitle.title ?? undefined,
+      title: resolveCreatedTaskTitle(title, input.description, id),
       description: input.description,
       priority: normalizeTaskPriority(input.priority),
       tokenUsage: input.tokenUsage,
@@ -1079,7 +1109,7 @@ export async function createTaskWithReservedIdImpl(store: TaskStore, input: Task
 
 export async function _createTaskInternalImpl(store: TaskStore, input: TaskCreateInput, title: string | undefined, resolvedWorkflowSteps: string[] | undefined, id: string, options?: { createdAt?: string; updatedAt?: string; promptOverride?: string; invokeTaskCreatedHook?: boolean; resolvedEntryColumn?: string; onProposalClaimConflict?: (task: Task) => void; },): Promise<Task> {
     const now = options?.createdAt ?? new Date().toISOString();
-    // FN-5077: null normalized titles are treated as "no title" and allow standard fallback/summarization behavior.
+    // FNXC:TriageTitleFallback 2026-08-11-11:04: retain FN-5077 drift logging while resolving a nonblank stored title.
     const normalizedTitle = normalizeTitleForTaskId(title, id);
     /*
     FNXC:MergedPlanningColumn 2026-07-29-14:30 (U11 post-merge audit):
@@ -1112,7 +1142,7 @@ export async function _createTaskInternalImpl(store: TaskStore, input: TaskCreat
       id,
       lineageId: input.lineageId ?? generateTaskLineageId(),
       proposalClaimId: input.proposalClaimId,
-      title: normalizedTitle.title ?? undefined,
+      title: resolveCreatedTaskTitle(title, input.description, id),
       description: input.description,
       priority: normalizeTaskPriority(input.priority),
       tokenUsage: input.tokenUsage,
