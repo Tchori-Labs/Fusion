@@ -199,6 +199,19 @@ function repositoryFromGitHubIssueUrl(url: unknown): string | undefined {
   return match ? `${match[1]}/${match[2]}` : undefined;
 }
 
+/*
+FNXC:GithubImport 2026-08-11-10:34:
+Legacy imports can only identify their GitHub provenance from description text. Match the
+source URL at a URL boundary so issue/PR 1 never produces a false 409 from a task that
+references issue/PR 15 or 132; one optional trailing slash remains compatible with old prose.
+*/
+export function descriptionReferencesSourceUrl(description: string | undefined, sourceUrl: string): boolean {
+  if (!description) return false;
+  const normalizedSourceUrl = sourceUrl.replace(/\/$/u, "");
+  const escapedSourceUrl = normalizedSourceUrl.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+  return new RegExp(`${escapedSourceUrl}/?(?!\\d)`, "iu").test(description);
+}
+
 export function isGitHubIssueAlreadyImported(
   task: Pick<Task, "description" | "sourceIssue" | "source">,
   input: { owner: string; repo: string; issueNumber: number; sourceUrl: string },
@@ -228,7 +241,7 @@ export function isGitHubIssueAlreadyImported(
 
   if (hasGitHubSourceIssue || hasGitHubSourceMetadata) return false;
 
-  return task.description?.toLocaleLowerCase().includes(sourceUrl.toLocaleLowerCase()) ?? false;
+  return descriptionReferencesSourceUrl(task.description, sourceUrl);
 }
 
 /**

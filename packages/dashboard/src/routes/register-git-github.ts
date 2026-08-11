@@ -42,7 +42,7 @@ import {
 } from "../api-error.js";
 // FNXC:TaskLookup404 2026-07-26-11:40: shared task-miss -> 404 mapping seam.
 import { isTaskLookupMiss, rethrowTaskApiError } from "./task-lookup-error.js";
-import { GitHubClient, buildGitHubIssueSource, isGitHubIssueAlreadyImported, type PrReviewSnapshot, parseBadgeUrl } from "../github.js";
+import { GitHubClient, buildGitHubIssueSource, descriptionReferencesSourceUrl, isGitHubIssueAlreadyImported, type PrReviewSnapshot, parseBadgeUrl } from "../github.js";
 import { importIssueImageAttachments, githubImagePolicy } from "../issue-image-attachments.js";
 import { GitHubIssueCommentService } from "../github-issue-comment.js";
 import { GitHubTrackingCommentService } from "../github-tracking-comments.js";
@@ -4959,7 +4959,7 @@ export function registerGitGitHubRoutes(ctx: ApiRoutesContext): void {
       const existingTasks = await scopedStore.listTasks({ slim: true, includeArchived: false });
       const sourceUrl = pr.html_url;
       for (const existingTask of existingTasks) {
-        if (existingTask.description.includes(sourceUrl)) {
+        if (descriptionReferencesSourceUrl(existingTask.description, sourceUrl)) {
           throw new ApiError(409, `PR #${prNumber} already imported as ${existingTask.id}`, {
             existingTaskId: existingTask.id,
           });
