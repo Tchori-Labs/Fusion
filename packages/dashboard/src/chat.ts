@@ -2163,6 +2163,11 @@ export class ChatManager {
       */
       ...(mergedRoomSkillSelection ? { skillSelection: mergedRoomSkillSelection } : {}),
       ...(roomSkillContext.additionalSkillPaths.length > 0 ? { additionalSkillPaths: roomSkillContext.additionalSkillPaths } : {}),
+      /*
+      FNXC:McpConfig 2026-08-11-11:01:
+      Direct-mention and ambient room responders must receive the resolved MCP catalog like direct-chat and task lanes, so gated calls create approvals instead of suggesting an integration is absent (Tchori-Labs/Fusion#16; FN-8443 / Runfusion/Fusion#2364 lane-parity class). The existing actionGateContext and permanentAgentGating options retain that gating.
+      */
+      ...(this.taskStore ? { mcpServers: (await resolveMcpServersForStore(this.taskStore, { agentId: input.responder.id })).servers } : {}),
       cwd: this.rootDir,
       systemPrompt,
       tools: CHAT_CODING_TOOLS,
