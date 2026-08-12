@@ -57,6 +57,11 @@ Runfusion/Fusion#3414 requires every `project.agents` read, update, and delete�
 
 Bound agent-store layers scope those operations with `projectScopeFor(..., projectId)`. An unbound or blank layer is intentionally a no-op scope for compatibility and cross-project analytics callers; it must not be converted to a literal empty `project_id` filter or a throwing project-id accessor.
 
+### Global approval queue
+
+<!-- FNXC:ApprovalQueueVisibility 2026-08-11-11:35: An omitted API scope is a global operator view, never an authoritative empty approval queue caused by a fallback project's RLS binding. -->
+`GET /api/approvals` without `projectId` lists approval requests across the projects visible to the daemon. Each returned request includes its owning `projectId`, which clients must use for a follow-up detail lookup or decision. `GET /api/approvals?projectId=…` remains project-scoped; approval decisions require that explicit project scope and do not use cross-project writes.
+
 Use PostgreSQL-native backup/restore tooling for authoritative runtime data. Legacy `fn backup` SQLite artifacts remain migration/recovery inputs; restoring one does not replace the live PostgreSQL registry.
 
 `taskClaims` is the central cross-node lease mutex introduced by FN-4819 §2: claim acquisition/renewal/release happen in PostgreSQL, while per-project lease fields mirror the central winner for local scheduler/runtime consumption.

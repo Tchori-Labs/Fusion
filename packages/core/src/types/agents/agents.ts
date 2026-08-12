@@ -396,6 +396,8 @@ export interface ApprovalRequestAuditEvent {
 /** Durable approval request record used by engine and dashboard surfaces. */
 export interface ApprovalRequest {
   id: string;
+  /** FNXC:ApprovalQueueVisibility 2026-08-11-11:20: Owning project when PostgreSQL exposes this request through an opt-in global read. */
+  projectId?: string;
   status: ApprovalRequestStatus;
   requester: ApprovalRequestActorSnapshot;
   targetAction: ApprovalRequestTargetAction;

@@ -41,6 +41,7 @@ import {
 type QueryHandle = AsyncDataLayer["db"] | DbTransaction;
 
 interface ApprovalRequestRow {
+  projectId: string;
   id: string;
   status: ApprovalRequestStatus;
   requesterActorId: string;
@@ -75,6 +76,7 @@ interface ApprovalRequestAuditEventRow {
 function rowToRequest(row: ApprovalRequestRow): ApprovalRequest {
   return {
     id: row.id,
+    projectId: row.projectId || undefined,
     status: row.status,
     requester: {
       actorId: row.requesterActorId,

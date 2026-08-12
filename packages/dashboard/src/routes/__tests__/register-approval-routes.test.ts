@@ -28,6 +28,11 @@ import express from "express";
 const approvalState = vi.hoisted(() => ({
   requests: new Map<string, Record<string, unknown>>(),
   decide: vi.fn(),
+  getCalls: [] as Array<{ id: string; options?: { crossProject?: boolean } }>,
+  listCalls: [] as Array<{ input: unknown; options?: { crossProject?: boolean } }>,
+  historyCalls: [] as Array<{ id: string; options?: { crossProject?: boolean } }>,
+  listResults: [] as Array<Record<string, unknown>>,
+  getImplementation: undefined as undefined | ((id: string, options?: { crossProject?: boolean }) => Record<string, unknown> | undefined),
 }));
 
 vi.mock("@fusion/core", async (importOriginal) => {
@@ -41,10 +46,19 @@ vi.mock("@fusion/core", async (importOriginal) => {
     */
     ApprovalRequestStore: class FakeApprovalRequestStore {
       constructor(..._args: unknown[]) {}
-      async get(id: string) { return approvalState.requests.get(id); }
+      async get(id: string, options?: { crossProject?: boolean }) {
+        approvalState.getCalls.push({ id, options });
+        return approvalState.getImplementation?.(id, options) ?? approvalState.requests.get(id);
+      }
       async decide(id: string, status: string, input: unknown) { return approvalState.decide(id, status, input); }
-      async getAuditHistory() { return []; }
-      async list() { return []; }
+      async getAuditHistory(id: string, options?: { crossProject?: boolean }) {
+        approvalState.historyCalls.push({ id, options });
+        return [];
+      }
+      async list(input: unknown, options?: { crossProject?: boolean }) {
+        approvalState.listCalls.push({ input, options });
+        return approvalState.listResults;
+      }
       async findLatestByDedupeKey() { return undefined; }
     },
     AgentStore: class FakeAgentStore {
@@ -136,6 +150,11 @@ async function postDecision(
 beforeEach(() => {
   approvalState.requests.clear();
   approvalState.requests.set(REQUEST_ID, makeApprovalRequest());
+  approvalState.getCalls.length = 0;
+  approvalState.listCalls.length = 0;
+  approvalState.historyCalls.length = 0;
+  approvalState.listResults.length = 0;
+  approvalState.getImplementation = undefined;
   approvalState.decide.mockReset();
   approvalState.decide.mockImplementation(async (id: string, status: string, input: { actor: unknown; note?: string }) => ({
     ...makeApprovalRequest(),
@@ -145,6 +164,67 @@ beforeEach(() => {
     decidedBy: (input.actor as { actorId?: string })?.actorId,
   }));
   registerSandboxProvisioningExecutor(null);
+});
+
+/*
+FNXC:ApprovalQueueVisibility 2026-08-11-11:25:
+Tchori-Labs/Fusion#17 requires the route to distinguish an omitted projectId
+from context.ts's resolved fallback project. The route must select the explicit
+cross-project read only for omitted scope, preserve explicitly scoped reads,
+and leave unscoped decisions loudly not-found rather than bypassing RLS writes.
+*/
+describe("GET /api/approvals — global visibility", () => {
+  it("uses a cross-project read only when projectId is omitted and includes row attribution", async () => {
+    let launchStore: TaskStore;
+    const { app, store } = makeApp({
+      engine: {
+        getProjectId: () => "project-1",
+        getTaskStore: () => launchStore,
+      } as ServerOptions["engine"],
+    });
+    launchStore = store;
+    approvalState.listResults.push(makeApprovalRequest({ id: "apr-p1", projectId: "project-1" }));
+
+    const unscoped = await REQUEST(app, "GET", "/api/approvals");
+    expect(unscoped.status).toBe(200);
+    expect(unscoped.body).toMatchObject({
+      total: 1,
+      pendingCount: 1,
+      requests: [{ id: "apr-p1", projectId: "project-1" }],
+    });
+    expect(approvalState.listCalls).toHaveLength(3);
+    expect(approvalState.listCalls.every((call) => call.options?.crossProject === true)).toBe(true);
+    expect(approvalState.historyCalls).toEqual([{ id: "apr-p1", options: { crossProject: true } }]);
+
+    approvalState.listCalls.length = 0;
+    approvalState.historyCalls.length = 0;
+    const scoped = await REQUEST(app, "GET", "/api/approvals?projectId=project-1");
+    expect(scoped.status).toBe(200);
+    expect(approvalState.listCalls).toHaveLength(3);
+    expect(approvalState.listCalls.every((call) => call.options?.crossProject === false)).toBe(true);
+    expect(approvalState.historyCalls).toEqual([{ id: "apr-p1", options: { crossProject: false } }]);
+  });
+
+  it("finds unscoped details globally but leaves unscoped decisions scoped and loudly not-found", async () => {
+    const { app } = makeApp();
+    const crossProjectRequest = makeApprovalRequest({ id: "apr-p1", projectId: "project-1" });
+    approvalState.getImplementation = (_id, options) => options?.crossProject ? crossProjectRequest : undefined;
+
+    const detail = await REQUEST(app, "GET", "/api/approvals/apr-p1");
+    expect(detail.status).toBe(200);
+    expect(detail.body).toMatchObject({ id: "apr-p1", projectId: "project-1" });
+    expect(approvalState.getCalls).toEqual([{ id: "apr-p1", options: { crossProject: true } }]);
+    expect(approvalState.historyCalls).toEqual([{ id: "apr-p1", options: { crossProject: true } }]);
+
+    const decision = await REQUEST(app, "POST", "/api/approvals/apr-p1/decision", JSON.stringify({ decision: "approve" }), {
+      "content-type": "application/json",
+    });
+    expect(decision.status).toBe(404);
+    expect(approvalState.getCalls).toEqual([
+      { id: "apr-p1", options: { crossProject: true } },
+      { id: "apr-p1", options: undefined },
+    ]);
+  });
 });
 
 describe("POST /api/approvals/:id/decision — server-derived decider", () => {

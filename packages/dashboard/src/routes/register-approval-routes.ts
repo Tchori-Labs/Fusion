@@ -39,6 +39,7 @@ interface ApprovalRequestSummaryDto {
   updatedAt: string;
   decidedAt?: string;
   decidedBy?: string;
+  projectId?: string;
 }
 
 interface ApprovalRequestDetailDto extends ApprovalRequestSummaryDto {
@@ -98,6 +99,7 @@ function toSummaryDto(
     updatedAt: request.updatedAt,
     decidedAt: request.decidedAt,
     decidedBy: getDeciderActorId(history),
+    projectId: request.projectId,
   };
 }
 
@@ -263,7 +265,7 @@ async function resumeAfterDecision(params: {
 }
 
 export function registerApprovalRoutes(ctx: ApiRoutesContext): void {
-  const { router, getProjectContext, rethrowAsApiError, runtimeLogger } = ctx;
+  const { router, getProjectContext, getProjectIdFromRequest, rethrowAsApiError, runtimeLogger } = ctx;
 
   router.get("/approvals", async (req, res) => {
     try {
@@ -273,14 +275,24 @@ export function registerApprovalRoutes(ctx: ApiRoutesContext): void {
       const status = parseStatus(req.query.status);
       const limit = parseOptionalInt(req.query.limit, "limit") ?? 50;
       const offset = parseOptionalInt(req.query.offset, "offset") ?? 0;
+      /*
+      FNXC:ApprovalQueueVisibility 2026-08-11-11:25:
+      Tchori-Labs/Fusion#17 found that an omitted projectId resolved to a
+      fallback project layer, whose RLS GUC hid pending approvals elsewhere and
+      fabricated an authoritative zero. An unscoped operator read must instead
+      use the explicit transaction-local global read; explicit scopes remain
+      byte-for-byte bound to their requested project.
+      */
+      const crossProject = getProjectIdFromRequest(req) === undefined;
+      const readOptions = { crossProject };
 
-      const requests = await approvalStore.list({ status, limit, offset });
+      const requests = await approvalStore.list({ status, limit, offset }, readOptions);
       const summaries = await Promise.all(requests.map(async (request) => {
-        const history = await approvalStore.getAuditHistory(request.id);
+        const history = await approvalStore.getAuditHistory(request.id, readOptions);
         return toSummaryDto(request, history);
       }));
-      const total = (await approvalStore.list({ status, limit: Number.MAX_SAFE_INTEGER, offset: 0 })).length;
-      const pendingCount = (await approvalStore.list({ status: "pending", limit: Number.MAX_SAFE_INTEGER, offset: 0 })).length;
+      const total = (await approvalStore.list({ status, limit: Number.MAX_SAFE_INTEGER, offset: 0 }, readOptions)).length;
+      const pendingCount = (await approvalStore.list({ status: "pending", limit: Number.MAX_SAFE_INTEGER, offset: 0 }, readOptions)).length;
 
       res.json({ requests: summaries, total, pendingCount });
     } catch (err: unknown) {
@@ -295,9 +307,10 @@ export function registerApprovalRoutes(ctx: ApiRoutesContext): void {
       const layer = requireAsyncLayer(scopedStore, "Dashboard approval store");
       const approvalStore = new ApprovalRequestStore(null, { asyncLayer: layer });
       const requestId = String(req.params.id);
-      const request = await approvalStore.get(requestId);
+      const readOptions = { crossProject: getProjectIdFromRequest(req) === undefined };
+      const request = await approvalStore.get(requestId, readOptions);
       if (!request) throw notFound("Approval request not found");
-      const history = await approvalStore.getAuditHistory(requestId);
+      const history = await approvalStore.getAuditHistory(requestId, readOptions);
       res.json(toDetailDto(request, history));
     } catch (err: unknown) {
       if (err instanceof ApiError) throw err;
@@ -322,6 +335,7 @@ export function registerApprovalRoutes(ctx: ApiRoutesContext): void {
       }
 
       const { store: scopedStore, projectId } = await getProjectContext(req);
+      // FNXC:ApprovalQueueVisibility 2026-08-11-11:25: Decision writes never use the global read bypass; audit events must inherit the explicitly scoped layer's project_id or fail loudly with 404 rather than be mis-attributed.
       const layer = requireAsyncLayer(scopedStore, "Dashboard approval store");
       const approvalStore = new ApprovalRequestStore(null, { asyncLayer: layer });
       const requestId = String(req.params.id);

@@ -2357,6 +2357,8 @@ export const importTranslationCache = projectSchema.table("import_translation_ca
 ]);
 
 export const approvalRequests = projectSchema.table("approval_requests", {
+  // FNXC:ApprovalQueueVisibility 2026-08-11-11:20: project_id is physical since migration 0006; expose it so an explicitly privileged read can attribute global approval rows without changing insert ownership.
+  projectId: text("project_id").notNull().default(""),
   id: text("id").primaryKey(),
   status: text("status").notNull(),
   requesterActorId: text("requester_actor_id").notNull(),
