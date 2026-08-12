@@ -6,8 +6,8 @@
  * CLOSE_NO_OP is Plan Review only (FN-8841). Exact match + optionalGroupId gate so unrelated
  * review groups and prose cannot open a terminal lifecycle path.
  */
-import { proseSignalsClearApproval, extractJsonObjectCandidates } from "../execution/reviewer.js";
-import { normalizeWorkflowReviewFindings, PLAN_REVIEW_GROUP_ID, type WorkflowReviewFinding } from "@fusion/core";
+import { proseSignalsClearApproval, extractJsonObjectCandidates, textHasStructuredVerdictKey } from "../execution/reviewer.js";
+import { normalizeSupersededFindingIds, normalizeWorkflowReviewFindings, PLAN_REVIEW_GROUP_ID, type WorkflowReviewFinding } from "@fusion/core";
 
 /** Machine-readable workflow-step verdicts, including Plan Review CLOSE_NO_OP. */
 export type WorkflowStepVerdict = "APPROVE" | "APPROVE_WITH_NOTES" | "REVISE" | "CLOSE_NO_OP";
@@ -58,6 +58,10 @@ export interface WorkflowStepOutcome {
   notes?: string;
   /** Normalized independently actionable feedback from a review-kind node. */
   findings?: WorkflowReviewFinding[];
+  /** Specific prior result containing the findings this review step claims are superseded. */
+  supersededFindingSourceWorkflowStepId?: string;
+  /** Explicit prior-lane finding IDs this review step claims are now superseded. */
+  supersededFindingIds?: string[];
   /** Set when the call exceeded `settings.workflowStepTimeoutMs`. Signals the
    *  caller to escalate to the fallback model rather than treat the failure
    *  as a generic revision request. */
@@ -81,7 +85,7 @@ export type WorkflowStepResult =
 export function parseWorkflowStepVerdict(
   rawOutput: string,
   options: { optionalGroupId?: string } = {},
-): { verdict: WorkflowStepVerdict; notes: string; findings?: WorkflowReviewFinding[] } | null {
+): { verdict: WorkflowStepVerdict; notes: string; findings?: WorkflowReviewFinding[]; supersededFindingSourceWorkflowStepId?: string; supersededFindingIds?: string[] } | null {
   const trimmed = rawOutput.trim();
   const candidates: string[] = [];
   const fencedMatches = [...trimmed.matchAll(/```(?:json)?\s*([\s\S]*?)```/g)];
@@ -90,13 +94,13 @@ export function parseWorkflowStepVerdict(
   }
   /*
   FNXC:ReviewLeniency 2026-07-01-23:30:
-  Prefer a balanced, string-aware object scan over a greedy `\{[\s\S]*\}` match: models that emit reasoning PROSE (which may itself contain braces) followed by a trailing `{"verdict":...}` payload broke the greedy span into invalid JSON. extractJsonObjectCandidates returns each top-level object in document order; iterating last→first prefers the trailing verdict payload.
+  Prefer a balanced, string-aware object scan over a greedy `\{[\s\S]*\}` match: models that emit reasoning PROSE (which may itself contain braces) followed by a trailing `{"verdict":...}` payload broke the greedy span into invalid JSON. extractJsonObjectCandidates returns every balanced object in close order; iterating last→first prefers the trailing verdict payload.
   */
   candidates.push(...extractJsonObjectCandidates(trimmed));
 
   for (let i = candidates.length - 1; i >= 0; i -= 1) {
     try {
-      const parsed = JSON.parse(candidates[i]) as { verdict?: unknown; notes?: unknown; findings?: unknown };
+      const parsed = JSON.parse(candidates[i]) as { verdict?: unknown; notes?: unknown; findings?: unknown; supersededFindingIds?: unknown; supersededFindingSourceWorkflowStepId?: unknown };
       if (!parsed || typeof parsed.verdict !== "string") continue;
       /*
       FNXC:ReviewLeniency 2026-07-01-23:30:
@@ -123,10 +127,14 @@ export function parseWorkflowStepVerdict(
       entries never poison the step outcome or Review-tab selection contract.
       */
       const findings = normalizeWorkflowReviewFindings(parsed.findings);
+      const supersededFindingIds = normalizeSupersededFindingIds(parsed.supersededFindingIds);
+      const supersededFindingSourceWorkflowStepId = normalizeSupersededFindingIds([parsed.supersededFindingSourceWorkflowStepId])?.[0];
       return {
         verdict,
         notes: typeof parsed.notes === "string" ? parsed.notes : "",
         ...(findings ? { findings } : {}),
+        ...(supersededFindingSourceWorkflowStepId && supersededFindingIds ? { supersededFindingSourceWorkflowStepId } : {}),
+        ...(supersededFindingSourceWorkflowStepId && supersededFindingIds ? { supersededFindingIds } : {}),
       };
     } catch {
       // continue
@@ -136,7 +144,10 @@ export function parseWorkflowStepVerdict(
   return null;
 }
 
-export function inferWorkflowStepVerdictFromProse(rawOutput: string): { verdict: "APPROVE" | "APPROVE_WITH_NOTES" | "REVISE"; notes: string } | null {
+export function inferWorkflowStepVerdictFromProse(
+  rawOutput: string,
+  options: { suppressLenientApprovalForStructuredVerdict?: boolean } = {},
+): { verdict: "APPROVE" | "APPROVE_WITH_NOTES" | "REVISE"; notes: string } | null {
   const trimmed = rawOutput.trim();
   const revisionMatch = trimmed.match(/^REQUEST REVISION\s*\n*/i);
   if (revisionMatch) {
@@ -159,8 +170,11 @@ export function inferWorkflowStepVerdictFromProse(rawOutput: string): { verdict:
   /*
   FNXC:ReviewLeniency 2026-07-01-22:15:
   A gate review (code-review, browser-verification) whose text clearly approves must PASS even when it is not perfectly structured. Delegate to the shared proseSignalsClearApproval detector so this parser and the reviewer/plan-review parser agree on what "clearly approved" means, and so a prose rejection ("not approved", "please revise", "reject") is never promoted to APPROVE. Replaces the prior narrow approve/approved/looks good/no issues/out of scope regex (now a subset of the shared detector).
+
+  FNXC:ReviewLeniency 2026-08-11-18:44:
+  When the gate parser was unable to classify a visible structured verdict, do not invent an APPROVE from nearby prose. The reviewer lane uses this same detector before its lenient branch, while fail-closed merge/PR/mission gates remain untouched because they never used prose leniency.
   */
-  if (proseSignalsClearApproval(trimmed)) {
+  if (!options.suppressLenientApprovalForStructuredVerdict && proseSignalsClearApproval(trimmed)) {
     return { verdict: "APPROVE", notes: "" };
   }
   return null;
@@ -181,6 +195,8 @@ export function parseWorkflowStepOutput(rawOutput: string, options: { requireVer
   verdict?: WorkflowStepVerdict;
   notes?: string;
   findings?: WorkflowReviewFinding[];
+  supersededFindingSourceWorkflowStepId?: string;
+  supersededFindingIds?: string[];
   malformed?: boolean;
 } {
   const trimmed = rawOutput.trim();
@@ -191,10 +207,11 @@ export function parseWorkflowStepOutput(rawOutput: string, options: { requireVer
       verdict: parsed.verdict,
       notes: parsed.notes,
       ...(parsed.findings ? { findings: parsed.findings } : {}),
+      ...(parsed.supersededFindingSourceWorkflowStepId && parsed.supersededFindingIds ? { supersededFindingSourceWorkflowStepId: parsed.supersededFindingSourceWorkflowStepId, supersededFindingIds: parsed.supersededFindingIds } : {}),
     };
   }
 
-  const inferred = inferWorkflowStepVerdictFromProse(trimmed);
+  const inferred = inferWorkflowStepVerdictFromProse(trimmed, { suppressLenientApprovalForStructuredVerdict: textHasStructuredVerdictKey(trimmed) });
   if (inferred) {
     return {
       output: inferred.notes || trimmed,
