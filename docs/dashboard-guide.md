@@ -2060,6 +2060,8 @@ Non-Command-Center dashboard CSS uses `--text` as the canonical primary text tok
 
 The following curated tokens are the supported dashboard theming contract for integrations and plugin-rendered UI. Each token is defined by `styles.css`; use these names rather than depending on internal or theme-data-only variables.
 
+For typed, authenticated dashboard metadata discovery, see [the `window.fusion.api` frontend integration contract](./PLUGIN_AUTHORING.md#frontend-integration-windowfusionapi).
+
 <!-- fusion-theme-token-contract:start -->
 | Token | Stable meaning |
 |---|---|

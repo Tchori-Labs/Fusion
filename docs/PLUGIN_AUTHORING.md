@@ -2009,3 +2009,27 @@ mcpServers: [{
 ## Todo Lists: second first-party extraction
 
 `plugins/fusion-plugin-todos` is the second first-party extraction after Roadmaps. It demonstrates an atomic vertical boundary: the plugin owns its `/api/plugins/fusion-plugin-todos/todos/*` route definitions and dashboard view, while the host owns only generic plugin loading, project enablement, and a narrow dashboard callback context for opening planning and ingesting created tasks. Do not retain a host route or feature flag when extracting a surface: enabled plugin state must be the sole authority for both API registration and navigation visibility.
+
+## Frontend integration: window.fusion.api
+
+Dashboard bootstrap publishes `window.fusion.api` after dashboard authentication is installed and before React mounts. It is the stable, typed client for frontend integrators and theme plugins that need the host's UI metadata. Calls authenticate automatically through the dashboard token path; do not capture, store, or re-implement bearer-token handling yourself.
+
+The client is intentionally allow-listed. It exposes named read-only methods only, not generic method-plus-URL or fetch access; calls outside this documented scope throw before a request is sent. This prevents a page-held daemon token from becoming arbitrary same-origin API capability.
+
+<!-- fusion-dashboard-api-client-contract:start -->
+
+| Method | Path | Client method |
+| --- | --- | --- |
+| `GET` | `/api/views` | `getViews()` |
+| `GET` | `/api/settings/sections` | `getSettingsSections()` |
+
+<!-- fusion-dashboard-api-client-contract:end -->
+
+The exported TypeScript contract is `FusionDashboardApi`, `FusionWindowNamespace`, `FusionApiView`, `FusionApiViewsResponse`, `FusionApiSettingsSection`, `FusionApiSettingsSectionsResponse`, and `FUSION_API_ALLOWED_ENDPOINTS`.
+
+```ts
+const views = await window.fusion.api.getViews();
+const settingsSections = await window.fusion.api.getSettingsSections();
+```
+
+This contract implements Slice 2, `DashboardApiClient`, from upstream's 2026-07-01 theme-plugin proposal. The origin tracker is [Tchori-Labs/Fusion#6](https://github.com/Tchori-Labs/Fusion/issues/6).
