@@ -72,6 +72,7 @@ import {
   resetHeartbeatErrorRecoveryMetadata,
   resolveErrorRecoveryLimit,
 } from "./agent-heartbeat.js";
+import { evaluateRetryExhaustedRearm } from "./agents/durable-agent-retry-rearm.js";
 import { classifyForeignOnlyContamination, deriveTaskIdFromFusionBranch, inspectBranchConflict, listUniqueBranchCommits } from "./execution/branch-conflicts.js";
 import { createRunAuditor, generateSyntheticRunId, type DatabaseMutationType, type RunAuditor } from "./util/run-audit.js";
 import { finalizeProvenAutoMergeTask, validateWorkflowDoneMergeProof } from "./merge/auto-merge-finalization.js";
@@ -2696,6 +2697,7 @@ export class SelfHealingManager extends SelfHealingGitEvidence {
            { name: "finalize-orphaned-planning-segments", fn: () => this.finalizeOrphanedPlanningSegments() },
           { name: "recover-ghost-review", fn: () => this.recoverGhostReviewTasks() },
           { name: "recover-orphaned-agents", fn: () => this.recoverOrphanedAgents() },
+          { name: "rearm-retry-exhausted-agents", fn: () => this.rearmExpiredRetryExhaustedAgents() },
           { name: "recover-stale-heartbeat-runs", fn: () => this.recoverStaleHeartbeatRuns() },
           { name: "reattach-orphaned-assigned-executions", fn: () => this.reattachOrphanedAssignedExecutions() },
           { name: "recover-running-on-inactive-tasks", fn: () => this.recoverAgentsRunningOnInactiveTasks() },
@@ -13682,12 +13684,13 @@ const movedTask = await this.store.moveTask(task.id, completeLane);
 
   private async emitDurableAgentErrorRecoveryAudit(options: {
     agentId: string;
-    type: "agent:auto-recover-error-state" | "agent:reset-error-state-on-startup" | "agent:error-retry-exhausted" | "agent:error-parked-unrecoverable";
+    type: "agent:auto-recover-error-state" | "agent:reset-error-state-on-startup" | "agent:error-retry-exhausted" | "agent:error-parked-unrecoverable" | "agent:rearm-error-retry-exhausted";
     attempt?: number;
     attempts?: number;
     limit?: number;
     priorState?: Agent["state"];
     priorPauseReason?: string;
+    reason?: string;
     source: "self-healing";
   }): Promise<void> {
     try {
@@ -13706,6 +13709,7 @@ const movedTask = await this.store.moveTask(task.id, completeLane);
           ...(options.limit !== undefined ? { limit: options.limit } : {}),
           ...(options.priorState !== undefined ? { priorState: options.priorState } : {}),
           ...(options.priorPauseReason !== undefined ? { priorPauseReason: options.priorPauseReason } : {}),
+          ...(options.reason !== undefined ? { reason: options.reason } : {}),
           source: options.source,
         },
       });
@@ -14058,6 +14062,73 @@ const movedTask = await this.store.moveTask(task.id, completeLane);
     }
 
     return resetCount;
+  }
+
+  /*
+  FNXC:AgentHeartbeat 2026-08-11-10:41:
+  A paused `error-retry-exhausted` agent is intentionally re-entered only by
+  this periodic sweep, not the timer path: the predicate keeps every existing
+  manual, operator-actionable, stale-module, runtime, and execution suppression
+  intact before state becomes active and heartbeat re-arm is requested.
+  */
+  async rearmExpiredRetryExhaustedAgents(): Promise<number> {
+    const agentStore = this.options.agentStore;
+    if (!agentStore) {
+      return 0;
+    }
+
+    const errorRecoveryLimit = resolveErrorRecoveryLimit(await this.store.getSettings());
+    const now = Date.now();
+    let rearmed = 0;
+    for (const agent of await agentStore.listAgents()) {
+      const evaluation = evaluateRetryExhaustedRearm(agent, {
+        now,
+        hasActiveAgentExecution: this.options.hasActiveAgentExecution,
+      });
+      if (!evaluation.eligible) {
+        continue;
+      }
+
+      try {
+        const priorState = agent.state;
+        const priorPauseReason = agent.pauseReason;
+        await agentStore.updateAgentState(agent.id, "active");
+        await agentStore.updateAgent(agent.id, {
+          lastError: undefined,
+          pauseReason: undefined,
+          metadata: resetHeartbeatErrorRecoveryMetadata(agent),
+        });
+        await this.emitDurableAgentErrorRecoveryAudit({
+          agentId: agent.id,
+          type: "agent:rearm-error-retry-exhausted",
+          attempts: evaluation.priorAttempts,
+          limit: errorRecoveryLimit,
+          priorState,
+          ...(priorPauseReason ? { priorPauseReason } : {}),
+          reason: evaluation.trigger,
+          source: "self-healing",
+        });
+        if (!this.options.restartDurableAgentHeartbeat) {
+          log.warn(`Durable-agent retry-exhausted rearm heartbeat restart unavailable for ${agent.id}; state reset only`);
+        } else {
+          const restartOk = await this.options.restartDurableAgentHeartbeat(agent.id, {
+            reason: "retry-exhausted-rearm",
+            attempt: 1,
+          });
+          if (!restartOk) {
+            log.warn(`Durable-agent retry-exhausted rearm heartbeat restart skipped for ${agent.id}`);
+          }
+        }
+        rearmed++;
+      } catch (error) {
+        log.warn(`Failed to rearm retry-exhausted durable agent ${agent.id}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+
+    if (rearmed > 0) {
+      log.log(`Re-armed ${rearmed} retry-exhausted durable agent(s)`);
+    }
+    return rearmed;
   }
 
   /*
