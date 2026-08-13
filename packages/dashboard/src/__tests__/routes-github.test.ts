@@ -227,7 +227,8 @@ function createMockGlobalSettingsStore() {
 
 function createMockStore(overrides: Partial<TaskStore> = {}): TaskStore {
   return {
-    getTask: vi.fn(),
+    // FNXC:GithubImport 2026-08-11-10:34: GitHub import proves createTask persistence with a target-store read-back; generic fixtures model that persisted result unless a test overrides it.
+    getTask: vi.fn().mockImplementation(async (id: string) => ({ ...FAKE_TASK_DETAIL, id, column: "triage" })),
     listTasks: vi.fn().mockResolvedValue([]),
     searchTasks: vi.fn().mockResolvedValue([]),
     createTask: vi.fn(),
@@ -986,6 +987,41 @@ describe("POST /github/issues/import", () => {
     });
 
     expect(store.logEntry).toHaveBeenCalledWith("FN-001", "Imported from GitHub", "https://github.com/owner/repo/issues/1");
+  });
+
+  /*
+  FNXC:GithubImport 2026-08-11-10:34:
+  The early persistence guard must run BEFORE the log entry, comment fetch, and image-attachment
+  side effects — not just before the response. A store whose createTask reports success but whose
+  target-project read-back comes back empty (the exact failure this guard exists for) must fail
+  fast, so none of these side effects run against a task that was never actually persisted.
+  */
+  it("does not run import side effects when the early persistence guard fails", async () => {
+    // Body carries an image so a passing run WOULD call fetch via importIssueImageAttachments;
+    // asserting fetch was never invoked proves the guard blocked that side effect too, not just
+    // that there happened to be no image to attach.
+    const originalFetch = globalThis.fetch;
+    const fetchSpy = vi.fn();
+    globalThis.fetch = fetchSpy as unknown as typeof globalThis.fetch;
+    (store.getTask as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    getIssueSpy.mockResolvedValueOnce({
+      ...mockGitHubIssue,
+      body: "Broken here:\n\n![shot](https://github.com/user-attachments/assets/abc-123)",
+    });
+
+    try {
+      const res = await REQUEST(buildApp(), "POST", "/api/github/issues/import", JSON.stringify({ owner: "owner", repo: "repo", issueNumber: 1 }), {
+        "Content-Type": "application/json",
+      });
+
+      expect(res.status).toBe(500);
+      expect(store.logEntry).not.toHaveBeenCalled();
+      expect(getIssueDetailSpy).not.toHaveBeenCalled();
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(store.addAttachment).not.toHaveBeenCalled();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 
   it("returns 400 when issueNumber is missing", async () => {
@@ -1903,6 +1939,24 @@ describe("projectId store scoping regressions", () => {
     app.use("/api", createApiRoutes(defaultStore, options));
     return app;
   }
+
+  it("rejects every task-creating GitHub import before default-project routing when multiple projects exist", async () => {
+    const imports = [
+      ["/api/github/issues/import", { owner: "owner", repo: "repo", issueNumber: 1 }],
+      ["/api/github/issues/batch-import", { owner: "owner", repo: "repo", issueNumbers: [1] }],
+      ["/api/github/pulls/import", { owner: "owner", repo: "repo", prNumber: 1 }],
+      ["/api/github/comments/import", { owner: "owner", repo: "repo", number: 1, type: "issue", comment: { author: "reviewer", body: "body" } }],
+    ] as const;
+
+    for (const [path, body] of imports) {
+      mockCentralListProjects.mockResolvedValueOnce([{ id: "launch" }, { id: "named" }]);
+      const res = await REQUEST(buildApp(), "POST", path, JSON.stringify(body), { "Content-Type": "application/json" });
+      expect(res.status).toBe(400);
+      expect(res.body.details).toMatchObject({ code: "PROJECT_ID_REQUIRED", registeredProjectCount: 2 });
+    }
+
+    expect(defaultStore.createTask).not.toHaveBeenCalled();
+  });
 
   it("routes github issue import mutations to scoped store when projectId is provided", async () => {
     vi.spyOn(GitHubClient.prototype, "getIssue").mockResolvedValue({
