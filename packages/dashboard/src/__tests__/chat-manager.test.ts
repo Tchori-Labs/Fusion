@@ -4060,6 +4060,153 @@ describe("ChatManager generation isolation", () => {
     expect(createOptions.additionalSkillPaths).toEqual([pluginSkillDir, dirname(pluginSkillDir)]);
   });
 
+  it("forwards configured MCP servers to direct-mention room responders", async () => {
+    (mockChatStore as any).getRoom = vi.fn().mockReturnValue({ id: "room-1", name: "team" });
+    (mockChatStore as any).listRoomMembers = vi.fn().mockReturnValue([
+      { roomId: "room-1", agentId: "agent-001", role: "member", addedAt: "2026-01-01" },
+    ]);
+    (mockChatStore as any).addRoomMessage = vi.fn().mockImplementation((_roomId: string, input: any) => ({
+      id: "room-msg",
+      roomId: "room-1",
+      ...input,
+    }));
+
+    let createOptions: any;
+    __setCreateResolvedAgentSession(async (options: any) => {
+      createOptions = options;
+      return {
+        session: {
+          prompt: vi.fn().mockResolvedValue(undefined),
+          dispose: vi.fn(),
+          state: { messages: [{ role: "assistant", content: "Room answer" }] },
+        },
+      };
+    });
+    const taskStore = {
+      getTask: vi.fn(),
+      getSettings: vi.fn().mockResolvedValue({}),
+      getSettingsByScope: vi.fn().mockResolvedValue({
+        global: { mcpServers: { enabled: true, servers: [{ name: "postiz", transport: "stdio", command: "postiz" }] } },
+        project: {},
+      }),
+    };
+    const chatManager = new ChatManager(mockChatStore as any, "/tmp/test", mockAgentStore as any, undefined, undefined, undefined, taskStore as any);
+
+    await chatManager.sendRoomMessage("room-1", "hello @Avery");
+
+    expect(createOptions).toMatchObject({
+      sessionPurpose: "heartbeat",
+      mcpServers: [expect.objectContaining({ name: "postiz" })],
+    });
+    expect(createOptions.customTools).toEqual(expect.any(Array));
+  });
+
+  it("forwards configured MCP servers to ambient room responders", async () => {
+    (mockChatStore as any).getRoom = vi.fn().mockReturnValue({ id: "room-1", name: "team" });
+    (mockChatStore as any).listRoomMembers = vi.fn().mockReturnValue([
+      { roomId: "room-1", agentId: "agent-001", role: "member", addedAt: "2026-01-01" },
+    ]);
+    (mockChatStore as any).addRoomMessage = vi.fn().mockImplementation((_roomId: string, input: any) => ({
+      id: "room-msg",
+      roomId: "room-1",
+      ...input,
+    }));
+
+    let createOptions: any;
+    __setCreateResolvedAgentSession(async (options: any) => {
+      createOptions = options;
+      return {
+        session: {
+          prompt: vi.fn().mockResolvedValue(undefined),
+          dispose: vi.fn(),
+          state: { messages: [{ role: "assistant", content: "Room answer" }] },
+        },
+      };
+    });
+    const taskStore = {
+      getTask: vi.fn(),
+      getSettings: vi.fn().mockResolvedValue({}),
+      getSettingsByScope: vi.fn().mockResolvedValue({
+        global: { mcpServers: { enabled: true, servers: [{ name: "postiz", transport: "stdio", command: "postiz" }] } },
+        project: {},
+      }),
+    };
+    const chatManager = new ChatManager(mockChatStore as any, "/tmp/test", mockAgentStore as any, undefined, undefined, undefined, taskStore as any);
+
+    await chatManager.sendRoomMessage("room-1", "hello everyone");
+
+    expect(createOptions.mcpServers).toEqual([expect.objectContaining({ name: "postiz" })]);
+  });
+
+  it("omits MCP servers for room responders without a task store", async () => {
+    (mockChatStore as any).getRoom = vi.fn().mockReturnValue({ id: "room-1", name: "team" });
+    (mockChatStore as any).listRoomMembers = vi.fn().mockReturnValue([
+      { roomId: "room-1", agentId: "agent-001", role: "member", addedAt: "2026-01-01" },
+    ]);
+    (mockChatStore as any).addRoomMessage = vi.fn().mockImplementation((_roomId: string, input: any) => ({
+      id: "room-msg",
+      roomId: "room-1",
+      ...input,
+    }));
+
+    let createOptions: any;
+    __setCreateResolvedAgentSession(async (options: any) => {
+      createOptions = options;
+      return {
+        session: {
+          prompt: vi.fn().mockResolvedValue(undefined),
+          dispose: vi.fn(),
+          state: { messages: [{ role: "assistant", content: "Room answer" }] },
+        },
+      };
+    });
+
+    await createChatManager().sendRoomMessage("room-1", "hello @Avery");
+
+    expect(createOptions).not.toHaveProperty("mcpServers");
+    expect((mockChatStore as any).addRoomMessage).toHaveBeenCalledWith("room-1", expect.objectContaining({
+      role: "assistant",
+      content: "Room answer",
+    }));
+  });
+
+  it("forwards an empty MCP catalog when room MCP is disabled", async () => {
+    (mockChatStore as any).getRoom = vi.fn().mockReturnValue({ id: "room-1", name: "team" });
+    (mockChatStore as any).listRoomMembers = vi.fn().mockReturnValue([
+      { roomId: "room-1", agentId: "agent-001", role: "member", addedAt: "2026-01-01" },
+    ]);
+    (mockChatStore as any).addRoomMessage = vi.fn().mockImplementation((_roomId: string, input: any) => ({
+      id: "room-msg",
+      roomId: "room-1",
+      ...input,
+    }));
+
+    let createOptions: any;
+    __setCreateResolvedAgentSession(async (options: any) => {
+      createOptions = options;
+      return {
+        session: {
+          prompt: vi.fn().mockResolvedValue(undefined),
+          dispose: vi.fn(),
+          state: { messages: [{ role: "assistant", content: "Room answer" }] },
+        },
+      };
+    });
+    const taskStore = {
+      getTask: vi.fn(),
+      getSettings: vi.fn().mockResolvedValue({}),
+      getSettingsByScope: vi.fn().mockResolvedValue({
+        global: { mcpServers: { enabled: false, servers: [{ name: "postiz", transport: "stdio", command: "postiz" }] } },
+        project: {},
+      }),
+    };
+    const chatManager = new ChatManager(mockChatStore as any, "/tmp/test", mockAgentStore as any, undefined, undefined, undefined, taskStore as any);
+
+    await chatManager.sendRoomMessage("room-1", "hello @Avery");
+
+    expect(createOptions.mcpServers).toEqual([]);
+  });
+
   it("sendRoomMessage persists assistant room replies", async () => {
     (mockChatStore as any).getRoom = vi.fn().mockReturnValue({ id: "room-1", name: "team" });
     (mockChatStore as any).listRoomMembers = vi.fn().mockReturnValue([
