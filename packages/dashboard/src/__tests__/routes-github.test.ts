@@ -777,6 +777,43 @@ describe("POST /github/issues/import", () => {
     });
   });
 
+  it("returns a strict-JSON-safe response for NUL-contaminated GitHub issue text", async () => {
+    const title = "before\u0000fnlvl=info\u0000after";
+    const body = "before\u0000fnlvl=info\u0000after";
+    getIssueSpy.mockResolvedValueOnce({ ...mockGitHubIssue, title, body });
+    (store.createTask as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      id: "FN-NUL-002",
+      title: "beforefnlvl=infoafter",
+      description: "beforefnlvl=infoafter\n\nSource: https://github.com/owner/repo/issues/1",
+      column: "triage",
+    });
+
+    const res = await performRequest(
+      buildApp(),
+      "POST",
+      "/api/github/issues/import",
+      JSON.stringify({ owner: "owner", repo: "repo", issueNumber: 1 }),
+      { "Content-Type": "application/json" },
+    );
+
+    expect(res.status).toBe(201);
+    expect(res.body).toMatchObject({
+      id: "FN-NUL-002",
+      title: "beforefnlvl=infoafter",
+      description: "beforefnlvl=infoafter\n\nSource: https://github.com/owner/repo/issues/1",
+    });
+    expect(store.createTask).toHaveBeenCalledWith(expect.objectContaining({
+      title,
+      description: `${body}\n\nSource: https://github.com/owner/repo/issues/1`,
+    }));
+    /*
+     * FNXC:TaskPersistenceNulSanitize 2026-08-11-11:15:
+     * JSON.parse would accept escaped control characters, so inspect bodyBuffer directly to prove
+     * GitHub-import responses remain safe for strict byte-level JSON consumers such as jq.
+     */
+    expect([...res.bodyBuffer].some((byte) => byte >= 0x00 && byte <= 0x1f)).toBe(false);
+  });
+
   /*
   FNXC:GitHubImportTranslate 2026-07-16-11:22:
   FN-8115 requires a single project-settings read per single import even though translation and tracking both depend on it. The route test protects the request-scoped sharing invariant rather than the resolver internals.
