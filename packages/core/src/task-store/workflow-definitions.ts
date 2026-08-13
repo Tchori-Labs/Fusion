@@ -24,7 +24,7 @@ import { type PluginGateVerdict } from "../plugins/plugin-gate-verdict.js";
 import { PluginStore } from "../stores/plugin-store.js";
 import { SecretsStore } from "../secrets/secrets-store.js";
 import { createAsyncDistributedTaskIdAllocator } from "./async/async-allocator.js";
-import { getWorkflowRow, listWorkflowRows } from "../async-stores/async-workflow-store.js";
+import { getWorkflowRow, listWorkflowIdsAcrossProjects, listWorkflowRows } from "../async-stores/async-workflow-store.js";
 import { isPostgresUniqueError } from "../db/postgres-errors.js";
 import {resolveColumnCapacity, resolveCapacityPoolId} from "../workflows/workflow-capacity.js";
 import {readTaskRow as readTaskRowAsync} from "./async/async-persistence.js";
@@ -212,9 +212,9 @@ function errorMessages(error: unknown): string {
 }
 
 /**
- * Return true only for the global `workflows.id` primary-key target. A bare
- * unique violation is deliberately insufficient because future workflow-table
- * unique constraints must still reach callers unchanged.
+ * Return true only for the `workflows` primary-key target. A bare unique
+ * violation is deliberately insufficient because future workflow-table unique
+ * constraints must still reach callers unchanged.
  */
 export function isWorkflowDefinitionIdPrimaryKeyCollision(error: unknown): boolean {
   const message = errorMessages(error);
@@ -223,19 +223,20 @@ export function isWorkflowDefinitionIdPrimaryKeyCollision(error: unknown): boole
 }
 
 /**
- * FNXC:WorkflowDefinitionIdAllocator 2026-07-21-12:00:
- * `project.workflows.id` is global while `config.next_workflow_definition_id`
- * belongs to one project. Allocate above the full unscoped workflows table as
- * well as the monotonic local counter, otherwise a stale second-project counter
- * can reissue an id owned by another project. The create path separately retries
- * an id-PK race because this scan and withConfigLock are process-local.
+ * FNXC:WorkflowDefinitionIdAllocator 2026-08-12-03:02:
+ * `project.workflows` now has project-local composite identity while
+ * `config.next_workflow_definition_id` remains per-project. Allocate above the
+ * full unscoped table as well as the local counter: legacy __legacy_unscoped__
+ * rows and stale counters can still reissue an ID held by another partition.
+ * Burning an ID is harmless; reusing one is not. The create path separately
+ * retries a same-project PK race because this scan and withConfigLock are
+ * process-local.
  */
 export async function nextWorkflowDefinitionIdAsyncImpl(store: TaskStore): Promise<string> {
   const layer = store.asyncLayer!;
   const [configRow, workflows] = await Promise.all([
     readProjectConfig(layer),
-    // listWorkflowRows deliberately has no project_id filter: workflow ids are global PKs.
-    listWorkflowRows(layer),
+    listWorkflowIdsAcrossProjects(layer),
   ]);
   const counter = configRow.nextWorkflowDefinitionId ?? 1;
   const next = Math.max(counter, maxWorkflowDefinitionSequence(workflows.map(({ id }) => id)) + 1);
@@ -654,7 +655,7 @@ export async function purgeTaskWorkflowSelectionRowsAsyncImpl(store: TaskStore, 
     if (Array.isArray(parsed)) {
       for (const stepId of parsed) {
         if (typeof stepId === "string") {
-          await layer.db.delete(schema.project.workflowSteps).where(eq(schema.project.workflowSteps.id, stepId));
+          await layer.db.delete(schema.project.workflowSteps).where(and(eq(schema.project.workflowSteps.id, stepId), projectScopeFor(schema.project.workflowSteps.projectId, layer.projectId)));
         }
       }
     }
@@ -679,7 +680,7 @@ export async function cleanupOrphanedMaterializedStepsImpl(store: TaskStore, ste
     const layer = store.getAsyncLayer();
     if (layer) {
       try {
-        await layer.db.delete(schema.project.workflowSteps).where(inArray(schema.project.workflowSteps.id, stepIds));
+        await layer.db.delete(schema.project.workflowSteps).where(and(inArray(schema.project.workflowSteps.id, stepIds), projectScopeFor(schema.project.workflowSteps.projectId, layer.projectId)));
       } catch {
         // Best-effort cleanup.
       }
@@ -1176,7 +1177,14 @@ export async function getVerificationCacheHitImpl(store: TaskStore,
     const rows = await store.asyncLayer!.db
       .select({ recordedAt: table.recordedAt, taskId: table.taskId })
       .from(table)
+      /*
+      FNXC:ProjectSchemaOwnership 2026-08-12-14:14:
+      Verification cache keys are only unique within their project partition.
+      Read through the owning layer's project scope so an identical tree and
+      command tuple from another project cannot skip this project's verification.
+      */
       .where(and(
+        projectScopeFor(table.projectId, store.asyncLayer!.projectId),
         eq(table.treeSha, treeSha),
         eq(table.testCommand, normalizedTest),
         eq(table.buildCommand, normalizedBuild),

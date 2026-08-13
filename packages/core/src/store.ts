@@ -150,7 +150,7 @@ import { deleteTaskImpl, archiveTaskImpl, type DeleteTaskIfResult } from "./task
 import type { TaskDeleteAuditContext } from "./task-delete-attribution.js";
 import { updateSettingsImpl, updateGlobalSettingsImpl } from "./task-store/settings-ops.js";
 import { createTaskBackendImpl, _createTaskInternalBackendImpl, createTaskImpl, createTaskWithReservedIdImpl, _createTaskInternalImpl, _maybeAutoArchiveSameAgentDuplicateImpl } from "./task-store/task-creation.js";
-import { getTaskImpl, listTasksImpl, searchTasksImpl, listTasksModifiedSinceImpl, getTaskVerificationRequestAsyncImpl } from "./task-store/reads.js";
+import { getTaskImpl, listTasksImpl, searchTasksImpl, listTasksModifiedSinceImpl, getTaskVerificationRequestAsyncImpl, listTaskRecommendationsImpl } from "./task-store/reads.js";
 import { updateTaskUnlockedImpl } from "./task-store/task-update.js";
 import { __setTaskActivityLogLimitsForTesting } from "./task-store/comments.js";
 import { declaresAnyLifecycleTrait, resolveReviewColumns, resolveTaskLifecycleColumns, type LifecycleColumns } from "./workflows/workflow-lifecycle-traits.js";
@@ -1595,6 +1595,9 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   async clearWorkflowRunStepInstancesAsync(taskId: string, keepRunId?: string): Promise<void> {
     return clearWorkflowRunStepInstancesAsyncImpl(this, taskId, keepRunId);
   }
+  async listTaskRecommendations(options?: { completeColumns?: ReadonlySet<string>; limit?: number; offset?: number }): Promise<import("./types.js").TaskRecommendationListPage> {
+    return listTaskRecommendationsImpl(this, options);
+  }
   async listTasksForGithubTrackingReconcile(options?: { offset?: number; limit?: number }): Promise<{ tasks: Task[]; hasMore: boolean }> {
     return listTasksForGithubTrackingReconcileImpl(this, options);
   }
@@ -2453,8 +2456,8 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   async replaceActiveTaskWorkflowContinuation(input: WorkflowWorkItemUpsertInput & { kind: "task" }): Promise<WorkflowWorkItem> {
     return replaceActiveTaskWorkflowContinuationImpl(this, input);
   }
-  async seedStrandedPlanReviewContinuation(input: WorkflowWorkItemUpsertInput & { kind: "task" }): Promise<{ seeded: boolean; reason?: "active-continuation" | "plan-review-passed"; workItemId?: string }> {
-    return seedStrandedPlanReviewContinuationImpl(this, input);
+  async seedStrandedPlanReviewContinuation(input: WorkflowWorkItemUpsertInput & { kind: "task" }, options: { retirePredecessorId?: string } = {}): Promise<{ seeded: boolean; reason?: "active-continuation" | "plan-review-passed"; workItemId?: string }> {
+    return seedStrandedPlanReviewContinuationImpl(this, input, options);
   }
   async transitionWorkflowWorkItem( id: string, state: WorkflowWorkItemState, patch: WorkflowWorkItemTransitionPatch = {}, tx?: import("./postgres/data-layer.js").DbTransaction, ): Promise<WorkflowWorkItem> {
     return transitionWorkflowWorkItemImpl(this, id, state, patch, tx);
@@ -2544,7 +2547,11 @@ export class TaskStore extends EventEmitter<TaskStoreEvents> {
   /** PostgreSQL-authoritative audit reader; sync fallback remains for test doubles. */
   async getRunAuditEventsAsync(options: RunAuditEventFilter = {}): Promise<RunAuditEvent[]> {
     if (this.asyncLayer) {
-      const events = await queryRunAuditEvents(this.asyncLayer.db, options);
+      const events = await queryRunAuditEvents(
+        this.asyncLayer.db,
+        options,
+        this.asyncLayer.projectId,
+      );
       return events.map((event) => ({
         ...event,
         taskId: event.taskId ?? undefined,

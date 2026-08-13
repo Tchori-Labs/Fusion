@@ -98,11 +98,6 @@ function getPlanningLifecycleLockTransportFailure(task: Task): PlanningLifecycle
     : null;
 }
 
-function isPlanningLifecycleLockTransportError(error: unknown): error is Error {
-  return error instanceof fusionCore.PlanningLifecycleLockTransportError
-    || (error instanceof Error && error.name === "PlanningLifecycleLockTransportError");
-}
-
 /*
 FNXC:PlanReviewReplan 2026-08-10-18:32 (TOMBSTONE — do not re-add):
 `PLAN_REVIEW_GATE_REPLAN_CAP = 8` is DELETED. It belonged to the out-of-graph triage Plan Review gate
@@ -159,7 +154,11 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { ModelFallbackExhaustedError, describeModel, formatModelMarkerDetails, promptWithFallback } from "./pi.js";
 import { hasAdvancedPastPlanning, isTaskStillInPlanningStage, resolvePlannerLanesForTaskAsync } from "./execution/replan-target.js";
-import { classifyPersistedPlanHandoff, LEGACY_NULL_PLAN_HANDOFF_STALE_MS } from "./planning-handoff-recovery.js";
+import {
+  classifyPersistedPlanHandoff,
+  isPlanningLifecycleLockTransportError,
+  LEGACY_NULL_PLAN_HANDOFF_STALE_MS,
+} from "./planning-handoff-recovery.js";
 import {
   createResolvedAgentSession,
   extractRuntimeHint,
@@ -349,6 +348,16 @@ export type PlanningHandoffOutcome = "released" | "parked" | "withheld";
  *  `finalizeApprovedTask` for why this is a report object and not a return value. */
 export interface PlanningHandoffReport {
   outcome: PlanningHandoffOutcome;
+  /*
+  FNXC:PlanningHandoffAtomicity 2026-08-13-03:49:
+  The durable work item this planning session ran under. The runtime's
+  specification-complete reaction passes it to the Plan Review seeder so the
+  successor install can atomically retire this exact predecessor row instead of
+  bailing on it: triage announces completion BEFORE its finally block transitions
+  the row to succeeded, so without this id the seeder saw its own caller as an
+  "active continuation" and silently stranded the card for self-healing to repair.
+  */
+  planningWorkItemId?: string;
 }
 
 
@@ -3587,7 +3596,7 @@ export class TriageProcessor {
 
           // FNXC:TriagePlanningRetry 2026-08-03-00:20: A duplicate remains a separate closure
           // path, but fallback-authored or inherited markers cannot bypass clean-attempt admission.
-          const duplicateReport: PlanningHandoffReport = { outcome: "parked" };
+          const duplicateReport: PlanningHandoffReport = { outcome: "parked", planningWorkItemId };
           if (await this.tryFinalizeExplicitDuplicateMarker(task, written, settings, {
             isReplan,
             feedback,
@@ -3610,6 +3619,7 @@ export class TriageProcessor {
             isReplan,
             feedback,
           });
+          finalizeReport.planningWorkItemId = planningWorkItemId;
           this.options.onSpecifyComplete?.(task, finalizeReport);
         } finally {
           this.activeSessions.delete(task.id);
@@ -4910,11 +4920,13 @@ export class TriageProcessor {
     FNXC:SpecLock 2026-08-09-07:36:
     Planning finalization writes PROMPT.md without going through updateTask({ prompt }), so it must
     capture the same canonical evidence before any approval path can release the task. This remains
-    before the release boundary: a database/parser failure leaves the planning hold intact.
+    before the release boundary: a database/parser failure leaves the planning hold intact. The
+    finalizer already owns the planning lifecycle lock, so evidence capture must use the lock-assuming
+    seam instead of reacquiring the non-reentrant PostgreSQL advisory lock.
     */
     const supportsSpecLock = (this.store as unknown as { isBackendMode?: () => boolean }).isBackendMode?.() === true;
     if (supportsSpecLock) {
-      await this.store.captureCurrentPlanEvidence(task.id, written);
+      await this.store.captureCurrentPlanEvidenceWhilePlanningLocked(task.id, written);
     }
 
     let taskIntentSignature: ReturnType<typeof extractIntentSignature> = {

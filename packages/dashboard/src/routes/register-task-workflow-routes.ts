@@ -1588,6 +1588,39 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
     }
   });
 
+  /*
+  FNXC:TaskRecommendations 2026-08-13-04:41:
+  This literal route must stay before `/tasks/:id`; its bounded row pagination exposes total and
+  hasMore so operators can intentionally walk every advisory recommendation rather than receive a
+  silent cap.
+  */
+  router.get("/tasks/recommendations", async (req, res) => {
+    try {
+      const { store: scopedStore } = await getProjectContext(req);
+      const parsePageNumber = (value: unknown, name: "limit" | "offset"): number | undefined => {
+        if (value === undefined) return undefined;
+        if (typeof value !== "string" || value.trim() === "" || !Number.isInteger(Number(value)) || Number(value) < 0) {
+          throw badRequest(`${name} must be a non-negative integer`);
+        }
+        return Number(value);
+      };
+      const requestedLimit = parsePageNumber(req.query.limit, "limit");
+      const offset = parsePageNumber(req.query.offset, "offset");
+      if (requestedLimit === 0) throw badRequest("limit must be a positive integer");
+      const limit = requestedLimit === undefined ? undefined : Math.min(200, requestedLimit);
+      let completeColumns: ReadonlySet<string>;
+      try {
+        completeColumns = await resolveProjectColumnsForRoles(scopedStore, ["complete"]);
+      } catch {
+        completeColumns = new Set(["done"]);
+      }
+      res.json(await scopedStore.listTaskRecommendations({ completeColumns, limit, offset }));
+    } catch (err: unknown) {
+      if (err instanceof ApiError) throw err;
+      rethrowAsApiError(err);
+    }
+  });
+
   router.post("/tasks/duplicate-check", async (req, res) => {
     try {
       const { store: scopedStore } = await getProjectContext(req);
@@ -1910,7 +1943,11 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
         if (
           deterministicGuard.action === "duplicate"
           && deterministicGuard.existing
-          && deterministicGuard.existing.proposalClaimId === trusted?.proposalClaimId
+          && typeof trusted?.proposalClaimId === "string"
+          && trusted.proposalClaimId.length > 0
+          && typeof deterministicGuard.existing.proposalClaimId === "string"
+          && deterministicGuard.existing.proposalClaimId.length > 0
+          && deterministicGuard.existing.proposalClaimId === trusted.proposalClaimId
         ) {
           /*
           FNXC:TaskRecommendations 2026-08-08-05:27:
@@ -1918,6 +1955,11 @@ export function registerTaskWorkflowRoutes(ctx: ApiRoutesContext, deps: TaskWork
           A second process can observe its newly-created child while checking the normal content
           guard; reuse that immutable same-recommendation winner and repair the parent link rather
           than surfacing the ordinary duplicate conflict reserved for distinct recommendations.
+
+          FNXC:TaskRecommendations 2026-08-12-00:58:
+          Reuse is reserved for a named proposal claim on both the trusted request and canonical.
+          Comparing absent ids made every ordinary deterministic duplicate return 200 and skipped
+          the duplicate-blocker classification that preserves legitimate done or archived creates.
           */
           const trustedCreateResult = await trusted?.onCreated?.(deterministicGuard.existing);
           res.status(200).json(trusted?.responseForCreated?.(deterministicGuard.existing, trustedCreateResult) ?? deterministicGuard.existing);
